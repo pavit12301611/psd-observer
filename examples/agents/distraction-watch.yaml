@@ -1,0 +1,20 @@
+# Example: screen + desktop notification, no third-party accounts at all.
+id: "distraction-watch"
+name: "I got distracted"
+description: "Gentle nudge when the screen shows something unrelated to work."
+enabled: false
+loop_interval_s: 300
+model:
+  provider: ollama
+  endpoint: "http://127.0.0.1:11434"
+  model: "qwen2.5vl:7b"
+  supports_vision: true
+sensors:
+  - kind: screen
+    enabled: true
+system_prompt: |
+  Look at $SCREEN. If it shows social media, video streaming or shopping,
+  respond {"triggered": true, "reason": "distracted", "actions": [{"tool":"desktop_notify","args":{"text":"Back to work?"}}]}.
+  Otherwise respond exactly: {"triggered": false}
+tools:
+  - kind: desktop_notify

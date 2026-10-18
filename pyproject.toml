@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "observer-core"
+version = "0.1.0"
+description = "Local-first micro-agents that sense your screen, camera and audio and act on what they see (Fedora-native)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["observer", "agents", "local-llm", "fedora", "automation", "privacy"]
+authors = [{ name = "Observer Core contributors" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Desktop Environment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "PyQt6>=6.7,<7",
+    "pyqtgraph>=0.13",
+    "mss>=9.0",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26,<3",
+    "Pillow>=10.2",
+    "pytesseract>=0.3.10",
+    "requests>=2.31",
+    "httpx>=0.27",
+    "sounddevice>=0.4.6",
+    "PyYAML>=6.0",
+    "tomli-w>=1.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "loguru>=0.7",
+    "pydantic>=2.6",
+    "platformdirs>=4.2",
+    "psutil>=5.9",
+    "jinja2>=3.1",
+    "watchdog>=4.0",
+    "filelock>=3.13",
+]
+
+[project.optional-dependencies]
+whisper = ["faster-whisper>=1.0"]
+llamacpp = ["llama-cpp-python>=0.2.70"]
+onnx = ["onnxruntime>=1.17"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
+
+[project.scripts]
+observer-core = "observer_core.cli:main"
+observer-core-daemon = "observer_core.daemon:main"
+
+[tool.setuptools.packages.find]
+include = ["observer_core*"]
+
+[tool.setuptools.package-data]
+observer_core = ["resources/icons/*.svg", "resources/*.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

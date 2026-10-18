@@ -1,0 +1,65 @@
+# Observer Core — Fedora system packages
+# Parsed by run.sh:  sudo dnf install -y --needed $(tr -d '#' < requirements-system-fedora.txt)
+# One package (or space separated group) per line. Lines starting with '#' are ignored.
+# Packages that do not exist on every Fedora release are listed with a comment; run.sh
+# tolerates individual failures (see --allow-missing in run.sh) so a missing optional
+# package never aborts the install.
+
+# --- Python toolchain ------------------------------------------------------
+python3-devel
+python3-pip
+gcc
+gcc-c++
+make
+cmake
+pkgconf
+pkgconf-pkg-config
+
+# --- OCR / media -----------------------------------------------------------
+tesseract
+tesseract-langpack-eng
+ffmpeg
+
+# --- Audio (PipeWire + PulseAudio) -----------------------------------------
+portaudio
+portaudio-devel
+pulseaudio-utils
+pipewire-utils
+pipewire
+pipewire-pulse
+alsa-utils
+
+# --- Notifications / desktop integration -----------------------------------
+libnotify
+xdg-utils
+
+# --- Qt6 / OpenGL / XKB ----------------------------------------------------
+mesa-libEGL
+mesa-libGL
+libxkbcommon
+libxkbcommon-x11
+
+# --- xcb compatibility stack (Qt xcb platform plugin) ----------------------
+xcb-util-wm
+xcb-util-keysyms
+xcb-util-image
+xcb-util-renderutil
+libxcb-cursor0
+libxcb-icccm4
+libxcb-image0
+libxcb-keysyms1
+libxcb-randr0
+libxcb-render-util0
+libxcb-shape0
+libxcb-xinerama0
+libxcb-xkb1
+xorg-x11-utils
+
+# --- Wayland screen capture (xdg-desktop-portal + PipeWire) ----------------
+xdg-desktop-portal
+xdg-desktop-portal-gtk
+
+# --- Misc ------------------------------------------------------------------
+util-linux
+v4l-utils
+flatpak

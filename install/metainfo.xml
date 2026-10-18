@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.observer_core</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Observer Core</name>
+  <summary>Local-first micro-agents that sense your screen, camera and audio</summary>
+  <description>
+    <p>
+      Observer Core lets you define small agents that continuously look at your screen, your camera
+      or your audio, ask a local language model to interpret what they see, and act when a condition
+      is met: a desktop notification, a message, a memory, or a short clip.
+    </p>
+    <p>
+      Everything runs on your machine by default. There is no Observer Core server. Cloud models and
+      messaging channels are optional and clearly labelled.
+    </p>
+    <p>
+      Concept after Observer AI by Roy3838 (https://github.com/Roy3838/Observer), AGPL-3.0.
+    </p>
+  </description>
+  <launchable type="desktop-id">observer-core.desktop</launchable>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>agent</keyword>
+    <keyword>monitor</keyword>
+    <keyword>local</keyword>
+    <keyword>llm</keyword>
+  </keywords>
+  <url type="homepage">https://github.com/pavit12301611/psd-observer</url>
+  <url type="bugtracker">https://github.com/pavit12301611/psd-observer/issues</url>
+  <developer_name>Observer Core contributors</developer_name>
+  <releases>
+    <release version="0.1.0" date="2026-10-18"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

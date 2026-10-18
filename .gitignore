@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# Virtual environments (run.sh creates <repo>/.venv)
+.venv/
+venv/
+env/
+ENV/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets & local data — NEVER commit
+.env
+.env.*
+!.env.example
+config.toml
+*.local.toml
+secrets.toml
+
+# Runtime data (XDG dirs live in $HOME, but be defensive)
+observer.db
+observer.db-*
+*.log
+logs/
+frames/
+recordings/
+captures/
+
+# Local model files
+*.gguf
+models/

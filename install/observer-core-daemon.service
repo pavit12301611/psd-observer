@@ -1,0 +1,30 @@
+# Observer Core headless daemon — runs enabled agents on login, for unlocked sessions only.
+# Install:  observer-core install-desktop && systemctl --user daemon-reload \
+#           && systemctl --user enable --now observer-core-daemon
+# Logs:     journalctl --user -u observer-core-daemon -f
+# Stop:     systemctl --user disable --now observer-core-daemon
+[Unit]
+Description=Observer Core headless agent daemon
+Documentation=https://github.com/pavit12301611/psd-observer
+After=graphical-session.target pipewire.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Do not start while the desktop session is locked. If the session cannot be
+# determined the condition passes and the daemon starts normally.
+ExecCondition=/bin/sh -c 'id="${XDG_SESSION_ID:-}"; [ -z "$id" ] && exit 0; [ "$(loginctl show-session "$id" -p LockedHint --value 2>/dev/null)" != "yes" ]'
+ExecStart=@DAEMON@
+Restart=on-failure
+RestartSec=10
+# Hardening that does not get in the way of local files or the portal
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/observer-core %h/.local/state/observer-core %h/.cache/observer-core %h/.config/observer-core %t
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=default.target

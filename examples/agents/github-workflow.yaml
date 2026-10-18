@@ -1,0 +1,30 @@
+# Example: notify on Telegram when a CI workflow completes.
+# Requires: a vision model in Ollama (e.g. `ollama pull qwen2.5vl:7b`) and Telegram creds
+# (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID env vars, or config.toml [telegram]).
+id: "github-workflow"
+name: "GitHub workflow finished"
+description: "Notify me on Telegram when a CI workflow completes."
+enabled: true
+loop_interval_s: 30
+model:
+  provider: ollama
+  endpoint: "http://127.0.0.1:11434"
+  model: "qwen2.5vl:7b"
+  supports_vision: true
+sensors:
+  - kind: screen
+    enabled: true
+  - kind: screen_ocr
+    enabled: true
+    options: { lang: "eng", roi: null }
+system_prompt: |
+  You are a monitoring agent. Inspect the provided screen content.
+  If a GitHub Actions / CI workflow has reached a terminal state
+  (success or failure), respond with a JSON object:
+  {"triggered": true, "actions": [{"tool":"telegram","args":{"text":"..."}}],
+   "memory":[{"key":"last_workflow","value":"..."}]}
+  Otherwise respond exactly: {"triggered": false}
+tools:
+  - kind: telegram
+    options: { chat_id: "${telegram.chat_id}" }
+  - kind: memory

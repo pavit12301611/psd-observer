@@ -1,0 +1,23 @@
+# Example: text-only OCR agent (works with any local text model, no vision needed).
+id: "battery-low"
+name: "Battery is low"
+description: "Desktop notification when a battery warning shows on screen."
+enabled: false
+loop_interval_s: 120
+model:
+  provider: ollama
+  endpoint: "http://127.0.0.1:11434"
+  model: "llama3.2"
+  supports_vision: false
+sensors:
+  - kind: screen_ocr
+    enabled: true
+    options: { lang: "eng" }
+system_prompt: |
+  The OCR text of the screen is below. If a battery warning or a battery
+  percentage under 15% is visible, respond:
+  {"triggered": true, "reason": "battery low", "actions": [{"tool":"desktop_notify","args":{"text":"Battery is low"}}]}
+  Otherwise respond exactly: {"triggered": false}
+  Screen text: $SCREEN_OCR
+tools:
+  - kind: desktop_notify

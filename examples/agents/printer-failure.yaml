@@ -1,0 +1,23 @@
+# Example: a camera-watching agent for a 3D printer that has failed.
+id: "printer-failure"
+name: "3D printer failed"
+description: "Alert me when the print has detached or turned into spaghetti."
+enabled: false
+loop_interval_s: 60
+model:
+  provider: ollama
+  endpoint: "http://127.0.0.1:11434"
+  model: "qwen2.5vl:7b"
+  supports_vision: true
+sensors:
+  - kind: camera
+    enabled: true
+    options: { device: 0 }
+system_prompt: |
+  You watch a 3D printer through a webcam ($CAMERA).
+  If the print has failed (detached from bed, spaghetti, layer shift), respond:
+  {"triggered": true, "reason": "<what you see>", "actions": [{"tool":"desktop_notify","args":{"text":"Print failed"}}]}
+  Otherwise respond exactly: {"triggered": false}
+tools:
+  - kind: desktop_notify
+  - kind: memory

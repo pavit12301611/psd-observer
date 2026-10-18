@@ -1,0 +1,43 @@
+# Observer Core — Python runtime dependencies
+# Install with:  .venv/bin/pip install -r requirements.txt
+# Pinned to minor versions; volatile packages carry upper bounds.
+
+# --- GUI -------------------------------------------------------------------
+PyQt6>=6.7,<7
+pyqtgraph>=0.13
+
+# --- Sensors ---------------------------------------------------------------
+mss>=9.0
+opencv-python-headless>=4.9
+numpy>=1.26,<3
+Pillow>=10.2
+pytesseract>=0.3.10
+sounddevice>=0.4.6
+
+# --- Inference / network ---------------------------------------------------
+requests>=2.31
+httpx>=0.27
+
+# --- Config / serialization ------------------------------------------------
+PyYAML>=6.0
+tomli-w>=1.0
+
+# --- CLI / logging / modelling --------------------------------------------
+typer>=0.12
+rich>=13.7
+loguru>=0.7
+pydantic>=2.6
+platformdirs>=4.2
+psutil>=5.9
+jinja2>=3.1
+
+# --- Filesystem / locking --------------------------------------------------
+watchdog>=4.0
+filelock>=3.13
+
+# --- Optional extras (documented, NOT installed by default) ----------------
+#   faster-whisper        local STT for microphone / system audio sensors
+#   llama-cpp-python      in-process GGUF inference (llamacpp_local provider)
+#   onnxruntime           CPU vision helpers
+#   torch                 only if you use faster-whisper
+# Install e.g.:  .venv/bin/pip install faster-whisper
