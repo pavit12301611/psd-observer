@@ -53,7 +53,7 @@ export async function ocrImage(buffer, { langs, psm } = {}) {
 
 /** Screenshot → text. Throws with a useful message when a tool is missing. */
 export async function ocrScreen(config) {
-  const image = await pc.captureScreenshot();
+  const image = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs });
   const text = await ocrImage(image, { langs: config?.ocrLangs || 'eng' });
   return { image, text };
 }

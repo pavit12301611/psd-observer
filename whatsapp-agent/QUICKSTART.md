@@ -254,7 +254,11 @@ Phir WhatsApp pe **`/doctor`** bhejo — asli screenshot leke, brightness naap k
 har tool check karke exact fix batayega.
 
 - Pehli screenshot pe PC screen pe **"Allow screenshot?"** dialog aayega →
-  *Allow* / *Always allow* dabao.
+  *Allow* / *Always allow* dabao. Dialog khula rehne tak agent 60 sec tak wait
+  karta hai (`PORTAL_TIMEOUT_MS`), aur file `~/Pictures/` se khud utha leta hai.
+- GNOME Wayland pe ho to har screenshot pe prompt aa sakta hai (gdbus ka koi
+  app id nahi hota). Roz screenshot lene ho to login screen pe gear → **"GNOME
+  on Xorg"** se login karo — wahan bina prompt ke capture hota hai.
 - Agar error me `No such interface "org.freedesktop.portal.Desktop.Screenshot"`
   aaye to portal ka GNOME backend missing hai:
   `sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome` phir

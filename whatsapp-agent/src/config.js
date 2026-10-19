@@ -149,6 +149,10 @@ export function loadConfig({ dryRun = false } = {}) {
     autoRelink: bool(e.AUTO_RELINK, true),
 
     // Screen/document reading (all local, free).
+    // How long the Wayland screenshot dialog may stay open before we give up.
+    // Generous by default: the owner may be away from the PC when asking for a
+    // screenshot from WhatsApp, and the portal keeps the image on disk anyway.
+    portalTimeoutMs: int(e.PORTAL_TIMEOUT_MS, 60_000),
     ocrLangs: e.OCR_LANGS || 'eng',
     // Voice notes → text. Groq free tier if GROQ_API_KEY is set, otherwise a
     // local whisper.cpp binary + model file (fully offline).

@@ -105,7 +105,7 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
       checks.push({ icon: '✅', title: 'Screenshot portal', detail: 'Screenshot interface available (GNOME/KDE Wayland path)' });
     }
     try {
-      const buffer = await pc.captureScreenshot();
+      const buffer = await pc.captureScreenshot({ portalTimeoutMs: Math.min(config.portalTimeoutMs ?? 60_000, 20_000) });
       const stats = imageStats(buffer);
       shot = stats;
       checks.push({
@@ -114,7 +114,14 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
         detail: `${stats.unknown ? 'captured' : `${stats.width}×${stats.height}, brightness ${stats.mean}/255`}`,
       });
     } catch (err) {
-      checks.push({ icon: '❌', title: 'Screenshot', detail: err.message.split('\n').slice(0, 3).join(' ') });
+      checks.push({ icon: '❌', title: 'Screenshot', detail: err.message.split('\n').slice(0, 4).join(' ') });
+    }
+    if (session.type === 'wayland') {
+      checks.push({
+        icon: 'ℹ️',
+        title: 'Wayland note',
+        detail: 'GNOME asks "Allow screenshot?" for each capture (gdbus has no remembered app id). For silent, frequent screenshots, log in with *GNOME on Xorg* (login screen → gear icon) or tick "Always allow" when offered.',
+      });
     }
   }
 

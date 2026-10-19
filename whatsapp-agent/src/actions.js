@@ -102,7 +102,7 @@ export function createActions({ config, store, log = console }) {
       description: 'Capture the PC screen and send it to the owner as an image.',
       params: {},
       run: async () => {
-        const image = await pc.captureScreenshot();
+        const image = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs });
         return { image, text: `🖥️ Screenshot · ${new Date().toLocaleTimeString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })}` };
       },
     },

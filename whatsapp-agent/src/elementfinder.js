@@ -194,7 +194,7 @@ export const TESSERACT_HINT = 'sudo dnf install tesseract';
 export async function locateOnScreen(config, query, log = console) {
   const label = String(query ?? '').trim();
   if (!label) throw new Error('usage: /pc tap <PIN> <button or field label, e.g. Login>');
-  const screenshot = await pc.captureScreenshot();
+  const screenshot = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs });
   const size = pngSize(screenshot);
   if (!size) throw new Error('Screenshot captured but its size could not be read (not a PNG?) — cannot map click coordinates.');
 

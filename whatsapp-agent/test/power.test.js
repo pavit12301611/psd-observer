@@ -662,3 +662,54 @@ test('portal: availability check reports a missing interface clearly', async () 
   assert.equal(typeof result.reason, 'string');
   assert.ok(result.reason.length > 10);
 });
+
+test('portal: finds the screenshot file even when the Response signal is missed', async () => {
+  // The real-world failure: GNOME saves the PNG to Pictures, but the agent never
+  // sees the D-Bus signal, so it reported a timeout while the file existed.
+  const dir = tempDir();
+  const pictures = path.join(dir, 'Pictures');
+  fs.mkdirSync(pictures, { recursive: true });
+  const saved = { XDG_PICTURES_DIR: process.env.XDG_PICTURES_DIR };
+  process.env.XDG_PICTURES_DIR = pictures;
+
+  try {
+    const since = Date.now() - 5_000;
+    assert.equal(pc.findNewScreenshot(since, [pictures]), null);
+
+    const file = path.join(pictures, 'Screenshot from 2026-10-19 15-30-00.png');
+    fs.writeFileSync(file, makePng(8, [10, 120, 200]));
+    const hit = pc.findNewScreenshot(since, [pictures]);
+    assert.equal(hit.path, file);
+    assert.ok(hit.size > 0);
+
+    // Old screenshots (before `since`) are ignored, small files too.
+    const old = path.join(pictures, 'Screenshot from 2020-01-01 00-00-00.png');
+    fs.writeFileSync(old, makePng(8, [1, 1, 1]));
+    fs.utimesSync(old, new Date('2020-01-01'), new Date('2020-01-01'));
+    assert.equal(pc.findNewScreenshot(since, [pictures]).path, file);
+
+    // Non-screenshot images must not be picked up.
+    fs.writeFileSync(path.join(pictures, 'cat.png'), makePng(8, [9, 9, 9]));
+    assert.notEqual(pc.findNewScreenshot(since, [pictures]).path, path.join(pictures, 'cat.png'));
+
+    // waitForCompleteFile: present + non-empty + stable size.
+    assert.equal(await pc.waitForCompleteFile(file, { timeoutMs: 1_000 }), true);
+    assert.equal(await pc.waitForCompleteFile(path.join(pictures, 'missing.png'), { timeoutMs: 300 }), false);
+  } finally {
+    if (saved.XDG_PICTURES_DIR === undefined) delete process.env.XDG_PICTURES_DIR;
+    else process.env.XDG_PICTURES_DIR = saved.XDG_PICTURES_DIR;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('portal: response with @a{sv} spelling and extra keys still parses', () => {
+  const line = "…: org.freedesktop.portal.Request.Response (uint32 0, @a{sv} "
+    + "{'uri': <'file:///home/u/Pictures/Screenshot%20from%202026.png'>, 'width': <int32 1920>})";
+  const parsed = pc.parsePortalScreenshotResponse(line);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.path, '/home/u/Pictures/Screenshot from 2026.png');
+
+  const denied = pc.parsePortalScreenshotResponse('…: org.freedesktop.portal.Request.Response (uint32 2, {})');
+  assert.equal(denied.denied, true);
+  assert.equal(denied.ok, false);
+});

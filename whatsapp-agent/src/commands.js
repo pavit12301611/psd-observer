@@ -198,7 +198,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'battery': return tools.batteryStatus() ?? '🔌 No battery found — this PC/VM reports none under /sys/class/power_supply (normal for desktops).';
       case 'top': return pc.topProcesses();
       case 'screenshot': case 'shot': {
-        const image = await pc.captureScreenshot();
+        const image = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs });
         return { image, text: `🖥️ Screenshot · ${new Date().toLocaleTimeString('en-IN', { timeZone: tz })}` };
       }
       case 'volume': case 'vol': {

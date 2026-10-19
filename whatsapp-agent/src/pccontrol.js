@@ -237,22 +237,89 @@ const PORTAL_PATH = '/org/freedesktop/portal/desktop';
 // like a broken portal but is just a bad method name.
 const PORTAL_SCREENSHOT_IFACE = 'org.freedesktop.portal.Screenshot';
 
-/** Extract "file:///..." (or a plain path) from a portal Response signal. */
+/**
+ * Extract the file URI from a portal Response signal.
+ *
+ * gdbus monitor prints GVariant text, and the exact spelling varies between
+ * glib versions:
+ *   ... Request.Response (uint32 0, {'uri': <'file:///home/u/Pictures/x.png'>})
+ *   ... Request.Response (uint32 0, @a{sv} {'uri': <'file:///…'>})
+ *   ... Request.Response (uint32 2, {})
+ * So: parse the code loosely, then take any file:// URI in the payload.
+ */
 export function parsePortalScreenshotResponse(text) {
   const body = String(text ?? '');
-  // .../request/1_45/obs123: org.freedesktop.portal.Request.Response (uint32 0, {'uri': <'file:///…'>})
-  const responseMatch = body.match(/Response\s*\(\s*uint32\s+(\d+)\s*,\s*\{(.*)\}\s*\)/s);
+  // Signals carry the interface name (org.freedesktop.portal.Request.Response);
+  // accept a bare "Response (uint32 …" too so older/newer spellings both work.
+  const responseMatch = body.match(/(?:[\w.]+\.)?Response\s*\(\s*uint32\s+(\d+)/);
   if (!responseMatch) return null;
   const code = Number.parseInt(responseMatch[1], 10);
-  const uriMatch = responseMatch[2].match(/['"]uri['"]\s*:\s*<?['"]([^'">]+)['"]>?/);
-  const uri = uriMatch ? uriMatch[1] : null;
+  const uriMatch = body.match(/['"]uri['"]\s*:\s*<*\s*['"]([^'">]+)['"]/)
+    ?? body.match(/file:\/\/[^'"<>\s]+/);
+  let uri = uriMatch ? (uriMatch[1] ?? uriMatch[0]) : null;
+  if (uri && !uri.startsWith('file://')) uri = null;
   return {
     code,
     ok: code === 0 && Boolean(uri),
     cancelled: code === 1,
+    denied: code === 2,
     uri,
     path: uri ? decodeURIComponent(uri.replace(/^file:\/\//, '')) : null,
   };
+}
+
+/** Where GNOME/KDE put screenshots: the XDG pictures dir (+ common variants). */
+export function picturesDirs(env = process.env) {
+  const home = os.homedir();
+  const dirs = [];
+  // ~/.config/user-dirs.dirs has the real localized path (e.g. ~/Pictures).
+  try {
+    const text = fs.readFileSync(path.join(home, '.config', 'user-dirs.dirs'), 'utf8');
+    const match = text.match(/^XDG_PICTURES_DIR="?([^"\n]+)"?/m);
+    if (match) dirs.push(match[1].replace(/^\$HOME/, home));
+  } catch { /* no user-dirs */ }
+  if (env.XDG_PICTURES_DIR) dirs.push(env.XDG_PICTURES_DIR);
+  dirs.push(path.join(home, 'Pictures'), path.join(home, 'Pictures', 'Screenshots'), path.join(home, 'Desktop'));
+  return [...new Set(dirs)].filter((dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } });
+}
+
+const SCREENSHOT_NAME = /^(Screenshot|Screenshot from|Screenshot_|Screen ?shot|Bildschirmfoto|Ekran)/i;
+
+/** Any screenshot-looking file created after `sinceMs` (newest first). */
+export function findNewScreenshot(sinceMs, dirs = picturesDirs()) {
+  const found = [];
+  for (const dir of dirs) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (!/\.(png|jpg|jpeg)$/i.test(name)) continue;
+      if (!SCREENSHOT_NAME.test(name)) continue;
+      const full = path.join(dir, name);
+      try {
+        const stat = fs.statSync(full);
+        // 250ms slack for coarse filesystem timestamps, not enough to pick up
+        // an older screenshot from a previous request.
+        if (stat.isFile() && stat.size > 0 && stat.mtimeMs >= sinceMs - 250) found.push({ path: full, mtimeMs: stat.mtimeMs, size: stat.size });
+      } catch { /* raced with deletion */ }
+    }
+  }
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return found[0] ?? null;
+}
+
+/** Wait until a file exists, is non-empty and its size stopped changing. */
+export async function waitForCompleteFile(file, { timeoutMs = 5_000, stepMs = 150 } = {}) {
+  const started = Date.now();
+  let lastSize = -1;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const stat = fs.statSync(file);
+      if (stat.size > 0 && stat.size === lastSize) return true;
+      lastSize = stat.size;
+    } catch { /* not there yet */ }
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+  try { return fs.statSync(file).size > 0; } catch { return false; }
 }
 
 /**
@@ -285,58 +352,73 @@ export async function portalScreenshotAvailable(env = displayEnv()) {
 }
 
 /**
- * Screenshot through xdg-desktop-portal (works on GNOME/KDE Wayland and X11).
- * gdbus is part of glib2, present on every Fedora install.
+ * Screenshot through xdg-desktop-portal (the only supported path on GNOME
+ * Wayland; also works on KDE and X11).
  *
- * We start `gdbus monitor` BEFORE the call so the async Response can't be
- * missed. The Response arrives on a *request handle* object path
- * (/org/freedesktop/portal/desktop/request/<sender>/<token>), so the monitor
- * must not filter by object path. GNOME shows a one-time "Allow screenshot?"
- * prompt — after that it is silent.
+ * Two independent ways of learning the result, because each one alone is
+ * fragile in practice:
+ *   1. the async Response signal on the request handle, and
+ *   2. the file the portal writes into the Pictures folder.
+ * (2) also covers the case where the owner takes longer than the timeout to
+ * click "Allow" — we still pick the screenshot up once it appears.
+ *
+ * The monitor deliberately watches the WHOLE session bus instead of
+ * `--dest org.freedesktop.portal.Desktop`: the portal is D-Bus activated, so
+ * filtering by destination silently misses signals when the service starts up
+ * as part of our own call.
  */
-async function portalScreenshot(env, { timeoutMs = 25_000 } = {}) {
+async function portalScreenshot(env, { timeoutMs = 60_000 } = {}) {
   if (!findBin('gdbus', env)) throw Object.assign(new Error('gdbus is not installed (sudo dnf install glib2)'), { code: 'ENOENT' });
   const token = `obs${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-  const child = spawn('gdbus', ['monitor', '--session', '--dest', PORTAL_DEST], {
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const startedAt = Date.now();
+  const dirs = picturesDirs(env);
+
+  const child = spawn('gdbus', ['monitor', '--session'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let buffer = '';
-  const done = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+  let settled = false;
+  let watcher = null;
+
+  const result = new Promise((resolve, reject) => {
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (watcher) clearInterval(watcher);
       try { child.kill('SIGKILL'); } catch { /* noop */ }
-      reject(Object.assign(new Error('the portal did not answer in 25s — approve the "Allow screenshot?" dialog on the PC screen (or check xdg-desktop-portal-gnome)'), { code: 'ETIMEDOUT' }));
+      fn(value);
+    };
+    const timer = setTimeout(async () => {
+      // Last chance: the dialog may have been approved right at the deadline.
+      const late = findNewScreenshot(startedAt, dirs);
+      if (late) return finish(resolve, late.path);
+      finish(reject, Object.assign(
+        new Error(`the portal did not answer in ${Math.round(timeoutMs / 1000)}s. If a "Allow screenshot?" dialog is (or was) open on the PC, approve it and tick "Always allow", then retry — or raise PORTAL_TIMEOUT_MS in .env. Check: systemctl --user status xdg-desktop-portal-gnome`),
+        { code: 'ETIMEDOUT' },
+      ));
     }, timeoutMs);
+
+    // Path 2: the portal saves the screenshot to ~/Pictures (or XDG_PICTURES_DIR).
+    watcher = setInterval(() => {
+      const hit = findNewScreenshot(startedAt, dirs);
+      if (hit) finish(resolve, hit.path);
+    }, 400);
+    watcher.unref?.();
+
     const onData = (chunk) => {
       buffer += chunk.toString();
+      if (!buffer.includes('Request.Response')) return;
       const parsed = parsePortalScreenshotResponse(buffer);
-      if (!parsed) {
-        // A Response with code 2 = user dismissed/denied; the portal may send
-        // an empty options dict, so check that too.
-        if (/Request\.Response\s*\(\s*uint32\s+[12]/.test(buffer)) {
-          const code = Number.parseInt(buffer.match(/Request\.Response\s*\(\s*uint32\s+(\d+)/)[1], 10);
-          clearTimeout(timer);
-          try { child.kill('SIGKILL'); } catch { /* noop */ }
-          reject(new Error(code === 1 ? 'cancelled in the permission dialog on the PC' : 'the portal denied the screenshot'));
-        }
-        return;
-      }
-      clearTimeout(timer);
-      try { child.kill('SIGKILL'); } catch { /* noop */ }
-      if (parsed.ok && parsed.path) resolve(parsed.path);
-      else if (parsed.cancelled) reject(new Error('cancelled in the permission dialog on the PC'));
-      else reject(new Error(`portal refused the screenshot (response code ${parsed.code})`));
+      if (!parsed) return;
+      if (parsed.ok && parsed.path) return finish(resolve, parsed.path);
+      if (parsed.cancelled) return finish(reject, new Error('you cancelled the screenshot dialog on the PC'));
+      if (parsed.denied) return finish(reject, new Error('the portal denied the screenshot (dialog dismissed)'));
+      return finish(reject, new Error(`portal refused the screenshot (response code ${parsed.code})`));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(Object.assign(err, { code: err.code ?? 'EPORTAL' }));
-    });
+    child.on('error', (err) => finish(reject, Object.assign(err, { code: err.code ?? 'EPORTAL' })));
   });
-  // The call below can fail before the monitor ever answers; keep the promise
-  // handled either way so a failing portal is a normal, explained error.
-  done.catch(() => {});
+  result.catch(() => {});
 
   await new Promise((resolve) => setTimeout(resolve, 350));
   try {
@@ -344,16 +426,18 @@ async function portalScreenshot(env, { timeoutMs = 25_000 } = {}) {
       'call', '--session', '--dest', PORTAL_DEST, '--object-path', PORTAL_PATH,
       '--method', `${PORTAL_SCREENSHOT_IFACE}.Screenshot`,
       '', `{'handle_token': <'${token}'>, 'interactive': <false>, 'modal': <false>}`,
-    ], { timeout: 15_000 });
+    ], { timeout: 20_000 });
   } catch (err) {
+    if (watcher) clearInterval(watcher);
+    settled = true;
     try { child.kill('SIGKILL'); } catch { /* noop */ }
     const detail = String(err.stderr || err.message || '');
     if (/UnknownMethod|No such interface/i.test(detail) && /Screenshot/i.test(detail)) {
-      err.message = 'the portal is running but its Screenshot interface is missing — install the GNOME portal backend: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome && systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal';
+      err.message = 'the portal is running but its Screenshot interface is missing — install the GNOME backend: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome && systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal';
     }
     throw err;
   }
-  return done;
+  return result;
 }
 
 /**
@@ -364,7 +448,7 @@ async function portalScreenshot(env, { timeoutMs = 25_000 } = {}) {
  * exit 0 with a black frame there, so trying them only adds delay and confusing
  * error text.
  */
-function screenshotAttempts(file, env) {
+function screenshotAttempts(file, env, portalMs = 60_000) {
   const session = sessionInfo(env);
   const attempts = [];
   if (session.wayland) {
@@ -373,7 +457,7 @@ function screenshotAttempts(file, env) {
       fn: async () => {
         const avail = await portalScreenshotAvailable(env);
         if (!avail.available) throw new Error(avail.reason);
-        return portalScreenshot(env);
+        return portalScreenshot(env, { timeoutMs: portalMs });
       },
     });
     attempts.push({ label: 'grim', fn: async () => { await run('grim', [file], { timeout: 12_000 }); return file; } });
@@ -412,18 +496,20 @@ async function waylandHint(env, tried) {
   return lines.join('\n');
 }
 
-export async function captureScreenshot() {
+export async function captureScreenshot({ portalTimeoutMs } = {}) {
   const env = displayEnv();
   const session = sessionInfo(env);
   if (!session.graphical) throw new Error(NO_SESSION);
+  const portalMs = Number(portalTimeoutMs ?? process.env.PORTAL_TIMEOUT_MS ?? 60_000) || 60_000;
 
   const failures = [];
   const file = path.join(os.tmpdir(), `observer-shot-${Date.now()}.png`);
-  const attempts = screenshotAttempts(file, env);
+  const attempts = screenshotAttempts(file, env, portalMs);
   for (const attempt of attempts) {
     let produced = null;
     try {
       produced = await attempt.fn();
+      if (produced) await waitForCompleteFile(produced, { timeoutMs: 4_000 });
       const data = fs.existsSync(produced) ? fs.readFileSync(produced) : null;
       if (!data || !data.length) {
         failures.push({ label: attempt.label, reason: 'produced no file' });

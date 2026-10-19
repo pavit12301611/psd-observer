@@ -199,8 +199,17 @@ Sway/Hyprland). The agent now:
 3. keeps trying, and if nothing produces real pixels it tells you why per tool
    instead of showing you a black rectangle.
 
-First portal capture may pop an **"Allow screenshot?"** dialog on the PC screen
-(GNOME asks once per app). Approve it — or tick *Always allow*.
+First portal capture may pop an **"Allow screenshot?"** dialog on the PC screen.
+Approve it — or tick *Always allow*. While the dialog is open the agent waits up
+to `PORTAL_TIMEOUT_MS` (default 60 s) and, even if the signal is missed or you
+click Allow late, it picks the PNG up from `~/Pictures/` — so the screenshot
+still arrives.
+
+> **GNOME Wayland asks every time.** The request comes from `gdbus`, which has no
+> remembered app id, so the portal may prompt on each capture. If you take
+> screenshots often and want them silent, log out and choose **"GNOME on Xorg"**
+> from the gear menu at the login screen: X11 allows direct capture with no
+> dialog. Everything else in the agent works the same.
 
 **Why typing/clicking does nothing.** On Wayland, `xdotool` only reaches
 XWayland apps. The real keyboard/mouse driver is **ydotool**, which needs its
