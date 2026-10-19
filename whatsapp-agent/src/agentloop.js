@@ -81,6 +81,7 @@ export function createAgentLoop({ config, store, actions, log = console }) {
       '4. If a tool fails, say exactly what failed in one line and, if there is an obvious fix, do it.',
       '5. Reply in the owner\'s language: Hinglish for Hinglish, Hindi for Hindi, English for English. WhatsApp-short, no Markdown tables or # headers, *bold* is fine.',
       '6. Never invent results. If you could not do something, say so.',
+      '7. Never claim you opened/launched/closed an app unless the open_app/close_app tool just returned success. If it failed, report the tool error verbatim - do not say \"open ho gaya\".',
       `Access level: ${actions.level()}. Shell: ${config.allowShell ? 'enabled (PIN protected)' : 'disabled'}.`,
       facts ? `Things the owner asked you to remember:\n${facts}` : '',
       todos ? `Open to-dos:\n${todos}` : '',

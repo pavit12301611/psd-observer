@@ -30,6 +30,8 @@ import {
 } from './allowlist.js';
 import * as ai from './ai.js';
 import * as ocr from './ocr.js';
+import * as pc from './pccontrol.js';
+import * as finder from './elementfinder.js';
 import { transcribeAudio } from './transcribe.js';
 
 const MIME_EXT = {
@@ -113,6 +115,8 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     stopped: false,
     simulated: [], // dry-run sent log for tests/dashboard
     downloadMediaMessage: null, // set by start() from the lazily loaded Baileys
+    lastSentImage: null, // last screenshot we sent to owner — used to diff red marks
+    lastSentImageAt: 0,
   };
 
   const status = () =>
@@ -129,6 +133,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         : {
             text: reply.text,
             hasImage: Boolean(reply.image),
+            hasAudio: Boolean(reply.audio),
             document: reply.document?.fileName,
             poll: reply.poll?.name,
             sticker: Boolean(reply.sticker),
@@ -147,11 +152,23 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       return;
     }
     if (reply.sticker) await send({ sticker: reply.sticker });
+    if (reply.audio) {
+      // Voice note / audio reply from /voicereply (TTS)
+      const mimetype = reply.mimetype ?? (reply.ptt ? 'audio/ogg; codecs=opus' : 'audio/mpeg');
+      await send({ audio: reply.audio, mimetype, ptt: Boolean(reply.ptt), caption: reply.text?.slice(0, 300) });
+      if (reply.text) {
+        // also send text caption as separate message for readability (optional)
+        // but keep it in one if Baileys supports caption with audio (some clients ignore)
+      }
+      return;
+    }
     if (reply.document) {
       await send({ document: reply.document.buffer, fileName: reply.document.fileName, mimetype: reply.document.mimetype ?? 'application/octet-stream', caption: reply.text });
       return;
     }
     if (reply.image) {
+      // Remember last image we sent — so when owner marks it red and sends back, we can diff only the NEW red pixels (ignores YouTube/brave red icons in dock)
+      try { state.lastSentImage = Buffer.from(reply.image); state.lastSentImageAt = Date.now(); } catch {}
       await send({ image: reply.image, caption: reply.text?.slice(0, 1000) });
       for (const extra of reply.extraImages ?? []) await send({ image: extra });
       return;
@@ -246,6 +263,53 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       return processOwnerMessage({ chatJid, content: { kind: 'text', text: caption }, rawMsg });
     }
     if (content.kind === 'image' && buffer) {
+      // Marked screenshot -> click where user marked (red pen)
+      // User flow: /screenshot -> mark red dot where to click -> send back with caption "click here / yahan click karo / tap this"
+      const lowerCap = caption.toLowerCase();
+      const isClickMark = /click|tap|press|dabao|yahan|ispe|here|this|mark|nishan|yes pe|no pe/i.test(caption) && caption.length < 120;
+      // Also treat any image that looks like an edited screenshot with red annotation even without caption?
+      // Check for red pen quickly via image analysis if caption is empty but image is from downloads (previous screenshot)
+      // If caption says "yes pe click", just OCR the live screen for "Yes" — far more reliable than red-pixel math
+      let captionTarget = extractClickTarget(caption);
+      if (captionTarget) {
+        try {
+          log?.info?.(`[wa] caption target "${captionTarget}" from "${caption.slice(0,60)}" — locating on live screen`);
+          const hit = await finder.locateOnScreen(config, captionTarget, log);
+          await pc.click(hit.x, hit.y);
+          const after = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+          const tip = `🎯 Clicked "${hit.matched}" @ ${hit.x},${hit.y} (${hit.source}${hit.confidence ? ` ${hit.confidence}%` : ''}) — from your caption "${captionTarget}"`;
+          if (after) return transportSend(chatJid, { image: after, text: tip }, rawMsg);
+          return transportSend(chatJid, tip, rawMsg);
+        } catch (e) {
+          log.info?.(`[wa] caption target locate failed (${e.message}), falling back to red-mark detection`);
+        }
+      }
+      let tryMark = isClickMark;
+      if (!tryMark && !caption && buffer.length > 5000) {
+        // Heuristic: if user just sends back a screenshot with no caption, check if it's likely a marked one
+        // We will attempt red-mark detection anyway if no other handler produces a description — but only if caption empty
+        // To avoid false positives on normal photos, only try if image is PNG/JPEG screenshot-sized (>800px wide)
+        try {
+          const sz = finder.pngSize(buffer);
+          if (sz && sz.width >= 800) tryMark = false; // don't auto-trigger on every large image without caption
+        } catch {}
+      }
+      if (tryMark) {
+        try {
+          const hit = await handleMarkedClick(buffer, config, log, caption);
+          if (hit) {
+            // Click and send back new screenshot as confirmation
+            await pc.click(hit.x, hit.y);
+            const after = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+            const tip = `🎯 Clicked where you marked @ ${hit.x},${hit.y} (${hit.source}${hit.confidence ? ` ${hit.confidence}%` : ''})`;
+            if (after) return transportSend(chatJid, { image: after, text: tip + ` — "${hit.matched ?? caption}"` }, rawMsg);
+            return transportSend(chatJid, tip, rawMsg);
+          }
+        } catch (err) {
+          log.warn?.(`[wa] marked click failed: ${err.message}`);
+          // fall through to normal image handling so user gets at least OCR/description
+        }
+      }
       // 1) local vision model (best) 2) OCR the image (works for screenshots)
       const description = await ai.describeImage(config, buffer.toString('base64'), caption, log);
       if (description) return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${description}`, rawMsg);
@@ -283,6 +347,129 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       }
     }
     return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote} in my downloads. (/downloads lists them)`, rawMsg);
+  }
+
+  function extractClickTarget(caption) {
+    const low = String(caption ?? '').toLowerCase();
+    // Common UI labels - if caption mentions them near click, use that directly via OCR on live screen
+    const labels = ['yes','no','battle','agent','auto','ok','cancel','submit','send','save','allow','deny','close','open','next','back','login','sign in','search'];
+    for (const lab of labels) {
+      if (low.includes(lab) && /click|tap|press|dabao|yahan|ispe|here|kar/i.test(low)) return lab;
+    }
+    // Try to extract word after "click" e.g. "click on Yes"
+    const m = low.match(/click\s+(?:on\s+)?([a-z0-9_ ]{2,20})/);
+    if (m) return m[1].trim();
+    const m2 = low.match(/tap\s+(?:on\s+)?([a-z0-9_ ]{2,20})/);
+    if (m2) return m2[1].trim();
+    // Hindi: "yes pe click"
+    const m3 = low.match(/([a-z0-9_ ]{2,20})\s+pe\s+click/);
+    if (m3) return m3[1].trim();
+    return null;
+  }
+  function parseMarkColor(caption) {
+    const low = String(caption ?? '').toLowerCase();
+    if (/\bgreen\b|\bhara\b|\bhari\b|\bharA\b/.test(low)) return 'green';
+    if (/\bblue\b|\bneela\b|\bneeli\b/.test(low)) return 'blue';
+    if (/\byellow\b|\bpeela\b|\bpeeli\b/.test(low)) return 'yellow';
+    if (/\bred\b|\blal\b/.test(low)) return 'red';
+    return 'red'; // default
+  }
+  function isColorMarked(r,g,b,a, color) {
+    if (a < 40) return false;
+    if (color === 'green') return g > 130 && r < 120 && b < 120 && (g - r) > 25 && (g - b) > 25;
+    if (color === 'blue') return b > 130 && r < 120 && g < 120 && (b - r) > 25 && (b - g) > 25;
+    if (color === 'yellow') return r > 140 && g > 140 && b < 100 && (r - b) > 40 && (g - b) > 40;
+    // red default (lenient for JPEG)
+    return r > 130 && g < 130 && b < 130 && (r - g) > 30 && (r - b) > 30;
+  }
+  async function handleMarkedClick(buffer, config, log, caption='') {
+    // If we have the original screenshot we sent, diff only NEW red pixels (so YouTube red icons in dock are ignored)
+    let baseBuffer = state.lastSentImage && (Date.now() - state.lastSentImageAt < 5*60*1000) ? state.lastSentImage : null;
+    // Try 1: red-pen detection via sharp (fast, offline, no AI)
+    try {
+      const sharp = (await import('sharp')).default;
+      const markColor = parseMarkColor(caption);
+      log?.info?.(`[wa] mark color: ${markColor} for "${caption.slice(0,40)}"`);
+      // Prepare marked image raw
+      const marked = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      let baseRaw = null, baseInfo = null;
+      if (baseBuffer) {
+        try {
+          // Resize base to match marked dimensions (WhatsApp may have recompressed/resized)
+          baseRaw = await sharp(baseBuffer).resize(marked.info.width, marked.info.height, { fit: 'fill' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+          baseInfo = baseRaw.info;
+        } catch {}
+      }
+      // Scan for NEW red pixels: red in marked but not red in base
+      let sumX = 0, sumY = 0, count = 0;
+      let minX = marked.info.width, minY = marked.info.height, maxX = 0, maxY = 0;
+      const stride = 4;
+      for (let y = 0; y < marked.info.height; y++) {
+        for (let x = 0; x < marked.info.width; x++) {
+          const idx = (y * marked.info.width + x) * stride;
+          const r = marked.data[idx], g = marked.data[idx+1], b = marked.data[idx+2], a = marked.data[idx+3];
+          // JPEG compresses red to ~R140-200, so be lenient; also check R dominance
+          const isRedMarked = isColorMarked(r,g,b,a, markColor);
+          if (!isRedMarked) continue;
+          // If we have base, check if base was already red there — then it's not a new mark (e.g. YouTube icon)
+          if (baseRaw) {
+            const bR = baseRaw.data[idx], bG = baseRaw.data[idx+1], bB = baseRaw.data[idx+2];
+            const isRedBase = isColorMarked(bR,bG,bB,255, markColor);
+            if (isRedBase) continue; // dock icon, not user mark
+          }
+          sumX += x; sumY += y; count++;
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (count > 10 && count < 80000) {
+        // Centroid of red cluster
+        const cx = Math.round(sumX / count);
+        const cy = Math.round(sumY / count);
+        const w = maxX - minX, h = maxY - minY;
+        // Map from marked-image coords (phone may have resized) to real screen via proportion
+        // The marked image is a screenshot the PC sent, so its dimensions should match screen.
+        // If phone resized it (WhatsApp compresses), we scale proportionally.
+        const screen = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+        let screenSize = null;
+        if (screen) {
+          const sz = finder.pngSize(screen);
+          if (sz) screenSize = sz;
+        }
+        // If we have screen size, scale marked coords to screen coords
+        let sx = cx, sy = cy;
+        if (screenSize) {
+          sx = Math.round((cx / marked.info.width) * screenSize.width);
+          sy = Math.round((cy / marked.info.height) * screenSize.height);
+        }
+        return { x: sx, y: sy, source: 'red-mark', confidence: Math.min(95, Math.round(50 + Math.min(count/200, 40))), matched: 'marked spot', width: w, height: h };
+      }
+    } catch (e) {
+      log.info?.(`[wa] red-mark scan failed (${e.message}), trying vision model`);
+    }
+    // Try 2: vision model — ask it to find the red mark
+    try {
+      const raw = await ai.locateInImage(config, buffer.toString('base64'), 'red mark or circle or arrow indicating where to click', log);
+      const pt = raw ? finder.parseVisionPoint(raw) : null;
+      if (pt) {
+        const screen = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+        const screenSize = screen ? finder.pngSize(screen) : null;
+        // Vision point is 0..1000 relative to the *marked image* itself
+        // Convert to screen coords via proportion if we have both sizes
+        // For now we assume marked image == screen, so scale 1:1
+        // If we have screenSize, we can scale: but vision point already 0..1000, so we need to map
+        // We need the marked image dimensions — we have info from sharp above, fallback to assuming same as screen
+        // Simpler: use relative 0..1000 scaled to screen
+        let x = Math.round((pt.x / 1000) * (screenSize?.width ?? 1920));
+        let y = Math.round((pt.y / 1000) * (screenSize?.height ?? 1080));
+        // If we have actual marked image width/height from sharp, use that instead
+        // But we already returned above if sharp succeeded — vision fallback only when sharp missing
+        return { x, y, source: 'vision', matched: 'red mark', confidence: null };
+      }
+    } catch {}
+    return null;
   }
 
   async function makeSticker(buffer) {

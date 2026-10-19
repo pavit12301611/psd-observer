@@ -12,6 +12,10 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import QRCode from 'qrcode';
 import * as tools from './tools.js';
+import * as learn from './learn.js';
+import * as cron from './cron.js';
+import * as tts from './tts.js';
+import * as autopilot from './autopilot.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
@@ -48,6 +52,10 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
 *Do things*
 • /remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>
+• /cron add every 10m <text> · /cron add roz 9 baje <text> · /cron list|del
+• /voicereply <text> — free offline voice note (only on this command)
+• /auto <task> — one-command UI autopilot: open agent | tap battle | tap agent | type hello | key enter | screenshot
+• /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
 *Safety*
@@ -74,6 +82,9 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     if (result.extraImages) out.extraImages = result.extraImages;
     if (result.document) out.document = result.document;
     if (result.video) out.video = result.video;
+    if (result.audio) out.audio = result.audio;
+    if (result.mimetype) out.mimetype = result.mimetype;
+    if (result.ptt != null) out.ptt = result.ptt;
     return Object.keys(out).length ? out : '✅ Done.';
   }
   const act = async (name, args = {}, ctx = {}) => {
@@ -81,7 +92,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     // Text-only results stay strings (friendlier for WhatsApp + existing code);
     // media results keep their reply object.
     if (result && typeof result === 'object' && !result.image && !result.extraImages
-        && !result.document && !result.video) {
+        && !result.document && !result.video && !result.audio) {
       return result.text ?? (result.ok ? '✅ Done.' : "⚠️ That didn't work.");
     }
     return toReply(result);
@@ -104,6 +115,119 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
   function listReminders() {
     if (!store.data.reminders.length) return '⏰ No reminders set. Try: /remind in 10m drink water';
     return '⏰ *Reminders*\n\n' + store.data.reminders.map((r) => `#${r.id} · ${tools.formatDateTime(r.dueTs, tz)} — ${r.text}`).join('\n');
+  }
+
+  // ── cron (recurring scheduled jobs) ──────────────────────────────────────
+  function cronCmd(args) {
+    const raw = String(args ?? '').trim();
+    if (!raw || raw.toLowerCase() === 'list' || raw.toLowerCase() === 'ls') {
+      const jobs = store.listCronJobs();
+      if (!jobs.length) return '🔁 No scheduled jobs. Add one:\n/cron add every 10m drink water\n/cron add roz 9 baje good morning\n/cron add every Monday at 9am standup';
+      return '🔁 *Scheduled jobs*\n\n' + jobs.map((j) => {
+        const when = cron.formatSchedule(j.schedule, j.nextDueTs, tz);
+        return `#${j.id} · ${when}\n  ${j.text}`;
+      }).join('\n\n');
+    }
+    const del = raw.match(/^(?:del|delete|rm|remove)\s+(\d+)$/i);
+    if (del) return store.deleteCronJob(num(del[1])) ? `🗑️ Scheduled job #${del[1]} deleted.` : `No scheduled job #${del[1]}. See /cron list`;
+    let addText = raw;
+    addText = addText.replace(/^add\s+/i, '');
+    const parsed = cron.parseCronSchedule(addText, new Date());
+    if (!parsed) {
+      return '🔁 I didn\'t get the schedule. Try:\n/cron add every 10m drink water\n/cron add every day at 9am good morning\n/cron add roz 9 baje chai\n/cron add every Monday at 9am standup';
+    }
+    if (parsed.error) return `⚠️ ${parsed.error}`;
+    if (!parsed.rest) return '🔁 Schedule samjha, par message kya hai? e.g. /cron add every 10m drink water';
+    const job = store.addCronJob(parsed.rest, parsed.scheduleRaw, parsed.schedule, parsed.nextDueTs);
+    return `🔁 Done — scheduled #${job.id}: *${job.text}*\n_${job.scheduleRaw} → ${tools.formatDateTime(job.nextDueTs, tz)} (in ${tools.humanDuration(job.nextDueTs - Date.now())})_`;
+  }
+
+  async function voiceReply(args) {
+    const text = String(args ?? '').trim();
+    if (!text) return '🔊 Usage: /voicereply <text> — e.g. /voicereply namaste bhai, kaise ho\n(Only this command sends voice — normal replies stay text)';
+    try {
+      const result = await tts.synthesize(text, config, log);
+      const isOpus = result.mimetype.includes('opus') || result.ext === 'ogg';
+      return {
+        audio: result.buffer,
+        mimetype: result.mimetype,
+        ptt: isOpus,
+        text: `🔊 ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`,
+      };
+    } catch (err) {
+      if (/engine nahi|not installed|not found/i.test(err.message)) {
+        return `⚠️ ${err.message}\n\nInstall: sudo dnf install espeak-ng ffmpeg\nThen try again: /voicereply hello`;
+      }
+      return `⚠️ Voice nahi bana paaya: ${err.message}`;
+    }
+  }
+
+  // ── learn custom keywords ──────────────────────────────────────────────
+  function learnCmd(args) {
+    const raw = String(args ?? '').trim();
+    if (!raw || raw.toLowerCase() === 'list' || raw.toLowerCase() === 'ls') {
+      const all = store.listLearned();
+      if (!all.length) return '📚 No learned keywords yet. Teach one:\n/learn work open chrome | open slack | open code\n/learn work chrome, slack, code  (shorthand: each word = app to open)\nThen just type /work';
+      return '📚 *Learned keywords*\n\n' + all.map(e => `• /${e.keyword} → ${e.commands.map(c => c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`).join(' | ')}`).join('\n');
+    }
+    // delete forms: del work / delete work / rm work / remove work / unlearn work
+    let m = raw.match(/^(?:del|delete|rm|remove|unlearn|forget)\s+([a-z0-9_-]+)$/i);
+    if (m) {
+      const kw = learn.normalizeKeyword(m[1]);
+      return store.deleteLearned(kw) ? `🗑️ /${kw} deleted.` : `No learned keyword /${kw}. See /learn list`;
+    }
+    // handle "add work ..." prefix
+    let addText = raw.replace(/^add\s+/i, '');
+    // split keyword from commands: first word is keyword, rest is commands
+    const sp = addText.search(/\s/);
+    if (sp === -1) {
+      return '📚 Usage: /learn <keyword> <commands>\nE.g. /learn work open chrome | open slack | open code\nOr shorthand: /learn work chrome slack vscode';
+    }
+    const keywordRaw = addText.slice(0, sp).trim();
+    const commandsRaw = addText.slice(sp+1).trim();
+    if (!commandsRaw) return `📚 /learn ${keywordRaw} — commands kya hai? E.g. /learn ${keywordRaw} open chrome | open slack`;
+    const kw = learn.normalizeKeyword(keywordRaw);
+    const err = learn.validateKeyword(kw);
+    if (err) return `⚠️ ${err}`;
+    const cmds = learn.parseLearnCommands(commandsRaw);
+    if (!cmds) return '⚠️ Commands samajh nahi aaye. Try:\n/learn work open chrome | open slack\n/learn work chrome, slack, code';
+    const entry = store.addLearned(kw, cmds, commandsRaw);
+    const steps = cmds.map(c => c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`).join(' | ');
+    return `📚 Learned /${kw} → ${steps}\nAb bas /${kw} likho aur ye saare kaam ek saath honge.`;
+  }
+
+  async function runLearned(keyword, ctx) {
+    const entry = store.getLearned(keyword);
+    if (!entry) return null;
+    const results = [];
+    for (const step of entry.commands) {
+      // inferredOpen → open_app, else use step.cmd/args
+      const cmd = step.inferredOpen ? 'open' : step.cmd;
+      const args = step.inferredOpen ? step.args : step.args;
+      const r = await handleCommand(cmd, args, ctx);
+      const out = typeof r === 'string' ? r : (r?.text ?? '');
+      // if media reply, push media handling? For now just text
+      if (r && typeof r === 'object' && (r.image || r.audio || r.document || r.video)) {
+        // if media, we need to send it — but stacking text join loses media. For /work we mostly open apps (text).
+        // We'll send media immediately via a side effect? Instead collect text and if any step returns media, we will return that media reply (last media wins)
+        // For simplicity, if any step has media, return it as final; caller will handle stacking text already collected
+        // We push text part and note media
+        results.push(out || '(media)');
+        // TODO: media stacking could be improved to send multiple messages; for now last media will be in final reply
+        if (r.image || r.audio || r.document || r.video) {
+          // store last media to merge into final
+          results._lastMedia = r;
+        }
+      } else {
+        results.push(out);
+      }
+    }
+    const text = `📚 /${keyword} (${entry.commands.length} steps):\n\n` + results.join('\n\n---\n\n');
+    const lastMedia = results._lastMedia;
+    if (lastMedia) {
+      return { ...lastMedia, text };
+    }
+    return text;
   }
 
   function todo(args) {
@@ -411,7 +535,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           `WhatsApp: ${ctx.waStatus?.() ?? '?'}`,
           `Uptime: ${tools.humanDuration(Date.now() - s.startedAt)}`,
           `Messages: ${s.received} in · ${s.replied} out · ${s.ignoredNonOwner} non-owner ignored`,
-          `Data: ${store.data.todos.filter((t) => !t.done).length} open to-dos · ${store.data.notes.length} notes · ${store.data.reminders.length} reminders`,
+          `Data: ${store.data.todos.filter((t) => !t.done).length} open to-dos · ${store.data.notes.length} notes · ${store.data.reminders.length} reminders · ${(store.data.cronJobs ?? []).length} cron jobs · ${(store.data.learned ?? []).length} learned`,
           `Observer bridge: ${observerOnline() ? 'tab connected 🖥️' : 'not needed (agent is standalone)'}`,
           `Access: *${actions.level()}* · ${actions.accessReport().actions} tools · shell ${config.allowShell ? 'ON (PIN)' : 'off'}`,
           `PC control: tier-1 on (screenshot/volume/…) · input+power ${config.allowPcControl ? `ON ⌨️${config.controlPin ? ' (PIN)' : ''}` : 'off (ALLOW_PC_CONTROL)'}`,
@@ -423,6 +547,10 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'remind': case 'reminder': return remind(args);
       case 'reminders': return listReminders();
       case 'timer': return remind(args);
+      case 'cron': case 'schedule': case 'repeat': case 'jobs': return cronCmd(args);
+      case 'voicereply': return await voiceReply(args);
+      case 'learn': case 'teach': case 'alias': return learnCmd(args);
+      case 'unlearn': case 'undefine': case 'forgetword': return learnCmd(`del ${args}`);
       case 'todo': case 'todos': case 'task': return todo(args);
       case 'note': return note(args);
       case 'notes': return notes();
@@ -587,12 +715,26 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'rm': case 'delete': return args ? act('delete_path', { path: args }) : '🗑️ Usage: /rm <path>  (asks for confirmation)';
 
       // ── agent + confirmations ───────────────────────────────────────────
-      case 'agent': case 'do': return args ? (await agentLoop.run(args, ctx)) ?? '🤖 No free AI brain is reachable for multi-step tasks. Use the direct commands (/open, /pc, /ls, /wifi…) or install Ollama (/model).' : '🤖 Usage: /agent <task in plain language>';
+      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open agent | tap battle | tap agent | type how to use ai | key enter | screenshot\nAlso natural: /auto open agent and click battle then select agent and ask how to use ai';
+      case 'agent': {
+        // Arena Agent Mode shortcut: /agent <prompt> directly opens arena.ai/agent then types.
+        if (!args) return '🤖 Usage: /agent <prompt> — e.g. /agent how to use ai\nI will: open arena.ai/agent → type your prompt → enter → screenshot';
+        const prompt = String(args).trim();
+        if (prompt.includes('|') || /^(open|tap|click|type|key|wait|screenshot|ss)\b/i.test(prompt)) {
+          return autopilot.runAutopilot(prompt, { config, log });
+        }
+        const task = `open agent | type ${prompt} | key enter | wait 6 | screenshot`;
+        return autopilot.runAutopilot(task, { config, log });
+      }
+      case 'do': return args ? (await agentLoop.run(args, ctx)) ?? '🤖 No free AI brain is reachable for multi-step tasks. Use the direct commands (/open, /pc, /ls, /wifi…) or install Ollama (/model).' : '🤖 Usage: /do <task in plain language>';
       case 'yes': case 'haan': return toReply(await actions.runPending(ctx));
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
-      default:
+      default: {
+        const learnedRes = await runLearned(cmd, ctx);
+        if (learnedRes != null) return learnedRes;
         return `🤖 I don't know /${cmd} yet.\n\n${HELP.split('\n').slice(0, 6).join('\n')}\n…full list: /help`;
+      }
     }
   }
 
@@ -637,11 +779,25 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
   const AFFIRM = /^(?:yes|y|ya|haan|han|ha|karo|kar\s*do|kardo|confirm|theek\s*hai|thik\s*hai|हाँ|हां|हा|करो|ठीक\s*है)[.!\s]*$/i;
   const DENY = /^(?:no|n|nahi|nah|nope|cancel|mat\s*karo|रद्द|ना|नहीं)[.!\s]*$/i;
 
+  // dedup + anti-double-work: same exact message within 4s is ignored
+  let lastHandledText = '';
+  let lastHandledTs = 0;
+  let isProcessing = false;
+
   /** Main entry: owner text → reply. `ctx` may carry { waStatus(), quotedMedia }. */
   async function handle(text, ctx = {}) {
     const clean = String(text ?? '').trim();
     if (!clean) return '🤖 I got an empty message. Try /help';
+    // dedup: same exact text within 4s → ignore second copy (double tap / network retry)
+    if (clean === lastHandledText && Date.now() - lastHandledTs < 4000) {
+      return '⏳ Same command abhi process hua tha (4s ke andar) — duplicate ignore kiya, double kaam nahi karunga.';
+    }
+    if (isProcessing) {
+      // queue-like behaviour: tell owner we're busy, don't run in parallel (no double work)
+      return '⏳ Ek kaam abhi chal raha hai, thoda ruko — khatam hote hi next bhej do. (Parallel double-work blocked)';
+    }
     try {
+      isProcessing = true;
       // A message starting with the shell PIN unlocks shell for this message
       // only ("1234 df -h"), so the PIN never has to live in the AI prompt.
       let working = clean;
@@ -651,8 +807,30 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         effCtx = { ...ctx, shellPinOk: true };
       }
 
+      // ── stack: multiple slash commands in one WhatsApp bubble, each line starting with /
+      //    e.g. "/cron add every 10m pani\n/voicereply hello"
+      //    Executed sequentially, results joined, no parallel double-work.
+      const lines = working.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const isStack = lines.length > 1 && lines.every(l => l.startsWith('/'));
+      if (isStack) {
+        const results = [];
+        for (const line of lines) {
+          const m = line.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+          if (!m) { results.push(`⚠️ Skip: ${line.slice(0,40)}`); continue; }
+          const r = await handleCommand(m[1].toLowerCase(), m[2].trim(), effCtx);
+          const out = typeof r === 'string' ? r : (r?.text ?? JSON.stringify(r).slice(0,500));
+          results.push(out);
+        }
+        lastHandledText = clean; lastHandledTs = Date.now();
+        return results.join('\n\n---\n\n');
+      }
+
       const cmdMatch = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
-      if (cmdMatch) return await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
+      if (cmdMatch) {
+        const res = await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
+        lastHandledText = clean; lastHandledTs = Date.now();
+        return res;
+      }
 
       // A parked destructive action: "haan" runs it, "nahi" cancels.
       if (store.data.pending) {
@@ -681,10 +859,15 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         // askObserver already explains failures; only fall through on timeout handled there.
         return fromObserver;
       }
-      return await askAI(working);
+      const aiRes = await askAI(working);
+      return aiRes;
     } catch (err) {
       log.error?.(`[commands] failed on "${clean.slice(0, 60)}": ${err.message}`);
       return `⚠️ That didn't work: ${err.message}\nNothing was charged (everything here is free). Try /help`;
+    } finally {
+      // dedup marker — any successful handle sets it, duplicate 4s window handles double-work
+      if (clean) { lastHandledText = clean; lastHandledTs = Date.now(); }
+      isProcessing = false;
     }
   }
 

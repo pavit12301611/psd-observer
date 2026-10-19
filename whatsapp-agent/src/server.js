@@ -77,6 +77,10 @@ export function replyForApp(reply) {
     if (reply.document.path) out.documentPath = reply.document.path;
   }
   if (reply.video) out.videoName = 'screen-recording.mp4';
+  if (reply.audio) {
+    out.audio = dataUrl(reply.audio, reply.mimetype ?? 'audio/ogg');
+    out.audioMimetype = reply.mimetype;
+  }
   if (reply.poll) out.text = `📊 ${reply.poll.name}\n${reply.poll.values.map((v) => `• ${v}`).join('\n')}`;
   return out;
 }
@@ -251,6 +255,7 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
             model: config.ollamaModel,
             stats: store.data.stats,
             reminders: store.data.reminders.length,
+            cronJobs: (store.data.cronJobs ?? []).length,
             openTodos: store.data.todos.filter((t) => !t.done).length,
             notes: store.data.notes.length,
             pending: store.data.pending ? { text: store.data.pending.text, ts: store.data.pending.ts } : null,

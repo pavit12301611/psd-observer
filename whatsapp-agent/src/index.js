@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { loadConfig } from './config.js';
 import { Store, startReminderLoop } from './store.js';
+import { startCronLoop } from './cron.js';
 import { Mailbox } from './mailbox.js';
 import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
@@ -50,6 +51,7 @@ const bridge = createBridgeServer({
   log: console,
 });
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
+const stopCron = startCronLoop(store, (text) => whatsapp.sendToOwner(text), console);
 
 console.info('👁️  Observer WhatsApp Agent — free, native WhatsApp + phone app');
 console.info(`   Owner (only listener): +${config.ownerNumber}`);
@@ -58,6 +60,7 @@ console.info(`   Mode: ${dryRun ? 'DRY-RUN (no WhatsApp connection)' : config.us
 console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${config.ollamaUrl}) · tools ${config.agentTools ? 'on' : 'off'}`);
 console.info(`   Access level: ${config.accessLevel} · full PC control (Observer app optional)`);
 console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
+console.info(`   Cron jobs: ${store.listCronJobs().length} recurring · TTS: ${config.ttsEngine}`);
 const distroLine = distroPrettyName();
 if (distroLine) console.info(`   OS: ${distroLine}`);
 // Say up-front whether screen control can work at all in this session — this
@@ -96,6 +99,7 @@ process.on('SIGTERM', shutdown);
 function shutdown() {
   console.info('\n[agent] shutting down…');
   stopReminders();
+  stopCron();
   whatsapp.stop();
   bridge.stop();
   store.saveNow();

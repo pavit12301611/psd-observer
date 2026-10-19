@@ -46,6 +46,11 @@ export function parseIntent(input) {
     const rest = clean(m[1]);
     if (!looksLikeChat(rest) && !/^(?:screen|pc|window|windows|app|apps)$/i.test(rest)) return asCmd('open', rest);
   }
+  // Suffix English open: "chrome open karo", "firefox open kar do", "vs code open karo"
+  if ((m = text.match(/^(.{2,40}?)\s+(?:open|launch)(?:\s+(?:karo|kar\s*do|kholo|khol\s*do))?$/i))) {
+    const rest = clean(m[1]);
+    if (rest && !looksLikeChat(rest) && !/^(?:the|app|application)$/i.test(rest)) return asCmd('open', rest);
+  }
   if ((m = text.match(/^(?:close|quit|exit|band\s*kar(?:o|do)?)\s+(?:the\s+|app\s+)?(.+)$/i))) {
     const rest = clean(m[1]);
     if (!looksLikeChat(rest) && !/^(?:pc|screen|system|wifi|wi-fi|bluetooth|bt|music|song|gaana|volume|awaaz|notification)$/i.test(rest)) return asCmd('close', rest);

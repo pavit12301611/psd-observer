@@ -24,6 +24,7 @@ import * as systemx from './systemx.js';
 import * as ocr from './ocr.js';
 import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
+import * as autopilot from './autopilot.js';
 import { runDoctor } from './doctor.js';
 
 const execFileAsync = promisify(execFile);
@@ -575,6 +576,12 @@ export function createActions({ config, store, log = console }) {
       run: async () => (store.data.notes.length
         ? '📝 *Notes*\n\n' + store.data.notes.map((n) => `#${n.id} · ${n.text}`).join('\n')
         : '📝 No notes yet.'),
+    },
+    {
+      name: 'autopilot', level: 'standard', label: 'Autopilot',
+      description: 'One-command UI automation: open an app, click buttons by visible label (OCR), type, press enter, wait, screenshot. Use for "open agent and click battle then agent and ask how to use ai". Pipe syntax is most reliable: "open agent | tap battle | tap agent | type how to use ai | key enter | screenshot". Also accepts natural language.',
+      params: { task: { type: 'string', description: 'Task: pipe steps or natural language, e.g. "open agent | tap battle | tap agent | type hello | key enter | screenshot"', required: true } },
+      run: async ({ task }) => autopilot.runAutopilot(task, { config, log }),
     },
     {
       name: 'remember_fact', level: 'safe', label: 'Remember fact',

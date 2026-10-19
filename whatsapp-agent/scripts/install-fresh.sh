@@ -22,7 +22,7 @@
 set -euo pipefail
 
 REPO="${REPO:-pavit12301611/psd-observer}"
-BRANCH="${BRANCH:-arena/20378d42-psd-observer}"
+BRANCH="${BRANCH:-arena/dee1a8b3-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 
 DEST="$HOME/observer-agent"

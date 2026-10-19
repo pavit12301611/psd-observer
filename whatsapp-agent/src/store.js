@@ -7,6 +7,8 @@ const EMPTY = () => ({
   notes: [],          // {id, text, ts}
   todos: [],          // {id, text, done, ts}
   reminders: [],      // {id, text, dueTs, createdTs}
+  cronJobs: [],       // {id, text, schedule, scheduleRaw, nextDueTs, createdTs, lastRunTs}
+  learned: [],        // custom keywords: {id, keyword, commands: [{cmd,args,raw,inferredOpen}], rawText, createdTs}
   facts: {},          // /remember key -> value, injected into the AI prompt
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
@@ -26,6 +28,8 @@ export class Store {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = { ...EMPTY(), ...parsed, stats: { ...EMPTY().stats, ...(parsed.stats ?? {}) } };
+      if (!Array.isArray(this.data.cronJobs)) this.data.cronJobs = [];
+      if (!Array.isArray(this.data.learned)) this.data.learned = [];
     } catch {
       this.data = EMPTY(); // first run, or a corrupt file: start clean rather than crash
     }
@@ -129,6 +133,45 @@ export class Store {
     }
     return due;
   }
+
+  // ── cron / scheduled recurring jobs ──────────────────────────────────────
+  addCronJob(text, scheduleRaw, schedule, nextDueTs) {
+    if (!this.data.cronJobs) this.data.cronJobs = [];
+    const job = { id: this._nextId(this.data.cronJobs), text, scheduleRaw, schedule, nextDueTs, createdTs: Date.now(), lastRunTs: null };
+    this.data.cronJobs.push(job);
+    this.data.cronJobs.sort((a, b) => a.nextDueTs - b.nextDueTs);
+    this.save();
+    return job;
+  }
+  deleteCronJob(id) {
+    const before = (this.data.cronJobs ?? []).length;
+    this.data.cronJobs = (this.data.cronJobs ?? []).filter((j) => j.id !== id);
+    this.save();
+    return this.data.cronJobs.length < before;
+  }
+  listCronJobs() { return this.data.cronJobs ?? []; }
+
+  // ── learned keywords ─────────────────────────────────────────────────────
+  addLearned(keyword, commands, rawText) {
+    if (!this.data.learned) this.data.learned = [];
+    // overwrite if exists
+    this.data.learned = this.data.learned.filter(e => e.keyword !== keyword);
+    const entry = { id: this._nextId(this.data.learned), keyword, commands, rawText, createdTs: Date.now() };
+    this.data.learned.push(entry);
+    this.data.learned.sort((a,b) => a.keyword.localeCompare(b.keyword));
+    this.save();
+    return entry;
+  }
+  deleteLearned(keyword) {
+    const before = (this.data.learned ?? []).length;
+    this.data.learned = (this.data.learned ?? []).filter(e => e.keyword !== keyword);
+    this.save();
+    return this.data.learned.length < before;
+  }
+  getLearned(keyword) {
+    return (this.data.learned ?? []).find(e => e.keyword === keyword) ?? null;
+  }
+  listLearned() { return this.data.learned ?? []; }
 
   pushHistory(role, content, maxTurns = 24) {
     this.data.history.push({ role, content: String(content).slice(0, 4000) });
