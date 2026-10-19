@@ -710,8 +710,10 @@ async function runInput(builders) {
     const build = builders[tool];
     if (!build) continue;
     try {
-      const args = typeof build === 'function' ? build() : build;
-      await run(tool, args);
+      const spec = typeof build === 'function' ? build() : build;
+      const args = Array.isArray(spec) ? spec : spec.args;
+      const input = Array.isArray(spec) ? undefined : spec.input;
+      await run(tool, args, input === undefined ? {} : { input, timeout: 30_000 });
       return tool;
     } catch (err) {
       failures.push({ tool, err });
@@ -734,16 +736,71 @@ async function runInput(builders) {
   throw new Error(`${real.tool} failed${raw ? `: ${raw}` : ''}.${hint}`);
 }
 
+/**
+ * Split text for typing. No more arbitrary 500-character ceiling: ydotool gets
+ * the text in argv chunks (long single arguments are slow and, on some builds,
+ * silently truncated), preferring word boundaries so a word isn't cut in two.
+ * Exported so the chunking itself is unit-tested without a desktop.
+ */
+export function splitForTyping(text, size = 180) {
+  const limit = Math.max(20, Math.min(Number(size) || 180, 1_000));
+  const source = String(text ?? '');
+  const chunks = [];
+  let rest = source;
+  while (rest.length > limit) {
+    let cut = rest.lastIndexOf(' ', limit);
+    // Break *after* the space (keep it) so no character is ever dropped.
+    if (cut >= Math.floor(limit * 0.6)) cut += 1;
+    else cut = limit; // no usable space nearby: hard cut
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest.length) chunks.push(rest);
+  return chunks;
+}
+
+const MAX_TYPE_CHARS = 40_000;
+
 export async function typeText(text) {
-  const payload = String(text ?? '').slice(0, 500);
+  const payload = String(text ?? '').slice(0, MAX_TYPE_CHARS);
   if (!payload) throw new Error('usage: /pc type <text>');
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+
+  const chunks = splitForTyping(payload, process.env.TYPE_CHUNK_CHARS ?? 180);
+  let used = null;
+  for (const [index, chunk] of chunks.entries()) {
+    used = await runInput({
+      ydotool: ['type', chunk],
+      wtype: ['--', chunk],
+      // xdotool reads stdin with --file -, so no argv limits at all.
+      xdotool: () => ({ args: ['type', '--clearmodifiers', '--file', '-'], input: chunk }),
+    });
+    // Give the target app a moment between chunks (large pastes in browsers,
+    // editors and Electron apps otherwise drop characters).
+    if (index < chunks.length - 1) await new Promise((r) => setTimeout(r, Number(process.env.TYPE_CHUNK_DELAY_MS ?? 60)));
+  }
+  const via = chunks.length > 1 ? `${chunks.length} chunks via ${used}` : `via ${used}`;
+  return `⌨️ Typed ${payload.length} characters ${via}.`;
+}
+
+/**
+ * Long text, instantly: put it on the clipboard and press Ctrl+V.
+ * Much faster and more reliable than typing thousands of key events, and it
+ * keeps newlines/Unicode intact.
+ */
+export async function pasteText(text) {
+  const payload = String(text ?? '');
+  if (!payload) throw new Error('usage: /pc paste <text>');
+  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  await clipboardSet(payload);
+  // Small delay so the clipboard owner is ready before the paste keystroke.
+  await new Promise((r) => setTimeout(r, 120));
   const used = await runInput({
-    ydotool: ['type', payload],
-    wtype: ['--', payload],
-    xdotool: ['type', '--clearmodifiers', '--', payload],
+    ydotool: ['key', ...ydotoolKeyArgs('ctrl+v')],
+    wtype: ['-k', 'ctrl+v'],
+    xdotool: ['key', '--clearmodifiers', 'ctrl+v'],
   });
-  return `⌨️ Typed ${payload.length} characters via ${used}.`;
+  return `📋 Pasted ${payload.length} characters (clipboard + Ctrl+V via ${used}).`;
 }
 
 export async function keyCombo(combo) {

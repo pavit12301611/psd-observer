@@ -36,7 +36,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 *PC control*
 • /screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top
 • /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
-• /pc type <text> · /pc key ctrl+l · /pc click [x y] [double] · /pc tap <label>
+• /pc type <text> · /pc paste <long text> · /pc key ctrl+l · /pc click [x y] [double]
 • /pc mousemove <x> <y> · /pc scroll [up|down] [steps] · /pc lock
 • /webcam · /record [seconds] · /notify <text> · /pc locate <button>
 *Network*
@@ -266,7 +266,14 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       }
       case 'type': {
         const gate = tier2Gate(rest);
-        return gate.reply ?? pc.typeText(gate.text);
+        if (gate.reply) return gate.reply;
+        // "/pc type paste <text>" and "/pc paste <text>" use the clipboard.
+        if (/^(?:paste|clip)\s+/i.test(gate.text)) return pc.pasteText(gate.text.replace(/^(?:paste|clip)\s+/i, ''));
+        return pc.typeText(gate.text);
+      }
+      case 'paste': {
+        const gate = tier2Gate(rest);
+        return gate.reply ?? pc.pasteText(gate.text);
       }
       case 'key': {
         const gate = tier2Gate(rest);

@@ -223,6 +223,13 @@ ls -l /dev/uinput                        # must exist
 
 `/doctor` reports all three: `ydotool`, `ydotoolDaemon`, `uinput`.
 
+**Typing very long text.** `typeText` has no fixed ceiling: it splits at word
+boundaries and feeds ydotool chunk by chunk (`TYPE_CHUNK_CHARS`, default 180;
+`TYPE_CHUNK_DELAY_MS`, default 60 ms), falling back to `wtype`/`xdotool` —
+"xdotool type --file -" reads stdin, so there is no argv limit at all. For
+multi-paragraph text, `/pc paste <text>` is better: it sets the clipboard and
+presses Ctrl+V, which is instant and preserves newlines/Unicode.
+
 **"It can't operate my whole computer" — the honest limits.** With the above in
 place the agent can open/close *any* installed app, type, press any key combo,
 move/click/scroll the pointer, read and write files anywhere in your home,

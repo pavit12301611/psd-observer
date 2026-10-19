@@ -181,6 +181,8 @@ everything else. Login attempts are rate-limited.
 /pc volume up|down|mute|50         volume
 /pc brightness 70                  brightness
 /pc media play|pause|next|prev     music/video
+/pc type <text>             type (any length — chunked, was capped at 500)
+/pc paste <text>            long/multi-line text via clipboard + Ctrl+V
 /pc mousemove <x> <y>       move the pointer
 /pc scroll [up|down] [n]   wheel scrolling
 /pc click [x y] [double]   click (or find a button by label with /pc tap <label>)

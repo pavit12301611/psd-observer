@@ -72,6 +72,8 @@ export function parseIntent(input) {
 
   // ── input ─────────────────────────────────────────────────────────────────
   if ((m = text.match(/^(?:type\s+kar\s+do|type\s+karo|type|likho|likh\s+do)\s+([\s\S]+)$/i))) return asCmd('pc', `type ${m[1]}`);
+  // Long / multi-line text is far more reliable through the clipboard.
+  if ((m = text.match(/^(?:paste\s+kar\s+do|paste|chipka\s+do|chipkao|baithao)\s+([\s\S]+)$/i))) return asCmd('pc', `paste ${m[1]}`);
   if ((m = text.match(/^(?:press|key|key\s+dabao|press\s+karo)\s+([\w+]+)$/i))) return asCmd('pc', `key ${m[1]}`);
   if ((m = text.match(/^(?:click|tap|dabao|click\s+karo)\s+(?:on\s+)?(.+)$/i))) {
     const rest = clean(m[1]);

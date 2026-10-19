@@ -184,7 +184,7 @@ Apne number `+91 95289 23866` se agent number ko WhatsApp karo:
 Phir ye try karo:
 
 ```
-/access                    → 60 tools, level full, kya allowed hai
+/access                    → 61 tools, level full, kya allowed hai
 /pc status                 → laptop ki halat
 /screenshot                → laptop ka screenshot
 chrome kholo               → (Hinglish bhi chalta hai)
@@ -273,6 +273,10 @@ har tool check karke exact fix batayega.
 Ab test: `/screenshot` (asli screen), `/pc type hello`, `/pc key super`,
 `/pc click 600 400`, `/pc scroll down 5`.
 
+Lamba text likhna ho (500+ characters, multi-line): `/pc paste <text>` —
+clipboard + Ctrl+V, instant aur koi limit nahi. `/pc type` bhi ab koi limit
+nahi rakhta (chunks me type karta hai).
+
 ---
 
 ## 9. Setup verify (2 minute)
@@ -284,7 +288,7 @@ node --check src/index.js     # syntax
 curl -s localhost:8787/health # {"ok":true,...}
 ```
 
-WhatsApp pe: `/access` → `60 tools`, `/model` → `Ollama · llama3.2` (ya jo bhi).
+WhatsApp pe: `/access` → `61 tools`, `/model` → `Ollama · llama3.2` (ya jo bhi).
 
 ---
 

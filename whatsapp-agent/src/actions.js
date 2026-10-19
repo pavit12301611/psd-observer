@@ -420,9 +420,18 @@ export function createActions({ config, store, log = console }) {
     // ── input ───────────────────────────────────────────────────────────────
     {
       name: 'type_text', level: 'standard', label: 'Type text',
-      description: 'Type text into whatever window is focused on the PC.',
-      params: { text: { type: 'string', description: 'Text to type', required: true } },
-      run: async ({ text }) => pc.typeText(text),
+      description: 'Type text into whatever window is focused on the PC. Long text is typed in chunks; use paste_text for very long text or multi-line content.',
+      params: {
+        text: { type: 'string', description: 'Text to type', required: true },
+        method: { type: 'string', enum: ['type', 'paste'], description: 'type = key events (default), paste = clipboard + Ctrl+V (fast, unlimited length)' },
+      },
+      run: async ({ text, method }) => (method === 'paste' ? pc.pasteText(text) : pc.typeText(text)),
+    },
+    {
+      name: 'paste_text', level: 'standard', label: 'Paste text',
+      description: 'Put text on the PC clipboard and press Ctrl+V in the focused window. Best for long or multi-line text.',
+      params: { text: { type: 'string', description: 'Text to paste', required: true } },
+      run: async ({ text }) => pc.pasteText(text),
     },
     {
       name: 'press_keys', level: 'standard', label: 'Press keys',

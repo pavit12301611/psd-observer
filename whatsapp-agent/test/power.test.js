@@ -713,3 +713,75 @@ test('portal: response with @a{sv} spelling and extra keys still parses', () => 
   assert.equal(denied.denied, true);
   assert.equal(denied.ok, false);
 });
+
+// ── typing long text (no more 500-character ceiling) ────────────────────────
+
+test('typing: long text is chunked without losing a single character', () => {
+  const { splitForTyping } = pc;
+
+  const essay = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '.repeat(80); // ~4.5k
+  const chunks = splitForTyping(essay, 180);
+  assert.ok(chunks.length > 20);
+  assert.ok(chunks.every((c) => c.length <= 181));
+  assert.equal(chunks.join(''), essay, 'chunking must be lossless');
+
+  // Newlines and emoji survive (clipboard/typing must not corrupt them).
+  const mixed = 'line one\nline two\nनमस्ते दुनिया 🙂\n' + 'x'.repeat(300);
+  assert.equal(splitForTyping(mixed, 100).join(''), mixed);
+
+  // Degenerate input.
+  assert.deepEqual(splitForTyping('', 180), []);
+  assert.deepEqual(splitForTyping('short', 180), ['short']);
+  // A single very long word still gets cut (no infinite loop).
+  const word = 'a'.repeat(950);
+  assert.equal(splitForTyping(word, 180).join(''), word);
+});
+
+test('typing: 500+ character payloads are no longer truncated', async () => {
+  const dir = tempDir();
+  const shimDir = path.join(dir, 'bin');
+  const runtimeDir = path.join(dir, 'run');
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(path.join(runtimeDir, 'wayland-0'), '');
+
+  // ydotool shim: append every argv it receives, one line per call.
+  const log = path.join(dir, 'typed.log');
+  fs.writeFileSync(path.join(shimDir, 'ydotool'), `#!/bin/sh\nshift\nprintf '%s\\n' "$*" >> ${log}\n`, { mode: 0o755 });
+
+  const saved = { PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE };
+  process.env.PATH = `${shimDir}:${saved.PATH}`;
+  process.env.XDG_RUNTIME_DIR = runtimeDir;
+  process.env.XDG_SESSION_TYPE = 'wayland';
+  pc.detectSockets({ force: true });
+  try {
+    const text = 'A'.repeat(1200);
+    const reply = await pc.typeText(text);
+    assert.match(reply, /Typed 1200 characters/);
+    assert.match(reply, /chunks/);
+    const written = fs.readFileSync(log, 'utf8').trim().split('\n').join('');
+    assert.equal(written.length, 1200, 'all typed characters must reach ydotool');
+    assert.equal(written, text);
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.XDG_RUNTIME_DIR === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = saved.XDG_RUNTIME_DIR;
+    if (saved.XDG_SESSION_TYPE === undefined) delete process.env.XDG_SESSION_TYPE;
+    else process.env.XDG_SESSION_TYPE = saved.XDG_SESSION_TYPE;
+    pc.detectSockets({ force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('actions/commands: paste is available for long text', () => {
+  const dir = tempDir();
+  try {
+    const actions = createActions({ config: makeConfig(dir), store: new Store(path.join(dir, 'p.json')), log: silent });
+    const names = actions.toolSchemas().map((t) => t.name);
+    assert.ok(names.includes('paste_text'));
+    const typeSchema = actions.toolSchemas().find((t) => t.name === 'type_text');
+    assert.ok(typeSchema.parameters.properties.method.enum.includes('paste'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

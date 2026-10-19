@@ -20,7 +20,7 @@ Project layout reference: [`STRUCTURE.md`](STRUCTURE.md). Agent deep-dive:
 |---|---|
 | **Installable phone app** | `http://<PC-IP>:8787/` → PIN → *Add to Home screen*. Chat, quick controls, files, QR. **No Observer app involved.** |
 | **Works with zero AI** | Offline Hinglish/English intents: “chrome kholo”, “screenshot bhej do”, “wifi off karo”, “thesis.pdf dhundo”, “10 second record karo”. |
-| **Free AI tool-calling** | Ollama/Groq/Gemini/OpenRouter models call 60 real PC actions in sequence (`/agent <task>` or just ask). |
+| **Free AI tool-calling** | Ollama/Groq/Gemini/OpenRouter models call 61 real PC actions in sequence (`/agent <task>` or just ask). |
 | **Full PC control** | Any installed app, files, OCR, typing/clicking, Wi-Fi, Bluetooth, services, webcam, screen recording, zip/download, power. |
 | **Voice + documents** | Voice notes transcribed (Groq Whisper free tier or local whisper.cpp); PDF/DOCX read and summarised; photos OCR'd. |
 | **Safer full access** | `ACCESS_LEVEL=safe|standard|full`, confirmations for destructive actions, shell still opt-in with a PIN. |
