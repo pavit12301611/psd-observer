@@ -137,10 +137,18 @@ always `/pc confirm`-gated) — needs one flag:
 ```
 
 That dnf-installs `grim gnome-screenshot scrot kde-spectacle playerctl
-brightnessctl ydotool xdotool wl-clipboard libnotify`, enables the ydotool
-daemon (uinput; Wayland input), and flips the switch. Then set a PIN in `.env`
-(`CONTROL_PIN=1234` → usage `/pc type 1234 hello`) and
+brightnessctl ydotool xdotool wl-clipboard libnotify tesseract`, enables the
+ydotool daemon (uinput; Wayland input), and flips the switch. Then set a PIN
+in `.env` (`CONTROL_PIN=1234` → usage `/pc type 1234 hello`) and
 `systemctl --user restart observer-whatsapp-agent`.
+
+**Clicking by name:** `/pc tap 1234 Login` finds the on-screen *Login*
+button/field by its label (tesseract OCR; optional `OLLAMA_VISION_MODEL`,
+e.g. `qwen2.5-vl`, covers icons) and clicks its centre, replying with a
+crosshair-marked screenshot as proof. `/pc locate Login` finds without
+clicking. Delete/Pay-style labels ask `/pc confirm` first. If taps land
+consistently offset by a fixed ratio, that's fractional display scaling —
+100 % scale is pixel-exact.
 
 Fedora session caveats (honest ones):
 

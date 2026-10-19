@@ -136,9 +136,22 @@ read/write, `find`/`get` files under your home folder, top processes.
 ```bash
 ./scripts/install-fedora.sh --pc-control   # installs the tools below + flips the tier-2 switch
 # …or by hand:
-sudo dnf install grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify
+sudo dnf install grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify tesseract
 sudo systemctl enable --now ydotool        # Wayland input daemon (uinput)
 ```
+
+**🎯 Element finder — click by name, not by pixels.** `/pc tap <PIN> Login`
+screenshots the screen, finds the *Login* button/field by its visible label
+(tesseract OCR — exact, offline; a local `OLLAMA_VISION_MODEL` like
+`qwen2.5-vl` is the fallback for icons/unlabelled controls), clicks its
+centre, and sends you the screenshot with a red crosshair on the spot as
+proof. `/pc locate Login` does the finding only (no click). Labels that smell
+irreversible (Delete, Pay, …) ask `/pc confirm` first. Caveats: it finds
+*visible text* best — tiny/low-contrast labels can be misread by OCR, the
+vision fallback is approximate, and clicks are screenshot pixels, so with
+fractional display scaling (125 %/150 %) they can land offset by that ratio
+(100 % scale is exact). Screenshots used for vision-locating stay on the PC
+(local Ollama only).
 
 | Feature | Fedora GNOME/Wayland (default) | KDE Plasma | X11 session |
 |---|---|---|---|

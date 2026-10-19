@@ -12,6 +12,7 @@ import { Store } from '../src/store.js';
 import { createAgent } from '../src/commands.js';
 import { Mailbox } from '../src/mailbox.js';
 import * as pcctl from '../src/pccontrol.js';
+import * as finder from '../src/elementfinder.js';
 
 const OWNER = '919528923866';
 const AGENT = '918859555795';
@@ -186,6 +187,52 @@ test('pc control: tier-2 input/power is gated off by default, tier-1 works', asy
   const pinned = makeAgent({ allowPcControl: true, controlPin: '1234' });
   assert.match(await pinned.agent.handle('/pc key ctrl+l'), /needs your PIN/);
   assert.match(await pinned.agent.handle('/pc key 9999 ctrl+l'), /needs your PIN/);
+});
+
+test('element finder: OCR TSV parsing + label matching + vision point parsing', () => {
+  const tsv = [
+    'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext',
+    '5\t1\t1\t1\t1\t1\t900\t40\t60\t24\t96\tSign',
+    '5\t1\t1\t1\t1\t2\t965\t40\t25\t24\t95\tin',
+    '5\t1\t2\t1\t1\t1\t100\t200\t80\t30\t92\tLogin',
+    '5\t1\t3\t1\t1\t1\t100\t300\t120\t30\t88\tSearch',
+    '4\t1\t3\t1\t1\t0\t100\t300\t120\t30\t-1\t',
+  ].join('\n');
+  const words = finder.parseOcrTsv(tsv);
+  assert.equal(words.length, 4); // level-4 row dropped
+  // Headerless TSV (some tesseract builds) parses via the canonical order.
+  const headerless = finder.parseOcrTsv('5\t1\t1\t1\t1\t1\t124\t118\t106\t41\t96.3\tLogin');
+  assert.equal(headerless.length, 1);
+  assert.equal(headerless[0].x, undefined); // words carry boxes, centres come from matching
+  assert.equal(headerless[0].text, 'Login');
+  const login = finder.findTextTarget(words, 'Login');
+  assert.equal(login.matched, 'Login');
+  assert.equal(login.x, 140); // centre of 100..180
+  assert.equal(login.y, 215);
+  const signIn = finder.findTextTarget(words, 'sign in');
+  assert.equal(signIn.matched, 'Sign in'); // multi-word phrase across one OCR line
+  assert.equal(finder.findTextTarget(words, 'the login button').matched, 'Login');
+  assert.equal(finder.findTextTarget(words, ' NonexistentXYZ '), null);
+  assert.deepEqual(finder.parseVisionPoint('{"x": 250, "y": 750}'), { x: 250, y: 750 });
+  assert.deepEqual(finder.parseVisionPoint('Sure: {"x": 0.5, "y": 0.25}'), { x: 500, y: 250 });
+  assert.equal(finder.parseVisionPoint('{"found": false}'), null);
+  // PNG size from a synthetic IHDR
+  const png = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png, 0);
+  png.writeUInt32BE(1920, 16);
+  png.writeUInt32BE(1080, 20);
+  assert.deepEqual(finder.pngSize(png), { width: 1920, height: 1080 });
+  assert.equal(finder.pngSize(Buffer.from('not png')), null);
+});
+
+test('element finder: /pc tap is tier-2 gated (off by default, PIN enforced)', async () => {
+  const off = makeAgent();
+  assert.match(await off.agent.handle('/pc tap Login'), /ALLOW_PC_CONTROL=false/);
+  const pinned = makeAgent({ allowPcControl: true, controlPin: '1234' });
+  assert.match(await pinned.agent.handle('/pc tap Login'), /needs your PIN/);
+  // Correct PIN passes the gate and fails later, honestly, on "no graphical
+  // session" in this headless test environment — never a phantom click.
+  assert.match(await pinned.agent.handle('/pc tap 1234 Login'), /graphical session|screenshot/i);
 });
 
 test('mailbox: message is offered to Observer, reply resolves the waiter once', async () => {

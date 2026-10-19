@@ -14,6 +14,7 @@ import QRCode from 'qrcode';
 import * as tools from './tools.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
+import * as finder from './elementfinder.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, native, owner-only
@@ -39,6 +40,8 @@ const HELP = `🤖 *Observer WhatsApp Agent* — free, native, owner-only
 • /pc clipboard · /pc clipset <text> · /pc find <name> · /pc get <path-in-home>
 • ⌨️ Input + power (needs ALLOW_PC_CONTROL=true): /pc type <text> · /pc key ctrl+l
   /pc click [x y] · /pc suspend|reboot|shutdown (asks /pc confirm first)
+• 🎯 *Element finder*: /pc locate Login — shows where it is · /pc tap Login —
+  finds that button/field by its label and clicks it (no pixel guessing)
 
 *Look things up (all free, no keys)*
 • /weather <city> · /wiki <topic> · /define <word> · /news [topic]
@@ -127,8 +130,11 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return '🧠 *What I remember*\n\n' + facts.map((f) => `• ${f}`).join('\n') + '\n\n/forget memory — wipe these';
   }
 
-  // Pending destructive PC action awaiting "/pc confirm" (60 s window).
+  // Pending destructive PC actions awaiting "/pc confirm" (60 s window).
   let pendingPower = null;
+  let pendingTap = null;
+  // A tap whose label smells irreversible asks first (same as power actions).
+  const RISKY_TAP = /\b(delete|remove|pay|payment|buy|purchase|checkout|place order|transfer|send money|uninstall|format|erase|factory reset|discard)\b/i;
 
   const TIER2_OFF =
     '🔒 Input/power PC control is OFF (ALLOW_PC_CONTROL=false) — the safe default even though I only listen to you.\n' +
@@ -206,7 +212,29 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         if (stat.size > 64 * 1024 * 1024) return '📂 That file is over WhatsApp\'s 64 MB document limit.';
         return { text: `📄 ${path.basename(resolved.file)} (${(stat.size / 1024).toFixed(0)} KB)`, document: { buffer: fs.readFileSync(resolved.file), fileName: path.basename(resolved.file) } };
       }
+      case 'locate': case 'findui': {
+        const hit = await finder.locateOnScreen(config, rest, log);
+        const image = await finder.annotateScreenshot(hit.screenshot, hit.x, hit.y, hit.width, hit.height);
+        const pinPrefix = config.controlPin ? '<PIN> ' : '';
+        return {
+          image,
+          text: `🎯 Found "${hit.matched}" at *${hit.x}, ${hit.y}* (${hit.source === 'ocr' ? `OCR text match, ${hit.confidence}% sure` : 'vision model'}).\nClick it: /pc tap ${pinPrefix}${rest} — or raw: /pc click ${pinPrefix}${hit.x} ${hit.y}`,
+        };
+      }
       // ── tier 2: input + power ──────────────────────────────────────────
+      case 'tap': case 'clicktext': case 'taptext': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        const hit = await finder.locateOnScreen(config, gate.text, log);
+        const image = await finder.annotateScreenshot(hit.screenshot, hit.x, hit.y, hit.width, hit.height);
+        const where = `"${hit.matched}" at ${hit.x},${hit.y} (${hit.source === 'ocr' ? `OCR ${hit.confidence}%` : 'vision model'})`;
+        if (RISKY_TAP.test(gate.text) || RISKY_TAP.test(hit.matched)) {
+          pendingTap = { x: hit.x, y: hit.y, matched: hit.matched, expires: Date.now() + 60_000 };
+          return { image, text: `⚠️ That click looks irreversible (${where}). Reply */pc confirm* within 60 seconds to click it, or ignore to cancel.` };
+        }
+        await pc.click(hit.x, hit.y);
+        return { image, text: `🖱️ Clicked ${where} — crosshair shows the spot. Send /pc screenshot to see the result.` };
+      }
       case 'type': {
         const gate = tier2Gate(rest);
         return gate.reply ?? pc.typeText(gate.text);
@@ -231,6 +259,13 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       }
       case 'confirm': {
         if (!config.allowPcControl) return TIER2_OFF;
+        if (pendingTap && pendingTap.expires >= Date.now()) {
+          const { x, y, matched } = pendingTap;
+          pendingTap = null;
+          await pc.click(x, y);
+          return `🖱️ Clicked "${matched}" at ${x},${y} (confirmed). Send /pc screenshot to see the result.`;
+        }
+        pendingTap = null;
         if (!pendingPower || pendingPower.expires < Date.now()) { pendingPower = null; return 'Nothing is waiting for confirmation.'; }
         const { action } = pendingPower;
         pendingPower = null;
@@ -239,7 +274,8 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       }
       case 'cancel':
         pendingPower = null;
-        return 'Cancelled — PC stays on.';
+        pendingTap = null;
+        return 'Cancelled — nothing was clicked, PC stays on.';
       default:
         return [
           '🖥️ *PC control* — usage:',
@@ -248,6 +284,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           '/pc media play|pause|next|prev|stop|status',
           '/pc open firefox|terminal|settings|https://… · /pc notify <text> · /pc lock',
           '/pc clipboard · /pc clipset <text> · /pc find <name> · /pc get ~/<path>',
+          '/pc locate <label> — find a button/field on screen · /pc tap <label> — find + click it 🎯',
           '/pc type <text> · /pc key ctrl+l · /pc click [x y] · /pc suspend|reboot|shutdown' + (config.allowPcControl ? '' : '  (⌨️ tier-2 currently OFF — see ALLOW_PC_CONTROL)'),
         ].join('\n');
     }

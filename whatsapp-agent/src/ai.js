@@ -134,6 +134,38 @@ export async function describeImage(config, imageBase64, caption = '', log = con
   }
 }
 
+const VISIONY_MODEL = /llava|vision|vl\b|[-_]vl|moondream|minicpm-v|gemma3|qwen.*vl|llama3\.2-vision/i;
+
+/**
+ * Ask a local Ollama vision model where a UI element is in an image.
+ * Returns the raw model reply (expected: {"x":0-1000,"y":0-1000} or
+ * {"found":false}) or null when no vision model is available. Local-only on
+ * purpose: screenshots of the owner's screen never leave the PC for this.
+ */
+export async function locateInImage(config, imageBase64, description, log = console) {
+  const model = config.ollamaVisionModel || (VISIONY_MODEL.test(config.ollamaModel ?? '') ? config.ollamaModel : '');
+  if (!model) return null;
+  try {
+    const data = await postJson(`${config.ollamaUrl}/api/chat`, {
+      model,
+      stream: false,
+      messages: [{
+        role: 'user',
+        content:
+          `This is a screenshot of a computer screen. Find the UI element the user wants to click: "${description}". ` +
+          'Reply with ONLY a JSON object {"x": <0-1000>, "y": <0-1000>} giving the CENTER of that element in ' +
+          '0-to-1000 relative coordinates (x: 0=left edge, 1000=right edge; y: 0=top, 1000=bottom). ' +
+          'If the element is not visible, reply with ONLY {"found": false}. No other text.',
+        images: [imageBase64],
+      }],
+    });
+    return data.message?.content?.trim() || null;
+  } catch (err) {
+    log.warn?.(`[ai] vision locate failed: ${err.message}`);
+    return null;
+  }
+}
+
 /** For /model: what brains are configured, and whether Ollama is actually up. */
 export async function aiStatus(config) {
   const lines = [`Provider mode: *${config.aiProvider}*`];

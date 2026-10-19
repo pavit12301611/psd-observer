@@ -73,7 +73,7 @@ npm install
 # ── 4b. Optional: PC-control tools + tier-2 switch ───────────────────────────
 if [ "$WANT_PCCONTROL" -eq 1 ]; then
   say "PC-control tools (screenshot/media/brightness/input)"
-  sudo dnf install -y grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify || \
+  sudo dnf install -y grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify tesseract || \
     echo "⚠ Some PC-control packages failed to install — /pc subcommands that need them will name the missing one."
   # Wayland keyboard/mouse needs the ydotool daemon (uinput). Unit name varies
   # by packaging; try both, never fatal.
