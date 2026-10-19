@@ -8,6 +8,10 @@ import { Mailbox } from './mailbox.js';
 import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
+import { distroPrettyName } from './tools.js';
+
+// Set by systemd for every service (user services included on Fedora).
+const underSystemd = Boolean(process.env.INVOCATION_ID || process.env.NOTIFY_SOCKET);
 
 const dryRun = process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
 
@@ -44,6 +48,9 @@ console.info(`   Agent WhatsApp number: +${config.agentNumber}`);
 console.info(`   Mode: ${dryRun ? 'DRY-RUN (no WhatsApp connection)' : config.usePairingCode ? 'link by pairing code' : 'link by QR scan'}`);
 console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${config.ollamaUrl})`);
 console.info(`   Forward plain messages to Observer tab: ${config.forwardToObserver}`);
+const distroLine = distroPrettyName();
+if (distroLine) console.info(`   OS: ${distroLine}`);
+if (underSystemd) console.info('   Running under systemd — logs: journalctl --user -u observer-whatsapp-agent -f');
 console.info('');
 
 await bridge.start();

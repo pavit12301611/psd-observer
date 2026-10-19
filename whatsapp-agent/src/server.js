@@ -214,7 +214,7 @@ ${hasToken && config.allowSimulate ? `<div class="card"><h2>🧪 Try a command (
  <p class="muted">This runs the real command engine + owner check without WhatsApp. Try also from another number via API to see it ignored.</p>
  <pre id="out">Replies will appear here…</pre></div>` : ''}
 <div class="card"><h2>📱 First-time linking</h2><ol>
- <li>Keep this agent running (<code>npm start</code> in <code>whatsapp-agent/</code>).</li>
+ <li>Keep this agent running — <code>./start.sh</code> in <code>whatsapp-agent/</code>, or the Fedora systemd user service (<code>systemctl --user status observer-whatsapp-agent</code>).</li>
  <li>On the <b>agent phone +${config.agentNumber}</b>: WhatsApp → ⋮/Settings → <b>Linked devices</b> → <b>Link a device</b> → scan the QR above (or in the terminal).</li>
  <li>From <b>your phone +${config.ownerNumber}</b>, WhatsApp the agent number: <code>/help</code></li>
  <li>Anyone else messaging the agent number gets <b>silence</b> — by design.</li></ol>

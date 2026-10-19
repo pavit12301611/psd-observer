@@ -66,6 +66,26 @@ test('parseWhen understands the reminder phrasings users actually type', () => {
   assert.equal(tools.parseWhen('whenever lol', now), null);
 });
 
+test('fedora/linux helpers: os-release parsing + sysfs battery', () => {
+  const parsed = tools.parseOsRelease('NAME="Fedora Linux"\nPRETTY_NAME="Fedora Linux 42 (Workstation Edition)"\nID=fedora\n');
+  assert.equal(parsed.ID, 'fedora');
+  assert.equal(parsed.PRETTY_NAME, 'Fedora Linux 42 (Workstation Edition)');
+
+  const sysfs = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-power-supply-'));
+  if (process.platform === 'linux') {
+    fs.mkdirSync(path.join(sysfs, 'BAT1'), { recursive: true });
+    fs.writeFileSync(path.join(sysfs, 'BAT1', 'capacity'), '73\n');
+    fs.writeFileSync(path.join(sysfs, 'BAT1', 'status'), 'Discharging\n');
+    fs.writeFileSync(path.join(sysfs, 'BAT1', 'energy_now'), '30000000\n');
+    fs.writeFileSync(path.join(sysfs, 'BAT1', 'power_now'), '10000000\n');
+    const line = tools.batteryStatus(sysfs);
+    assert.match(line, /73%/);
+    assert.match(line, /discharging/);
+    assert.match(line, /3h/); // 30Wh / 10W
+  }
+  assert.equal(tools.batteryStatus(path.join(sysfs, 'nope')), null);
+});
+
 test('units + password helpers', () => {
   assert.match(tools.convertUnit(10, 'km', 'mi'), /6\.21/);
   assert.match(tools.convertUnit(100, 'c', 'f'), /212/);

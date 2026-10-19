@@ -7,9 +7,10 @@
 > Ollama, and Observer screen/MCP acting via `/observer`), and costs **₹0** —
 > no Twilio, no Meta Cloud API, no quota, no 24-hour window.
 >
-> **Start:** `cd whatsapp-agent && cp .env.example .env && npm install && npm start`,
+> **Start (Fedora Linux):** `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama`,
 > scan the QR with the agent phone, then WhatsApp it `/help` from your phone.
-> Full story: [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) · project map: [`STRUCTURE.md`](STRUCTURE.md)
+> Full story: [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) · Fedora guide: [`FEDORA.md`](FEDORA.md)
+> · project map: [`STRUCTURE.md`](STRUCTURE.md)
 > · agent guide: [`whatsapp-agent/README.md`](whatsapp-agent/README.md). Upstream
 > cloud behaviour below is unchanged unless you opt into the local bridge.
 

@@ -14,6 +14,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import pino from 'pino';
 import QRCode from 'qrcode';
 import makeWASocket, {
@@ -89,6 +90,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     seenIds: new Set(),
     rateStamps: [],
     reconnectDelay: 2_000,
+    qrOpened: false,
     stopped: false,
     simulated: [], // dry-run sent log for tests/dashboard
   };
@@ -353,6 +355,19 @@ export function createWhatsApp({ config, store, agent, log = console }) {
           fs.mkdirSync(config.dataDir, { recursive: true });
           await QRCode.toFile(config.qrPngFile, qr, { width: 480 });
           log.info?.(`\n[wa] 📱 Scan this QR with the AGENT phone (+${config.agentNumber}): WhatsApp → Linked devices → Link a device\n${await QRCode.toString(qr, { type: 'terminal', small: true })}\n[wa] QR also at http://${config.host}:${config.port}/ and saved to ${config.qrPngFile}\n`);
+          // Fedora desktop: first QR of the run pops open in the default image
+          // viewer (GNOME/KDE both honour xdg-open). QRs refresh every ~20 s,
+          // so only the first one opens; later ones update the file silently.
+          // The service runs headless under systemd --user too — no display,
+          // no attempt. Disable with OPEN_QR=false.
+          if (config.openQr && !state.qrOpened && process.platform === 'linux'
+              && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY)) {
+            state.qrOpened = true;
+            try {
+              spawn('xdg-open', [config.qrPngFile], { detached: true, stdio: 'ignore' }).unref();
+              log.info?.('[wa] Opened the QR in your image viewer — scan it within ~20 s, or use the dashboard copy if it expires.');
+            } catch { /* terminal + dashboard QRs still work */ }
+          }
         } catch (err) { log.error?.(`[wa] QR render failed: ${err.message}`); }
       }
       if (connection === 'open') {

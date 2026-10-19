@@ -2,7 +2,7 @@
   "name": "observer-whatsapp-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "Free native-WhatsApp agent for Observer: links like WhatsApp Web (Baileys), listens ONLY to the owner number, replies and acts. No Twilio, no Meta Cloud API, no per-message cost.",
+  "description": "Free native-WhatsApp agent for Observer (Fedora Linux): links like WhatsApp Web (Baileys), listens ONLY to the owner number, replies and acts. No Twilio, no Meta Cloud API, no per-message cost.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -10,6 +10,11 @@
   "scripts": {
     "start": "node src/index.js",
     "demo": "node --env-file-if-exists=.env src/index.js --dry-run",
+    "setup:fedora": "bash scripts/install-fedora.sh",
+    "service:install": "bash scripts/install-systemd.sh",
+    "service:uninstall": "bash scripts/install-systemd.sh --uninstall",
+    "service:status": "systemctl --user status observer-whatsapp-agent",
+    "service:logs": "journalctl --user -u observer-whatsapp-agent -f",
     "test": "node --test test/agent.test.js",
     "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/commands.js && node --check src/server.js && node --check src/ai.js && node --check src/tools.js && node --check src/store.js && node --check src/config.js && node --check src/allowlist.js && node --check src/mailbox.js"
   },

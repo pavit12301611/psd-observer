@@ -1,6 +1,8 @@
-# 👁️ Observer WhatsApp Agent — free, native WhatsApp
+# 👁️ Observer WhatsApp Agent — free, native WhatsApp (Fedora Linux)
 
-A personal WhatsApp agent that runs on **your own computer for ₹0**:
+A personal WhatsApp agent that runs on **your own Fedora PC/laptop for ₹0**
+(`dnf` install, `systemd --user` autostart, `journalctl` logs — full distro
+guide in [`../FEDORA.md`](../FEDORA.md)):
 
 - It links to WhatsApp **like WhatsApp Web / a linked device** ([Baileys](https://github.com/WhiskeySockets/Baileys) — the WhatsApp Web protocol directly over WebSocket). No Twilio, no Meta WhatsApp Cloud API, no rented number, no per-message charges, no 24-hour window.
 - **Agent number:** `+91 88595 55795` (the second phone/SIM you link once by QR)
@@ -16,22 +18,31 @@ A personal WhatsApp agent that runs on **your own computer for ₹0**:
 
 | Thing | Why | Cost |
 |---|---|---|
-| A PC/laptop that stays on while you want the agent awake (old laptop/Raspberry Pi is perfect) | The agent process lives here | Free (electricity only) |
-| Node.js 20+ | Runs the agent | Free — nodejs.org |
+| A Fedora PC/laptop that stays on while you want the agent awake (an old laptop is perfect) | The agent process lives here | Free (electricity only) |
+| Node.js 20+ + npm | Runs the agent — Fedora packages: `sudo dnf install nodejs npm` (they're separate packages on Fedora!) | Free |
 | Phone with WhatsApp on `8859555795` | This becomes the agent; you scan the QR with it once | Free |
 | Your phone `9528923866` | The only number the agent obeys | Free |
 | Optional: Ollama + `llama3.2` model | Free offline AI answers | Free — ollama.com |
 
-## 2. Setup (5 minutes)
+## 2. Setup on Fedora (5 minutes)
+
+One command does everything (dnf packages, agent install, autostart service, free local AI):
 
 ```bash
 cd whatsapp-agent
-cp .env.example .env     # your two numbers are already filled in; edit only if they change
-npm install
-npm start
+./scripts/install-fedora.sh --service --ollama
+journalctl --user -u observer-whatsapp-agent -f    # watch logs + linking QR
 ```
 
-Windows users can double-click **`start.bat`** instead (it installs deps on first run, then starts).
+Or manually / foreground-only:
+
+```bash
+sudo dnf install nodejs npm git curl gcc-c++ make python3
+cd whatsapp-agent
+cp .env.example .env     # your two numbers are already filled in; edit only if they change
+npm install
+./start.sh               # on GNOME/KDE the first QR also opens in your image viewer
+```
 
 Then link the agent phone **once**:
 
@@ -45,12 +56,15 @@ The login is stored in `auth_info/` (like a browser's WhatsApp Web session). Res
 
 ### Free AI brain (recommended)
 
-Install Ollama from ollama.com, then:
+The official installer supports Fedora and sets Ollama up as a service:
 
 ```bash
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl enable --now ollama
 ollama pull llama3.2        # ~2 GB, runs on most laptops; try qwen2.5:7b if you have RAM
-ollama serve                # usually auto-starts; agent talks to 127.0.0.1:11434
 ```
+
+The agent talks to it at `127.0.0.1:11434` (nothing to open in firewalld).
 
 Send the agent `/model` — it tells you exactly what's connected. For photo understanding add `ollama pull llava` and set `OLLAMA_VISION_MODEL=llava` in `.env`.
 
@@ -70,7 +84,8 @@ what is 15% of 2400
 /wiki Uttarakhand
 /summarize https://any-article-link
 /qr https://observer-ai.com
-/pc status
+/pc status                   ← shows your Fedora version, kernel, battery…
+/pc battery
 /screen                      ← needs Observer open on the PC (see §5)
 any normal question…         ← answered by local Ollama, in your language (incl. Hinglish)
 ```
@@ -79,14 +94,32 @@ Send a **photo** → saved on the PC (`data/downloads/`, list with `/downloads`)
 
 Full command list is in `/help` itself.
 
-## 4. Keep it running
+## 4. Keep it running (systemd user service — the Fedora way)
 
 The agent only works while this process runs and the PC is online (same as WhatsApp Web on a laptop — except the agent phone does **not** need to stay online; linked devices work independently).
 
-- **Easiest:** leave the terminal open, or use [PM2](https://pm2.keymetrics.io) (free): `npm i -g pm2 && pm2 start src/index.js --name wa-agent && pm2 save`
-- **Windows auto-start:** Task Scheduler → run `start.bat` at log-on.
-- **Linux/Pi:** `docker compose up -d` (files included) or a systemd service running `node src/index.js`.
-- **Free always-on idea:** an old phone with Termux, a Raspberry Pi, or Oracle Cloud's free-tier VM can host it — but local PC is best, because `/screen` and Observer tools need *your* PC anyway.
+```bash
+./scripts/install-systemd.sh      # installs ~/.config/systemd/user/observer-whatsapp-agent.service
+systemctl --user status  observer-whatsapp-agent
+journalctl --user -u     observer-whatsapp-agent -f
+systemctl --user restart observer-whatsapp-agent
+```
+
+The installer also enables **linger** (`loginctl enable-linger $USER`) so the agent
+starts at boot and keeps running after logout. Being a *user* service matters on
+Fedora: it runs with your SELinux context in your home directory, so `auth_info/`
+never needs relabelling and no root process holds your WhatsApp session. The
+unit template lives in `systemd/` with light hardening (`NoNewPrivileges`,
+`PrivateTmp`, `ProtectSystem=full` — deliberately no `ProtectHome`, the agent
+writes `auth_info/` + `data/` in its working directory).
+
+Other options: just leave `./start.sh` running in a terminal/tmux session, or
+Podman (`sudo dnf install podman-compose && podman-compose up -d` — bind mounts
+carry the SELinux `:Z` label for Fedora). Your Fedora PC is the best host either
+way, because `/screen` and Observer tools need *your* desktop.
+
+**Firewall:** nothing to open in firewalld — the bridge is `127.0.0.1`-only and
+WhatsApp is an outbound connection. Details + SELinux notes in [`../FEDORA.md`](../FEDORA.md).
 
 ## 5. Connect it to Observer (screen, camera, agent alerts)
 
@@ -137,3 +170,10 @@ curl -X POST localhost:8787/api/simulate -H "x-bridge-token: <token>" -H 'conten
 | Agent doesn't reply to you | Check `/health` on the dashboard; confirm you messaged from `9528923866`, 1-to-1 (not a group). Logs show `ignored non-owner` with a masked number if the gate rejected it. WhatsApp's LID rollout can take one message exchange for the number mapping to appear — send once more. |
 | Replies but "no AI brain" | Install Ollama + pull the model, or check `/model`. Commands keep working meanwhile. |
 | Port 8787 busy | Set `PORT=8790` in `.env` (update the Observer bridge URL too). |
+| `npm: command not found` (node exists) | Fedora splits the packages: `sudo dnf install npm`. |
+| Node older than 20 | Upgrade Fedora (`dnf system-upgrade`), use the NodeSource RPM repo, or `nvm install 22` — see `../FEDORA.md`. |
+| Service only runs while logged in | `loginctl enable-linger $USER` (check: `loginctl show-user $USER -p Linger`). |
+| No QR under systemd | It's in the journal: `journalctl --user -u observer-whatsapp-agent -f`; or open the dashboard URL printed there. (Image-viewer pop-up is desktop/foreground only.) |
+| Podman: permission denied writing `auth_info` | SELinux label missing — the compose file's `:Z` volume flags handle it; don't drop them. |
+| Moved `auth_info/` from another disk and it won't load | `restorecon -Rv whatsapp-agent/` to relabel for SELinux. |
+| `/pc battery` says no battery | Desktop/VM without `BAT*` in `/sys/class/power_supply` — expected. |

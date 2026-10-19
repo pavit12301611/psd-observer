@@ -30,7 +30,7 @@ const HELP = `🤖 *Observer WhatsApp Agent* — free, native, owner-only
 • /note <text> · /notes · /note del <id>
 • /observer <text> — hand it to Observer on my PC (screen/camera/tools)
 • /screen — ask Observer what's on the PC screen right now
-• /pc status · /pc disk · /pc ip
+• /pc status · /pc disk · /pc ip · /pc battery
 
 *Look things up (all free, no keys)*
 • /weather <city> · /wiki <topic> · /define <word> · /news [topic]
@@ -130,6 +130,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       } catch { return '💾 Could not read disk info on this system.'; }
     }
     if (what === 'ip') return tools.systemInfo(store.data.stats.startedAt).split('\n').find((l) => l.startsWith('LAN IP')) ?? 'No LAN IP found.';
+    if (what === 'battery') return tools.batteryStatus() ?? '🔌 No battery found — this PC/VM reports none under /sys/class/power_supply (normal for desktops).';
     return tools.systemInfo(store.data.stats.startedAt);
   }
 

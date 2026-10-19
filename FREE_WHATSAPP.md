@@ -33,22 +33,35 @@ anyone wants them.
 
 ## 2. Run the agent (the only step that's strictly required)
 
+This fork targets **Fedora Linux** — full guide in [`FEDORA.md`](FEDORA.md). One-shot:
+
 ```bash
+cd whatsapp-agent
+./scripts/install-fedora.sh --service --ollama   # dnf deps + agent + systemd autostart + free local AI
+journalctl --user -u observer-whatsapp-agent -f  # logs + linking QR
+```
+
+Manual/foreground equivalent:
+
+```bash
+sudo dnf install nodejs npm git curl gcc-c++ make python3   # Fedora splits npm from nodejs
 cd whatsapp-agent
 cp .env.example .env        # both numbers are already set; .env stays private (gitignored)
 npm install
-npm start                   # Windows: double-click start.bat
+./start.sh
 ```
 
-1. A QR appears in the terminal (and at the private dashboard URL it prints).
+1. A QR appears in the terminal, in your image viewer on GNOME/KDE, and at the private dashboard URL it prints (under systemd: in the journal).
 2. On the **8859555795 phone**: WhatsApp → **Linked devices → Link a device** → scan it.
    (Or `USE_PAIRING_CODE=true` in `.env` and use "Link with phone number instead".)
 3. From **your 9528923866 phone**, WhatsApp the agent number: `/help` — it replies instantly.
 4. Optional free AI: install [Ollama](https://ollama.com), `ollama pull llama3.2`. Now plain
    messages ("plan my study timetable", Hinglish included) get real AI answers, offline.
 
-Keep the process running while you want the agent awake (PM2/Task Scheduler/systemd/
-`docker compose up -d` — all covered in the agent README). Restarting does **not**
+Keep it running with the **systemd user service** (`systemctl --user`, linger
+enabled so it starts at boot — installed by `scripts/install-systemd.sh`), or
+Podman (`podman-compose up -d`, SELinux `:Z` bind labels included). No firewalld
+changes are needed (localhost bridge + outbound WhatsApp). Restarting does **not**
 need a new QR scan; the session persists in `whatsapp-agent/auth_info/` (gitignored —
 treat it like a password, it *is* the agent number's WhatsApp login).
 
@@ -106,7 +119,8 @@ Beyond "send me an alert", the agent is now a two-way personal assistant:
   language, Hinglish included.
 - **Useful extras:** strong password generator, `/improve` rewriting, choices/dice,
   local dashboard with status + QR + command tester, dry-run simulation mode,
-  Docker + Windows/Linux launchers, unit tests (`npm test` in `whatsapp-agent/`).
+  Fedora dnf installer + systemd user service + Podman, `/pc battery` from Linux
+  sysfs and real distro name in `/pc status`, unit tests (`npm test` in `whatsapp-agent/`).
 
 What intentionally did **not** change: email/SMS/calls still use their cloud
 providers upstream (only WhatsApp was made native+free, as asked). For other free

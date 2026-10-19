@@ -1,19 +1,29 @@
-# Run:  cp .env.example .env && docker compose up -d
-# Link: docker compose logs -f   (scan the QR with the 8859555795 phone)
-# Note: the bridge port is bound to localhost only. Token is still required.
+# Fedora-first: Podman.   sudo dnf install podman-compose
+#   cp .env.example .env && podman-compose up -d
+#   podman-compose logs -f        (scan the QR with the 8859555795 phone)
+# Also works unchanged with: docker compose up -d
+# The bridge port stays on localhost only, and still needs its token.
 services:
   whatsapp-agent:
-    build: .
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: observer-whatsapp-agent
     restart: unless-stopped
     env_file: .env
     environment:
       HOST: 0.0.0.0
-      # If Ollama runs on the Docker host, point the agent at it:
-      OLLAMA_URL: http://host.docker.internal:11434
+      # Reach Ollama on the host. host.containers.internal is Podman's name;
+      # Docker calls the same thing host.docker.internal (mapped below).
+      OLLAMA_URL: http://host.containers.internal:11434
     extra_hosts:
+      - "host.containers.internal:host-gateway"
       - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8787:8787"
     volumes:
-      - ./auth_info:/app/auth_info
-      - ./data:/app/data
+      # :Z is required on Fedora/SELinux — it relabels the bind mounts as
+      # private to this container, without which Podman gets "permission
+      # denied" writing the WhatsApp session (auth_info) and data.
+      - ./auth_info:/app/auth_info:Z
+      - ./data:/app/data:Z

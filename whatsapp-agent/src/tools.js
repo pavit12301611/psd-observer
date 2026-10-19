@@ -3,6 +3,8 @@
 // Frankfurter/ECB rates, Google News RSS, is.gd). Each network tool has a
 // short timeout and fails with a friendly message, never a stack trace.
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -351,16 +353,69 @@ export function generatePassword(length = 16) {
   return out;
 }
 
+/** Parse /etc/os-release contents into a key→value map (Fedora & every distro ships this file). */
+export function parseOsRelease(text) {
+  const out = {};
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+/** "Fedora Linux 42 (Workstation Edition)" on Fedora, null elsewhere/unreadable. */
+export function distroPrettyName(file = '/etc/os-release') {
+  if (process.platform !== 'linux') return null;
+  try {
+    return parseOsRelease(fs.readFileSync(file, 'utf8')).PRETTY_NAME || null;
+  } catch { return null; }
+}
+
+/**
+ * Laptop battery from Linux sysfs (no shelling out to upower/acpi). Reads
+ * /sys/class/power_supply/BAT* — present on Fedora laptops. Returns a
+ * WhatsApp-ready line, or null on desktops/VMs with no battery.
+ * `base` is injectable for tests.
+ */
+export function batteryStatus(base = '/sys/class/power_supply') {
+  if (process.platform !== 'linux') return null;
+  let entries;
+  try { entries = fs.readdirSync(base); } catch { return null; }
+  for (const name of entries.filter((e) => /^BAT\d/i.test(e)).sort()) {
+    const read = (f) => { try { return fs.readFileSync(path.join(base, name, f), 'utf8').trim(); } catch { return ''; } };
+    const capacity = Number.parseInt(read('capacity'), 10);
+    if (!Number.isFinite(capacity)) continue;
+    const status = read('status') || 'Unknown';
+    const icon = /charg/i.test(status) ? '🔌' : capacity <= 20 ? '🪫' : '🔋';
+    // Optional time/power details: µWh/µW or µAh/µA pairs → rough hours left.
+    const energyNow = Number.parseInt(read('energy_now') || read('charge_now'), 10);
+    const powerNow = Number.parseInt(read('power_now') || read('current_now'), 10);
+    let eta = '';
+    if (Number.isFinite(energyNow) && Number.isFinite(powerNow) && powerNow > 0 && /discharg/i.test(status)) {
+      eta = ` · ~${humanDuration((energyNow / powerNow) * 3600_000)} left`;
+    }
+    return `${icon} Battery: *${capacity}%* (${status.toLowerCase()})${eta}`;
+  }
+  return null;
+}
+
 export function systemInfo(startedAt) {
   const total = os.totalmem();
   const free = os.freemem();
   const gb = (n) => `${(n / 1024 ** 3).toFixed(1)} GB`;
   const nets = Object.values(os.networkInterfaces()).flat().filter((n) => n && !n.internal && n.family === 'IPv4').map((n) => n.address);
+  const distro = distroPrettyName();
+  const battery = batteryStatus();
   return [
-    `🖥️ *${os.hostname()}* — ${os.type()} ${os.release()} (${os.arch()})`,
+    `🖥️ *${os.hostname()}* — ${distro ?? `${os.type()} ${os.release()}`} (${os.arch()}, kernel ${os.release()})`,
     `CPU: ${os.cpus()[0]?.model ?? '?'} × ${os.cpus().length}`,
     `RAM: ${gb(total - free)} used / ${gb(total)}`,
     `Load (1m): ${os.loadavg()[0].toFixed(2)}`,
+    ...(battery ? [battery] : []),
     `LAN IP: ${nets.join(', ') || '—'}`,
     `PC uptime: ${humanDuration(os.uptime() * 1000)} · Agent uptime: ${humanDuration(Date.now() - startedAt)}`,
     `Node ${process.version} · Agent RAM: ${Math.round(process.memoryUsage().rss / 1024 ** 2)} MB`,

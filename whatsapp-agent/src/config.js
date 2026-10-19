@@ -88,6 +88,10 @@ export function loadConfig({ dryRun = false } = {}) {
     allowShell: bool(e.ALLOW_SHELL, false),
     shellPin: e.SHELL_PIN || '',
     allowSimulate: bool(e.ALLOW_SIMULATE, false) || dryRun,
+    // Fedora/GNOME desktop convenience: pop the linking QR open in the image
+    // viewer on first run. Headless boxes (no DISPLAY/WAYLAND_DISPLAY) skip it
+    // automatically; OPEN_QR=false disables it everywhere.
+    openQr: bool(e.OPEN_QR, true),
 
     dataDir,
     authDir: path.resolve(ROOT, e.AUTH_DIR || 'auth_info'),
