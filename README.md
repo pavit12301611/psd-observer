@@ -14,10 +14,10 @@
 > `/access` model with confirmations for destructive actions.
 >
 > **Start (Fedora Linux, no git needed):**
-> `curl -fL -o /tmp/setup.sh https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh && bash /tmp/setup.sh --service --ollama --power --phone`
->
-> (git hai? `git clone -b arena/20378d42-psd-observer …` then `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`)
-> (add `--remote` for free Tailscale access to the phone app from **outside** your home)
+> see [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md#1-code-laao-git-ke-bina-bhi--2-tarike) —
+> one `curl` (no git), or `git clone -b arena/20378d42-psd-observer` if you have git.
+> then `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`.
+> Add `--remote` for free Tailscale access to the phone app from **outside** your home.
 > → scan the QR with the agent phone → WhatsApp it `/help` from your phone →
 > open the printed phone-app URL and enter the PIN.
 > Step-by-step run guide: [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md).

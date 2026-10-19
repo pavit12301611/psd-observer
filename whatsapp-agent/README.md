@@ -26,8 +26,10 @@ troubleshooting): **[`QUICKSTART.md`](QUICKSTART.md)**. The short version is bel
 **No git needed** — one script downloads the branch with `curl` and installs it:
 
 ```bash
-curl -fL -o /tmp/observer-setup.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 ```
 

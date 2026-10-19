@@ -24,11 +24,13 @@ Everything is free; no paid API, no Observer app.
 ### 🅰️ Pehli baar install — ek script (recommended)
 
 ```bash
-curl -fL -o /tmp/observer-setup.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 ```
+
 
 Ye 4 kaam karta hai: GitHub se tarball **curl** karta hai (git nahi), code
 `~/observer-agent` me rakhta hai, `.env` bana deta hai (numbers pehle se bhare

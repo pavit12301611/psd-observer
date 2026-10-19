@@ -91,8 +91,10 @@ story — the agent only talks HTTP to `127.0.0.1:11434`.
 First-time install, nothing but `curl`/`tar` needed:
 
 ```bash
-curl -fL -o /tmp/observer-setup.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 ```
 
