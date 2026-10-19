@@ -34,10 +34,11 @@ const WEB_URLS = {
   claude: 'https://claude.ai',
   perplexity: 'https://www.perplexity.ai',
   copilot: 'https://copilot.microsoft.com',
-  arena: 'https://arena.ai',
-  'arena ai': 'https://arena.ai',
-  agent: 'https://arena.ai',
-  'agent mode': 'https://arena.ai',
+  arena: 'https://arena.ai/agent',
+  'arena ai': 'https://arena.ai/agent',
+  agent: 'https://arena.ai/agent',
+  'agent mode': 'https://arena.ai/agent',
+  'arena agent': 'https://arena.ai/agent',
 };
 
 function clean(s) { return String(s ?? '').replace(/\s+/g, ' ').trim(); }

@@ -717,16 +717,13 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       // ── agent + confirmations ───────────────────────────────────────────
       case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open agent | tap battle | tap agent | type how to use ai | key enter | screenshot\nAlso natural: /auto open agent and click battle then select agent and ask how to use ai';
       case 'agent': {
-        // Arena Agent Mode shortcut: /agent <prompt> does the full battle->agent->type->enter->ss flow.
-        // If user passes pipe syntax, honour it; otherwise build the standard Arena sequence.
-        if (!args) return '🤖 Usage: /agent <prompt> — e.g. /agent how to use ai\nI will: open Arena (Brave PWA) → click Battle → pick Agent → type your prompt → enter → screenshot';
+        // Arena Agent Mode shortcut: /agent <prompt> directly opens arena.ai/agent then types.
+        if (!args) return '🤖 Usage: /agent <prompt> — e.g. /agent how to use ai\nI will: open arena.ai/agent → type your prompt → enter → screenshot';
         const prompt = String(args).trim();
-        // If user already wrote a full pipe/task, run as-is
         if (prompt.includes('|') || /^(open|tap|click|type|key|wait|screenshot|ss)\b/i.test(prompt)) {
           return autopilot.runAutopilot(prompt, { config, log });
         }
-        // Clean prompt: remove leading "ask" etc is handled by autopilot parser, just forward
-        const task = `open agent | tap Battle | wait 2 | tap Agent | type ${prompt} | key enter | wait 5 | screenshot`;
+        const task = `open agent | type ${prompt} | key enter | wait 6 | screenshot`;
         return autopilot.runAutopilot(task, { config, log });
       }
       case 'do': return args ? (await agentLoop.run(args, ctx)) ?? '🤖 No free AI brain is reachable for multi-step tasks. Use the direct commands (/open, /pc, /ls, /wifi…) or install Ollama (/model).' : '🤖 Usage: /do <task in plain language>';
