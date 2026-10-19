@@ -52,6 +52,26 @@ function resolveBridgeToken(dataDir, fromEnv) {
   return token;
 }
 
+/**
+ * Dashboard PIN for the mobile app. Env wins; otherwise a 6-digit PIN is
+ * generated once and kept in data/dashboard-pin.txt (mode 600). It only ever
+ * unlocks this PC's own bridge, and only from your LAN.
+ */
+function resolveDashboardPin(dataDir, fromEnv) {
+  if (fromEnv) return String(fromEnv);
+  const file = path.join(dataDir, 'dashboard-pin.txt');
+  try {
+    const existing = fs.readFileSync(file, 'utf8').trim();
+    if (existing) return existing;
+  } catch { /* first run */ }
+  const pin = String(crypto.randomInt(100000, 1000000));
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(file, pin, { mode: 0o600 });
+  } catch { /* read-only fs: PIN still works for this run */ }
+  return pin;
+}
+
 export function loadConfig({ dryRun = false } = {}) {
   loadDotEnv();
   const e = process.env;
@@ -67,7 +87,9 @@ export function loadConfig({ dryRun = false } = {}) {
     usePairingCode: bool(e.USE_PAIRING_CODE, false),
     deviceName: e.DEVICE_NAME || 'Observer Agent',
 
-    host: e.HOST || '127.0.0.1',
+    // 0.0.0.0 = the phone app on your Wi-Fi can reach it (PIN/token protected).
+    // 127.0.0.1 = PC-only; use that if you never want LAN access.
+    host: e.HOST || '0.0.0.0',
     port: int(e.PORT, 8787),
     timezone: e.TIMEZONE || 'Asia/Kolkata',
 
@@ -85,14 +107,32 @@ export function loadConfig({ dryRun = false } = {}) {
     forwardToObserver: bool(e.FORWARD_TO_OBSERVER, false),
     observerWaitMs: int(e.OBSERVER_WAIT_MS, 90_000),
 
+    // How much of the PC this agent may touch.
+    //   safe     = read-only (status, screenshot, lookups)
+    //   standard = apps, files, Wi-Fi, input, downloads, OCR … (destructive
+    //              actions ask for confirmation)
+    //   full     = standard + power (shutdown/reboot/suspend), always with a
+    //              confirmation prompt. Shell stays separately opt-in.
+    accessLevel: (e.ACCESS_LEVEL || 'full').toLowerCase(),
+    filesExtraRoots: (e.FILES_EXTRA_ROOTS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    confirmTtlMs: int(e.CONFIRM_TTL_MS, 120_000),
+    // Free AI tool-calling: plain language → real actions on the PC.
+    agentTools: bool(e.AGENT_TOOLS, true),
+    maxAgentSteps: int(e.MAX_AGENT_STEPS, 6),
+    // Local models have small contexts: send only the ~20 most relevant tools
+    // and give Ollama a real context window.
+    agentToolLimit: int(e.AGENT_TOOL_LIMIT, 20),
+    ollamaNumCtx: int(e.OLLAMA_NUM_CTX, 8192),
+
     allowShell: bool(e.ALLOW_SHELL, false),
     shellPin: e.SHELL_PIN || '',
+    shellTimeoutMs: int(e.SHELL_TIMEOUT_MS, 20_000),
     // Tier-2 PC control (keyboard/mouse + power). Tier 1 (screenshot, volume,
-    // brightness, media, open, clipboard, lock, files) is always on. Off by
-    // default even though the agent is owner-only: an unlocked-owner-WhatsApp
-    // should not silently mean full input control of the PC. CONTROL_PIN is an
-    // optional extra gate: /pc type <PIN> <text>, /pc key <PIN> ctrl+l, …
-    allowPcControl: bool(e.ALLOW_PC_CONTROL, false),
+    // brightness, media, open, clipboard, lock, files) is always on.
+    // Defaults on now because the agent is owner-only and full access was
+    // explicitly asked for; set ALLOW_PC_CONTROL=false to refuse input.
+    // CONTROL_PIN is an optional extra gate: /pc type <PIN> <text>, …
+    allowPcControl: bool(e.ALLOW_PC_CONTROL, true),
     controlPin: e.CONTROL_PIN || '',
     allowSimulate: bool(e.ALLOW_SIMULATE, false) || dryRun,
     // Fedora/GNOME desktop convenience: pop the linking QR open in the image
@@ -108,6 +148,19 @@ export function loadConfig({ dryRun = false } = {}) {
     // remove authDir, restart) or ./scripts/relink-whatsapp.sh.
     autoRelink: bool(e.AUTO_RELINK, true),
 
+    // Screen/document reading (all local, free).
+    // How long the Wayland screenshot dialog may stay open before we give up.
+    // Generous by default: the owner may be away from the PC when asking for a
+    // screenshot from WhatsApp, and the portal keeps the image on disk anyway.
+    portalTimeoutMs: int(e.PORTAL_TIMEOUT_MS, 60_000),
+    ocrLangs: e.OCR_LANGS || 'eng',
+    // Voice notes → text. Groq free tier if GROQ_API_KEY is set, otherwise a
+    // local whisper.cpp binary + model file (fully offline).
+    whisperBin: e.WHISPER_BIN || '',
+    whisperModel: e.WHISPER_MODEL || '',
+    whisperModelGroq: e.WHISPER_MODEL_GROQ || 'whisper-large-v3-turbo',
+    whisperLanguage: e.WHISPER_LANGUAGE || 'auto',
+
     dataDir,
     authDir: path.resolve(ROOT, e.AUTH_DIR || 'auth_info'),
     downloadsDir: path.join(dataDir, 'downloads'),
@@ -116,6 +169,7 @@ export function loadConfig({ dryRun = false } = {}) {
     qrPngFile: path.join(dataDir, 'qr.png'),
   };
   config.bridgeToken = resolveBridgeToken(dataDir, e.BRIDGE_TOKEN || '');
+  config.dashboardPin = resolveDashboardPin(dataDir, e.DASHBOARD_PIN || '');
 
   const problems = [];
   if (!/^\d{10,15}$/.test(config.ownerNumber)) problems.push(`OWNER_NUMBER looks wrong: "${config.ownerNumber || '(empty)'}"`);
@@ -124,6 +178,7 @@ export function loadConfig({ dryRun = false } = {}) {
     problems.push('OWNER_NUMBER and AGENT_NUMBER are the same. The agent needs its own WhatsApp number, otherwise it would talk to itself.');
   }
   if (config.allowShell && !config.shellPin) problems.push('ALLOW_SHELL=true but SHELL_PIN is empty. Set a PIN or turn ALLOW_SHELL off.');
+  if (!['safe', 'standard', 'full'].includes(config.accessLevel)) problems.push(`ACCESS_LEVEL must be safe, standard or full (got "${config.accessLevel}").`);
   if (problems.length) {
     throw new Error(`Configuration problem(s):\n  - ${problems.join('\n  - ')}`);
   }

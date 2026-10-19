@@ -4,18 +4,29 @@ Everything below is written for **Fedora Workstation (40+; any recent Fedora wor
 `dnf` packages, a `systemd --user` service, `journalctl` logs, Podman instead of
 Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 
-**TL;DR — the WhatsApp agent** (run these one at a time, waiting for each to finish —
-don't paste the `journalctl` line together with the installer):
+**TL;DR — the WhatsApp agent.** This setup is **curl-only: no `git clone`, no
+`git pull`.** (Owner ka workflow git ke bina chalta hai.)
 
 ```bash
-git clone https://github.com/pavit12301611/psd-observer.git
-cd psd-observer/whatsapp-agent
-./scripts/install-fedora.sh --service --ollama   # deps + agent + autostart + free local AI
-# (want keyboard/mouse + power control from WhatsApp too? add --pc-control)
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+
+bash /tmp/observer-setup.sh --service --ollama --power --phone
+#   --service  autostart (systemd --user + linger)
+#   --ollama   free offline AI (llama3.2)
+#   --power    OCR, recording, Wi-Fi/BT, windows, input, full access level
+#   --phone    phone app reachable at http://<PC-IP>:8787/ (firewalld 8787)
 ```
+
+It installs to `~/observer-agent` and creates `.env` for you. Updates later are
+also curl-only — see [Updating without git](#updating-without-git).
+
 ```bash
 journalctl --user -u observer-whatsapp-agent -f  # scan the QR with the 8859555795 phone
 # …then from your 9528923866 phone, WhatsApp the agent number:  /help
+# …and open the printed phone-app URL on your phone, enter the PIN, Add to Home screen
 ```
 
 ---
@@ -28,10 +39,10 @@ Fedora ships `npm` as a **separate package** from `nodejs` — install both
 (Fedora 40 gives Node 20 LTS, 41+ gives Node 22; the agent needs ≥ 20):
 
 ```bash
-sudo dnf install nodejs npm git curl gcc-c++ make python3
+sudo dnf install nodejs npm curl gcc-c++ make python3
 node --version && npm --version
 
-cd whatsapp-agent
+cd ~/observer-agent        # jahan install-fresh.sh ne rakha (ya apna path)
 cp .env.example .env     # owner 919528923866 / agent 918859555795 already set
 npm install
 ./start.sh               # foreground run; QR in terminal + image viewer + dashboard
@@ -80,13 +91,183 @@ Then WhatsApp `/model` should report Ollama running. (`install-fedora.sh --ollam
 does all of this.) NVIDIA/AMD GPU acceleration, if wanted, is Ollama's own Fedora
 story — the agent only talks HTTP to `127.0.0.1:11434`.
 
-### Firewall (firewalld): nothing to open
+### Install without git (plain curl — the supported way)
 
-The bridge binds **127.0.0.1:8787**, and WhatsApp traffic is an outbound WebSocket
-to WhatsApp's servers — Fedora's default firewalld policy needs **no changes**.
-Only if you deliberately set `HOST=0.0.0.0` for LAN access (not recommended) would
-you need `sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload`
-— and then the bridge token is your only gate, so think twice.
+First-time install, nothing but `curl`/`tar` needed (no `git`, no `zip` tool):
+
+```bash
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+bash /tmp/observer-setup.sh --service --ollama --power --phone
+```
+
+Installs to `~/observer-agent` by default (`--dir <path>` to choose). It refuses
+to overwrite an existing install unless you pass `--force` (or use the updater
+below), and `--no-install` downloads only. Then jump to “Phone app over Wi-Fi”.
+
+### Updating without git (curl only)
+
+No `git pull` needed — the installer/repo works as a plain download:
+
+```bash
+curl -fL -o /tmp/agent-update.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+```
+
+It fetches the branch tarball from `codeload.github.com`, backs up the current
+code, replaces `src/ webapp/ test/ scripts/ systemd/` + manifests, runs
+`npm install`, and restarts `observer-whatsapp-agent`. Your `.env`, `auth_info/`
+and `data/` are untouched, so the WhatsApp link survives. `--fresh <dir>` does a
+first-time install with no git at all.
+
+### Phone app over Wi-Fi (optional, recommended)
+
+```bash
+./scripts/install-fedora.sh --phone
+```
+
+This sets `HOST=0.0.0.0` and opens TCP **8787** in firewalld. On the phone,
+open `http://<PC-IP>:8787/`, enter the 6-digit PIN printed at startup
+(`data/dashboard-pin.txt`), then **Add to Home screen**. It is an installable
+PWA — chat, quick controls, files and the linking QR — with **no Observer app
+and no Play Store**.
+
+### Phone app from outside the house (free, no port forwarding)
+
+WhatsApp commands work from **anywhere already** — the PC dials out to WhatsApp,
+so your phone just needs mobile data. Only the *phone app* needs a route home:
+
+```bash
+./scripts/setup-remote.sh          # or: ./scripts/install-fedora.sh --remote
+```
+
+This installs [Tailscale](https://tailscale.com) (free personal plan), logs the
+PC in, keeps `HOST=0.0.0.0` + TCP 8787 allowed, and prints the exact
+`http://<tailscale-ip>:8787/` URL and PIN. Install the Tailscale app on your
+phone, sign in with the **same account**, open the URL, "Add to Home screen".
+Tailscale is a private encrypted network: the port is not exposed publicly, so
+**never** port-forward 8787 on your router (Cloudflare Tunnel + Access is the
+alternative if you can't install Tailscale).
+
+Two honest caveats:
+
+- **Laptop must be awake and online.** Closing the lid usually suspends it.
+  To keep it serving while plugged in:
+  `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`
+  (undo with `unmask`, same targets). Battery drain is real.
+- **Home internet must be up.** No Wi-Fi/router → the PC is unreachable, from
+  Telegram or Tailscale alike. WhatsApp itself also queues messages until the
+  link is back.
+
+### Black screenshots / typing & mouse not working (Wayland)
+
+Fedora Workstation defaults to **GNOME on Wayland**, which is not broken — it is
+*restrictive on purpose*. Two things follow from that, and both are fixed in one
+command:
+
+```bash
+./scripts/fix-desktop.sh        # packages + ydotool daemon + agent restart
+```
+
+Then send **`/doctor`** on WhatsApp: it takes a real screenshot, inspects the
+pixels, checks every input tool and prints the exact fix for whatever is still
+missing.
+
+**`UnknownMethod: No such interface "org.freedesktop.portal.Desktop.Screenshot"`**
+means the portal is running *without* its desktop backend, so no Screenshot
+interface is exported (a running portal alone is not enough):
+
+```bash
+sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome   # KDE: -kde
+systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal
+gdbus introspect --session --dest org.freedesktop.portal.Desktop \
+  --object-path /org/freedesktop/portal/desktop | grep -i screenshot
+```
+
+The last line must list `interface org.freedesktop.portal.Screenshot`. If it does
+not, the backend isn't installed for your desktop (GNOME vs KDE) or the session
+was started before it was installed — log out/in once.
+
+**Why screenshots are black.** X11-era tools (`gnome-screenshot`, `scrot`,
+`maim`, ImageMagick `import`, even GNOME's own Screenshot API) still *run* on
+Wayland, exit with code 0 — and hand back a perfectly black frame, because the
+compositor refused the capture. The supported path is
+**xdg-desktop-portal**, and `grim` (which works on wlroots desktops such as
+Sway/Hyprland). The agent now:
+
+1. tries the portal first on Wayland, then `grim`, then the old tools;
+2. **decodes every capture and measures its brightness** — a black/empty frame
+   is treated as a failure, not sent to you as a "screenshot";
+3. keeps trying, and if nothing produces real pixels it tells you why per tool
+   instead of showing you a black rectangle.
+
+First portal capture may pop an **"Allow screenshot?"** dialog on the PC screen.
+Approve it — or tick *Always allow*. While the dialog is open the agent waits up
+to `PORTAL_TIMEOUT_MS` (default 60 s) and, even if the signal is missed or you
+click Allow late, it picks the PNG up from `~/Pictures/` — so the screenshot
+still arrives.
+
+> **GNOME Wayland asks every time.** The request comes from `gdbus`, which has no
+> remembered app id, so the portal may prompt on each capture. If you take
+> screenshots often and want them silent, log out and choose **"GNOME on Xorg"**
+> from the gear menu at the login screen: X11 allows direct capture with no
+> dialog. Everything else in the agent works the same.
+
+**Why typing/clicking does nothing.** On Wayland, `xdotool` only reaches
+XWayland apps. The real keyboard/mouse driver is **ydotool**, which needs its
+daemon (`ydotoold`) and `/dev/uinput`:
+
+```bash
+sudo dnf install ydotool
+sudo systemctl enable --now ydotool     # unit may be named ydotoold
+ls -l /dev/uinput                        # must exist
+```
+
+`/doctor` reports all three: `ydotool`, `ydotoolDaemon`, `uinput`.
+
+**Typing very long text.** `typeText` has no fixed ceiling: it splits at word
+boundaries and feeds ydotool chunk by chunk (`TYPE_CHUNK_CHARS`, default 180;
+`TYPE_CHUNK_DELAY_MS`, default 60 ms), falling back to `wtype`/`xdotool` —
+"xdotool type --file -" reads stdin, so there is no argv limit at all. For
+multi-paragraph text, `/pc paste <text>` is better: it sets the clipboard and
+presses Ctrl+V, which is instant and preserves newlines/Unicode.
+
+**"It can't operate my whole computer" — the honest limits.** With the above in
+place the agent can open/close *any* installed app, type, press any key combo,
+move/click/scroll the pointer, read and write files anywhere in your home,
+screenshot, OCR, record, control Wi-Fi/BT/volume/brightness/media, manage
+services and processes, and shut down/reboot. It still cannot (and should not
+be able to) do these:
+
+- **Type into secure prompts** — the lock screen, GDM greeter, password fields,
+  polkit/sudo dialogs. That is the OS protecting itself; no user-level tool can
+  write there, by design.
+- **Control the PC while nobody is logged in.** At the login screen there is no
+  user session, so there is nothing to capture or click. The agent keeps
+  answering text commands (files, shell, downloads, lookups) — screen things
+  resume after login. `systemctl --user restart observer-whatsapp-agent` after
+  logging in makes it re-detect the session immediately.
+- **List/focus windows on GNOME Wayland** — `wmctrl` is X11-only and GNOME does
+  not expose its window list. Opening/closing apps still works; per-window focus
+  is best-effort (`/windows` explains this).
+- **Reach another user's session or a different TTY.**
+- **Get past the OS's own permission prompts** — the first portal screenshot
+  needs *your* click on the PC.
+
+Everything else is enabled by `--power` (`ACCESS_LEVEL=full`); destructive
+actions still ask `haan`/`nahi` first, and raw shell stays off behind
+`ALLOW_SHELL=true` + `SHELL_PIN`.
+
+### Firewall (firewalld): nothing to open for WhatsApp itself
+
+The phone app binds **0.0.0.0:8787** so your phone (same Wi-Fi or tailnet) can
+use it — PIN/token protected; `HOST=127.0.0.1` makes it PC-only. WhatsApp traffic
+is an outbound WebSocket to WhatsApp's servers, so Fedora's default firewalld
+policy needs **no changes for WhatsApp itself** — only TCP 8787 for the app,
+which `--phone` / `--remote` opens for you.
 
 ### SELinux notes
 
@@ -107,7 +288,7 @@ builds with both:
 sudo dnf install podman-compose
 cp .env.example .env
 podman-compose up -d
-podman-compose logs -f    # QR in the logs; dashboard stays at 127.0.0.1:8787
+podman-compose logs -f    # QR + phone-app URL/PIN in the logs (port 8787)
 ```
 
 Host Ollama is reached as `host.containers.internal:11434` (already set in

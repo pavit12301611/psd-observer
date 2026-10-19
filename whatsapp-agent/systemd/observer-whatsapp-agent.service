@@ -37,7 +37,10 @@ Environment=OPEN_QR=false
 # ProtectHome= is intentionally absent — the agent must write auth_info/ and
 # data/ inside its home-based WorkingDirectory.
 NoNewPrivileges=true
-PrivateTmp=true
+# PrivateTmp must stay FALSE: the agent needs the real /tmp to see the ydotool
+# daemon socket (/tmp/.ydotool_socket) and /tmp/.X11-unix on X11 sessions.
+# With a private /tmp, screenshots/typing silently stop working under systemd.
+PrivateTmp=false
 ProtectSystem=full
 ProtectKernelTunables=true
 ProtectControlGroups=true

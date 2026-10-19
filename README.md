@@ -1,18 +1,31 @@
-> ### 🟢 This fork: free native WhatsApp, owner-only
+> ### 🟢 This fork: free WhatsApp **+ a real phone app + full PC control**
 >
-> WhatsApp here no longer needs Observer's paid Twilio cloud. The new
-> **[`whatsapp-agent/`](whatsapp-agent/)** links like WhatsApp Web to the agent
+> WhatsApp here no longer needs Observer's paid Twilio cloud. The
+> **[`whatsapp-agent/`](whatsapp-agent/)** folder is a complete personal agent
+> that runs on your own PC for **₹0**: it links like WhatsApp Web to the agent
 > number **+91 88595 55795**, listens **only** to the owner **+91 95289 23866**,
-> answers and acts on messages (reminders, to-dos, weather, free local AI via
-> Ollama, and Observer screen/MCP acting via `/observer`), and costs **₹0** —
-> no Twilio, no Meta Cloud API, no quota, no 24-hour window.
+> and actually *does things* — open any app, files, screenshots, OCR, typing,
+> Wi-Fi/Bluetooth, downloads, recording, reminders, free local AI, and more.
 >
-> **Start (Fedora Linux):** `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama`,
-> scan the QR with the agent phone, then WhatsApp it `/help` from your phone.
+> **2.0 adds:** an installable **phone app** at `http://<PC-IP>:8787/` (works
+> with **no Observer app at all**, and from **anywhere** over free Tailscale), **Hinglish offline intents** ("chrome kholo",
+> "wifi off karo") that work with zero AI, **free AI tool-calling** for
+> multi-step tasks, **voice-note transcription**, **PDF/DOCX reading**, and an
+> `/access` model with confirmations for destructive actions.
+>
+> **Start (Fedora Linux, no git needed):**
+> see [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md#1-code-laao-git-ke-bina-bhi--2-tarike) —
+> one `curl` — **no git at all** (this setup is curl-only; no clone/pull needed).
+> then `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`.
+> Add `--remote` for free Tailscale access to the phone app from **outside** your home.
+> → scan the QR with the agent phone → WhatsApp it `/help` from your phone →
+> open the printed phone-app URL and enter the PIN.
+> Step-by-step run guide: [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md).
+> Build log (every feature, command, error + fix): [`whatsapp-agent/BUILD-LOG.md`](whatsapp-agent/BUILD-LOG.md).
 > Full story: [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) · Fedora guide: [`FEDORA.md`](FEDORA.md)
-> · project map: [`STRUCTURE.md`](STRUCTURE.md)
-> · agent guide: [`whatsapp-agent/README.md`](whatsapp-agent/README.md). Upstream
-> cloud behaviour below is unchanged unless you opt into the local bridge.
+> · agent guide: [`whatsapp-agent/README.md`](whatsapp-agent/README.md)
+> · project map: [`STRUCTURE.md`](STRUCTURE.md). Upstream cloud behaviour below
+> is unchanged unless you opt into the local bridge.
 
 <div align="center">
 

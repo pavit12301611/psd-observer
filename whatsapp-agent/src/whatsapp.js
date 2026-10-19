@@ -17,19 +17,20 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import pino from 'pino';
 import QRCode from 'qrcode';
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  downloadMediaMessage,
-  fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
-  Browsers,
-} from '@whiskeysockets/baileys';
+// Baileys is imported lazily inside start(): the phone app, commands and
+// tests all work without the (large) WhatsApp dependency installed.
+let baileysModule = null;
+async function loadBaileys() {
+  if (!baileysModule) baileysModule = await import('@whiskeysockets/baileys');
+  return baileysModule;
+}
 import {
   candidateNumbers, candidateLids, isOwner, isGroupJid, isBroadcastJid,
   isNewsletterJid, jidToNumber, maskNumber, normalizeNumber, numberToJid,
 } from './allowlist.js';
 import * as ai from './ai.js';
+import * as ocr from './ocr.js';
+import { transcribeAudio } from './transcribe.js';
 
 const MIME_EXT = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
@@ -111,6 +112,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     relinkScheduled: false,
     stopped: false,
     simulated: [], // dry-run sent log for tests/dashboard
+    downloadMediaMessage: null, // set by start() from the lazily loaded Baileys
   };
 
   const status = () =>
@@ -209,7 +211,8 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     let savedAs = null;
     if (!config.dryRun) {
       try {
-        buffer = await downloadMediaMessage(rawMsg, 'buffer', {}, {
+        if (!state.downloadMediaMessage) throw new Error('WhatsApp media helper not ready yet');
+        buffer = await state.downloadMediaMessage(rawMsg, 'buffer', {}, {
           logger: pino({ level: 'silent' }),
           reuploadRequest: state.sock.updateMediaMessage,
         });
@@ -243,12 +246,41 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       return processOwnerMessage({ chatJid, content: { kind: 'text', text: caption }, rawMsg });
     }
     if (content.kind === 'image' && buffer) {
+      // 1) local vision model (best) 2) OCR the image (works for screenshots)
       const description = await ai.describeImage(config, buffer.toString('base64'), caption, log);
       if (description) return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${description}`, rawMsg);
-      return transportSend(chatJid, `💾 Photo saved as ${savedAs}${sizeNote}.\n_(Set OLLAMA_VISION_MODEL, e.g. llava, and I'll also describe photos. /observer can look too.)_`, rawMsg);
+      try {
+        const text = await ocr.ocrImage(buffer, { langs: config.ocrLangs });
+        if (text) {
+          return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n🔎 *Text in the image*\n\n${text.slice(0, 2000)}${text.length > 2000 ? '\n…' : ''}\n\n_(Free OCR on your PC. For photo descriptions: ollama pull llava + OLLAMA_VISION_MODEL=llava)_`, rawMsg);
+        }
+      } catch { /* tesseract not installed: fall through */ }
+      return transportSend(chatJid, `💾 Photo saved as ${savedAs}${sizeNote}.\n_(Set OLLAMA_VISION_MODEL, e.g. llava, for photo descriptions — or install tesseract for text OCR.)_`, rawMsg);
     }
     if (content.kind === 'voice' || content.kind === 'audio') {
-      return transportSend(chatJid, `🎙️ Audio saved as ${savedAs}${sizeNote}.\nI can't transcribe yet without a local Whisper setup — type the command and I'll act on it instantly.`, rawMsg);
+      if (!buffer) {
+        return transportSend(chatJid, `🎙️ Voice note received (dry-run: audio not downloaded).`, rawMsg);
+      }
+      try {
+        const { text, provider } = await transcribeAudio(config, buffer, content.media?.mimetype ?? 'audio/ogg', log);
+        await transportSend(chatJid, `🎙️ *Samjha:* ${text.slice(0, 1500)}${text.length > 1500 ? '…' : ''}\n_(transcribed free · ${provider})_`, rawMsg);
+        // Treat the transcript exactly like a typed message: it can be a command!
+        return processOwnerMessage({ chatJid, content: { kind: 'text', text }, rawMsg });
+      } catch (err) {
+        return transportSend(chatJid, `🎙️ Audio saved as ${savedAs}${sizeNote}.\n\n${err.message}`, rawMsg);
+      }
+    }
+    if (content.kind === 'document' && buffer) {
+      // PDF / DOCX / TXT: read it on the PC and summarise for free.
+      try {
+        const text = await ocr.extractDocumentText(buffer, content.fileName, content.media?.mimetype);
+        if (text) {
+          const summary = await ai.complete(config, `Summarise this document briefly for WhatsApp (language: same as the document, Hinglish if mixed). Bullet points, max 12 lines.\n\n${text.slice(0, 8000)}`, log);
+          return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n📄 *${content.fileName ?? 'document'}*\n\n${summary ? summary.text : `${text.slice(0, 1800)}${text.length > 1800 ? '\n…' : ''}`}`, rawMsg);
+        }
+      } catch (err) {
+        log.warn?.(`[wa] document text extraction failed: ${err.message}`);
+      }
     }
     return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote} in my downloads. (/downloads lists them)`, rawMsg);
   }
@@ -334,6 +366,20 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       log.info?.('[wa] DRY-RUN: WhatsApp not connected. Use POST /api/simulate or the dashboard to try commands.');
       return;
     }
+    let B;
+    try {
+      B = await loadBaileys();
+    } catch (err) {
+      state.conn = 'WhatsApp library missing — run npm install';
+      log.error?.('[wa] Could not load @whiskeysockets/baileys: ' + err.message);
+      log.error?.('[wa] Run `npm install` inside whatsapp-agent/. The phone app keeps working in the meantime.');
+      return;
+    }
+    const makeWASocket = B.default;
+    const {
+      useMultiFileAuthState, DisconnectReason, downloadMediaMessage,
+      fetchLatestBaileysVersion, makeCacheableSignalKeyStore, Browsers,
+    } = B;
     fs.mkdirSync(config.authDir, { recursive: true });
     const { state: authState, saveCreds } = await useMultiFileAuthState(config.authDir);
     let version;
@@ -352,6 +398,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       getMessage: async () => undefined, // no message store: retries of *inbound* polls only
     });
     state.sock = sock;
+    state.downloadMediaMessage = downloadMediaMessage;
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('messages.upsert', handleUpsert);
@@ -477,6 +524,11 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     state.sock = null;
   }
 
+  /** Phone app / dashboard chat: run the agent without sending to WhatsApp. */
+  async function runOwner(text) {
+    return agent.handle(text, { waStatus: status });
+  }
+
   /** Dry-run/test hook: run the owner gate + pipeline without WhatsApp. */
   async function simulate(text, fromNumber = config.ownerNumber) {
     if (!isOwner([fromNumber], config.ownerNumber)) {
@@ -492,5 +544,5 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     return { ignored: false, sent: state.simulated.slice(before) };
   }
 
-  return { start, stop, status, sendToOwner, simulate, state };
+  return { start, stop, status, sendToOwner, simulate, runOwner, state };
 }

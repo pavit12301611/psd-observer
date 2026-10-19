@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#075e54">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Observer Agent">
+<meta name="description" content="Your PC, in your pocket. Free WhatsApp + web agent for your own computer.">
+<title>Observer Agent</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- ── Login ─────────────────────────────────────────────────────────────── -->
+<div id="login" class="screen hidden">
+  <div class="login-card">
+    <div class="logo-eye">👁️</div>
+    <h1>Observer Agent</h1>
+    <p class="muted">Apne PC ka control — free, private, aapke paas.</p>
+    <form id="login-form">
+      <label for="pin">Dashboard PIN</label>
+      <input id="pin" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="12" placeholder="••••••" required>
+      <button type="submit" class="primary">Open</button>
+      <p id="login-error" class="error hidden"></p>
+    </form>
+    <p class="hint">The PIN is printed in the agent console at startup (and stored in <code>data/dashboard-pin.txt</code> on the PC). Set <code>DASHBOARD_PIN</code> in <code>.env</code> to choose your own.</p>
+  </div>
+</div>
+
+<!-- ── App ───────────────────────────────────────────────────────────────── -->
+<div id="app" class="screen hidden">
+  <header class="topbar">
+    <div class="avatar">👁️</div>
+    <div class="who">
+      <strong>Observer Agent</strong>
+      <span id="conn" class="muted small">connecting…</span>
+    </div>
+    <span id="dot" class="dot"></span>
+  </header>
+
+  <main>
+    <!-- Chat -->
+    <section id="tab-chat" class="tab active">
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <div id="chips" class="chips"></div>
+      <form id="chat-form" class="composer">
+        <button type="button" id="mic" class="icon-btn" title="Voice input (browser dictation)">🎤</button>
+        <textarea id="chat-input" rows="1" placeholder="Kuch bhi likho… /help" autocomplete="off"></textarea>
+        <button type="submit" class="send" title="Send">➤</button>
+      </form>
+    </section>
+
+    <!-- Controls -->
+    <section id="tab-controls" class="tab">
+      <h2>Quick controls</h2>
+      <div class="grid" id="control-grid"></div>
+      <h2>PC</h2>
+      <div class="grid" id="pc-grid"></div>
+      <p class="muted small">Har button ek WhatsApp command bhejta hai — jo phone pe bhi kaam karta hai.</p>
+    </section>
+
+    <!-- Files -->
+    <section id="tab-files" class="tab">
+      <div class="row-between"><h2>Files</h2><button id="files-refresh" class="ghost">↻ Refresh</button></div>
+      <h3>Received on the PC</h3>
+      <div id="downloads" class="file-list"><p class="muted">Loading…</p></div>
+      <h3>Shared folder</h3>
+      <div id="shared" class="file-list"><p class="muted">Loading…</p></div>
+      <div class="card">
+        <h3>Koi bhi file bhejo</h3>
+        <p class="muted small">PC pe kisi bhi file ka path likho aur wo WhatsApp + is app pe aa jayegi.</p>
+        <form id="file-form" class="inline">
+          <input id="file-path" placeholder="~/Documents/report.pdf">
+          <button class="primary" type="submit">Send</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h2>Status</h2>
+        <dl id="status-list" class="kv"></dl>
+      </div>
+      <div class="card" id="qr-card" hidden>
+        <h2>Link WhatsApp</h2>
+        <p class="muted small">Agent phone (+<span id="qr-number"></span>) se scan karo: WhatsApp → Linked devices → Link a device.</p>
+        <img id="qr-img" class="qr" alt="WhatsApp QR">
+      </div>
+      <div class="card">
+        <h2>Install as an app</h2>
+        <p class="muted small">Browser menu → “Add to Home screen”. Phir ye full-screen native app jaisa khulega — Observer app ki zaroorat nahi.</p>
+        <button id="install" class="primary" hidden>Install</button>
+      </div>
+      <div class="card">
+        <h2>Connection</h2>
+        <p class="muted small">This page talks to your PC directly. Use the same Wi-Fi, or Tailscale/ngrok for access from anywhere.</p>
+        <button id="logout" class="danger">Log out</button>
+      </div>
+      <p class="muted small center">Observer Agent · free forever · your data stays on your PC</p>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" role="tablist">
+    <button data-tab="chat" class="active" role="tab">💬 <span>Chat</span></button>
+    <button data-tab="controls" role="tab">🎛️ <span>Panel</span></button>
+    <button data-tab="files" role="tab">📁 <span>Files</span></button>
+    <button data-tab="settings" role="tab">⚙️ <span>Settings</span></button>
+  </nav>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

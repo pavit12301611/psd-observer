@@ -10,6 +10,7 @@ const EMPTY = () => ({
   facts: {},          // /remember key -> value, injected into the AI prompt
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
+  pending: null,      // destructive action waiting for "haan"/"yes"
   stats: { received: 0, replied: 0, ignoredNonOwner: 0, startedAt: Date.now() },
 });
 

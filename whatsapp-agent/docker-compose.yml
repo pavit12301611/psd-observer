@@ -2,7 +2,8 @@
 #   cp .env.example .env && podman-compose up -d
 #   podman-compose logs -f        (scan the QR with the 8859555795 phone)
 # Also works unchanged with: docker compose up -d
-# The bridge port stays on localhost only, and still needs its token.
+# Port 8787 serves the phone app too (PIN/token protected). Change the mapping
+# to "127.0.0.1:8787:8787" if you want it PC-only.
 services:
   whatsapp-agent:
     build:
@@ -20,7 +21,7 @@ services:
       - "host.containers.internal:host-gateway"
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:8787:8787"
+      - "8787:8787"
     volumes:
       # :Z is required on Fedora/SELinux — it relabels the bind mounts as
       # private to this container, without which Podman gets "permission
