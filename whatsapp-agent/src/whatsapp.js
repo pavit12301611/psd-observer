@@ -30,6 +30,8 @@ import {
 } from './allowlist.js';
 import * as ai from './ai.js';
 import * as ocr from './ocr.js';
+import * as pc from './pccontrol.js';
+import * as finder from './elementfinder.js';
 import { transcribeAudio } from './transcribe.js';
 
 const MIME_EXT = {
@@ -257,6 +259,38 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       return processOwnerMessage({ chatJid, content: { kind: 'text', text: caption }, rawMsg });
     }
     if (content.kind === 'image' && buffer) {
+      // Marked screenshot -> click where user marked (red pen)
+      // User flow: /screenshot -> mark red dot where to click -> send back with caption "click here / yahan click karo / tap this"
+      const lowerCap = caption.toLowerCase();
+      const isClickMark = /click|tap|press|dabao|yahan|ispe|here|this|mark|nishan/i.test(caption) && caption.length < 80;
+      // Also treat any image that looks like an edited screenshot with red annotation even without caption?
+      // Check for red pen quickly via image analysis if caption is empty but image is from downloads (previous screenshot)
+      let tryMark = isClickMark;
+      if (!tryMark && !caption && buffer.length > 5000) {
+        // Heuristic: if user just sends back a screenshot with no caption, check if it's likely a marked one
+        // We will attempt red-mark detection anyway if no other handler produces a description — but only if caption empty
+        // To avoid false positives on normal photos, only try if image is PNG/JPEG screenshot-sized (>800px wide)
+        try {
+          const sz = finder.pngSize(buffer);
+          if (sz && sz.width >= 800) tryMark = false; // don't auto-trigger on every large image without caption
+        } catch {}
+      }
+      if (tryMark) {
+        try {
+          const hit = await handleMarkedClick(buffer, config, log);
+          if (hit) {
+            // Click and send back new screenshot as confirmation
+            await pc.click(hit.x, hit.y);
+            const after = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+            const tip = `🎯 Clicked where you marked @ ${hit.x},${hit.y} (${hit.source}${hit.confidence ? ` ${hit.confidence}%` : ''})`;
+            if (after) return transportSend(chatJid, { image: after, text: tip + ` — "${hit.matched ?? caption}"` }, rawMsg);
+            return transportSend(chatJid, tip, rawMsg);
+          }
+        } catch (err) {
+          log.warn?.(`[wa] marked click failed: ${err.message}`);
+          // fall through to normal image handling so user gets at least OCR/description
+        }
+      }
       // 1) local vision model (best) 2) OCR the image (works for screenshots)
       const description = await ai.describeImage(config, buffer.toString('base64'), caption, log);
       if (description) return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${description}`, rawMsg);
@@ -294,6 +328,78 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       }
     }
     return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote} in my downloads. (/downloads lists them)`, rawMsg);
+  }
+
+  async function handleMarkedClick(buffer, config, log) {
+    // Try 1: red-pen detection via sharp (fast, offline, no AI)
+    try {
+      const sharp = (await import('sharp')).default;
+      const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      // Scan for red pixels: R>180, G<90, B<90, A>80  (user's phone red pen)
+      let sumX = 0, sumY = 0, count = 0;
+      let minX = info.width, minY = info.height, maxX = 0, maxY = 0;
+      const stride = 4;
+      for (let y = 0; y < info.height; y++) {
+        for (let x = 0; x < info.width; x++) {
+          const idx = (y * info.width + x) * stride;
+          const r = data[idx], g = data[idx+1], b = data[idx+2], a = data[idx+3];
+          const isRed = r > 170 && g < 110 && b < 110 && a > 60;
+          // Also accept pure red circle with white border: allow slightly less strict for high R
+          if (isRed) {
+            sumX += x; sumY += y; count++;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (count > 20 && count < 50000) {
+        // Centroid of red cluster
+        const cx = Math.round(sumX / count);
+        const cy = Math.round(sumY / count);
+        const w = maxX - minX, h = maxY - minY;
+        // Map from marked-image coords (phone may have resized) to real screen via proportion
+        // The marked image is a screenshot the PC sent, so its dimensions should match screen.
+        // If phone resized it (WhatsApp compresses), we scale proportionally.
+        const screen = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+        let screenSize = null;
+        if (screen) {
+          const sz = finder.pngSize(screen);
+          if (sz) screenSize = sz;
+        }
+        // If we have screen size, scale marked coords to screen coords
+        let sx = cx, sy = cy;
+        if (screenSize) {
+          sx = Math.round((cx / info.width) * screenSize.width);
+          sy = Math.round((cy / info.height) * screenSize.height);
+        }
+        return { x: sx, y: sy, source: 'red-mark', confidence: Math.min(95, Math.round(50 + Math.min(count/200, 40))), matched: 'marked spot', width: w, height: h };
+      }
+    } catch (e) {
+      log.info?.(`[wa] red-mark scan failed (${e.message}), trying vision model`);
+    }
+    // Try 2: vision model — ask it to find the red mark
+    try {
+      const raw = await ai.locateInImage(config, buffer.toString('base64'), 'red mark or circle or arrow indicating where to click', log);
+      const pt = raw ? finder.parseVisionPoint(raw) : null;
+      if (pt) {
+        const screen = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+        const screenSize = screen ? finder.pngSize(screen) : null;
+        // Vision point is 0..1000 relative to the *marked image* itself
+        // Convert to screen coords via proportion if we have both sizes
+        // For now we assume marked image == screen, so scale 1:1
+        // If we have screenSize, we can scale: but vision point already 0..1000, so we need to map
+        // We need the marked image dimensions — we have info from sharp above, fallback to assuming same as screen
+        // Simpler: use relative 0..1000 scaled to screen
+        let x = Math.round((pt.x / 1000) * (screenSize?.width ?? 1920));
+        let y = Math.round((pt.y / 1000) * (screenSize?.height ?? 1080));
+        // If we have actual marked image width/height from sharp, use that instead
+        // But we already returned above if sharp succeeded — vision fallback only when sharp missing
+        return { x, y, source: 'vision', matched: 'red mark', confidence: null };
+      }
+    } catch {}
+    return null;
   }
 
   async function makeSticker(buffer) {
