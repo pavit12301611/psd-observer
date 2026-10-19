@@ -34,6 +34,9 @@ jinja2>=3.1
 # --- WhatsApp remote (optional feature; unofficial linked-device client) ---
 neonize>=0.5.2,<0.6
 
+# --- arena.ai browser jobs (dedicated Chromium profile; Chromium itself comes from dnf) ---
+playwright>=1.47,<2
+
 # --- Filesystem / locking --------------------------------------------------
 watchdog>=4.0
 filelock>=3.13

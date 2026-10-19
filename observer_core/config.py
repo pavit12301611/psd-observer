@@ -184,6 +184,20 @@ class WhatsAppSettings(BaseModel):
     command_timeout_s: int = 120
     #: Seconds to wait for a YES/NO reply before a proposed command is dropped.
     confirm_timeout_s: int = 600
+    #: Let the model drive arena.ai Agent Mode in a dedicated browser profile (opt-in).
+    browser_enabled: bool = False
+    #: Path to Chromium. Empty = find "chromium" or "google-chrome" on PATH.
+    browser_executable: str = ""
+    #: Headless runs are invisible to you; keep False so you can watch and log in.
+    browser_headless: bool = False
+    #: "public" = any public https site (never localhost or your LAN); "arena" = arena.ai only.
+    browser_scope: str = "public"
+    #: Model steps per browser job.
+    browser_max_steps: int = 40
+    #: Minutes a browser job may run before it is stopped.
+    browser_timeout_min: int = 30
+    #: Where arena.ai downloads are saved. Empty = data dir / arena-downloads.
+    downloads_dir: str = ""
 
 
 class PathsSettings(BaseModel):
@@ -434,6 +448,10 @@ def skeleton_toml(cfg: AppConfig | None = None) -> str:
         ("whatsapp", "agent_number"): "the WhatsApp account the agent runs on (linked device)",
         ("whatsapp", "allowed_number"): "the ONLY number allowed to give instructions",
         ("whatsapp", "country_code"): "used when a number has no +country code",
+        ("whatsapp", "browser_enabled"): "true = the model may drive arena.ai in a dedicated browser (see README)",
+        ("whatsapp", "browser_executable"): "empty = find chromium on PATH (sudo dnf install --needed chromium)",
+        ("whatsapp", "browser_scope"): "public = any public https site (no localhost or LAN); arena = arena.ai only",
+        ("whatsapp", "browser_headless"): "keep false: you can watch the browser and log in to arena.ai",
         ("models", "provider"): "ollama | openai_compat | llamacpp_local | cloud",
         ("models", "endpoint"): "ollama / llama.cpp / vLLM / LM Studio base URL",
         ("models", "ollama_model"): "run `ollama list` to see what you have pulled",

@@ -47,6 +47,7 @@ dependencies = [
     "watchdog>=4.0",
     "filelock>=3.13",
     "neonize>=0.5.2,<0.6",
+    "playwright>=1.47,<2",
 ]
 
 [project.optional-dependencies]
@@ -63,7 +64,7 @@ observer-core-daemon = "observer_core.daemon:main"
 include = ["observer_core*"]
 
 [tool.setuptools.package-data]
-observer_core = ["resources/icons/*.svg", "resources/*.toml"]
+observer_core = ["resources/icons/*.svg", "resources/*.toml", "remote/playbooks/*.md", "remote/playbooks/*.jsonl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

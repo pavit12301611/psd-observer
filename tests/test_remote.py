@@ -182,7 +182,7 @@ def test_other_text_during_approval_is_a_reminder_not_an_answer():
     cmd.handle_inbound(OWNER, "load?")
     assert wait_until(lambda: any("uptime" in t for t in transport.texts()))
     assert cmd.handle_inbound(OWNER, "maybe later").action == "reminded"
-    assert any("waiting for approval" in t for t in transport.texts())
+    assert any("Waiting for your approval" in t for t in transport.texts())
     assert calls == []
     cmd.handle_inbound(OWNER, "Y")
     assert cmd.wait_idle(5)

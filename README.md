@@ -25,6 +25,8 @@ persistent memory, a short screen clip, or a webhook.
 - [Credentials](#credentials)
 - [Agents: wizard, YAML and JSON](#agents-wizard-yaml-and-json)
 - [WhatsApp remote](#whatsapp-remote)
+  - [Routines and timers](#routines-and-timers)
+  - [Browser jobs: arena.ai and web research](#browser-jobs-arenaai-and-web-research)
 - [Headless daemon and systemd](#headless-daemon-and-systemd)
 - [Command reference](#command-reference)
 - [Privacy and security](#privacy-and-security)
@@ -54,6 +56,7 @@ split:
 | **PyQt6 GUI** (window, sensor previews, editor, wizard, tray, settings) | **Written and statically checked (pyflakes, compile), but not run.** The sandbox lacks `libGL`, and apt is unreachable. A Qt smoke test exists and runs where Qt loads. |
 | **Wayland screen capture via the portal (ScreenCast + PipeWire)** | **Not implemented in full.** See [Wayland](#wayland-read-this-first). |
 | **WhatsApp remote** (commands, YES/NO approval, bounded loop, owner gate, shell limits, account-mismatch refusal) | Covered by fakes in `tests/test_remote.py`. **Not run against WhatsApp:** the sandbox has no route to it. See [WhatsApp remote](#whatsapp-remote). |
+| **WhatsApp routines, timers, browser jobs (arena.ai and web research)** | Covered by fakes in `tests/test_remote_features.py` and `tests/test_public_browser.py` (parsing, scheduling, step limits, local-network block, refused clicks and passwords, search and research flow on fake pages, playbook examples validated). **Not run live:** no Chromium or Playwright in the build sandbox, and no WhatsApp or search-engine route. See [Routines and timers](#routines-and-timers) and [Browser jobs](#browser-jobs-arenaai-and-web-research). |
 | Local Whisper transcription, llama.cpp in-process, clip recording on Wayland | Optional paths, present but not exercised here |
 
 Run `./run.sh` on a real Fedora 40–42 machine to confirm the GUI. If something
@@ -335,10 +338,82 @@ From **9528923866**, send a message to the **8859555795** chat:
 | `YES` / `NO` | run or cancel the pending command |
 | `STOP` | cancel the current task |
 | `STATUS` | show how to use it |
+| `ROUTINES` | list the routines in `routines.toml` |
+| `RUN <name>` / `RUN <name> IN 5 MIN` | run a routine now, or in 5 minutes (one YES approves it) |
+| `TIMERS` / `CANCEL <id>` | list scheduled routines, or cancel one |
+| `ARENA: <prompt>` | ask arena.ai to do a job in the agent's own browser (only if enabled) |
+| `RESEARCH: <question>` | search the web in the agent's browser and reply with an answer and sources (only if enabled) |
 
 Messages from any other number are ignored without a reply. Messages in group chats are ignored. The agent works on one instruction at a time, and gives up after `max_steps` (default 10) model steps.
 
 If the model needs information it asks you a question, and your next message is the answer. If no reply arrives within 10 minutes (`confirm_timeout_s`), the task stops and nothing runs.
+
+### Routines and timers
+
+A **routine** is a short, fixed list of steps you write yourself in `routines.toml` in the config directory (`~/.config/observer-core/routines.toml`). The agent can only run what is written there. `setup` creates an example file if none exists.
+
+```toml
+[[routine]]
+name = "home"
+description = "Desk ready when I get home"
+steps = [
+  { open_app = "firefox" },
+  { open_url = "https://arena.ai/agent" },
+  { notify = "Welcome home. Desk is ready." },
+]
+```
+
+Step types (exactly one per step): `open_app` (an installed program, no arguments), `open_url` (http or https), `run` (one exact shell command, 120 s limit), `notify` (a WhatsApp message to you, up to 300 characters), and `wait` (0 to 300 seconds). Limits: 20 steps per routine, 50 routines.
+
+- `RUN home` asks for a YES and then runs it. `RUN home IN 5 MIN` asks for a YES and then schedules it. One YES covers that run.
+- A timer fires only if Observer is running at that time. Timers more than 15 minutes late (computer asleep, Observer stopped) are skipped, and you get a notice. Maximum delay is 12 hours.
+- Timers are kept in `timers.json` in the data directory, so they survive a restart of `whatsapp run`.
+- Steps stop at the first failure, and the result is sent back to WhatsApp.
+
+Check the file with `observer-core whatsapp routines`. It exits 1 if anything is wrong.
+
+### Browser jobs: arena.ai and web research
+
+Off by default. Set `browser_enabled = true` under `[whatsapp]` in `config.toml`, then run `observer-core whatsapp browser-login` once so you can log in where you need to. The agent drives a Chromium window you can watch.
+
+Two job types, and each starts with one YES after the full prompt or question is shown:
+
+- **Research** (`RESEARCH: <question>`, or the model chooses it when you ask it to look something up). The agent searches the web (DuckDuckGo), opens two to four reliable sources, and replies with a short answer plus the URLs it used.
+- **arena.ai** (`ARENA: <prompt>`). The agent submits your prompt in Arena Agent Mode, waits for the answer, and reports it. Only arena.ai is reachable in this mode.
+
+Scope is set by `browser_scope`:
+
+- `public` (default): any public `https` site. Local and private addresses are blocked: `localhost`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, link-local and cloud metadata addresses (`169.254.x.x`), IPv6 local addresses, and single-name hosts such as `router` or `nas`. Your router, NAS, and local services stay unreachable.
+- `arena`: arena.ai only, the strictest setting.
+
+Rules enforced in code, whatever the model says:
+
+- Passwords, one-time codes, and hidden fields are never typed into. A login page is handed back to you.
+- Clicks and typing on controls labelled delete, remove account, deactivate, log out, sign out, billing, purchase, subscribe, upgrade, pay, checkout, buy, or cancel subscription are refused.
+- Prompts and questions are at most 800 characters; searches at most 200.
+- Each job has at most `browser_max_steps` (default 40) model steps and `browser_timeout_min` (default 30) minutes.
+- Downloads go to one folder. A file over 50 MB is deleted after it is saved.
+- If the model needs information, it asks you on WhatsApp and waits for your reply.
+
+**Instructions and examples.** The job reads its instructions from `observer_core/remote/playbooks/`. You can edit them, and the next job uses your changes. Nothing needs retraining:
+
+- `system.md`: the action format and the rules that always apply.
+- `arena.md`, `research.md`: the steps for each job type.
+- `examples.jsonl`: 14 worked examples (a page and the correct next action). The three closest to your request are added to each job, within a fixed size budget. The examples show the format only. A test checks that each one is valid against the same rules the browser enforces.
+
+These are instructions, not trained weights. "Training" in this release means curating these files. It does not change the model's weights.
+
+**Choosing a model.** A browser job needs a model that reliably returns one JSON object per step, and speed matters because every step reads the page again. Run:
+
+```bash
+observer-core whatsapp model-advice
+```
+
+It reads your RAM and any NVIDIA GPU, suggests an Ollama model, and prints the commands. It changes nothing. As a rough guide: 6 GB or more of GPU memory, or 16 GB or more of RAM, gets `qwen2.5:7b`. 8 to 15 GB of RAM gets `qwen2.5:3b`. Less than that gets `qwen2.5:1.5b`, which makes more mistakes. A cloud model is faster and stronger, but your WhatsApp messages and the text of every page the agent reads go to that provider.
+
+Terms: many websites, including arena.ai, restrict automated access in their terms of use. arena.ai's terms (last updated 2026-02-23) allow personal or internal business use only and prohibit use "in any way not expressly permitted". I did not find explicit language on automated access, but I read only part of those terms. Search engines and many sites also restrict automated queries. Read the terms of the sites you use before you enable this. You are responsible for that choice, and your accounts can be restricted.
+
+**Limits of this design.** The local-network block checks the address a page requests. It does not stop DNS rebinding, where a public name resolves to a private address. Do not rely on it as a firewall. The agent also sees whatever sites you logged into in its profile, and acts as you on them.
 
 ### Commands and status
 
@@ -349,6 +424,9 @@ observer-core whatsapp pair                                      scan the QR cod
 observer-core whatsapp run                                       listen until Ctrl-C
 observer-core whatsapp disable                                   stop using it (keeps the pairing)
 observer-core whatsapp unpair --yes                              delete the local session keys
+observer-core whatsapp routines                                  list routines.toml and any problems
+observer-core whatsapp browser-login                              log in to a site once in the agent's browser
+observer-core whatsapp model-advice                               suggest a local model for this machine
 ```
 
 `observer-core doctor` shows a "WhatsApp remote" line. It is never an error when the feature is off.
@@ -362,13 +440,17 @@ observer-core whatsapp unpair --yes                              delete the loca
 - **The model also reads command output.** A file or web page can contain text that tries to steer it into proposing something harmful. Each proposed command still needs your YES, so read it before approving.
 - **Messages travel through WhatsApp's servers**, which is how WhatsApp works. The model that reads them runs locally by default. If you configured a cloud or non-local model endpoint, `setup` warns you, and instructions and command output go to that endpoint.
 - **Wrong account protection.** If the linked account is not the agent number, the agent refuses to run and disconnects.
+- **Routines run exactly what the file says.** Their `run` steps execute as written in `routines.toml` once you approve them with YES. Anyone who can edit that file can change what a routine does, so keep it private.
+- **The browser uses your logins.** Its profile holds session cookies for every site you log into in it. Anything a job does there is done as you. Deleting `arena-browser-profile` signs the agent out everywhere. With `browser_scope = "public"` the agent can open any public site, so keep the profile for sites you are happy to automate.
 - **Storage.** The linked-device keys live in `$XDG_DATA_HOME/observer-core/whatsapp/session.sqlite3`, forced to mode 0600. Nothing secret is written to `config.toml`. Logs show phone numbers masked (last four digits only).
 
 ### Not yet verified
 
+- Routines, timers, and browser jobs (arena.ai and research) have **not** been run live. There is no Chromium or Playwright in the build sandbox, and no route to the search engine or arena.ai. Page handling is tested against fake pages only. Expect the first real run to need selector tuning, and expect the search engine to show a CAPTCHA at times.
+- The model recommendations in `model-advice` are untested on your hardware. Check the answers with a few real jobs before relying on them.
 - The live pairing and messaging flow has **not** been run against WhatsApp. The build sandbox has no route to WhatsApp, and `libmagic` was missing there. Behaviour is covered by fakes in `tests/test_remote.py`, and the library's own session creation was checked up to the network call.
 - Small local models may not always produce the exact JSON the loop expects. An invalid reply is retried inside the step limit.
-- Not included: images and voice notes from WhatsApp, group chats, GUI controls for the remote (use the CLI), and a systemd unit for `whatsapp run`. A simple user service is `systemctl --user` around `observer-core whatsapp run`.
+- Not included: images and voice notes from WhatsApp, group chats, GUI controls for the remote (use the CLI), recurring schedules (timers are one-shot), file uploads through the browser, fine-tuned model weights (the browser uses instruction files and examples instead), and a systemd unit for `whatsapp run`. A simple user service is `systemctl --user` around `observer-core whatsapp run`.
 
 ---
 
@@ -408,7 +490,7 @@ observer-core agent enable ID [--off]
 observer-core agent delete ID [--yes]
 observer-core agent run-once ID [--dry-run]
 observer-core agent wizard "your words" [--preset KEY] [--action telegram] [--name NAME]
-observer-core whatsapp setup|status|pair|run|disable|unpair   remote control over WhatsApp
+observer-core whatsapp setup|status|pair|run|disable|unpair|routines|browser-login|model-advice   remote control over WhatsApp
 ```
 
 `python -m observer_core` behaves like `observer-core`.
@@ -534,7 +616,7 @@ observer_core/
   presets.py  daemon.py  cli.py  install.py  gui_entry.py
   sensors/   screen, screen_ocr, camera, microphone (+ system audio), clipboard,
              registry (shared captures), preview (Qt bridge, throttled)
-  remote/    WhatsApp remote: commander (owner gate, YES/NO, bounded loop), shell
+  remote/    WhatsApp remote: commander (owner gate, YES/NO, bounded loop), routines and timers, browser jobs (browser; playbooks/ holds their instructions and examples), model_advice, shell
              (one bounded command), whatsapp (neonize linked device), service, cli_whatsapp, phone
   llm/       base (timeouts, retries), ollama, openai_compat, llamacpp_local,
              cloud (opt-in), factory

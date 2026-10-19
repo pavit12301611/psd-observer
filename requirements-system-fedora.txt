@@ -66,3 +66,6 @@ flatpak
 
 # --- WhatsApp remote: libmagic is loaded by neonize at import time ----------
 file-libs
+
+# --- arena.ai browser jobs: Chromium for Playwright (only needed if you enable them) ---
+chromium

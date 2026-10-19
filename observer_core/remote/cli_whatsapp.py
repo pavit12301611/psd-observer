@@ -86,6 +86,13 @@ def setup(
         _die(str(exc))
     cfg.whatsapp.enabled = True
     cfg.save()
+    from .routines import EXAMPLE_ROUTINES
+    from .service import routines_path
+
+    if not routines_path().exists():
+        routines_path().parent.mkdir(parents=True, exist_ok=True)
+        routines_path().write_text(EXAMPLE_ROUTINES, encoding="utf-8")
+        console.print(f"[dim]wrote example routines: {routines_path()} (edit it to add your own)[/]")
     console.print(f"[green]saved[/] WhatsApp remote enabled: agent {mask_phone(normalize_phone(agent, country))}, "
                   f"allowed sender {mask_phone(normalize_phone(allow, country))}")
     if _uses_remote_model(cfg):
@@ -112,6 +119,17 @@ def status() -> None:
         console.print("numbers:        [green]valid[/]")
     except RemoteConfigError as exc:
         console.print(f"numbers:        [red]{exc}[/]")
+    from .routines import load_routines
+    from .service import routines_path
+
+    routines, route_errors = load_routines(routines_path())
+    console.print(f"routines:       {len(routines)} valid ({routines_path()})")
+    for err in route_errors:
+        console.print(f"                [red]{err}[/]")
+    from .browser import find_chromium
+
+    console.print(f"arena browser:  {'on' if w.browser_enabled else 'off'}; "
+                  f"chromium: {find_chromium() or 'not found (sudo dnf install --needed chromium)'}")
     try:
         _load_neonize()
         console.print("neonize:        [green]installed[/]")
@@ -185,6 +203,60 @@ def run() -> None:
             break
     service.stop()
     _status("stopped")
+
+
+@whatsapp_app.command("model-advice")
+def model_advice_cmd() -> None:
+    """Suggest a local model for browser and WhatsApp jobs, based on this machine."""
+    from .model_advice import advice_lines, detect_hardware, recommend
+
+    cfg = load_or_create()
+    hw = detect_hardware()
+    adv = recommend(hw)
+    for line in advice_lines(hw, adv, cfg.models.ollama_model if cfg.models.provider == "ollama"
+                             else f"{cfg.models.provider} (not Ollama)"):
+        console.print(line, markup=False)
+
+
+@whatsapp_app.command("routines")
+def routines_cmd() -> None:
+    """List the routines in routines.toml and any problems with them."""
+    from .routines import load_routines
+    from .service import routines_path
+
+    routines, errors = load_routines(routines_path())
+    if not routines and not errors:
+        console.print(f"No routines yet. Edit {routines_path()} (run `whatsapp setup` for an example).")
+    for r in routines.values():
+        console.print(f"[bold]{r.name}[/] — {r.description}")
+        for line in r.plan_lines():
+            console.print(f"    {line}")
+    for err in errors:
+        console.print(f"[red]problem:[/] {err}")
+    if errors:
+        raise typer.Exit(1)
+
+
+@whatsapp_app.command("browser-login")
+def browser_login() -> None:
+    """Open arena.ai in the agent's own browser profile so YOU can log in once.
+
+    The agent never types your password. Close the window when you are done.
+    """
+    from .browser import BrowserUnavailable, PlaywrightSession
+    from .service import browser_profile_dir, downloads_dir
+
+    cfg = load_or_create()
+    try:
+        session = PlaywrightSession(profile_dir=browser_profile_dir(), downloads_dir=downloads_dir(cfg),
+                                    executable=cfg.whatsapp.browser_executable or None, headless=False)
+        with session:
+            session.goto("https://arena.ai/agent")
+            console.print("A browser window is open at arena.ai/agent. Log in there, then close the window.")
+            session.wait_until_closed()
+    except BrowserUnavailable as exc:
+        _die(str(exc))
+    console.print("[green]browser profile saved.[/] Turn it on with whatsapp.browser_enabled = true.")
 
 
 @whatsapp_app.command("disable")
