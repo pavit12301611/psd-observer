@@ -304,6 +304,9 @@ WhatsApp pe: `/access` → `61 tools`, `/model` → `Ollama · llama3.2` (ya jo 
 | `volume` → `No wpctl/pactl` | `sudo dnf install wireplumber pipewire-pulseaudio` |
 | WhatsApp ne device unlink kar diya | Auto-relink on hai — journal me naya QR aayega, scan kar lo. Warna `./scripts/relink-whatsapp.sh`. |
 
+Poora engineering log (kya banaya, kaise, saare errors + fixes, saari commands):
+[`BUILD-LOG.md`](BUILD-LOG.md).
+
 Aur zyada: [`README.md`](README.md) (agent guide) · [`../FEDORA.md`](../FEDORA.md)
 (Fedora specifics) · [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md) (poora scene).
 

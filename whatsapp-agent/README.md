@@ -21,6 +21,9 @@ app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 Step-by-step, copy-paste commands (install → link → first message → phone app →
 troubleshooting): **[`QUICKSTART.md`](QUICKSTART.md)**. The short version is below.
 
+Everything that was built, every command, and every error with its fix:
+**[`BUILD-LOG.md`](BUILD-LOG.md)**.
+
 ## 1. Install (Fedora, ~5 minutes)
 
 **No git needed** — one script downloads the branch with `curl` and installs it:

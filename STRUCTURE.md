@@ -90,6 +90,7 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 | `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/download`, `/api/action`. |
 | `whatsapp-agent/scripts/install-fresh.sh` | **First-time install with no git**: curl the tarball, extract, create `.env`, run the installer (`--dir`, `--no-install`, `--force`). |
 | `whatsapp-agent/scripts/update-from-github.sh` | Update/install **without git**: downloads the branch tarball with curl, backs up code, keeps `.env`/`auth_info`/`data`, restarts the service. |
+| `whatsapp-agent/BUILD-LOG.md` | Engineering log: every feature, commit, command, error and its fix. |
 | `whatsapp-agent/scripts/setup-remote.sh` | Free Tailscale setup so the phone app works from **outside** the house (no port-forwarding). WhatsApp commands already work from anywhere. |
 
 See [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md) for the exact

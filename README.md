@@ -21,6 +21,7 @@
 > → scan the QR with the agent phone → WhatsApp it `/help` from your phone →
 > open the printed phone-app URL and enter the PIN.
 > Step-by-step run guide: [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md).
+> Build log (every feature, command, error + fix): [`whatsapp-agent/BUILD-LOG.md`](whatsapp-agent/BUILD-LOG.md).
 > Full story: [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) · Fedora guide: [`FEDORA.md`](FEDORA.md)
 > · agent guide: [`whatsapp-agent/README.md`](whatsapp-agent/README.md)
 > · project map: [`STRUCTURE.md`](STRUCTURE.md). Upstream cloud behaviour below
