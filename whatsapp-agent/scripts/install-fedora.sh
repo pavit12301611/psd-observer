@@ -7,6 +7,9 @@
 #                                            via journal/dashboard)
 #   ./scripts/install-fedora.sh --ollama   …plus install/enable local Ollama
 #                                            and pull the default free model
+#   ./scripts/install-fedora.sh --pc-control …plus PC-control tools (screenshot,
+#                                            volume/brightness, input daemon)
+#                                            and ALLOW_PC_CONTROL=true in .env
 #
 # Idempotent: safe to re-run. Uses sudo only for dnf (and the Ollama installer,
 # which manages its own sudo).
@@ -16,11 +19,13 @@ AGENT_DIR="$PWD"
 
 WANT_SERVICE=0
 WANT_OLLAMA=0
+WANT_PCCONTROL=0
 for arg in "$@"; do
   case "$arg" in
     --service) WANT_SERVICE=1 ;;
     --ollama) WANT_OLLAMA=1 ;;
-    *) echo "Unknown option: $arg (supported: --service, --ollama)" >&2; exit 2 ;;
+    --pc-control) WANT_PCCONTROL=1 ;;
+    *) echo "Unknown option: $arg (supported: --service, --ollama, --pc-control)" >&2; exit 2 ;;
   esac
 done
 
@@ -64,6 +69,24 @@ fi
 say "Agent setup in $AGENT_DIR"
 [ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example (owner +91 95289 23866, agent +91 88595 55795 already set)."; }
 npm install
+
+# ── 4b. Optional: PC-control tools + tier-2 switch ───────────────────────────
+if [ "$WANT_PCCONTROL" -eq 1 ]; then
+  say "PC-control tools (screenshot/media/brightness/input)"
+  sudo dnf install -y grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify || \
+    echo "⚠ Some PC-control packages failed to install — /pc subcommands that need them will name the missing one."
+  # Wayland keyboard/mouse needs the ydotool daemon (uinput). Unit name varies
+  # by packaging; try both, never fatal.
+  sudo systemctl enable --now ydotool 2>/dev/null || sudo systemctl enable --now ydotoold 2>/dev/null || \
+    echo "⚠ Couldn't enable the ydotool daemon automatically — Wayland input needs it: check 'systemctl list-unit-files | grep ydotool'"
+  if grep -q '^ALLOW_PC_CONTROL=' .env; then
+    sed -i 's/^ALLOW_PC_CONTROL=.*/ALLOW_PC_CONTROL=true/' .env
+  else
+    printf '\nALLOW_PC_CONTROL=true\n' >> .env
+  fi
+  echo "Tier-2 PC control ENABLED in .env (keyboard/mouse + power, power asks /pc confirm)."
+  echo "Strongly recommended: set a PIN in .env, e.g. CONTROL_PIN=1234 (usage: /pc type 1234 hello)"
+fi
 
 # ── 5. Optional: systemd user service (the Fedora way to keep it running) ────
 # Deliberately BEFORE the optional Ollama step: the agent must end up running

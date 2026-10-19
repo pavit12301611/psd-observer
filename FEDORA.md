@@ -11,6 +11,7 @@ don't paste the `journalctl` line together with the installer):
 git clone https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ./scripts/install-fedora.sh --service --ollama   # deps + agent + autostart + free local AI
+# (want keyboard/mouse + power control from WhatsApp too? add --pc-control)
 ```
 ```bash
 journalctl --user -u observer-whatsapp-agent -f  # scan the QR with the 8859555795 phone
@@ -122,6 +123,36 @@ screen/camera features — those live on the host, not in a container.
 - Optional XDG storage: set `DATA_DIR=~/.local/share/observer-whatsapp-agent`
   and `AUTH_DIR=~/.local/state/observer-whatsapp-agent/auth_info` in `.env`
   (defaults stay inside `whatsapp-agent/`, gitignored).
+
+### PC control (`/pc …`) — Fedora desktop control from WhatsApp
+
+Tier 1 works out of the box (screenshot, PipeWire volume via `wpctl`,
+brightness, MPRIS media, open app/URL, `notify-send`, `loginctl lock-session`,
+clipboard, file find/fetch under `$HOME`, top processes). Tier 2 —
+keyboard/mouse (`/pc type|key|click`) and power (`/pc suspend|reboot|shutdown`,
+always `/pc confirm`-gated) — needs one flag:
+
+```bash
+./scripts/install-fedora.sh --pc-control     # tools + ALLOW_PC_CONTROL=true
+```
+
+That dnf-installs `grim gnome-screenshot scrot kde-spectacle playerctl
+brightnessctl ydotool xdotool wl-clipboard libnotify`, enables the ydotool
+daemon (uinput; Wayland input), and flips the switch. Then set a PIN in `.env`
+(`CONTROL_PIN=1234` → usage `/pc type 1234 hello`) and
+`systemctl --user restart observer-whatsapp-agent`.
+
+Fedora session caveats (honest ones):
+
+- **GNOME + Wayland screenshots** are the hard case — Mutter restricts silent
+  capture; the agent tries the GNOME Shell D-Bus API and several tools. KDE
+  (`spectacle`), wlroots (`grim`) and X11 sessions just work. On GNOME+Wayland,
+  `/screen` with Observer open (browser capture) is the reliable path.
+- **Input on Wayland** = ydotool (daemon must run); `xdotool` only reaches
+  XWayland apps. On an X11 session both work.
+- **Linger/boot start**: if the user service started before desktop login,
+  screenshot/input say "no graphical session" — restart it after login.
+- **Brightness** permission: `sudo usermod -aG video $USER`, log out/in.
 
 ## 2. Observer app itself on Fedora (optional)
 

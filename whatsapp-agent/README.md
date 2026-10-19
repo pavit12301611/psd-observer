@@ -85,8 +85,10 @@ what is 15% of 2400
 /summarize https://any-article-link
 /qr https://observer-ai.com
 /pc status                   ← shows your Fedora version, kernel, battery…
-/pc battery
-/screen                      ← needs Observer open on the PC (see §5)
+/pc screenshot               ← direct from the PC (grim/GNOME/KDE), no Observer needed
+/pc volume up                /pc brightness 70      /pc media pause
+/pc open firefox             /pc lock               /pc find thesis.pdf
+/screen                      ← Observer if open (AI sees it), else a direct screenshot
 any normal question…         ← answered by local Ollama, in your language (incl. Hinglish)
 ```
 
@@ -120,6 +122,38 @@ way, because `/screen` and Observer tools need *your* desktop.
 
 **Firewall:** nothing to open in firewalld — the bridge is `127.0.0.1`-only and
 WhatsApp is an outbound connection. Details + SELinux notes in [`../FEDORA.md`](../FEDORA.md).
+
+## 4b. PC control (`/pc …`) — what works where
+
+The agent controls the Fedora desktop directly (fixed `execFile` argv, never a
+shell string). **Tier 1 is always on:** screenshot, volume, brightness, media
+(MPRIS), open allowlisted app/URL, desktop notification, lock, clipboard
+read/write, `find`/`get` files under your home folder, top processes.
+**Tier 2** (keyboard/mouse input + suspend/reboot/shutdown) needs
+`ALLOW_PC_CONTROL=true` in `.env`, optionally `CONTROL_PIN=…`
+(`/pc type 1234 hello`); power always asks `/pc confirm` first.
+
+```bash
+./scripts/install-fedora.sh --pc-control   # installs the tools below + flips the tier-2 switch
+# …or by hand:
+sudo dnf install grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify
+sudo systemctl enable --now ydotool        # Wayland input daemon (uinput)
+```
+
+| Feature | Fedora GNOME/Wayland (default) | KDE Plasma | X11 session |
+|---|---|---|---|
+| `/pc screenshot` | via GNOME Shell D-Bus — may be blocked by current Mutter; then `/screen` via Observer's browser capture is the reliable path | `spectacle` ✅ | ✅ (scrot/gnome-screenshot) |
+| `/pc type/key/click` | `ydotool` + daemon ✅ (xdotool reaches XWayland apps only) | `ydotool` ✅ | `xdotool` ✅ |
+| volume/brightness/media/clipboard/lock/notify | ✅ | ✅ | ✅ |
+
+If the service auto-starts at boot (linger) **before** you log in, screenshot/
+input commands answer "no graphical session" — `systemctl --user restart
+observer-whatsapp-agent` after login picks the session up. Brightness
+"permission denied" → `sudo usermod -aG video $USER`, log out/in.
+
+Honest scope: this is **control on demand**, not Observer's always-watching
+micro-agents. For continuous screen/camera/mic watching with AI reactions,
+keep Observer open (§5) — the two combine.
 
 ## 5. Connect it to Observer (screen, camera, agent alerts)
 
@@ -156,7 +190,8 @@ curl -X POST localhost:8787/api/simulate -H "x-bridge-token: <token>" -H 'conten
 - **One listener rule:** owner check happens before anything else, on every message, including WhatsApp's new LID addressing (`remoteJidAlt` + LID→phone mapping). Non-owners get nothing — not even an error.
 - **1-to-1 only:** groups, communities, newsletters, status and broadcasts are ignored even if you're in them.
 - **Localhost bridge:** binds `127.0.0.1`, token-protected, and refuses to send to any number but yours.
-- **Shell is OFF:** `/run` does nothing unless you set `ALLOW_SHELL=true` **and** a `SHELL_PIN`. Even then, remember: whoever holds your unlocked WhatsApp holds your PC. `/pc status|disk|ip` are read-only and always safe.
+- **Shell is OFF:** `/run` does nothing unless you set `ALLOW_SHELL=true` **and** a `SHELL_PIN`. Even then, remember: whoever holds your unlocked WhatsApp holds your PC. Tier-1 `/pc` actions are fixed commands (volume/screenshot/open/lock…) — no shell, no injection surface.
+- **Input/power control is OFF by default:** `/pc type|key|click|shutdown…` need `ALLOW_PC_CONTROL=true` (+ set `CONTROL_PIN`!). Power asks `/pc confirm` within 60 s. `/pc get` only serves files under `$HOME` and refuses `.ssh/`/`.gnupg/`/`auth_info/`.
 - **Private by default:** notes/todos/history live in one local JSON file; with Ollama, chat content never leaves your PC. Free-tier cloud brains are opt-in only.
 - **Your numbers** are defaults in `.env.example` because you asked for them wired in. If you later want them out of git history, keep them only in your private `.env` (gitignored) and blank the example.
 
@@ -177,3 +212,7 @@ curl -X POST localhost:8787/api/simulate -H "x-bridge-token: <token>" -H 'conten
 | Podman: permission denied writing `auth_info` | SELinux label missing — the compose file's `:Z` volume flags handle it; don't drop them. |
 | Moved `auth_info/` from another disk and it won't load | `restorecon -Rv whatsapp-agent/` to relabel for SELinux. |
 | `/pc battery` says no battery | Desktop/VM without `BAT*` in `/sys/class/power_supply` — expected. |
+| `/pc screenshot` fails on GNOME+Wayland | Mutter restricts silent capture. Install fallbacks (`grim gnome-screenshot`), use KDE/X11, or `/screen` with Observer open (browser screen-capture with your one-time permission). |
+| `/pc type/key` says ydotool failed | Daemon not running: `sudo systemctl enable --now ydotool` (check name with `systemctl list-unit-files \| grep ydotool`). |
+| PC control says "no graphical session" | Service started before login (linger): `systemctl --user restart observer-whatsapp-agent` after logging in to the desktop. |
+| `/pc brightness` permission denied | `sudo usermod -aG video $USER`, then log out and back in. |

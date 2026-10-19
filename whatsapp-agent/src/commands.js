@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import QRCode from 'qrcode';
 import * as tools from './tools.js';
 import * as ai from './ai.js';
+import * as pc from './pccontrol.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, native, owner-only
@@ -29,8 +30,15 @@ const HELP = `🤖 *Observer WhatsApp Agent* — free, native, owner-only
 • /todo add <text> · /todo · /todo done <id> · /todo del <id>
 • /note <text> · /notes · /note del <id>
 • /observer <text> — hand it to Observer on my PC (screen/camera/tools)
-• /screen — ask Observer what's on the PC screen right now
-• /pc status · /pc disk · /pc ip · /pc battery
+• /screen — what's on the PC screen (Observer if open, else a direct screenshot)
+
+*Control my PC (Fedora, direct — no Observer needed)*
+• /pc screenshot · /pc status · /pc disk · /pc ip · /pc battery · /pc top
+• /pc volume up|down|mute|50 · /pc brightness up|down|70 · /pc media pause|next|status
+• /pc open firefox · /pc open https://… · /pc notify <text> · /pc lock
+• /pc clipboard · /pc clipset <text> · /pc find <name> · /pc get <path-in-home>
+• ⌨️ Input + power (needs ALLOW_PC_CONTROL=true): /pc type <text> · /pc key ctrl+l
+  /pc click [x y] · /pc suspend|reboot|shutdown (asks /pc confirm first)
 
 *Look things up (all free, no keys)*
 • /weather <city> · /wiki <topic> · /define <word> · /news [topic]
@@ -119,19 +127,138 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return '🧠 *What I remember*\n\n' + facts.map((f) => `• ${f}`).join('\n') + '\n\n/forget memory — wipe these';
   }
 
-  function pcInfo(args) {
-    const what = (args || 'status').trim().toLowerCase();
-    if (what === 'disk') {
-      try {
-        const s = fs.statfsSync(config.dataDir);
-        const total = s.blocks * s.bsize;
-        const free = s.bavail * s.bsize;
-        return `💾 Disk: *${(free / 1024 ** 3).toFixed(1)} GB free* of ${(total / 1024 ** 3).toFixed(1)} GB (${Math.round(((total - free) / total) * 100)}% used)`;
-      } catch { return '💾 Could not read disk info on this system.'; }
+  // Pending destructive PC action awaiting "/pc confirm" (60 s window).
+  let pendingPower = null;
+
+  const TIER2_OFF =
+    '🔒 Input/power PC control is OFF (ALLOW_PC_CONTROL=false) — the safe default even though I only listen to you.\n' +
+    'To turn it on, on the PC: set ALLOW_PC_CONTROL=true in whatsapp-agent/.env (optionally CONTROL_PIN=1234), ' +
+    'install the tools (sudo dnf install ydotool xdotool, enable the daemon: sudo systemctl enable --now ydotool), ' +
+    'then systemctl --user restart observer-whatsapp-agent.\n' +
+    'Already working without it: /pc screenshot, volume, brightness, media, open, lock, clipboard, find/get.';
+
+  /** Strip + verify the optional CONTROL_PIN for tier-2 commands. Returns arg text or null (replied). */
+  function tier2Gate(rest) {
+    if (!config.allowPcControl) return { reply: TIER2_OFF };
+    if (!config.controlPin) return { text: rest };
+    const m = String(rest ?? '').match(/^(\S+)(?:\s+([\s\S]*))?$/);
+    if (!m || m[1] !== config.controlPin) return { reply: '🔒 This PC-control command needs your PIN first, e.g. /pc type 1234 hello · /pc key 1234 ctrl+l · /pc shutdown 1234' };
+    return { text: m[2] ?? '' };
+  }
+
+  async function handlePc(args) {
+    const raw = (args || 'status').trim();
+    const [subRaw, ...restParts] = raw.split(/\s+/);
+    const sub = subRaw.toLowerCase();
+    const rest = restParts.join(' ');
+    const value = num(restParts.find((p) => /^\d+$/.test(p)));
+
+    switch (sub) {
+      case 'status': case 'info': return tools.systemInfo(store.data.stats.startedAt);
+      case 'disk': {
+        try {
+          const s = fs.statfsSync(config.dataDir);
+          const total = s.blocks * s.bsize;
+          const free = s.bavail * s.bsize;
+          return `💾 Disk: *${(free / 1024 ** 3).toFixed(1)} GB free* of ${(total / 1024 ** 3).toFixed(1)} GB (${Math.round(((total - free) / total) * 100)}% used)`;
+        } catch { return '💾 Could not read disk info on this system.'; }
+      }
+      case 'ip': return tools.systemInfo(store.data.stats.startedAt).split('\n').find((l) => l.startsWith('LAN IP')) ?? 'No LAN IP found.';
+      case 'battery': return tools.batteryStatus() ?? '🔌 No battery found — this PC/VM reports none under /sys/class/power_supply (normal for desktops).';
+      case 'top': return pc.topProcesses();
+      case 'screenshot': case 'shot': {
+        const image = await pc.captureScreenshot();
+        return { image, text: `🖥️ Screenshot · ${new Date().toLocaleTimeString('en-IN', { timeZone: tz })}` };
+      }
+      case 'volume': case 'vol': {
+        const action = !rest ? 'get' : /^\d+$/.test(restParts[0]) ? 'set' : sub2volumeAction(restParts[0]);
+        return pc.volume(action, value);
+      }
+      case 'brightness': case 'bright': {
+        let action = !rest ? 'get' : /^\d+$/.test(restParts[0]) ? 'set' : sub2volumeAction(restParts[0]);
+        if (action === 'mute') action = 'get';
+        return pc.brightness(action, value);
+      }
+      case 'media': case 'music': {
+        const action = (restParts[0] ?? 'status').toLowerCase();
+        if (!['play', 'pause', 'toggle', 'next', 'prev', 'previous', 'stop', 'status'].includes(action)) return '🎵 Usage: /pc media play|pause|next|prev|stop|status';
+        return pc.media(action);
+      }
+      case 'open': return pc.openTarget(rest);
+      case 'notify': return rest ? pc.desktopNotify(rest) : '🔔 Usage: /pc notify <text>';
+      case 'lock': return pc.lockSession();
+      case 'clipboard': case 'clip': return pc.clipboardGet();
+      case 'clipset': return pc.clipboardSet(rest);
+      case 'find': {
+        const found = await pc.findFiles(rest);
+        return found.length
+          ? '🔎 *Found under ~*\n\n' + found.map((f) => `• ~/${f}`).join('\n') + '\n\nFetch one with /pc get ~/<path>'
+          : `🔎 Nothing under your home folder matches "${rest}".`;
+      }
+      case 'get': {
+        const resolved = pc.resolveHomeFile(rest);
+        if (!resolved.ok) return `📂 ${resolved.reason}`;
+        const stat = fs.statSync(resolved.file);
+        if (stat.isDirectory()) {
+          const names = fs.readdirSync(resolved.file).slice(0, 30);
+          return `📂 ${resolved.file}\n\n` + (names.map((n) => `• ${n}`).join('\n') || '(empty)');
+        }
+        if (stat.size > 64 * 1024 * 1024) return '📂 That file is over WhatsApp\'s 64 MB document limit.';
+        return { text: `📄 ${path.basename(resolved.file)} (${(stat.size / 1024).toFixed(0)} KB)`, document: { buffer: fs.readFileSync(resolved.file), fileName: path.basename(resolved.file) } };
+      }
+      // ── tier 2: input + power ──────────────────────────────────────────
+      case 'type': {
+        const gate = tier2Gate(rest);
+        return gate.reply ?? pc.typeText(gate.text);
+      }
+      case 'key': {
+        const gate = tier2Gate(rest);
+        return gate.reply ?? pc.keyCombo(gate.text.trim());
+      }
+      case 'click': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        const nums = gate.text.match(/-?\d+/g)?.map(Number) ?? [];
+        const button = /right/i.test(gate.text) ? 'right' : /middle/i.test(gate.text) ? 'middle' : 'left';
+        return pc.click(nums[0], nums[1], button);
+      }
+      case 'shutdown': case 'poweroff': case 'reboot': case 'restart': case 'suspend': case 'sleep': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        pendingPower = { action: sub, expires: Date.now() + 60_000 };
+        const label = { shutdown: 'Shut down', poweroff: 'Shut down', reboot: 'Reboot', restart: 'Reboot', suspend: 'Suspend', sleep: 'Suspend' }[sub];
+        return `⚠️ ${label} the PC? Unsaved work on it can be lost, and I'll go offline until it's back.\nReply */pc confirm* within 60 seconds to do it, or ignore this to cancel.`;
+      }
+      case 'confirm': {
+        if (!config.allowPcControl) return TIER2_OFF;
+        if (!pendingPower || pendingPower.expires < Date.now()) { pendingPower = null; return 'Nothing is waiting for confirmation.'; }
+        const { action } = pendingPower;
+        pendingPower = null;
+        pc.schedulePower(action);
+        return `⏻ ${{ shutdown: 'Shutting down', poweroff: 'Shutting down', reboot: 'Rebooting', restart: 'Rebooting', suspend: 'Suspending', sleep: 'Suspending' }[action]} in 5 seconds. See you on the other side 👋`;
+      }
+      case 'cancel':
+        pendingPower = null;
+        return 'Cancelled — PC stays on.';
+      default:
+        return [
+          '🖥️ *PC control* — usage:',
+          '/pc screenshot · /pc status · /pc disk · /pc battery · /pc top · /pc ip',
+          '/pc volume up|down|mute|50 · /pc brightness up|down|70',
+          '/pc media play|pause|next|prev|stop|status',
+          '/pc open firefox|terminal|settings|https://… · /pc notify <text> · /pc lock',
+          '/pc clipboard · /pc clipset <text> · /pc find <name> · /pc get ~/<path>',
+          '/pc type <text> · /pc key ctrl+l · /pc click [x y] · /pc suspend|reboot|shutdown' + (config.allowPcControl ? '' : '  (⌨️ tier-2 currently OFF — see ALLOW_PC_CONTROL)'),
+        ].join('\n');
     }
-    if (what === 'ip') return tools.systemInfo(store.data.stats.startedAt).split('\n').find((l) => l.startsWith('LAN IP')) ?? 'No LAN IP found.';
-    if (what === 'battery') return tools.batteryStatus() ?? '🔌 No battery found — this PC/VM reports none under /sys/class/power_supply (normal for desktops).';
-    return tools.systemInfo(store.data.stats.startedAt);
+  }
+
+  function sub2volumeAction(word) {
+    const w = String(word ?? '').toLowerCase();
+    if (['up', '+', 'increase', 'raise'].includes(w)) return 'up';
+    if (['down', '-', 'decrease', 'lower'].includes(w)) return 'down';
+    if (['mute', 'unmute', 'toggle'].includes(w)) return 'mute';
+    return 'get';
   }
 
   function files() {
@@ -151,7 +278,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
   }
 
   async function runShell(args) {
-    if (!config.allowShell) return '🔒 Shell is OFF (ALLOW_SHELL=false). That\'s the safe default — /pc status, /pc disk and /observer cover most needs.';
+    if (!config.allowShell) return '🔒 Shell is OFF (ALLOW_SHELL=false). That\'s the safe default — /pc (screenshot, volume, open, type/key/click, power…) and /observer cover most needs with fixed, non-shell actions.';
     const m = (args || '').match(/^(\S+)\s+([\s\S]+)$/);
     if (!m || m[1] !== config.shellPin) return '🔒 Usage: /run <PIN> <command>';
     try {
@@ -195,6 +322,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           `Messages: ${s.received} in · ${s.replied} out · ${s.ignoredNonOwner} non-owner ignored`,
           `Data: ${store.data.todos.filter((t) => !t.done).length} open to-dos · ${store.data.notes.length} notes · ${store.data.reminders.length} reminders`,
           `Observer bridge: ${observerOnline() ? 'tab connected 🖥️' : 'no Observer tab polling'}`,
+          `PC control: tier-1 on (screenshot/volume/…) · input+power ${config.allowPcControl ? `ON ⌨️${config.controlPin ? ' (PIN)' : ''}` : 'off (ALLOW_PC_CONTROL)'}`,
           `Cost so far: ₹0 (native WhatsApp, local tools)`,
         ].join('\n');
       }
@@ -277,9 +405,22 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         if (!store.data.downloads.length) return '⬇️ Nothing received yet. Send me a photo/file and I\'ll save it on the PC.';
         return '⬇️ *Recently received*\n\n' + store.data.downloads.slice(0, 10).map((d) => `• ${d.file} (${d.kind}, ${tools.formatDateTime(d.ts, tz)})`).join('\n');
       }
-      case 'pc': case 'system': case 'sysinfo': return pcInfo(cmd === 'pc' ? args : '');
+      case 'pc': return handlePc(args);
+      case 'system': case 'sysinfo': return handlePc('status');
       case 'observer': case 'obs': return args ? askObserver(args) : '🖥️ Usage: /observer <what to do/look at on the PC>';
-      case 'screen': return askObserver(args ? `Look at my screen and answer: ${args}` : 'Look at my screen and tell me briefly what is on it right now. Include a screenshot if you can.');
+      case 'screen': {
+        // Observer (when its tab is open) can see AND reason about the screen.
+        // Without it, fall back to a direct PC screenshot so /screen still works.
+        if (observerOnline()) {
+          return askObserver(args ? `Look at my screen and answer: ${args}` : 'Look at my screen and tell me briefly what is on it right now. Include a screenshot if you can.');
+        }
+        try {
+          const image = await pc.captureScreenshot();
+          return { image, text: `🖥️ Direct screenshot from your PC${args ? ` (you asked: ${args} — open Observer for an AI answer about it, or look right here)` : ''}` };
+        } catch (err) {
+          return `🖥️ Observer isn't open, and a direct screenshot failed too: ${err.message}`;
+        }
+      }
       case 'run': case 'exec': case 'shell': return runShell(args);
       case 'sticker': return '🎨 Send /sticker *with a photo* (as its caption) and I\'ll turn it into a sticker.';
       default:

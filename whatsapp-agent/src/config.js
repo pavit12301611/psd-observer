@@ -87,6 +87,13 @@ export function loadConfig({ dryRun = false } = {}) {
 
     allowShell: bool(e.ALLOW_SHELL, false),
     shellPin: e.SHELL_PIN || '',
+    // Tier-2 PC control (keyboard/mouse + power). Tier 1 (screenshot, volume,
+    // brightness, media, open, clipboard, lock, files) is always on. Off by
+    // default even though the agent is owner-only: an unlocked-owner-WhatsApp
+    // should not silently mean full input control of the PC. CONTROL_PIN is an
+    // optional extra gate: /pc type <PIN> <text>, /pc key <PIN> ctrl+l, …
+    allowPcControl: bool(e.ALLOW_PC_CONTROL, false),
+    controlPin: e.CONTROL_PIN || '',
     allowSimulate: bool(e.ALLOW_SIMULATE, false) || dryRun,
     // Fedora/GNOME desktop convenience: pop the linking QR open in the image
     // viewer on first run. Headless boxes (no DISPLAY/WAYLAND_DISPLAY) skip it

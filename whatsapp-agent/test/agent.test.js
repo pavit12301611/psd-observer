@@ -11,6 +11,7 @@ import * as tools from '../src/tools.js';
 import { Store } from '../src/store.js';
 import { createAgent } from '../src/commands.js';
 import { Mailbox } from '../src/mailbox.js';
+import * as pcctl from '../src/pccontrol.js';
 
 const OWNER = '919528923866';
 const AGENT = '918859555795';
@@ -136,6 +137,55 @@ test('no AI brain → helpful offline hint, never a crash or a paid call', async
   const reply = await agent.handle('write me a poem about rains');
   assert.match(reply, /Ollama/);
   assert.match(await agent.handle('/model'), /Provider mode/);
+});
+
+test('pc control: output parsers + ydotool/xdotool key mapping', () => {
+  assert.deepEqual(pcctl.parseWpctlVolume('Volume: 0.45'), { percent: 45, muted: false });
+  assert.deepEqual(pcctl.parseWpctlVolume('Volume: 1.00 [MUTED]'), { percent: 100, muted: true });
+  assert.equal(pcctl.parsePactlVolume('Volume: front-left: 65536 / 100% / 0.00 dB'), 100);
+  assert.equal(pcctl.parseBrightnessMachine('intel_backlight,backlight,937,47%,2000'), 47);
+  assert.deepEqual(pcctl.ydotoolKeyArgs('ctrl+l'), ['29:1', '38:1', '38:0', '29:0']);
+  assert.deepEqual(pcctl.ydotoolKeyArgs('alt+f4'), ['56:1', '62:1', '62:0', '56:0']);
+  assert.throws(() => pcctl.ydotoolKeyArgs('banana+x'));
+  assert.equal(pcctl.normalizeKeyForXdotool('ctrl+enter'), 'ctrl+Return');
+  assert.equal(pcctl.normalizeKeyForXdotool('alt+tab'), 'alt+Tab');
+});
+
+test('pc control: home-file guard blocks escapes and secrets', async () => {
+  const home = os.homedir();
+  const inside = fs.mkdtempSync(path.join(home, 'wa-test-'));
+  try {
+    const file = path.join(inside, 'note.txt');
+    fs.writeFileSync(file, 'hello');
+    assert.equal(pcctl.resolveHomeFile(file).ok, true);
+    assert.equal(pcctl.resolveHomeFile('~/../../etc/passwd').ok, false);
+    assert.equal(pcctl.resolveHomeFile('/etc/passwd').ok, false);
+    assert.equal(pcctl.resolveHomeFile(path.join(home, '.ssh', 'id_ed25519')).reason.length > 0, true);
+    assert.equal(pcctl.resolveHomeFile(path.join(inside, 'missing.txt')).ok, false);
+    const found = await pcctl.findFiles('note.txt', { maxDepth: 1 });
+    assert.ok(found.some((f) => f.endsWith('note.txt')));
+  } finally {
+    fs.rmSync(inside, { recursive: true, force: true });
+  }
+});
+
+test('pc control: tier-2 input/power is gated off by default, tier-1 works', async () => {
+  const off = makeAgent();
+  assert.match(await off.agent.handle('/pc type hello'), /ALLOW_PC_CONTROL=false/);
+  assert.match(await off.agent.handle('/pc shutdown'), /ALLOW_PC_CONTROL=false/);
+  assert.match(await off.agent.handle('/pc status'), /CPU:/);
+  assert.match(await off.agent.handle('/pc top'), /Top processes/);
+  assert.match(await off.agent.handle('/status'), /input\+power off/);
+
+  const on = makeAgent({ allowPcControl: true });
+  const ask = await on.agent.handle('/pc suspend');
+  assert.match(ask, /confirm/); // asks first, does NOT suspend immediately
+  assert.match(await on.agent.handle('/pc cancel'), /Cancelled/);
+  assert.match(await on.agent.handle('/pc confirm'), /Nothing is waiting/);
+
+  const pinned = makeAgent({ allowPcControl: true, controlPin: '1234' });
+  assert.match(await pinned.agent.handle('/pc key ctrl+l'), /needs your PIN/);
+  assert.match(await pinned.agent.handle('/pc key 9999 ctrl+l'), /needs your PIN/);
 });
 
 test('mailbox: message is offered to Observer, reply resolves the waiter once', async () => {
