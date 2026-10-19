@@ -223,6 +223,7 @@ sent as-is through the linked device.
 | Node is 18 or older | Upgrade Fedora / NodeSource RPM / `nvm install 22` (see §1) |
 | Service starts only while logged in | `loginctl enable-linger $USER`, verify with `loginctl show-user $USER -p Linger` |
 | No QR visible under systemd | It's in the journal: `journalctl --user -u observer-whatsapp-agent -f` (auto-open is disabled headless on purpose), or open the dashboard URL from the logs |
+| Unlinked from the phone / "logged out" | Don't delete anything by hand: the agent archives the dead login (`auth_info_loggedout_*`) and a fresh QR auto-appears in `journalctl --user -u observer-whatsapp-agent -f` — scan it with the `8859555795` phone. One-command manual version: `./scripts/relink-whatsapp.sh` (data/ is never touched) |
 | Podman: permission denied on `auth_info` | Missing SELinux label — the compose file's `:Z` flags fix it |
 | Moved `auth_info/` from another disk, agent can't read it | `restorecon -Rv whatsapp-agent/` |
 | `/pc battery` says no battery | Desktop/VM — no `BAT*` under `/sys/class/power_supply`; expected |

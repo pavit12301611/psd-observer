@@ -78,6 +78,22 @@ const chunkText = (text, size = 3800) => {
   return chunks;
 };
 
+/**
+ * Move a permanently-dead WhatsApp login (phone unlinked / session logged
+ * out) aside so a fresh link can start in its place. The dead login is KEPT
+ * as a sibling folder `auth_info_loggedout_<timestamp>/` — never deleted,
+ * never overwritten (a same-second second archive gets a `-1`, `-2`, …
+ * suffix). Returns the backup path, or null when there was nothing to move.
+ */
+export function archiveDeadAuthDir(authDir, now = new Date()) {
+  if (!authDir || !fs.existsSync(authDir)) return null;
+  const stamp = now.toISOString().replace(/[:.]/g, '-').replace('T', '_').replace(/Z$/, '');
+  let backup = `${authDir}_loggedout_${stamp}`;
+  for (let n = 1; fs.existsSync(backup); n++) backup = `${authDir}_loggedout_${stamp}-${n}`;
+  fs.renameSync(authDir, backup);
+  return backup;
+}
+
 export function createWhatsApp({ config, store, agent, log = console }) {
   const state = {
     sock: null,
@@ -91,6 +107,8 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     rateStamps: [],
     reconnectDelay: 2_000,
     qrOpened: false,
+    relinkAttempts: 0,   // auto-relinks after a phone-side unlink (capped, reset on connect)
+    relinkScheduled: false,
     stopped: false,
     simulated: [], // dry-run sent log for tests/dashboard
   };
@@ -374,6 +392,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         state.conn = 'connected';
         state.lastQr = null;
         state.reconnectDelay = 2_000;
+        state.relinkAttempts = 0;
         state.me = normalizeNumber(jidToNumber(sock.user?.id) || sock.user?.id || '');
         log.info?.(`[wa] ✅ Connected as +${state.me} — listening ONLY to owner +${config.ownerNumber}`);
         // Proactively learn the owner's LID (WhatsApp may hide the number behind it).
@@ -397,9 +416,41 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         state.conn = 'disconnected';
         state.sock = null;
         if (state.stopped) return;
-        if (code === DisconnectReason.loggedOut) {
-          log.error?.(`[wa] ❌ Logged out. Delete the session and link again: remove ${config.authDir}, restart, scan the QR with the agent phone.`);
-          state.conn = 'logged out — delete auth_info and relink';
+        if (code === DisconnectReason.loggedOut || code === 401) {
+          // The agent phone unlinked this device (or WhatsApp dropped the
+          // session). These creds can NEVER log in again, so reconnecting
+          // with them is pointless. Archive the dead login (timestamped,
+          // never deleted) and start a FRESH link automatically: a new QR
+          // shows up in the logs/dashboard and the owner just scans it with
+          // the agent phone. Capped so a banned/kicked number can't loop
+          // forever; the counter resets on every successful connect.
+          if (config.autoRelink !== false && !state.relinkScheduled && state.relinkAttempts < 3) {
+            state.relinkAttempts += 1;
+            state.relinkScheduled = true;
+            state.conn = 'logged out — preparing a fresh QR to scan';
+            log.error?.(`[wa] ❌ WhatsApp logged this device out (unlinked from the phone?). The dead login will be backed up and a FRESH QR generated automatically — keep watching these logs (or open the dashboard) and scan it with the AGENT phone (+${config.agentNumber}): WhatsApp → Linked devices → Link a device.`);
+            setTimeout(() => {
+              state.relinkScheduled = false;
+              if (state.stopped) return;
+              try {
+                const backup = archiveDeadAuthDir(config.authDir);
+                if (backup) log.info?.(`[wa] dead login backed up to ${backup} (safe to delete later — but never share it). Starting a fresh link now…`);
+              } catch (err) {
+                state.conn = 'logged out — manual relink needed';
+                log.error?.(`[wa] could not back up the dead login (${err.message}). Manual fix: stop the agent, run ./scripts/relink-whatsapp.sh`);
+                return;
+              }
+              state.me = null;
+              state.pairingCode = null;
+              state.qrOpened = false; // let the fresh QR pop open again on the desktop
+              state.ownerLids = new Set();
+              state.reconnectDelay = 2_000;
+              start().catch((e) => log.error?.(`[wa] fresh link start failed: ${e.message}`));
+            }, 1_500).unref?.();
+            return;
+          }
+          log.error?.(`[wa] ❌ Logged out. Easiest fix: run ./scripts/relink-whatsapp.sh (backs up the dead login, restarts, shows a fresh QR). Manual fix: stop the agent, rename/remove ${config.authDir}, restart, scan the QR with the agent phone.`);
+          state.conn = 'logged out — relink needed';
           return;
         }
         const delay = code === DisconnectReason.restartRequired ? 500 : state.reconnectDelay;

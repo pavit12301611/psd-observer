@@ -13,6 +13,7 @@ import { createAgent } from '../src/commands.js';
 import { Mailbox } from '../src/mailbox.js';
 import * as pcctl from '../src/pccontrol.js';
 import * as finder from '../src/elementfinder.js';
+import { archiveDeadAuthDir } from '../src/whatsapp.js';
 
 const OWNER = '919528923866';
 const AGENT = '918859555795';
@@ -233,6 +234,34 @@ test('element finder: /pc tap is tier-2 gated (off by default, PIN enforced)', a
   // Correct PIN passes the gate and fails later, honestly, on "no graphical
   // session" in this headless test environment — never a phantom click.
   assert.match(await pinned.agent.handle('/pc tap 1234 Login'), /graphical session|screenshot/i);
+});
+
+test('relink: a dead login is archived timestamped, lossless, repeat-safe (phone-unlink recovery)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-relink-'));
+  try {
+    const authDir = path.join(dir, 'auth_info');
+    const when = new Date('2026-10-19T10:11:12.000Z');
+    assert.equal(archiveDeadAuthDir(authDir, when), null); // nothing to archive yet
+
+    fs.mkdirSync(authDir);
+    fs.writeFileSync(path.join(authDir, 'creds.json'), '{"registered":true}');
+    const backup = archiveDeadAuthDir(authDir, when);
+    assert.match(backup, /auth_info_loggedout_2026-10-19_10-11-12-000$/); // sibling, timestamped
+    assert.equal(fs.existsSync(authDir), false);                            // original moved away
+    assert.equal(JSON.parse(fs.readFileSync(path.join(backup, 'creds.json'), 'utf8')).registered, true); // lossless
+
+    // Unlinked AGAIN in the same second: a second, distinct backup — the
+    // first one must not be overwritten or swallowed (the classic
+    // `mv auth_info auth_info_old` folder-inside-folder bug).
+    fs.mkdirSync(authDir);
+    fs.writeFileSync(path.join(authDir, 'creds.json'), '{"registered":true,"second":true}');
+    const backup2 = archiveDeadAuthDir(authDir, when);
+    assert.notEqual(backup2, backup);
+    assert.ok(fs.existsSync(path.join(backup, 'creds.json')));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(backup2, 'creds.json'), 'utf8')).second, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('mailbox: message is offered to Observer, reply resolves the waiter once', async () => {

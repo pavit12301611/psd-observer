@@ -54,6 +54,8 @@ Then link the agent phone **once**:
 
 The login is stored in `auth_info/` (like a browser's WhatsApp Web session). Restarting the PC/agent does **not** need a re-scan unless you log the device out from the phone. **Never share or commit `auth_info/`** — it's a full WhatsApp login for that number (it's gitignored).
 
+**Unlinked it from the phone by mistake?** No panic — and no data loss (notes/reminders live in `data/`, not in the login). The agent detects the logout, archives the dead login as `auth_info_loggedout_<timestamp>/` (kept, never auto-deleted) and automatically shows a **fresh QR** in the logs/dashboard — just scan it again with the `8859555795` phone. That's `AUTO_RELINK=true` (the default); `./scripts/relink-whatsapp.sh` (or `npm run relink`) does the same recovery manually in one command.
+
 ### Free AI brain (recommended)
 
 The official installer supports Fedora and sets Ollama up as a service:
@@ -213,8 +215,8 @@ curl -X POST localhost:8787/api/simulate -H "x-bridge-token: <token>" -H 'conten
 | Symptom | Fix |
 |---|---|
 | QR expired before scanning | It refreshes automatically; use the latest one (dashboard auto-refreshes). |
-| "Logged out — delete auth_info" | The phone removed the linked device (or WhatsApp reset it). Stop the agent, delete `auth_info/`, restart, scan again. |
-| Connected as the wrong number | You scanned with your personal phone. Stop, delete `auth_info/`, restart, scan with the **8859555795** phone. (`STRICT_AGENT_NUMBER=true` makes it refuse outright.) |
+| "Logged out" / you unlinked the device from the phone | Auto-recovered (`AUTO_RELINK=true`): the dead login is archived as `auth_info_loggedout_<timestamp>/` and a **fresh QR appears in the logs/dashboard** — just scan again with the **8859555795** phone. One-command manual fallback: `./scripts/relink-whatsapp.sh`. Your `data/` (notes/reminders) is never touched. |
+| Connected as the wrong number | You scanned with your personal phone. Run `./scripts/relink-whatsapp.sh` and scan with the **8859555795** phone. (`STRICT_AGENT_NUMBER=true` makes it refuse outright.) |
 | Agent doesn't reply to you | Check `/health` on the dashboard; confirm you messaged from `9528923866`, 1-to-1 (not a group). Logs show `ignored non-owner` with a masked number if the gate rejected it. WhatsApp's LID rollout can take one message exchange for the number mapping to appear — send once more. |
 | Replies but "no AI brain" | Install Ollama + pull the model, or check `/model`. Commands keep working meanwhile. |
 | Port 8787 busy | Set `PORT=8790` in `.env` (update the Observer bridge URL too). |

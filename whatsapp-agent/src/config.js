@@ -99,6 +99,14 @@ export function loadConfig({ dryRun = false } = {}) {
     // viewer on first run. Headless boxes (no DISPLAY/WAYLAND_DISPLAY) skip it
     // automatically; OPEN_QR=false disables it everywhere.
     openQr: bool(e.OPEN_QR, true),
+    // If the agent phone unlinks this device (or WhatsApp logs the session
+    // out), the saved creds are permanently dead — they can never log in
+    // again. Default behaviour: archive the dead login next to authDir
+    // (auth_info_loggedout_<timestamp>/, never auto-deleted) and start a
+    // fresh link automatically, so a new QR appears and the owner just scans
+    // again. AUTO_RELINK=false restores the manual flow (stop the agent,
+    // remove authDir, restart) or ./scripts/relink-whatsapp.sh.
+    autoRelink: bool(e.AUTO_RELINK, true),
 
     dataDir,
     authDir: path.resolve(ROOT, e.AUTH_DIR || 'auth_info'),
