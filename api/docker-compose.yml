@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: observer-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      observer-api:
+        condition: service_healthy
+    network_mode: "service:observer-api"
+
+  # Local Redis for quota / rate-limit state and the agent-creator log. Replaces the
+  # managed Upstash instance: at current scale a box-local Redis is simpler,
+  # ~100x faster per op, and has no per-command bill. No persistence on purpose
+  # - quota keys expire at the next UTC midnight and rate-limit keys within
+  # 60s, so a restart just resets counters slightly early, which is harmless.
+  # noeviction so a memory blowout fails loudly instead of silently dropping
+  # quota keys (the working set here is tiny; 256mb is already generous).
+  #
+  # When the API runs as more than one *concurrent* box (horizontal scale, not
+  # the manual failover swap), this has to go back to a shared/managed Redis -
+  # flip REDIS_URL in .env and restore the pool settings kept in redis_client.py.
+  redis:
+    image: redis:7-alpine
+    container_name: observer-redis
+    restart: unless-stopped
+    # appendonly, not --save "": quota counters are now monthly, so a restart
+    # without persistence hands every user and every org a fresh month's credits
+    # mid-month. appendfsync defaults to everysec, which on a loopback socket
+    # costs nothing and bounds the loss to one second of counters.
+    command: >
+      redis-server --save "" --appendonly yes
+      --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      # Without a named volume the AOF lives in the container's writable layer
+      # and is lost on `up --force-recreate`, i.e. on every deploy that rebuilds.
+      - redis-data:/data
+    networks:
+      - observer-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  observer-api:
+    build: .
+    container_name: observer-api
+    restart: unless-stopped
+    mem_limit: 6g
+    ports:
+      - "3839:3839"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # REDIS_URL comes from .env and points at the local redis service above
+      # (redis://redis:6379/0). The old Upstash rediss://... URL is kept
+      # commented in .env for the day this needs a shared Redis again.
+      #
+      # Every time key in the API is UTC: quota resets and creator-log days.
+      # Pinned so nothing depends on ambient host tz.
+      - TZ=UTC
+    volumes:
+      # Persist logs
+      - ./logs:/app/logs
+    networks:
+      - observer-network
+    # Application logs go to stdout and Docker owns retention. Without these
+    # options json-file keeps everything forever and eventually fills the disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3839/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  observer-network:
+    driver: bridge
+
+volumes:
+  redis-data:

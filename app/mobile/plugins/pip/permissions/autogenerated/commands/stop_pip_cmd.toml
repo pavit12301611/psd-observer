@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-stop-pip-cmd"
+description = "Enables the stop_pip_cmd command without any pre-configured scope."
+commands.allow = ["stop_pip_cmd"]
+
+[[permission]]
+identifier = "deny-stop-pip-cmd"
+description = "Denies the stop_pip_cmd command without any pre-configured scope."
+commands.deny = ["stop_pip_cmd"]

@@ -1,0 +1,22 @@
+[package]
+name = "observe"
+version = "0.1.1"
+edition = "2021"
+description = "CLI wrapper that sends notifications when commands complete"
+repository = "https://github.com/Roy3838/Observer"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full", "process"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "5"
+chrono = "0.4"
+dialoguer = "0.11"
+
+[[bin]]
+name = "observe"
+path = "src/main.rs"

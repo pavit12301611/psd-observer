@@ -1,0 +1,7 @@
+allowBuilds:
+  browser-tabs-lock: false
+  esbuild: false
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false
+  tesseract.js: false

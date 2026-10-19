@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Minimal permissions for the click-through overlay window. Only needs invoke (app commands are not ACL-gated) and event listening; deliberately excludes shell, http, dialog, screen-capture, global-shortcut, and deep-link.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["overlay"],
+  "permissions": [
+    "core:default"
+  ]
+}

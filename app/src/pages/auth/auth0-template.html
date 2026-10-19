@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+{% assign resolved_dir = dir | default: "auto" %}
+<html lang="{{locale}}" dir="{{resolved_dir}}">
+<head>
+  {%- auth0:head -%}
+  <style>
+    /* Observer Eye Header */
+    .observer-header {
+      display: flex;
+      justify-content: center;
+      padding: 32px 0 16px;
+    }
+
+    .eye-container {
+      width: 100px;
+      height: 100px;
+      color: #1a1a2e;
+    }
+
+    .eye-outer {
+      transition: ry 0.3s ease-in-out;
+    }
+
+    .eye-pupil {
+      transition: cx 0.1s ease-out, cy 0.1s ease-out, opacity 0.15s ease-in-out;
+    }
+
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+      .eye-container {
+        color: #ffffff;
+      }
+    }
+  </style>
+</head>
+<body class="_widget-auto-layout">
+  <!-- Observer Eye Header -->
+  <div class="observer-header">
+    <div class="eye-container" id="observer-eye">
+      <svg viewBox="-75 -75 150 150" xmlns="http://www.w3.org/2000/svg">
+        <!-- Outer ring: ellipse for close animation morphing -->
+        <ellipse
+          class="eye-outer"
+          id="eye-outer"
+          cx="0"
+          cy="0"
+          rx="67"
+          ry="67"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="12"
+        />
+        <!-- Pupil: follows see_target -->
+        <circle
+          class="eye-pupil"
+          id="eye-pupil"
+          cx="0"
+          cy="0"
+          r="18"
+          fill="currentColor"
+        />
+      </svg>
+    </div>
+  </div>
+
+  {%- auth0:widget -%}
+
+  <script>
+    (function() {
+      // Configuration
+      var R_LONG = 67;           // Outer ring radius
+      var R_SHORT = 18;          // Pupil radius
+      var IDLE_TIMEOUT = 2000;   // 2 seconds before returning to mouse tracking
+      var PUPIL_FADE_DELAY = 100; // Delay before pupil fades on close
+
+      // DOM elements
+      var container = document.getElementById('observer-eye');
+      var outer = document.getElementById('eye-outer');
+      var pupil = document.getElementById('eye-pupil');
+
+      // State
+      var seeTarget = null;      // {x, y} coordinates or null
+      var mousePos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+      var idleTimer = null;
+      var isPasswordField = false;
+      var isClosed = false;
+
+      // Initialize pupil to look down (toward inputs below)
+      updatePupilPosition(0, 20);
+
+      // Track mouse position for default see_target
+      document.addEventListener('mousemove', function(e) {
+        mousePos = { x: e.clientX, y: e.clientY };
+
+        // Only update if not in password mode and not idle-tracking input
+        if (!isPasswordField && !idleTimer) {
+          seeTarget = mousePos;
+          updatePupil();
+        }
+      });
+
+      // Event delegation: detect input focus
+      document.addEventListener('focusin', function(e) {
+        var input = e.target;
+        if (input.tagName !== 'INPUT') return;
+
+        var inputType = (input.type || input.name || '').toLowerCase();
+        isPasswordField = inputType.indexOf('password') !== -1;
+
+        if (isPasswordField) {
+          closeEye();
+        } else {
+          openEye();
+          // Look at the input field
+          seeTarget = getInputCursorPosition(input);
+          updatePupil();
+        }
+      });
+
+      // Event delegation: track typing
+      document.addEventListener('input', function(e) {
+        var input = e.target;
+        if (input.tagName !== 'INPUT') return;
+
+        // Clear any existing idle timer
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+
+        if (isPasswordField) {
+          // Keep eye closed while typing password
+          closeEye();
+        } else {
+          // Track cursor position in email/username field
+          seeTarget = getInputCursorPosition(input);
+          openEye();
+          updatePupil();
+        }
+
+        // Set idle timer: after 2s of no typing, return to mouse tracking
+        idleTimer = setTimeout(function() {
+          idleTimer = null;
+          seeTarget = mousePos;
+
+          // If password field was focused, open eye after idle
+          if (isPasswordField) {
+            openEye();
+          }
+
+          updatePupil();
+        }, IDLE_TIMEOUT);
+      });
+
+      // When focus leaves all inputs, reset
+      document.addEventListener('focusout', function(e) {
+        var relatedTarget = e.relatedTarget;
+
+        // Only reset if focus is leaving inputs entirely
+        if (!relatedTarget || relatedTarget.tagName !== 'INPUT') {
+          // Delay to allow focus to transfer
+          setTimeout(function() {
+            var activeEl = document.activeElement;
+            if (!activeEl || activeEl.tagName !== 'INPUT') {
+              isPasswordField = false;
+              openEye();
+              seeTarget = mousePos;
+              updatePupil();
+            }
+          }, 100);
+        }
+      });
+
+      /**
+       * Calculate the approximate position of the text cursor in an input
+       */
+      function getInputCursorPosition(input) {
+        var rect = input.getBoundingClientRect();
+        var charWidth = 8; // Approximate pixels per character
+        var textLength = (input.value || '').length;
+
+        // Estimate cursor X position (clamped to input width)
+        var cursorX = rect.left + Math.min(textLength * charWidth + 10, rect.width - 10);
+        var cursorY = rect.top + rect.height / 2;
+
+        return { x: cursorX, y: cursorY };
+      }
+
+      /**
+       * Update pupil position based on see_target
+       */
+      function updatePupil() {
+        if (!seeTarget || isClosed) return;
+
+        var eyeRect = container.getBoundingClientRect();
+        var eyeCenterX = eyeRect.left + eyeRect.width / 2;
+        var eyeCenterY = eyeRect.top + eyeRect.height / 2;
+
+        // Calculate angle from eye center to target
+        var dx = seeTarget.x - eyeCenterX;
+        var dy = seeTarget.y - eyeCenterY;
+        var angle = Math.atan2(dy, dx);
+
+        // Calculate distance (with max offset to keep pupil inside eye)
+        var maxOffset = R_LONG - R_SHORT - 7;
+        var distance = Math.sqrt(dx * dx + dy * dy);
+        var scaledDist = Math.min(maxOffset, distance / 8);
+
+        // Convert to pupil position
+        var pupilX = Math.cos(angle) * scaledDist;
+        var pupilY = Math.sin(angle) * scaledDist;
+
+        updatePupilPosition(pupilX, pupilY);
+      }
+
+      /**
+       * Set pupil cx/cy attributes
+       */
+      function updatePupilPosition(x, y) {
+        pupil.setAttribute('cx', x);
+        pupil.setAttribute('cy', y);
+      }
+
+      /**
+       * Close the eye: collapse outer ring to horizontal line, fade pupil
+       */
+      function closeEye() {
+        if (isClosed) return;
+        isClosed = true;
+        seeTarget = null;
+
+        // Animate outer ellipse: ry collapses to near stroke width
+        outer.setAttribute('ry', '6');
+
+        // Fade pupil with slight delay (so it disappears as "eyelid" closes)
+        setTimeout(function() {
+          pupil.style.opacity = '0';
+        }, PUPIL_FADE_DELAY);
+      }
+
+      /**
+       * Open the eye: restore outer ring to circle, show pupil
+       */
+      function openEye() {
+        if (!isClosed) return;
+        isClosed = false;
+
+        // Restore outer ellipse to circle
+        outer.setAttribute('ry', R_LONG);
+
+        // Show pupil
+        pupil.style.opacity = '1';
+
+        // Resume tracking
+        seeTarget = mousePos;
+        updatePupil();
+      }
+    })();
+  </script>
+</body>
+</html>

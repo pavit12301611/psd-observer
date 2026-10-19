@@ -1,0 +1,18 @@
+# Containerfile — Fedora-first: build/run with Podman (preinstalled on Fedora).
+#   podman build -t observer-whatsapp-agent .
+#   podman-compose up -d            (sudo dnf install podman-compose)
+# It is also a valid Dockerfile (docker build works unchanged).
+# NOTE: running directly on the host (install-fedora.sh + systemd) is the
+# primary path — Observer's screen/camera features need the host anyway.
+FROM docker.io/library/node:22-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY src ./src
+COPY .env.example ./
+# Session + data survive restarts via volumes (see docker-compose.yml).
+# auth_info/ is the WhatsApp login for the agent number — keep it private.
+VOLUME ["/app/auth_info", "/app/data"]
+ENV HOST=0.0.0.0 PORT=8787 OPEN_QR=false
+EXPOSE 8787
+CMD ["node", "src/index.js"]

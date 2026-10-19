@@ -1,0 +1,20 @@
+id: memory_summarization
+name: Memory Summarization Agent
+description: This agent reads another agent's memories and summarizes them so that context window length doesn't become a problem.
+status: stopped
+model_name: deepseek-r1:8b
+loop_interval_seconds: 300
+system_prompt: |
+  Hi deepseek please summarize the text below:
+  
+  $MEMORY@activity_tracking_agent
+  
+  respond with
+  SUMMARY: summary of text you saw 
+code: |
+  //SUMMARY
+  function(line) {
+    utilities.updateAgentMemory(agentId, line);
+  }
+memory: |
+  The user is actively developing a React application using TypeScript and Vite, engaging in remote work by screen sharing, setting up build commands with npm, updating GitHub repositories, and configuring network settings. They are interacting with AI tracking agents for task management, communicating via Telegram, contributing to open-source projects, and monitoring system logs while working on their web-based application.

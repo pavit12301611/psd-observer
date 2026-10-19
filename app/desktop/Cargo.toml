@@ -1,0 +1,65 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# --- Build Dependencies ---
+[build-dependencies]
+tauri-build = { version = "2.0.5", features = [] }
+
+# --- Runtime Dependencies ---
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.3.0", features = [ "macos-private-api", "tray-icon"] }
+tauri-plugin-log = "2.8"
+
+# Keep the shell plugin for default actions
+tauri-plugin-shell = "2.3"
+tauri-plugin-os = "2.3"
+
+# Web server Dependencies (desktop-only but listed here for compatibility)
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1.17", features = ["sync"] }
+axum = { version = "0.7", features = ["json"] }
+tower-http = { version = "0.5.0", features = ["fs", "cors"] }
+futures = "0.3"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+http-body-util = "0.1"
+tauri-plugin-dialog = "2.6"
+tauri-plugin-notification = "2.3"
+uuid = { version = "1.8", features = ["v4"] }
+
+# Desktop-specific plugins
+tauri-plugin-deep-link = "2"
+tauri-plugin-updater = "2.9"
+tauri-plugin-global-shortcut = "2"
+enigo = "0.6"
+screenshots = "0.8.5"
+base64 = "0.21.0"
+image = "0.24.6"
+tauri-plugin-screenshots = "2.2.0"
+tauri-plugin-opener = "2"
+tauri-plugin-http = "2"
+tauri-plugin-screen-capture = { path = "../plugins/screen-capture" }
+tauri-plugin-llm-engine = { path = "../plugins/llm_engine" }
+futures-util = "0.3"
+dirs = "5"
+sysinfo = "0.33"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[patch.crates-io]
+llama-cpp-2     = { git = "https://github.com/Roy3838/llama-cpp-rs", branch = "feat/mtmd-image-token-budget" }
+llama-cpp-sys-2 = { git = "https://github.com/Roy3838/llama-cpp-rs", branch = "feat/mtmd-image-token-budget" }

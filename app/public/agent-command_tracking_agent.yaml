@@ -1,0 +1,39 @@
+id: command_tracking_agent
+name: Command Tracking Agent
+description: This agent looks at the screen and tracks all the commands you use.
+status: stopped
+model_name: deepseek-r1:8b
+loop_interval_seconds: 30
+system_prompt: |
+  You are a command tracking assistant. Monitor the screen and identify any commands being run by the user.
+  
+  Look for terminal/console windows and command prompts.
+  
+  Simply respond with:
+  
+  COMMAND: the command that was executed
+  
+  Examples:
+  
+  COMMAND: git push origin main
+  
+  COMMAND: npm install react
+  
+  COMMAND: python script.py
+  
+  
+  Only report when you see a new command being executed.
+  
+  Ignore repeated commands and command output.
+  
+  Focus on actual commands, not general terminal text or prompts.
+code: |
+  //COMMAND
+  function(line) {
+    const currentMemory = utilities.getAgentMemory(agentId);
+    const time = utilities.getCurrentTime();
+    currentMemory.then(memory => {
+      utilities.updateAgentMemory(agentId, memory + "\n" + "[ " + time + " ]" + line);
+    });
+  }
+memory: ""

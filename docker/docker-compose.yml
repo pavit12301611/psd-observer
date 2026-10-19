@@ -1,0 +1,68 @@
+# Observer AI - Docker Compose Setup
+# ==================================
+# This file runs the complete Observer AI stack locally.
+# To configure, simply edit the 'environment' section below.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_service
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment for NVIDIA GPU support
+    # runtime: nvidia
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+  # This container runs both the Web UI and the backend proxy.
+  observer_app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+       - VITE_DISABLE_AUTH=false
+
+    container_name: observer_app_and_proxy
+    ports:
+      - "8080:80"    # Web UI (HTTP)
+      - "3838:3838"  # Backend Proxy (use for SSL or legacy connections)
+    volumes:
+      # Mount the Docker socket to allow model management from the UI.
+      # WARNING: This grants the container significant privileges on your host.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    
+    # --- THIS IS THE NEW CONTROL PANEL ---
+    environment:
+      # Enables the '/exec' endpoint for managing Ollama models from the UI.
+      # Recommended: true. Set to 'false' for maximum security if you prefer managing models manually.
+      - ENABLE_DOCKER_EXEC=true
+
+      # Enables an HTTPS proxy on port 3838 with a self-signed certificate.
+      # Useful for connecting from other devices.
+      # Default: false (for the simplest local setup).
+      - ENABLE_SSL=false
+      
+      # Forwards requests to Ollama's legacy '/api/generate' endpoint.
+      # Not needed for modern Ollama versions. Keep 'false' unless you have a specific reason.
+      - ENABLE_LEGACY_TRANSLATION=true
+
+      # The name of the ollama container for the 'exec' feature to target.
+      - OLLAMA_CONTAINER_NAME=ollama_service
+      
+      # --- THIS IS THE FIX --
+      # Tells the Python proxy how to find the Ollama service within the Docker network.
+      - OLLAMA_SERVICE_HOST=ollama
+
+volumes:
+  ollama_data: {}

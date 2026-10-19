@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "observer-ollama"
+version = "0.1.8"
+description = "HTTPS proxy with CORS support for Ollama"
+authors = [
+    {name = "Roy Medina", email = "roymedina@me.com"}
+]
+license = {file = "LICENSE"}
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "ollama>=0.4.7"  # Official Python client for Ollama
+]
+[tool.setuptools]
+packages = ["observer_ollama"]
+
+[project.scripts]
+observer-ollama = "observer_ollama.main:main"

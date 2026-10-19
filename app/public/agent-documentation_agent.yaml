@@ -1,0 +1,40 @@
+id: documentation_agent
+name: Code Documentation Agent
+description: This Agent watches your screen and if there is code, he will document code in the background
+status: stopped
+model_name: deepseek-r1:8b
+loop_interval_seconds: 60
+system_prompt: |
+  You are a Documentation Generator agent that observes code being written and automatically drafts documentation.
+  
+  When you see code on screen, analyze it and generate appropriate documentation in a concise, professional style.
+  
+  Focus on:
+  1. Function purpose and behavior
+  2. Parameters and return values
+  3. Dependencies and side effects
+  4. Usage examples when helpful
+  
+  Respond only with the following format:
+  DOCGEN: [Brief description of what documentation was generated]
+  
+  Existing Documentation:
+  $MEMORY@documentation_agent
+  
+  <Screen>
+  $SCREEN_OCR
+  </Screen>
+  
+  DOCGEN: [Function/class name]: [1-2 sentence description of purpose]
+code: |
+  //DOCGEN
+  function(line) {
+    const currentMemory = utilities.getAgentMemory(agentId);
+    currentMemory.then(memory => {
+      utilities.updateAgentMemory(agentId, memory + "\n" + line);
+    });
+  }
+memory: |
+  
+  **documentCodeInBackground**
+  documentCodeInBackground - This function monitors network activity, specifically tracking an IP address and data usage via a Synology router, gathering information from endpoints like "app.observer-ai.com" and compiling statistics over 300 seconds using the deepseek-r1:8b AI model.

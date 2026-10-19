@@ -1,0 +1,78 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Observer",
+  "version": "3.1.1",
+  "identifier": "com.observer.ai",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3001"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Observer",
+        "width": 1200,
+        "height": 1000,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": false
+      },
+      {
+        "label": "screen-selector",
+        "url": "/screen-selector",
+        "title": "Select Screen or Window",
+        "width": 900,
+        "height": 650,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default", "overlay", "screen-selector"]
+    },
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../dist"
+    ],
+    "externalBin": [
+      "binaries/observe"
+    ],
+    "macOS": {
+      "entitlements": "./Entitlements.plist",
+      "signingIdentity": "Developer ID Application: Luis Rodrigo Medina (55RWNTY4PH)"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": [
+        { "schemes": ["observer"] }
+      ]
+    },
+    "updater": {
+      "active": true,
+      "dialog": true, 
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExODcyRkI1MDUwRDkyRUIKUldUcmtnMEZ0UytIRVMxZWEvcEFsZHQzRmlCZWZONjlDVENKOUFnUWk3d1ZVZERkU2tvOUFlTjgK",
+      "endpoints": [
+        "https://github.com/Roy3838/Observer/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

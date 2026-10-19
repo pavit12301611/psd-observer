@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-read-broadcast-debug-log-cmd"
+description = "Enables the read_broadcast_debug_log_cmd command without any pre-configured scope."
+commands.allow = ["read_broadcast_debug_log_cmd"]
+
+[[permission]]
+identifier = "deny-read-broadcast-debug-log-cmd"
+description = "Denies the read_broadcast_debug_log_cmd command without any pre-configured scope."
+commands.deny = ["read_broadcast_debug_log_cmd"]

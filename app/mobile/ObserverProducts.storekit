@@ -1,0 +1,104 @@
+{
+  "identifier" : "ObserverProducts",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6479359942",
+    "_developerTeamID" : "55RWNTY4PH",
+    "_lastSynchronizedDate" : 760536600.96829402
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21572316",
+      "localizations" : [
+
+      ],
+      "name" : "Observer AI Subscriptions",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6739012345",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Access to Plus tier features",
+              "displayName" : "Observer Plus",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.observer.ai.plus.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Observer Plus Monthly",
+          "subscriptionGroupID" : "21572316",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "19.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6739012346",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Access to Pro tier features",
+              "displayName" : "Observer Pro",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.observer.ai.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Observer Pro Monthly",
+          "subscriptionGroupID" : "21572316",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "39.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "6739012347",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Access to Max tier features",
+              "displayName" : "Observer Max",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.observer.ai.max.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Observer Max Monthly",
+          "subscriptionGroupID" : "21572316",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

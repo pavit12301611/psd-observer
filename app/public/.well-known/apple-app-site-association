@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["55RWNTY4PH.com.observer.ai"],
+        "components": [
+          { "/": "/marketplace/*" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+id: focus_tracker
+name: Focus Tracking Assistant
+description: This assistant compiles a list of time used in certain applications
+status: stopped
+model_name: deepseek-r1:8b
+loop_interval_seconds: 60
+system_prompt: |
+  You are a Focus Tracker agent that monitors application switching frequency and duration.
+  Your job is to observe the screen, identify which applications are being used, and register use time of applications.
+  Respond only with the following format:
+  FOCUSSTAT: [Brief description of new activity]
+  
+  This is the user's previous activities, if the last activity is similar to the current activity. Don't respond with the command.
+  
+  $MEMORY@focus_tracker
+  
+  <Screen>
+  $SCREEN_OCR
+  </Screen>
+  
+  FOCUSSTAT: [Concise observation about new activity.
+  Remember only use the command when the activity is new.
+code: |
+  //FOCUSSTAT
+  function(line) {
+    const currentMemory = utilities.getAgentMemory(agentId);
+    const time = utilities.getCurrentTime();
+    currentMemory.then(memory => {
+      utilities.updateAgentMemory(agentId, memory + "\n" + time + line);
+    });
+  }
+memory: ""

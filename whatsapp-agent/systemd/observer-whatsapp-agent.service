@@ -1,0 +1,47 @@
+# observer-whatsapp-agent.service — systemd *user* service (template).
+#
+# Easiest: run scripts/install-systemd.sh — it fills the two placeholders
+# below with this machine's real paths and enables the service. Manual use:
+# replace __NODE__ (output of `command -v node`) and __AGENT_DIR__ (absolute
+# path of the whatsapp-agent folder), then:
+#   mkdir -p ~/.config/systemd/user
+#   cp observer-whatsapp-agent.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now observer-whatsapp-agent
+#   loginctl enable-linger "$USER"   # start at boot, keep running after logout
+#
+# A *user* service is deliberate on Fedora: it runs with your user's SELinux
+# context in your home directory, so auth_info/ (the WhatsApp login) and data/
+# keep correct labels with no semanage/restorecon fiddling, and no root is
+# involved in running a personal WhatsApp session.
+
+[Unit]
+Description=Observer WhatsApp Agent (free native WhatsApp, owner-only)
+Documentation=file:__AGENT_DIR__/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__AGENT_DIR__
+# The agent also loads .env itself; EnvironmentFile keeps systemd's view in sync.
+EnvironmentFile=-__AGENT_DIR__/.env
+ExecStart=__NODE__ src/index.js
+Restart=on-failure
+RestartSec=5
+# Headless under systemd: no desktop to pop the QR into (it is printed in the
+# journal and served on the dashboard instead).
+Environment=OPEN_QR=false
+
+# Light hardening that is safe for a home-directory user service. NOTE:
+# ProtectHome= is intentionally absent — the agent must write auth_info/ and
+# data/ inside its home-based WorkingDirectory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target
