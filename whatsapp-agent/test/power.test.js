@@ -10,10 +10,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import zlib from 'node:zlib';
 
 import * as nlp from '../src/nlp.js';
 import * as apps from '../src/apps.js';
 import * as files from '../src/files.js';
+import * as pc from '../src/pccontrol.js';
+import { imageStats } from '../src/imaging.js';
 import { createActions } from '../src/actions.js';
 import { createAgentLoop } from '../src/agentloop.js';
 import { createAgent } from '../src/commands.js';
@@ -481,4 +484,145 @@ test('replyForApp: images become data URLs, documents keep their name', () => {
   assert.equal(out.documentName, 'a.pdf');
   assert.deepEqual(replyForApp(null), { ok: true, text: '' });
   assert.deepEqual(replyForApp('plain'), { ok: true, text: 'plain' });
+});
+
+// ── black-screenshot detection + Wayland plumbing ───────────────────────────
+
+/** Tiny PNG writer so tests can build a black or white image with no deps. */
+function makePng(size, rgb) {
+  const raw = Buffer.alloc(size * (size * 3 + 1));
+  let offset = 0;
+  for (let y = 0; y < size; y++) {
+    raw[offset++] = 0;
+    for (let x = 0; x < size; x++) {
+      raw[offset++] = rgb[0];
+      raw[offset++] = rgb[1];
+      raw[offset++] = rgb[2];
+    }
+  }
+  const chunk = (type, data) => {
+    const typeBuf = Buffer.from(type, 'ascii');
+    const body = Buffer.concat([typeBuf, data]);
+    const out = Buffer.alloc(8 + data.length + 4);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(zlib.crc32 ? zlib.crc32(body) >>> 0 : 0, 8 + data.length);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2; // truecolour
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+test('imaging: a black Wayland screenshot is detected as blank', () => {
+  const black = imageStats(makePng(16, [0, 0, 0]));
+  assert.equal(black.blank, true);
+  assert.equal(black.mean, 0);
+  assert.equal(black.width, 16);
+  assert.equal(black.height, 16);
+
+  const white = imageStats(makePng(16, [255, 255, 255]));
+  assert.equal(white.blank, false);
+  assert.ok(white.mean > 250);
+
+  // Real PNGs from the icon generator must never be called blank.
+  assert.equal(imageStats(iconPng(96)).blank, false);
+  // Unknown/garbage input must not block a screenshot.
+  assert.equal(imageStats(Buffer.from('not a png')).blank, false);
+  assert.equal(imageStats(Buffer.from('not a png')).unknown, true);
+});
+
+test('pccontrol: xdg-desktop-portal Response parsing', () => {
+  const ok = pc.parsePortalScreenshotResponse(
+    "[.org.freedesktop.portal.Screenshot] Response (uint32 0, {'uri': <'file:///home/u/Pictures/Screenshot%20from%202026.png'>})",
+  );
+  assert.equal(ok.ok, true);
+  assert.equal(ok.path, '/home/u/Pictures/Screenshot from 2026.png');
+
+  const cancelled = pc.parsePortalScreenshotResponse('Response (uint32 1, {})');
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(pc.parsePortalScreenshotResponse('nothing useful'), null);
+});
+
+test('pccontrol: session + input diagnostics never throw and describe reality', () => {
+  const session = pc.sessionInfo();
+  assert.ok(['wayland', 'x11', 'headless'].includes(session.type));
+  assert.equal(typeof session.graphical, 'boolean');
+  // displayEnv must not point at a display that does not exist.
+  const env = pc.displayEnv();
+  if (!session.x11) assert.equal(env.DISPLAY, undefined);
+  if (!session.wayland) assert.equal(env.WAYLAND_DISPLAY, undefined);
+
+  const input = pc.inputDiagnostics();
+  assert.equal(typeof input.ydotoolDaemon, 'boolean');
+  assert.equal(typeof input.uinput, 'boolean');
+});
+
+test('actions: doctor + mouse move/scroll are registered', async () => {
+  const dir = tempDir();
+  try {
+    const actions = createActions({ config: makeConfig(dir), store: new Store(path.join(dir, 'd.json')), log: silent });
+    const names = actions.toolSchemas().map((t) => t.name);
+    for (const name of ['doctor', 'move_mouse', 'scroll']) assert.ok(names.includes(name), `${name} missing`);
+    const report = await actions.execute('doctor', {}, {});
+    assert.equal(typeof report.text, 'string');
+    assert.match(report.text, /Doctor/);
+    assert.match(report.text, /session:/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pccontrol: a black capture is rejected and explained (Wayland reality)', async () => {
+  const dir = tempDir();
+  const shimDir = path.join(dir, 'bin');
+  const runtimeDir = path.join(dir, 'run');
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(path.join(runtimeDir, 'wayland-0'), ''); // fake compositor socket
+
+  const writePng = (file, rgb) => fs.writeFileSync(file, makePng(8, rgb));
+  const shim = (name, body) => {
+    const p = path.join(shimDir, name);
+    fs.writeFileSync(p, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  };
+  // grim "succeeds" and hands back a black frame — exactly what Wayland does.
+  shim('grim', `node -e "process.stdout.write('')" ; printf '%s' "${makePng(8, [0, 0, 0]).toString('base64')}" | base64 -d > "$1"`);
+
+  const saved = { PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE };
+  process.env.PATH = `${shimDir}:${saved.PATH}`;
+  process.env.XDG_RUNTIME_DIR = runtimeDir;
+  process.env.XDG_SESSION_TYPE = 'wayland';
+  pc.detectSockets({ force: true });
+  try {
+    await assert.rejects(pc.captureScreenshot(), (err) => {
+      assert.match(err.message, /black image/);
+      assert.match(err.message, /xdg-desktop-portal/);
+      return true;
+    });
+
+    // Swap in a shim that returns a real (white) screenshot: it must be accepted.
+    shim('grim', `printf '%s' "${makePng(8, [255, 255, 255]).toString('base64')}" | base64 -d > "$1"`);
+    const shot = await pc.captureScreenshot();
+    assert.ok(shot.length > 0);
+    assert.equal(imageStats(shot).blank, false);
+    writePng(path.join(dir, 'unused.png'), [1, 2, 3]);
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.XDG_RUNTIME_DIR === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = saved.XDG_RUNTIME_DIR;
+    if (saved.XDG_SESSION_TYPE === undefined) delete process.env.XDG_SESSION_TYPE;
+    else process.env.XDG_SESSION_TYPE = saved.XDG_SESSION_TYPE;
+    pc.detectSockets({ force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

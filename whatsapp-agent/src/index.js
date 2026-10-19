@@ -9,6 +9,7 @@ import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
 import { distroPrettyName } from './tools.js';
+import { sessionInfo, inputDiagnostics } from './pccontrol.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -59,6 +60,15 @@ console.info(`   Access level: ${config.accessLevel} · full PC control (Observe
 console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
 const distroLine = distroPrettyName();
 if (distroLine) console.info(`   OS: ${distroLine}`);
+// Say up-front whether screen control can work at all in this session — this
+// is the #1 reason "it can't operate my PC" (boot-time service, no desktop yet).
+const session = sessionInfo();
+const input = inputDiagnostics();
+console.info(`   Desktop: ${session.graphical ? `${session.type} session detected` : 'none detected yet — log in on the PC, then restart the service'}`
+  + ` · keyboard/mouse: ${input.ydotoolDaemon ? 'ydotool ready' : input.xdotool ? 'xdotool' : input.wtype ? 'wtype' : 'not available (run ./scripts/fix-desktop.sh)'}`);
+if (!session.graphical || !(input.ydotoolDaemon || input.xdotool || input.wtype)) {
+  console.info('   If screenshots/typing fail, send /doctor on WhatsApp — it prints the exact fix.');
+}
 if (underSystemd) console.info('   Running under systemd — logs: journalctl --user -u observer-whatsapp-agent -f');
 
 const lanIps = Object.values(os.networkInterfaces()).flat()

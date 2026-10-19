@@ -191,6 +191,11 @@ export function parseIntent(input) {
     if (command && !/^(?:app|karo)$/i.test(command)) return asCmd('run', command);
   }
 
+  // ── troubleshooting ───────────────────────────────────────────────────────
+  if (/^(?:doctor|diagnose|diagnostics|health|healthcheck|sab\s+theek|kya\s+kaam\s+nahi|kya\s+theek\s+nahi|screenshot\s+(?:kaam\s+nahi|black|kaala)|why\s+(?:is|are)\s+(?:my\s+)?screenshot)\b/i.test(text)) {
+    return asCmd('doctor');
+  }
+
   // ── meta ──────────────────────────────────────────────────────────────────
   if (/^(?:help|commands|kya\s+kar\s+sakte\s+ho|what\s+can\s+you\s+do|capabilities|features|tum\s+kya\s+kar\s+sakte\s+ho)$/i.test(text)) return asCmd('help');
   return null;

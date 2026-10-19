@@ -96,7 +96,7 @@ Apne number `+91 95289 23866` se agent number ko WhatsApp karo:
 Phir ye try karo:
 
 ```
-/access                    → 57 tools, level full, kya allowed hai
+/access                    → 60 tools, level full, kya allowed hai
 /pc status                 → laptop ki halat
 /screenshot                → laptop ka screenshot
 chrome kholo               → (Hinglish bhi chalta hai)
@@ -153,6 +153,31 @@ Foreground (systemd ke bina) chalana ho:
 
 ---
 
+## 8b. Screenshot kaala aa raha / PC control kaam nahi kar raha? (Wayland)
+
+Fedora GNOME Wayland pe purane screenshot tools "chalte" hain par **kaali image**
+dete hain, aur typing/clicking ke liye alag driver chahiye. Ek command:
+
+```bash
+./scripts/fix-desktop.sh
+```
+
+Phir WhatsApp pe **`/doctor`** bhejo — asli screenshot leke, brightness naap ke,
+har tool check karke exact fix batayega.
+
+- Pehli screenshot pe PC screen pe **"Allow screenshot?"** dialog aayega →
+  *Allow* / *Always allow* dabao.
+- Typing/clicking ke liye `ydotool` ka daemon chahiye:
+  `sudo systemctl enable --now ydotool` + `/dev/uinput` hona chahiye.
+- Jo **kabhi nahi** hoga (OS ki security, by design): lock screen / password
+  prompt me type karna, jab koi logged-in na ho tab screen control, aur GNOME
+  Wayland pe window list.
+
+Ab test: `/screenshot` (asli screen), `/pc type hello`, `/pc key super`,
+`/pc click 600 400`, `/pc scroll down 5`.
+
+---
+
 ## 9. Setup verify (2 minute)
 
 ```bash
@@ -162,7 +187,7 @@ node --check src/index.js     # syntax
 curl -s localhost:8787/health # {"ok":true,...}
 ```
 
-WhatsApp pe: `/access` → `57 tools`, `/model` → `Ollama · llama3.2` (ya jo bhi).
+WhatsApp pe: `/access` → `60 tools`, `/model` → `Ollama · llama3.2` (ya jo bhi).
 
 ---
 
@@ -173,7 +198,8 @@ WhatsApp pe: `/access` → `57 tools`, `/model` → `Ollama · llama3.2` (ya jo 
 | QR journal me nahi dikh raha | `journalctl --user -u observer-whatsapp-agent -f` (systemd pe auto-open band hai). Ya QR `data/qr.png` kholo. |
 | `Port 8787 is already in use` | Puraana process: `systemctl --user stop observer-whatsapp-agent` ya `pkill -f "src/index.js"`. Ya `.env` me `PORT=8788`. |
 | `No graphical session found` | Laptop ki screen pe login hona chahiye (lock screen bhi theek). Boot pe start hua tha to: `systemctl --user restart observer-whatsapp-agent`. |
-| `screenshot` kaam nahi karta (Wayland) | `sudo dnf install grim` (GNOME Wayland) — `--power` ye karta hai. |
+| **Screenshot kaali aati hai** | Wayland X11 tools ko block karta hai (exit 0 + black frame). `./scripts/fix-desktop.sh`, PC pe "Allow screenshot?" → Allow, phir `/doctor`. |
+| Typing/clicking nahi hota | `sudo dnf install ydotool && sudo systemctl enable --now ydotool`; `/dev/uinput` hona chahiye. `./scripts/fix-desktop.sh` sab kar deta hai. |
 | `volume` → `No wpctl/pactl` | `sudo dnf install wireplumber pipewire-pulseaudio` |
 | WhatsApp ne device unlink kar diya | Auto-relink on hai — journal me naya QR aayega, scan kar lo. Warna `./scripts/relink-whatsapp.sh`. |
 

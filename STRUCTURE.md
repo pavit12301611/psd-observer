@@ -75,7 +75,7 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 
 | File | Job |
 |---|---|
-| `whatsapp-agent/src/actions.js` | **One registry of 57 PC actions** with permission levels + destructive confirmations. Used by commands, offline intents and the AI. |
+| `whatsapp-agent/src/actions.js` | **One registry of 60 PC actions** with permission levels + destructive confirmations. Used by commands, offline intents and the AI. |
 | `whatsapp-agent/src/nlp.js` | Offline intent parser — “chrome kholo”, “wifi off karo”, “thesis.pdf dhundo” work with **no AI installed**. |
 | `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step. |
 | `whatsapp-agent/src/apps.js` | Discovers `.desktop` apps, launches **any** installed app, window control. |
@@ -84,6 +84,9 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 | `whatsapp-agent/src/ocr.js` | tesseract OCR for screenshots/photos, PDF/DOCX text extraction, `/look` answers. |
 | `whatsapp-agent/src/transcribe.js` | Voice notes → text (Groq Whisper free tier or local whisper.cpp). |
 | `whatsapp-agent/webapp/` | The installable phone app: `index.html`, `styles.css`, `app.js`, service worker, manifest. `src/webapp.js` generates the PNG icons. |
+| `whatsapp-agent/src/imaging.js` | Dependency-free PNG decoder: **detects black/blank Wayland screenshots** instead of sending them. |
+| `whatsapp-agent/src/doctor.js` | `/doctor` — tests screenshot, keyboard/mouse, packages, AI and access, with the exact fix for each failure. |
+| `whatsapp-agent/scripts/fix-desktop.sh` | Repairs Wayland screenshots (xdg-desktop-portal + grim), input (ydotool daemon, /dev/uinput) and the rest of the toolkit. |
 | `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/download`, `/api/action`. |
 | `whatsapp-agent/scripts/setup-remote.sh` | Free Tailscale setup so the phone app works from **outside** the house (no port-forwarding). WhatsApp commands already work from anywhere. |
 

@@ -164,6 +164,10 @@ everything else. Login attempts are rate-limited.
 /pc volume up|down|mute|50         volume
 /pc brightness 70                  brightness
 /pc media play|pause|next|prev     music/video
+/pc mousemove <x> <y>       move the pointer
+/pc scroll [up|down] [n]   wheel scrolling
+/pc click [x y] [double]   click (or find a button by label with /pc tap <label>)
+/doctor                    what is broken + the exact fix
 /pc clipboard · /pc clipset <text> clipboard
 /pc notify <text> · /pc lock       desktop notification / lock
 /wifi [status|on|off|list]         Wi-Fi
@@ -317,7 +321,8 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 | Logged out / unlinked | Auto-recovered: a fresh QR appears. Manual: `./scripts/relink-whatsapp.sh`. |
 | Agent doesn't reply | Message from `9528923866`, 1-to-1. Check `/health`; logs show `ignored non-owner` (masked). |
 | No AI answers | `ollama serve` running + `ollama pull llama3.2`, then `/model`. Commands work regardless. |
-| Screenshot fails on GNOME/Wayland | Install `grim gnome-screenshot`; Mutter may still block silent capture — `/look` uses Observer only if open, otherwise the same capture path, so KDE/X11 or `grim` is the reliable route. |
+| **Screenshot is black** | Wayland blocks X11 capture tools — they "succeed" and return a black frame. Run `./scripts/fix-desktop.sh`, approve the one-time "Allow screenshot?" prompt on the PC, then `/doctor`. The agent now rejects black captures instead of sending them, and names each tool that failed. |
+| Typing / clicking does nothing | Wayland needs ydotool's daemon: `sudo dnf install ydotool && sudo systemctl enable --now ydotool` (unit may be `ydotoold`); `/dev/uinput` must exist. `./scripts/fix-desktop.sh` sets this up, `/doctor` verifies it. |
 | OCR says install tesseract | `sudo dnf install tesseract tesseract-langpack-hin`. |
 | Voice note not transcribed | Set `GROQ_API_KEY` (free) or `WHISPER_BIN`+`WHISPER_MODEL`. |
 | Phone app unreachable | Same Wi-Fi; `HOST=0.0.0.0`; `./scripts/install-fedora.sh --phone` opens firewalld 8787. |
@@ -326,7 +331,7 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 | `wmctrl`/window control missing | `sudo dnf install wmctrl` (X11; GNOME Wayland blocks window listing). |
 | Port 8787 busy | `PORT=8790` in `.env` (update bookmarks). |
 | `/pc brightness` permission denied | `sudo usermod -aG video $USER`, log out/in. |
-| ydotool input fails | `sudo systemctl enable --now ydotool` (Wayland daemon). |
+| "It can't control my whole computer" | Send **`/doctor`** — it tests screenshot/input/OCR/AI and prints the exact fix. Limits are honest: no typing into lock screens/password prompts, nothing while nobody is logged in, no window list on GNOME Wayland. See [`../FEDORA.md`](../FEDORA.md#black-screenshots--typing--mouse-not-working-wayland). |
 | Podman permission denied on `auth_info` | Keep the `:Z` volume flags. |
 
 ---
@@ -334,8 +339,9 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 ## 10. Tests
 
 ```bash
-npm test     # 31 offline tests: owner gate, intents, actions, permissions,
-             # confirmations, AI tool loop, HTTP API, PWA icons
+npm test     # 36 offline tests: owner gate, intents, actions, permissions,
+             # confirmations, AI tool loop, HTTP API, PWA icons, black-frame
+             # detection, portal parsing, doctor
 npm run demo # dry-run: phone app + commands, no WhatsApp connection
 ```
 

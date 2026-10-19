@@ -123,6 +123,74 @@ Two honest caveats:
   Telegram or Tailscale alike. WhatsApp itself also queues messages until the
   link is back.
 
+### Black screenshots / typing & mouse not working (Wayland)
+
+Fedora Workstation defaults to **GNOME on Wayland**, which is not broken — it is
+*restrictive on purpose*. Two things follow from that, and both are fixed in one
+command:
+
+```bash
+./scripts/fix-desktop.sh        # packages + ydotool daemon + agent restart
+```
+
+Then send **`/doctor`** on WhatsApp: it takes a real screenshot, inspects the
+pixels, checks every input tool and prints the exact fix for whatever is still
+missing.
+
+**Why screenshots are black.** X11-era tools (`gnome-screenshot`, `scrot`,
+`maim`, ImageMagick `import`, even GNOME's own Screenshot API) still *run* on
+Wayland, exit with code 0 — and hand back a perfectly black frame, because the
+compositor refused the capture. The supported path is
+**xdg-desktop-portal**, and `grim` (which works on wlroots desktops such as
+Sway/Hyprland). The agent now:
+
+1. tries the portal first on Wayland, then `grim`, then the old tools;
+2. **decodes every capture and measures its brightness** — a black/empty frame
+   is treated as a failure, not sent to you as a "screenshot";
+3. keeps trying, and if nothing produces real pixels it tells you why per tool
+   instead of showing you a black rectangle.
+
+First portal capture may pop an **"Allow screenshot?"** dialog on the PC screen
+(GNOME asks once per app). Approve it — or tick *Always allow*.
+
+**Why typing/clicking does nothing.** On Wayland, `xdotool` only reaches
+XWayland apps. The real keyboard/mouse driver is **ydotool**, which needs its
+daemon (`ydotoold`) and `/dev/uinput`:
+
+```bash
+sudo dnf install ydotool
+sudo systemctl enable --now ydotool     # unit may be named ydotoold
+ls -l /dev/uinput                        # must exist
+```
+
+`/doctor` reports all three: `ydotool`, `ydotoolDaemon`, `uinput`.
+
+**"It can't operate my whole computer" — the honest limits.** With the above in
+place the agent can open/close *any* installed app, type, press any key combo,
+move/click/scroll the pointer, read and write files anywhere in your home,
+screenshot, OCR, record, control Wi-Fi/BT/volume/brightness/media, manage
+services and processes, and shut down/reboot. It still cannot (and should not
+be able to) do these:
+
+- **Type into secure prompts** — the lock screen, GDM greeter, password fields,
+  polkit/sudo dialogs. That is the OS protecting itself; no user-level tool can
+  write there, by design.
+- **Control the PC while nobody is logged in.** At the login screen there is no
+  user session, so there is nothing to capture or click. The agent keeps
+  answering text commands (files, shell, downloads, lookups) — screen things
+  resume after login. `systemctl --user restart observer-whatsapp-agent` after
+  logging in makes it re-detect the session immediately.
+- **List/focus windows on GNOME Wayland** — `wmctrl` is X11-only and GNOME does
+  not expose its window list. Opening/closing apps still works; per-window focus
+  is best-effort (`/windows` explains this).
+- **Reach another user's session or a different TTY.**
+- **Get past the OS's own permission prompts** — the first portal screenshot
+  needs *your* click on the PC.
+
+Everything else is enabled by `--power` (`ACCESS_LEVEL=full`); destructive
+actions still ask `haan`/`nahi` first, and raw shell stays off behind
+`ALLOW_SHELL=true` + `SHELL_PIN`.
+
 ### Firewall (firewalld): nothing to open for WhatsApp itself
 
 The phone app binds **0.0.0.0:8787** so your phone (same Wi-Fi or tailnet) can

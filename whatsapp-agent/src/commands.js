@@ -18,6 +18,7 @@ import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
 import { parseIntent } from './nlp.js';
+import { runDoctor } from './doctor.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -35,7 +36,8 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 *PC control*
 • /screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top
 • /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
-• /pc type <text> · /pc key ctrl+l · /pc click [x y] · /pc lock
+• /pc type <text> · /pc key ctrl+l · /pc click [x y] [double] · /pc tap <label>
+• /pc mousemove <x> <y> · /pc scroll [up|down] [steps] · /pc lock
 • /webcam · /record [seconds] · /notify <text> · /pc locate <button>
 *Network*
 • /wifi [status|on|off|list] · /wifi connect <SSID> [password]
@@ -49,6 +51,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
 *Safety*
+• /doctor — kya kaam nahi kar raha, aur exact fix (screenshot/input/AI)
 • /access — what is allowed · /yes · /no (destructive actions ask first)
 • /run <PIN> <command> — shell, only if ALLOW_SHELL=true
 
@@ -274,7 +277,22 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         if (gate.reply) return gate.reply;
         const nums = gate.text.match(/-?\d+/g)?.map(Number) ?? [];
         const button = /right/i.test(gate.text) ? 'right' : /middle/i.test(gate.text) ? 'middle' : 'left';
-        return pc.click(nums[0], nums[1], button);
+        const clicks = /double/i.test(gate.text) ? 2 : 1;
+        return pc.click(nums[0], nums[1], button, clicks);
+      }
+      case 'mousemove': case 'move': case 'mouse': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        const nums = gate.text.match(/-?\d+/g)?.map(Number) ?? [];
+        if (nums.length < 2) return '🖱️ Usage: /pc mousemove 640 400';
+        return pc.moveMouse(nums[0], nums[1]);
+      }
+      case 'scroll': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        const dir = /up|upar|oopar/i.test(gate.text) ? 'up' : 'down';
+        const amount = gate.text.match(/(\d+)/)?.[1] ?? 3;
+        return pc.scrollMouse(dir, amount);
       }
       case 'shutdown': case 'poweroff': case 'reboot': case 'restart': case 'suspend': case 'sleep': {
         const gate = tier2Gate(rest);
@@ -309,7 +327,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           '/pc volume up|down|mute|50 · /pc brightness up|down|70',
           '/pc media play|pause|next|prev|stop|status',
           '/pc open <any app>   (/apps lists them) · /pc notify <text> · /pc lock',
-          '/pc clipboard · /pc clipset <text> · /pc find <name> · /pc get <path>',
+          '/pc clipset <text> · /pc mousemove <x> <y> · /pc scroll up 5 · /pc find <name>',
           '/pc locate <label> — find a button/field on screen · /pc tap <label> — find + click it 🎯',
           '/pc type <text> · /pc key ctrl+l · /pc click [x y] · /pc suspend|reboot|shutdown' + (config.allowPcControl ? '' : '  (⌨️ tier-2 currently OFF — see ALLOW_PC_CONTROL)'),
         ].join('\n');
@@ -512,6 +530,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         return sub === 'restart' ? act('service_restart', { name }) : act('service_status', { name });
       }
       case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
+      case 'doctor': case 'diag': case 'diagnose': return runDoctor({ config, ctx, log });
       case 'access': {
         const r = actions.accessReport();
         return [

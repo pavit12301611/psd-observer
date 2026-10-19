@@ -93,15 +93,20 @@ npm install
 # ── 4b. Optional: the full power toolkit ─────────────────────────────────────
 if [ "$WANT_PCCONTROL" -eq 1 ]; then
   say "Full toolkit: OCR, recording, webcam, windows, files, Wi-Fi, Bluetooth"
+  # Screenshots on Wayland go through xdg-desktop-portal (plain X11 tools hand
+  # back a black image there), and keyboard/mouse go through ydotool's daemon.
+  # Both are installed here; scripts/fix-desktop.sh can re-run just this part.
   sudo dnf install -y \
-    grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool \
-    wl-clipboard libnotify tesseract tesseract-langpack-hin wmctrl \
+    grim gnome-screenshot scrot maim ImageMagick kde-spectacle \
+    xdg-desktop-portal xdg-desktop-portal-gnome \
+    ydotool wtype xdotool wl-clipboard libnotify \
+    playerctl brightnessctl tesseract tesseract-langpack-hin wmctrl \
     ffmpeg wf-recorder zip unzip poppler-utils bluez NetworkManager \
-    || echo "⚠ Some packages failed to install — every action names the exact missing package when used."
+    || echo "⚠ Some packages failed to install — run ./scripts/fix-desktop.sh, and /doctor on WhatsApp names the exact package."
   # Wayland keyboard/mouse needs the ydotool daemon (uinput). Unit name varies
   # by packaging; try both, never fatal.
   sudo systemctl enable --now ydotool 2>/dev/null || sudo systemctl enable --now ydotoold 2>/dev/null || \
-    echo "⚠ Couldn't enable the ydotool daemon automatically — Wayland input needs it: check 'systemctl list-unit-files | grep ydotool'"
+    echo "⚠ Couldn't enable the ydotool daemon automatically — run ./scripts/fix-desktop.sh (Wayland typing needs it)."
   set_env ALLOW_PC_CONTROL true
   set_env ACCESS_LEVEL full
   set_env OCR_LANGS "eng+hin"
@@ -202,11 +207,14 @@ together with this installer, it gets swallowed while the installer runs):
      Enable LAN access + firewall with:  ./scripts/install-fedora.sh --phone
   6. Phone app from OUTSIDE your home Wi-Fi (free, no port forwarding):
      ./scripts/setup-remote.sh    (installs Tailscale + prints the URL)
+  7. Something not working (black screenshot, typing/mouse, OCR)?
+     ./scripts/fix-desktop.sh     then send /doctor on WhatsApp
 
 Optional but recommended extras:
   ./scripts/install-fedora.sh --power    full toolkit (OCR, recording, Wi-Fi…)
   ./scripts/install-fedora.sh --ollama   free offline AI (unlimited chat + tasks)
   ./scripts/install-fedora.sh --remote   Tailscale: phone app from anywhere
+  ./scripts/fix-desktop.sh               repair screenshots + keyboard/mouse
 
 Full Fedora guide: ../FEDORA.md · phone app + power guide: README.md
 EOF

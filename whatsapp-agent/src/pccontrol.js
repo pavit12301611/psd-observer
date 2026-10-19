@@ -17,28 +17,90 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { imageStats } from './imaging.js';
 
 const execFileAsync = promisify(execFile);
 const RUN_TIMEOUT = 10_000;
 
-/** Graphical-session environment, with fallbacks for systemd --user services
- *  started at boot (linger) before the desktop exported its variables. */
+/**
+ * Real display sockets on this machine.
+ *
+ * The agent normally runs as a systemd --user service, which may have been
+ * started at boot (linger) *before* the desktop exported WAYLAND_DISPLAY /
+ * DISPLAY. Guessing "wayland-0" then either fails outright or — worse — points
+ * at the wrong compositor and yields a black screenshot. So we look at the
+ * actual sockets under /run/user/<uid> and /tmp/.X11-unix.
+ */
+let socketCache = { at: 0, value: null };
+
+export function detectSockets({ force = false } = {}) {
+  if (!force && socketCache.value && Date.now() - socketCache.at < 5_000) return socketCache.value;
+  const uid = typeof os.userInfo().uid === 'number' ? os.userInfo().uid : 1000;
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+  let wayland = null;
+  try {
+    const socks = fs.readdirSync(runtimeDir)
+      .filter((name) => /^wayland-\d+$/.test(name))
+      .sort();
+    wayland = socks.at(-1) ?? null; // a second session usually means wayland-1
+  } catch { /* no runtime dir */ }
+
+  let x11 = null;
+  try {
+    const socks = fs.readdirSync('/tmp/.X11-unix')
+      .filter((name) => /^X\d+$/.test(name))
+      .map((name) => Number.parseInt(name.slice(1), 10))
+      .sort((a, b) => a - b);
+    if (socks.length) x11 = `:${socks.at(-1)}`;
+  } catch { /* no X */ }
+
+  socketCache = { at: Date.now(), value: { wayland, x11, runtimeDir } };
+  return socketCache.value;
+}
+
+/** Graphical-session environment, correct even for a boot-time user service. */
 export function displayEnv() {
   const env = { ...process.env };
-  const uid = typeof os.userInfo().uid === 'number' ? os.userInfo().uid : 1000;
-  env.XDG_RUNTIME_DIR ||= `/run/user/${uid}`;
+  const sockets = detectSockets();
+  env.XDG_RUNTIME_DIR ||= sockets.runtimeDir;
   env.DBUS_SESSION_BUS_ADDRESS ||= `unix:path=${env.XDG_RUNTIME_DIR}/bus`;
-  env.WAYLAND_DISPLAY ||= 'wayland-0';
-  env.DISPLAY ||= ':0';
+  // Point at sockets that actually exist instead of guessing wayland-0/:0.
+  if (sockets.wayland) {
+    if (!process.env.WAYLAND_DISPLAY) env.WAYLAND_DISPLAY = sockets.wayland;
+  } else {
+    delete env.WAYLAND_DISPLAY; // X11-only or headless
+  }
+  if (sockets.x11) {
+    if (!process.env.DISPLAY) env.DISPLAY = sockets.x11;
+  } else {
+    delete env.DISPLAY;
+  }
   return env;
 }
 
-function hasGraphicalSession(env = displayEnv()) {
+export function sessionInfo(env = displayEnv()) {
   const waylandSocket = env.WAYLAND_DISPLAY?.startsWith('/')
     ? env.WAYLAND_DISPLAY
-    : path.join(env.XDG_RUNTIME_DIR, env.WAYLAND_DISPLAY || 'wayland-0');
-  const x11Socket = `/tmp/.X11-unix/X${(env.DISPLAY || ':0').replace(/^:/, '').split('.')[0]}`;
-  return fs.existsSync(waylandSocket) || fs.existsSync(x11Socket);
+    : path.join(env.XDG_RUNTIME_DIR ?? '', env.WAYLAND_DISPLAY ?? '');
+  const x11Num = (env.DISPLAY || ':0').replace(/^:/, '').split('.')[0];
+  const x11Socket = `/tmp/.X11-unix/X${x11Num}`;
+  const wayland = Boolean(env.WAYLAND_DISPLAY) && fs.existsSync(waylandSocket);
+  const x11 = fs.existsSync(x11Socket);
+  const declared = (process.env.XDG_SESSION_TYPE || '').toLowerCase();
+  const type = wayland ? 'wayland' : x11 ? 'x11' : declared || 'headless';
+  return {
+    type,
+    wayland,
+    x11,
+    graphical: wayland || x11,
+    waylandDisplay: wayland ? env.WAYLAND_DISPLAY : null,
+    display: x11 ? env.DISPLAY : null,
+    runtimeDir: env.XDG_RUNTIME_DIR,
+  };
+}
+
+function hasGraphicalSession(env = displayEnv()) {
+  return sessionInfo(env).graphical;
 }
 
 export function findBin(name, env = process.env) {
@@ -152,39 +214,176 @@ export function normalizeKeyForXdotool(combo) {
 }
 
 // ── screenshot ────────────────────────────────────────────────────────────────
+//
+// Why screenshots come out black: on Wayland (Fedora's default) a compositor
+// only lets a client capture the screen through xdg-desktop-portal. X11-era
+// tools (gnome-screenshot, scrot, maim, ImageMagick's import, GNOME shell's
+// Screenshot API) still *run*, but what they hand back is a black frame — the
+// classic "it says success and I get a black image". grim works on wlroots
+// (Sway/Hyprland), not on GNOME.
+//
+// So: try the portal first on Wayland, verify every capture is not blank, and
+// keep trying until we get real pixels. If nothing produces real pixels, say
+// exactly which tool failed and why instead of sending a black rectangle.
+
+const PORTAL_DEST = 'org.freedesktop.portal.Desktop';
+const PORTAL_PATH = '/org/freedesktop/portal/desktop';
+
+/** Extract "file:///..." (or a plain path) from a portal Response signal. */
+export function parsePortalScreenshotResponse(text) {
+  const body = String(text ?? '');
+  // Response (uint32 0, {'uri': <'file:///home/u/Pictures/Screenshot...png'>})
+  const responseMatch = body.match(/Response\s*\(\s*uint32\s+(\d+)\s*,\s*\{(.*)\}\)/s);
+  if (!responseMatch) return null;
+  const code = Number.parseInt(responseMatch[1], 10);
+  const uriMatch = responseMatch[2].match(/['"]uri['"]\s*:\s*<?['"]([^'">]+)['"]>?/);
+  const uri = uriMatch ? uriMatch[1] : null;
+  return {
+    code,
+    ok: code === 0 && Boolean(uri),
+    cancelled: code === 1,
+    uri,
+    path: uri ? decodeURIComponent(uri.replace(/^file:\/\//, '')) : null,
+  };
+}
+
+/**
+ * Screenshot through xdg-desktop-portal (works on GNOME/KDE Wayland and X11).
+ * gdbus is part of glib2, present on every Fedora install.
+ *
+ * We start `gdbus monitor` first and then make the call, so the async Response
+ * signal can't be missed. GNOME may show a one-time "Allow screenshot?" prompt
+ * the first time — after that it is silent.
+ */
+async function portalScreenshot(env, { timeoutMs = 20_000 } = {}) {
+  // gdbus (glib2) is on every Fedora install, but be explicit rather than
+  // letting a spawn error escape as an unhandled rejection.
+  if (!findBin('gdbus', env)) throw Object.assign(new Error('gdbus is not installed'), { code: 'ENOENT' });
+  const token = `obs${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+  const child = spawn('gdbus', ['monitor', '--session', '--dest', PORTAL_DEST, '--object-path', PORTAL_PATH], {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let buffer = '';
+  const done = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* noop */ }
+      reject(Object.assign(new Error('the portal did not answer within 20s (is xdg-desktop-portal-gnome installed?)'), { code: 'ETIMEDOUT' }));
+    }, timeoutMs);
+    const onData = (chunk) => {
+      buffer += chunk.toString();
+      // gdbus monitor may print the signal, then the response body indented.
+      const parsed = parsePortalScreenshotResponse(buffer);
+      if (parsed) {
+        clearTimeout(timer);
+        try { child.kill('SIGKILL'); } catch { /* noop */ }
+        if (parsed.ok && parsed.path) resolve(parsed.path);
+        else if (parsed.cancelled) reject(new Error('cancelled in the permission dialog'));
+        else reject(new Error(`portal refused the screenshot (response code ${parsed.code})`));
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(Object.assign(err, { code: err.code ?? 'EPORTAL' }));
+    });
+  });
+  // The call below can fail before the monitor ever answers; keep the promise
+  // handled either way so a missing/failing portal is a normal, explained error.
+  done.catch(() => {});
+
+  // Give the monitor a moment to attach, then ask for the screenshot.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  try {
+    await run('gdbus', [
+      'call', '--session', '--dest', PORTAL_DEST, '--object-path', PORTAL_PATH,
+      '--method', `${PORTAL_DEST}.Screenshot.Screenshot`,
+      '', `{'handle_token': <'${token}'>, 'interactive': <false>, 'modal': <false>}`,
+    ], { timeout: 10_000 });
+  } catch (err) {
+    try { child.kill('SIGKILL'); } catch { /* noop */ }
+    throw err;
+  }
+  return done;
+}
+
+/** Every capture path we know, best-first for the current session. */
+function screenshotAttempts(file, env) {
+  const session = sessionInfo(env);
+  const attempts = [];
+  if (session.wayland) {
+    attempts.push({ label: 'xdg-desktop-portal', fn: () => portalScreenshot(env) });
+    attempts.push({ label: 'grim', fn: async () => { await run('grim', [file], { timeout: 12_000 }); return file; } });
+  }
+  // GNOME shell's own API (X11) — also tries on Wayland in case a portal-less
+  // setup allows it; a black result is caught and skipped.
+  attempts.push({ label: 'gnome-shell', fn: async () => {
+    await run('gdbus', ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell', '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'false', file], { timeout: 12_000 });
+    return file;
+  } });
+  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'gnome-screenshot', fn: async () => { await run('gnome-screenshot', ['-f', file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'scrot', fn: async () => { await run('scrot', ['--silent', file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'maim', fn: async () => { await run('maim', [file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'import', fn: async () => { await run('import', ['-window', 'root', file], { timeout: 12_000 }); return file; } });
+  return attempts;
+}
+
+function screenshotFailureHint(session, failures) {
+  const tried = failures.map((f) => (f.missing ? `${f.label}: not installed` : `${f.label}: ${f.reason}`)).join(' · ');
+  if (session.type === 'wayland') {
+    const portalBroken = failures.some((f) => f.label === 'xdg-desktop-portal' && /portal|permission|refused|answer/i.test(f.reason));
+    return [
+      `Screen capture is being blocked by Wayland (this is a ${process.env.XDG_CURRENT_DESKTOP || 'Wayland'} session).`,
+      `Tried: ${tried}.`,
+      portalBroken
+        ? 'The screenshot portal is the supported Wayland path. Fix: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome grim — then restart the agent and approve the "Allow screenshot" prompt that appears on the PC screen (or tick "Always allow").'
+        : 'Fix: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome grim — then systemctl --user restart observer-whatsapp-agent.',
+    ].join('\n');
+  }
+  return [
+    'No screenshot tool produced a usable image.',
+    `Tried: ${tried}.`,
+    'Fix: sudo dnf install grim gnome-screenshot scrot (or kde-spectacle on KDE).',
+  ].join('\n');
+}
 
 export async function captureScreenshot() {
-  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
-  const file = path.join(os.tmpdir(), `observer-shot-${Date.now()}.png`);
-  const attempts = [
-    ['grim', [file]],                                                              // wlroots/Sway/Hyprland (not GNOME)
-    ['gdbus', ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell', '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'false', file]], // GNOME
-    ['spectacle', ['-b', '-n', '-o', file]],                                       // KDE Plasma
-    ['gnome-screenshot', ['-f', file]],                                            // GNOME on X11 / older
-    ['scrot', [file]],                                                             // X11
-    ['maim', [file]],                                                              // X11
-    ['import', ['-window', 'root', file]],                                         // ImageMagick, X11
-  ];
+  const env = displayEnv();
+  const session = sessionInfo(env);
+  if (!session.graphical) throw new Error(NO_SESSION);
+
   const failures = [];
-  try {
-    for (const [bin, args] of attempts) {
-      try {
-        await run(bin, args, { timeout: 12_000 });
-        if (fs.existsSync(file) && fs.statSync(file).size > 0) return fs.readFileSync(file);
-        failures.push(`${bin}: produced no file`);
-      } catch (err) {
-        failures.push(err.code === 'ENOENT' ? `${bin}: not installed` : `${bin}: ${(err.stderr || err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 120)}`);
+  const file = path.join(os.tmpdir(), `observer-shot-${Date.now()}.png`);
+  const attempts = screenshotAttempts(file, env);
+  for (const attempt of attempts) {
+    let produced = null;
+    try {
+      produced = await attempt.fn();
+      const data = fs.existsSync(produced) ? fs.readFileSync(produced) : null;
+      if (!data || !data.length) {
+        failures.push({ label: attempt.label, reason: 'produced no file' });
+        continue;
       }
+      const stats = imageStats(data);
+      if (stats.blank) {
+        // The classic Wayland failure: exit code 0, black rectangle.
+        failures.push({ label: attempt.label, reason: `returned a black image (${stats.width}×${stats.height})` });
+        try { fs.unlinkSync(produced); } catch { /* noop */ }
+        continue;
+      }
+      return data;
+    } catch (err) {
+      failures.push({
+        label: attempt.label,
+        missing: err.code === 'ENOENT',
+        reason: String(err.stderr || err.message || '').trim().split('\n').at(-1)?.slice(0, 140) ?? 'failed',
+      });
     }
-  } finally {
-    try { fs.unlinkSync(file); } catch { /* either read already or never created */ }
   }
-  const session = process.env.XDG_SESSION_TYPE || 'wayland?';
-  throw new Error(
-    `Couldn't capture the screen in this ${session} session. Tried: ${failures.join(' · ')}.\n` +
-    `Fix on Fedora: sudo dnf install grim gnome-screenshot scrot  (KDE: kde-spectacle). ` +
-    `GNOME+Wayland is the strictest — /screen via Observer (browser capture) is the reliable path there.`,
-  );
+  try { fs.unlinkSync(file); } catch { /* never created */ }
+  throw new Error(screenshotFailureHint(session, failures));
 }
 
 // ── sound / brightness / media ───────────────────────────────────────────────
@@ -314,20 +513,49 @@ export async function openTarget(target) {
 
 // ── keyboard / mouse (tier 2) ────────────────────────────────────────────────
 
-const INPUT_MISSING = 'No input tool found. Fedora/Wayland: sudo dnf install ydotool && sudo systemctl enable --now ydotool (daemon: ydotoold). X11 sessions: sudo dnf install xdotool';
+const INPUT_MISSING = 'No keyboard/mouse tool found. Wayland (GNOME/KDE): sudo dnf install ydotool && sudo systemctl enable --now ydotool — the daemon (ydotoold) is what actually presses keys. X11: sudo dnf install xdotool';
+
+/** Where ydotool's daemon listens (distro/package dependent). */
+export function ydotoolSocket() {
+  const explicit = process.env.YDOTOOL_SOCKET;
+  if (explicit) return explicit;
+  const candidates = ['/tmp/.ydotool_socket', '/run/ydotoold/socket', '/var/run/.ydotool_socket'];
+  const hit = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  return hit ?? null;
+}
+
+/** Facts for /doctor: which input path would actually work right now. */
+export function inputDiagnostics() {
+  const socket = ydotoolSocket();
+  let uinput = false;
+  try { uinput = fs.existsSync('/dev/uinput'); } catch { /* noop */ }
+  const session = sessionInfo();
+  return {
+    session: session.type,
+    ydotool: Boolean(findBin('ydotool')),
+    ydotoolDaemon: Boolean(socket),
+    ydotoolSocket: socket,
+    wtype: Boolean(findBin('wtype')),
+    xdotool: Boolean(findBin('xdotool')),
+    uinput,
+  };
+}
 
 function inputToolOrder() {
-  const session = (process.env.XDG_SESSION_TYPE ?? '').toLowerCase();
-  const waylandFirst = session !== 'x11';
-  return waylandFirst ? ['ydotool', 'xdotool'] : ['xdotool', 'ydotool'];
+  const session = sessionInfo().type;
+  if (session === 'x11') return ['xdotool', 'ydotool', 'wtype'];
+  // Wayland: ydotool (uinput, works on GNOME/KDE/wlroots) → wtype (wlroots only)
+  // → xdotool (XWayland apps only).
+  return ['ydotool', 'wtype', 'xdotool'];
 }
 
 async function runInput(builders) {
   const failures = [];
   for (const tool of inputToolOrder()) {
-    const args = builders[tool];
-    if (!args) continue;
+    const build = builders[tool];
+    if (!build) continue;
     try {
+      const args = typeof build === 'function' ? build() : build;
       await run(tool, args);
       return tool;
     } catch (err) {
@@ -336,8 +564,19 @@ async function runInput(builders) {
   }
   if (failures.every(({ err }) => err.code === 'ENOENT')) throw new Error(INPUT_MISSING);
   const real = failures.filter(({ err }) => err.code !== 'ENOENT').at(-1);
-  const hint = real.tool === 'ydotool' ? ' Is the daemon running? sudo systemctl enable --now ydotool (or: ydotoold).' : ' On Wayland, xdotool only reaches XWayland apps — ydotool is the reliable path.';
-  throw new Error(`${real.tool} failed: ${(real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160)}.${hint}`);
+  const raw = (real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160) ?? '';
+  let hint = '';
+  if (real.tool === 'ydotool') {
+    const diag = inputDiagnostics();
+    hint = diag.ydotoolDaemon
+      ? ' ydotool is installed and its daemon is running, so this is a one-off failure — try again.'
+      : ' ydotool needs its daemon: sudo systemctl enable --now ydotool (unit is sometimes named ydotoold). Check with: systemctl status ydotool.';
+  } else if (real.tool === 'xdotool') {
+    hint = ' On Wayland xdotool can only type into XWayland apps — install ydotool for everything else.';
+  } else if (real.tool === 'wtype') {
+    hint = ' wtype only works on wlroots compositors (Sway/Hyprland), not GNOME/KDE.';
+  }
+  throw new Error(`${real.tool} failed${raw ? `: ${raw}` : ''}.${hint}`);
 }
 
 export async function typeText(text) {
@@ -346,6 +585,7 @@ export async function typeText(text) {
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);
   const used = await runInput({
     ydotool: ['type', payload],
+    wtype: ['--', payload],
     xdotool: ['type', '--clearmodifiers', '--', payload],
   });
   return `⌨️ Typed ${payload.length} characters via ${used}.`;
@@ -356,13 +596,15 @@ export async function keyCombo(combo) {
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);
   const used = await runInput({
     ydotool: ['key', ...ydotoolKeyArgs(combo)],
+    wtype: ['-k', String(combo).toLowerCase().replace(/\s+/g, '')],
     xdotool: ['key', '--clearmodifiers', normalizeKeyForXdotool(combo)],
   });
   return `⌨️ Sent key "${combo}" via ${used}.`;
 }
 
-export async function click(x, y, button = 'left') {
+export async function click(x, y, button = 'left', repeat = 1) {
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  const times = Math.min(Math.max(Number.parseInt(repeat, 10) || 1, 1), 3);
   const hasCoords = Number.isFinite(x) && Number.isFinite(y);
   const failures = [];
   for (const tool of inputToolOrder()) {
@@ -370,16 +612,61 @@ export async function click(x, y, button = 'left') {
       if (tool === 'ydotool') {
         if (hasCoords) await run('ydotool', ['mousemove', '--absolute', '-x', String(x), '-y', String(y)]);
         await run('ydotool', ['click', button === 'right' ? '0xC1' : button === 'middle' ? '0xC2' : '0xC0']);
+        for (let i = 1; i < times; i++) await run('ydotool', ['click', button === 'right' ? '0xC1' : button === 'middle' ? '0xC2' : '0xC0']);
       } else {
         if (hasCoords) await run('xdotool', ['mousemove', String(x), String(y)]);
-        await run('xdotool', ['click', button === 'right' ? '3' : button === 'middle' ? '2' : '1']);
+        await run('xdotool', ['click', '--repeat', String(times), '--delay', '80', button === 'right' ? '3' : button === 'middle' ? '2' : '1']);
       }
-      return `🖱️ ${button} click${hasCoords ? ` at ${x},${y}` : ' at the cursor'} via ${tool}.`;
+      return `🖱️ ${times > 1 ? `${times}× ` : ''}${button} click${hasCoords ? ` at ${x},${y}` : ' at the cursor'} via ${tool}.`;
     } catch (err) { failures.push({ tool, err }); }
   }
   if (failures.every(({ err }) => err.code === 'ENOENT')) throw new Error(INPUT_MISSING);
   const real = failures.filter(({ err }) => err.code !== 'ENOENT').at(-1);
   throw new Error(`${real.tool} click failed: ${(real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160)}`);
+}
+
+/** Move the pointer (absolute coordinates). */
+export async function moveMouse(x, y) {
+  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  const hasCoords = Number.isFinite(x) && Number.isFinite(y);
+  if (!hasCoords) throw new Error('usage: /pc mousemove 640 400  (screen pixels)');
+  const failures = [];
+  for (const tool of inputToolOrder()) {
+    try {
+      if (tool === 'ydotool') await run('ydotool', ['mousemove', '--absolute', '-x', String(x), '-y', String(y)]);
+      else if (tool === 'xdotool') await run('xdotool', ['mousemove', String(x), String(y)]);
+      else continue; // wtype has no pointer support
+      return `🖱️ Moved the pointer to ${x},${y} via ${tool}.`;
+    } catch (err) { failures.push({ tool, err }); }
+  }
+  if (failures.every(({ err }) => err.code === 'ENOENT')) throw new Error(INPUT_MISSING);
+  const real = failures.filter(({ err }) => err.code !== 'ENOENT').at(-1);
+  throw new Error(`${real.tool} mousemove failed: ${(real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160)}`);
+}
+
+/** Scroll the wheel: positive = down. */
+export async function scrollMouse(direction = 'down', amount = 3) {
+  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  const dir = String(direction ?? 'down').toLowerCase();
+  const clicks = Math.min(Math.max(Number.parseInt(amount, 10) || 3, 1), 25);
+  const isUp = ['up', 'upar', 'oopar'].includes(dir);
+  const failures = [];
+  for (const tool of inputToolOrder()) {
+    try {
+      if (tool === 'ydotool') {
+        // ydotool click codes: 0x40 = wheel up, 0x41 = wheel down.
+        for (let i = 0; i < clicks; i++) await run('ydotool', ['click', isUp ? '0x40' : '0x41']);
+      } else if (tool === 'xdotool') {
+        for (let i = 0; i < clicks; i++) await run('xdotool', ['click', isUp ? '4' : '5']);
+      } else {
+        continue;
+      }
+      return `🖱️ Scrolled ${isUp ? 'up' : 'down'} ${clicks} step(s) via ${tool}.`;
+    } catch (err) { failures.push({ tool, err }); }
+  }
+  if (failures.every(({ err }) => err.code === 'ENOENT')) throw new Error(INPUT_MISSING);
+  const real = failures.filter(({ err }) => err.code !== 'ENOENT').at(-1);
+  throw new Error(`${real.tool} scroll failed: ${(real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160)}`);
 }
 
 // ── clipboard ─────────────────────────────────────────────────────────────────

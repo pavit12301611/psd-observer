@@ -24,6 +24,7 @@ import * as systemx from './systemx.js';
 import * as ocr from './ocr.js';
 import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
+import { runDoctor } from './doctor.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -220,6 +221,12 @@ export function createActions({ config, store, log = console }) {
     },
 
     // ── system ──────────────────────────────────────────────────────────────
+    {
+      name: 'doctor', level: 'safe', label: 'Diagnose the PC',
+      description: 'Self-check: is the screenshot, keyboard/mouse, OCR, AI and every required tool working? Explains each failure with the exact fix command.',
+      params: {},
+      run: async (_args, ctx = {}) => runDoctor({ config, ctx, log }),
+    },
     {
       name: 'system_status', level: 'safe', label: 'System status',
       description: 'CPU/RAM/disk/uptime/battery summary of the PC.',
@@ -431,16 +438,35 @@ export function createActions({ config, store, log = console }) {
         y: { type: 'number', description: 'Y coordinate (optional)' },
         label: { type: 'string', description: 'Visible button/field label to find and click' },
         button: { type: 'string', enum: ['left', 'right', 'middle'] },
+        clicks: { type: 'number', description: 'How many times to click (1-3, default 1)' },
       },
-      run: async ({ x, y, label, button }) => {
+      run: async ({ x, y, label, button, clicks }) => {
         if (label) {
           const hit = await finder.locateOnScreen(config, label, log);
-          await pc.click(hit.x, hit.y);
+          await pc.click(hit.x, hit.y, button ?? 'left', clicks ?? 1);
           return `🖱️ Clicked *${hit.matched}* at ${hit.x},${hit.y} (found by ${hit.source === 'ocr' ? `OCR ${hit.confidence}%` : 'vision'}).`;
         }
         if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) throw new Error('click needs x and y, or a visible label');
-        return pc.click(Number(x), Number(y), button ?? 'left');
+        return pc.click(Number(x), Number(y), button ?? 'left', clicks ?? 1);
       },
+    },
+    {
+      name: 'move_mouse', level: 'standard', label: 'Move mouse',
+      description: 'Move the mouse pointer to screen coordinates.',
+      params: {
+        x: { type: 'number', description: 'X coordinate', required: true },
+        y: { type: 'number', description: 'Y coordinate', required: true },
+      },
+      run: async ({ x, y }) => pc.moveMouse(Number(x), Number(y)),
+    },
+    {
+      name: 'scroll', level: 'standard', label: 'Scroll',
+      description: 'Scroll the wheel up or down on the PC.',
+      params: {
+        direction: { type: 'string', enum: ['up', 'down'], description: 'up or down (default down)' },
+        amount: { type: 'number', description: 'Steps (1-25, default 3)' },
+      },
+      run: async ({ direction, amount }) => pc.scrollMouse(direction ?? 'down', amount ?? 3),
     },
 
     // ── free lookups (no keys, no accounts) ─────────────────────────────────
