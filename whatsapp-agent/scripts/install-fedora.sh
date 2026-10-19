@@ -65,29 +65,66 @@ say "Agent setup in $AGENT_DIR"
 [ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example (owner +91 95289 23866, agent +91 88595 55795 already set)."; }
 npm install
 
-# ── 5. Optional: local Ollama (the free AI brain) ────────────────────────────
-if [ "$WANT_OLLAMA" -eq 1 ]; then
-  say "Ollama (optional, free local AI)"
-  if command -v ollama >/dev/null; then
-    echo "Ollama already installed: $(ollama --version 2>/dev/null || echo present)"
-  else
-    curl -fsSL https://ollama.com/install.sh | sh
-  fi
-  # The upstream installer creates a system service; make sure it's up.
-  sudo systemctl enable --now ollama 2>/dev/null || echo "Start Ollama with: ollama serve"
-  ollama pull llama3.2
-  echo "Optional photo understanding: ollama pull llava, then set OLLAMA_VISION_MODEL=llava in .env"
-fi
-
-# ── 6. Optional: systemd user service (the Fedora way to keep it running) ────
+# ── 5. Optional: systemd user service (the Fedora way to keep it running) ────
+# Deliberately BEFORE the optional Ollama step: the agent must end up running
+# even if the AI extras have trouble. Ollama problems must never block WhatsApp.
 if [ "$WANT_SERVICE" -eq 1 ]; then
   say "Installing systemd user service"
   bash scripts/install-systemd.sh
 fi
 
+# ── 6. Optional: local Ollama (the free AI brain) — best-effort, never fatal ─
+# Failure here only means "no AI chat yet"; every built-in command still works.
+setup_ollama() {
+  ollama_up() { curl -fsS --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; }
+
+  if command -v ollama >/dev/null; then
+    echo "Ollama binary found at $(command -v ollama)"
+  else
+    echo "Installing Ollama (upstream installer)…"
+    curl -fsSL https://ollama.com/install.sh | sh || { echo "⚠ Ollama install failed — skipping AI setup, the agent works without it."; return 0; }
+  fi
+
+  if ! ollama_up; then
+    echo "Ollama server is not responding yet — trying to start its service…"
+    if systemctl list-unit-files --no-legend 2>/dev/null | grep -q '^ollama\.service'; then
+      sudo systemctl enable --now ollama || echo "⚠ Could not enable the ollama service (see: systemctl status ollama)"
+    else
+      echo "⚠ No ollama.service unit on this system."
+      echo "  This happens when ollama was unpacked manually instead of installed."
+      echo "  Fix either way:"
+      echo "    a) Reinstall properly:  curl -fsSL https://ollama.com/install.sh | sh"
+      echo "       then:                sudo systemctl enable --now ollama"
+      echo "    b) Or just run it now:  ollama serve        (in a separate terminal)"
+    fi
+    for _ in $(seq 1 15); do ollama_up && break; sleep 1; done
+  fi
+
+  if ollama_up; then
+    echo "Ollama server is up — pulling llama3.2 (~2 GB, one time)…"
+    ollama pull llama3.2 || echo "⚠ Model pull failed — retry later with: ollama pull llama3.2"
+    echo "Optional photo understanding: ollama pull llava, then set OLLAMA_VISION_MODEL=llava in .env"
+  else
+    cat <<'EOF'
+⚠ Ollama server still not responding, so no model was pulled.
+  The WhatsApp agent itself is unaffected — link it and use /help, then
+  fix Ollama any time and send /model on WhatsApp to verify:
+    1) sudo systemctl enable --now ollama   (or: ollama serve)
+    2) curl http://127.0.0.1:11434          → should say "Ollama is running"
+    3) ollama pull llama3.2
+EOF
+  fi
+  return 0
+}
+if [ "$WANT_OLLAMA" -eq 1 ]; then
+  say "Ollama (optional, free local AI)"
+  setup_ollama || true
+fi
+
 say "Done"
 cat <<EOF
-Next steps:
+Next steps (run ONE command at a time — don't paste the journalctl line
+together with this installer, it gets swallowed while the installer runs):
   1. Start it:        ./start.sh        (or it is already running if you used --service)
   2. Link the agent phone +91 88595 55795:
      WhatsApp → Linked devices → Link a device → scan the QR

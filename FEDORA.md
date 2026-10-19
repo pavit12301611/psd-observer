@@ -4,12 +4,15 @@ Everything below is written for **Fedora Workstation (40+; any recent Fedora wor
 `dnf` packages, a `systemd --user` service, `journalctl` logs, Podman instead of
 Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 
-**TL;DR — the WhatsApp agent:**
+**TL;DR — the WhatsApp agent** (run these one at a time, waiting for each to finish —
+don't paste the `journalctl` line together with the installer):
 
 ```bash
 git clone https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ./scripts/install-fedora.sh --service --ollama   # deps + agent + autostart + free local AI
+```
+```bash
 journalctl --user -u observer-whatsapp-agent -f  # scan the QR with the 8859555795 phone
 # …then from your 9528923866 phone, WhatsApp the agent number:  /help
 ```
@@ -185,3 +188,5 @@ sent as-is through the linked device.
 | Moved `auth_info/` from another disk, agent can't read it | `restorecon -Rv whatsapp-agent/` |
 | `/pc battery` says no battery | Desktop/VM — no `BAT*` under `/sys/class/power_supply`; expected |
 | Ollama answers slowly on CPU | Use a smaller/faster model (`llama3.2:1b`, `qwen2.5:3b`) — `/model` shows what's pulled |
+| `ollama: server not responding` / "client version is 0.0.0" during install | The binary exists but its server isn't running. `sudo systemctl enable --now ollama`, check `curl http://127.0.0.1:11434` → "Ollama is running", then `ollama pull llama3.2`. No `ollama.service` unit? It was unpacked manually — either reinstall `curl -fsSL https://ollama.com/install.sh \| sh` or just run `ollama serve`. The agent itself doesn't need Ollama: install/start it first (`./scripts/install-systemd.sh`), fix AI later, verify with `/model`. |
+| Installer stopped (Ctrl-C) midway | Re-run it — every step is idempotent. If it stopped at the Ollama step, the service step may not have run yet on older copies: run `./scripts/install-systemd.sh` directly. |
