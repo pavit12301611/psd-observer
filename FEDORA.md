@@ -5,10 +5,12 @@ Everything below is written for **Fedora Workstation (40+; any recent Fedora wor
 Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 
 **TL;DR — the WhatsApp agent** (run these one at a time, waiting for each to finish —
-don't paste the `journalctl` line together with the installer):
+don't paste the `journalctl` line together with the installer).
+**No git?** The first two lines become one script download — see
+[Install without git](#install-without-git-plain-curl) below.
 
 ```bash
-git clone https://github.com/pavit12301611/psd-observer.git
+git clone -b arena/20378d42-psd-observer https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ./scripts/install-fedora.sh --service --ollama --power --phone
 #   --service  autostart (systemd --user + linger)
@@ -83,6 +85,20 @@ ollama pull llava                               # optional: photo understanding
 Then WhatsApp `/model` should report Ollama running. (`install-fedora.sh --ollama`
 does all of this.) NVIDIA/AMD GPU acceleration, if wanted, is Ollama's own Fedora
 story — the agent only talks HTTP to `127.0.0.1:11434`.
+
+### Install without git (plain curl)
+
+First-time install, nothing but `curl`/`tar` needed:
+
+```bash
+curl -fL -o /tmp/observer-setup.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+bash /tmp/observer-setup.sh --service --ollama --power --phone
+```
+
+Installs to `~/observer-agent` by default (`--dir <path>` to choose). It refuses
+to overwrite an existing install unless you pass `--force` (or use the updater
+below), and `--no-install` downloads only. Then jump to “Phone app over Wi-Fi”.
 
 ### Updating without git
 

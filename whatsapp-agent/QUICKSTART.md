@@ -19,9 +19,25 @@ Everything is free; no paid API, no Observer app.
 
 ---
 
-## 1. Code laao (branch dhyan se)
+## 1. Code laao (git ke bina bhi — 2 tarike)
 
-Repo ka 2.0 code `arena/20378d42-psd-observer` branch pe hai — **`main` pe nahi**:
+### 🅰️ Pehli baar install — ek script (recommended)
+
+```bash
+curl -fL -o /tmp/observer-setup.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+
+bash /tmp/observer-setup.sh --service --ollama --power --phone
+```
+
+Ye 4 kaam karta hai: GitHub se tarball **curl** karta hai (git nahi), code
+`~/observer-agent` me rakhta hai, `.env` bana deta hai (numbers pehle se bhare
+hue), aur `install-fedora.sh` ko wahi flags ke saath chala deta hai.
+
+Dusra folder chahiye: `--dir ~/psd-observer/whatsapp-agent` add karo.
+Sirf download karna hai (install baad me): `--no-install`.
+
+### 🅱️ Git se (agar git hai)
 
 ```bash
 sudo dnf install -y git
@@ -29,11 +45,25 @@ git clone -b arena/20378d42-psd-observer https://github.com/pavit12301611/psd-ob
 cd psd-observer/whatsapp-agent
 ```
 
-Check: `ls src/ | head` → `actions.js agentloop.js apps.js nlp.js …` dikhna chahiye.
+> ⚠️ 2.0 code sirf `arena/20378d42-psd-observer` branch pe hai, `main` pe nahi.
+> Check: `ls src/ | head` → `actions.js agentloop.js doctor.js imaging.js …`
+
+### 🅲 Na script, na git — sirf zip/tar manually
+
+```bash
+cd /tmp
+curl -fL -o agent.tar.gz \
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+tar -xzf agent.tar.gz
+mv psd-observer-arena-20378d42-psd-observer/whatsapp-agent ~/observer-agent
+cd ~/observer-agent
+```
+
+(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip`)
 
 ---
 
-## 1b. Update karna (git ke bina) — jab tumhare paas pull nahi hai
+## 1c. Update karna (git ke bina) — baad me, jab code purana ho jaye
 
 Git ki zaroorat nahi. Ye script GitHub se seedha **tarball** download karta hai
 (plain `curl`), purana code backup karke naya copy karta hai, `npm install`
@@ -88,8 +118,12 @@ Browser se bhi download kar sakte ho:
 ## 2. Install (ek hi command)
 
 ```bash
+cd ~/observer-agent          # ya jahan tumne install kiya (🅰️ ka default)
 ./scripts/install-fedora.sh --service --ollama --power --phone
 ```
+
+> 🅰️ wale script ke saath ye step automatic ho jata hai — dobara chalane ki
+> zaroorat nahi. Installer idempotent hai, phir bhi safe hai.
 
 Ye kya karega (idempotent — dobara chala sakte ho):
 

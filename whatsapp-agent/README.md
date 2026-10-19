@@ -23,11 +23,26 @@ troubleshooting): **[`QUICKSTART.md`](QUICKSTART.md)**. The short version is bel
 
 ## 1. Install (Fedora, ~5 minutes)
 
+**No git needed** — one script downloads the branch with `curl` and installs it:
+
+```bash
+curl -fL -o /tmp/observer-setup.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+bash /tmp/observer-setup.sh --service --ollama --power --phone
+```
+
+It lands in `~/observer-agent` (`--dir <path>` to change), creates `.env` with
+the owner/agent numbers filled in, and runs the Fedora installer below.
+
+<details><summary>Already have the code (git clone / tarball)?</summary>
+
 ```bash
 cd whatsapp-agent
 ./scripts/install-fedora.sh --service --ollama --power --phone
 journalctl --user -u observer-whatsapp-agent -f    # logs + linking QR + PIN
 ```
+
+</details>
 
 What the flags do:
 
