@@ -111,6 +111,19 @@ def scope_hosts(scope: str) -> tuple[str, ...]:
     return (PUBLIC_WEB,) if scope == "public" else DEFAULT_ALLOWED_HOSTS
 
 
+_BLOCK_MARKERS = (
+    "something unexpected happened", "not cooperating", "unusual traffic", "verify you are human",
+    "are you a robot", "access denied", "captcha", "checking your browser", "just a moment",
+    "enable javascript and cookies", "request blocked", "forbidden",
+)
+
+
+def is_blocked_page(title: str, text: str) -> bool:
+    """True when a page looks like a site's block, challenge, or error page instead of content."""
+    haystack = f"{title}\n{text[:1500]}".lower()
+    return any(marker in haystack for marker in _BLOCK_MARKERS)
+
+
 def search_url(query: str) -> str:
     return SEARCH_URL.format(query=quote_plus(query.strip()))
 
@@ -540,6 +553,6 @@ def run_browser_job(prompt: str, *, session: BrowserSession, provider: ModelProv
 
 __all__ = ["ARENA_URL", "PUBLIC_WEB", "BrowserSession", "BrowserUnavailable", "BrowserJobError", "PageSnapshot",
            "Element", "PlaywrightSession", "run_browser_job", "parse_browser_action", "check_action",
-           "host_allowed", "is_private_host", "scope_hosts", "search_url", "unwrap_result_url", "should_block",
+           "host_allowed", "is_private_host", "is_blocked_page", "scope_hosts", "search_url", "unwrap_result_url", "should_block",
            "should_block_request",
            "safe_filename", "find_chromium", "JobResult", "MAX_PROMPT_CHARS", "MODES"]

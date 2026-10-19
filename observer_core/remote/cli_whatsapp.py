@@ -266,6 +266,38 @@ def browser_login() -> None:
     console.print("[green]browser profile saved.[/] Turn it on with whatsapp.browser_enabled = true.")
 
 
+@whatsapp_app.command("browser-test")
+def browser_test(url: str = typer.Argument(..., help="https address to open, e.g. https://duckduckgo.com")) -> None:
+    """Open one address in the agent's browser and say whether it loaded or hit a block page."""
+    from ..llm.base import sanitize_error
+    from .browser import PUBLIC_WEB, BrowserUnavailable, PlaywrightSession, host_allowed, is_blocked_page
+    from .service import browser_profile_dir, downloads_dir
+
+    if not host_allowed(url, (PUBLIC_WEB,)):
+        _die("use a full https address on a public site, e.g. https://duckduckgo.com")
+    cfg = load_or_create()
+    try:
+        session = PlaywrightSession(profile_dir=browser_profile_dir(), downloads_dir=downloads_dir(cfg),
+                                    executable=cfg.whatsapp.browser_executable or None, headless=False,
+                                    allowed_hosts=(PUBLIC_WEB,))
+        with session:
+            try:
+                session.goto(url)
+            except Exception as exc:
+                _die(f"did not open: {sanitize_error(exc)}")
+            time.sleep(8)               # let the page finish its own loading
+            snap = session.snapshot()
+    except BrowserUnavailable as exc:
+        _die(str(exc))
+    console.print(f"title: {snap.title or '(none)'}")
+    console.print(f"url:   {snap.url}")
+    console.print(f"text:  {' '.join(snap.text.split())[:200]}", markup=False)
+    if is_blocked_page(snap.title, snap.text):
+        console.print("[red]result: blocked.[/] The site showed a block, challenge, or error page.")
+        raise typer.Exit(1)
+    console.print("[green]result: loaded.[/]")
+
+
 @whatsapp_app.command("disable")
 def disable() -> None:
     """Turn the remote off. The pairing is kept, so `run` works again after `setup`."""

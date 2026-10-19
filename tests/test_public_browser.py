@@ -463,3 +463,16 @@ def test_request_rule_separates_pages_from_resources(url, nav, scope, blocked):
     from observer_core.remote.browser import should_block_request
 
     assert should_block_request(url, nav, scope) is blocked
+
+
+@pytest.mark.parametrize("title, text, blocked", [
+    ("arena", "We've prompted this page a thousand ways. It's not cooperating. Something unexpected happened.", True),
+    ("Just a moment...", "Checking your browser before accessing the site.", True),
+    ("Unusual traffic", "Our systems have detected unusual traffic from your network.", True),
+    ("Wikipedia", "Nainital is a hill station in Uttarakhand.", False),
+    ("DuckDuckGo", "Results for raspberry pi 5 cpu", False),
+])
+def test_block_page_detection(title, text, blocked):
+    from observer_core.remote.browser import is_blocked_page
+
+    assert is_blocked_page(title, text) is blocked
