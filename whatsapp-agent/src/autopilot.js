@@ -266,9 +266,15 @@ export async function runAutopilot(rawTask, { config, log } = {}) {
       } else if (st.op === 'type') {
         const text = String(st.text ?? '');
         if (!text) throw new Error('type needs text');
-        // paste is faster + keeps formatting
-        await pc.pasteText(text);
-        outLines[outLines.length - 1] += ` → typed ${text.length} chars`;
+        // paste is faster + keeps formatting, but on some Wayland setups wl-copy/xclip hangs — fallback to ydotool typing
+        try {
+          await pc.pasteText(text);
+          outLines[outLines.length - 1] += ` → pasted ${text.length} chars (clipboard)`;
+        } catch (e) {
+          log?.info?.(`[auto] pasteText failed (${e.message}), falling back to typeText`);
+          await pc.typeText(text);
+          outLines[outLines.length - 1] += ` → typed ${text.length} chars (fallback)`;
+        }
         await sleep(700);
       } else if (st.op === 'key') {
         await pc.keyCombo(String(st.combo ?? 'enter'));
