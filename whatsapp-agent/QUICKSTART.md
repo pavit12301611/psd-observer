@@ -19,7 +19,10 @@ Everything is free; no paid API, no Observer app.
 
 ---
 
-## 1. Code laao (git ke bina bhi — 2 tarike)
+## 1. Code laao (sirf curl — git ki zaroorat nahi)
+
+> 🚫 Is setup me **git use nahi hota**. Koi `git clone` / `git pull` nahi —
+> sirf `curl` se download. Neeche 🅰️ wala raasta use karo; 🅱️/🅲 sirf reference ke liye hain.
 
 ### 🅰️ Pehli baar install — ek script (recommended)
 
@@ -39,18 +42,18 @@ hue), aur `install-fedora.sh` ko wahi flags ke saath chala deta hai.
 Dusra folder chahiye: `--dir ~/psd-observer/whatsapp-agent` add karo.
 Sirf download karna hai (install baad me): `--no-install`.
 
-### 🅱️ Git se (agar git hai)
+### 🅱️ Git se? (optional — sirf reference, is setup me use nahi hota)
+
+Tum git use nahi karte, isliye ye sirf record ke liye hai. Agar kabhi git chahiye:
 
 ```bash
-sudo dnf install -y git
 git clone -b arena/20378d42-psd-observer https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ```
 
 > ⚠️ 2.0 code sirf `arena/20378d42-psd-observer` branch pe hai, `main` pe nahi.
-> Check: `ls src/ | head` → `actions.js agentloop.js doctor.js imaging.js …`
 
-### 🅲 Na script, na git — sirf zip/tar manually
+### 🅲 Na script, na curl-fallback — seedha tar/zip manually
 
 ```bash
 cd /tmp
@@ -80,9 +83,10 @@ bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
 ```
 
 (Path apna actual install path daalo — jahan `package.json` hai wahan.
-Pata nahi? `find ~ -name package.json -path "*whatsapp-agent*" 2>/dev/null`)
+Default `~/observer-agent`. Pata nahi?
+`find ~ -name package.json -path "*observer-agent*" 2>/dev/null`)
 
-**Pehli baar install kar rahe ho (git clone hi nahi kiya):**
+**Pehli baar install kar rahe ho (koi code pehle se nahi hai):**
 
 ```bash
 bash /tmp/agent-update.sh --fresh ~/observer-agent

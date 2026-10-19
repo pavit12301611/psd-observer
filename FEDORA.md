@@ -4,20 +4,25 @@ Everything below is written for **Fedora Workstation (40+; any recent Fedora wor
 `dnf` packages, a `systemd --user` service, `journalctl` logs, Podman instead of
 Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 
-**TL;DR — the WhatsApp agent** (run these one at a time, waiting for each to finish —
-don't paste the `journalctl` line together with the installer).
-**No git?** The first two lines become one script download — see
-[Install without git](#install-without-git-plain-curl) below.
+**TL;DR — the WhatsApp agent.** This setup is **curl-only: no `git clone`, no
+`git pull`.** (Owner ka workflow git ke bina chalta hai.)
 
 ```bash
-git clone -b arena/20378d42-psd-observer https://github.com/pavit12301611/psd-observer.git
-cd psd-observer/whatsapp-agent
-./scripts/install-fedora.sh --service --ollama --power --phone
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+
+bash /tmp/observer-setup.sh --service --ollama --power --phone
 #   --service  autostart (systemd --user + linger)
 #   --ollama   free offline AI (llama3.2)
 #   --power    OCR, recording, Wi-Fi/BT, windows, input, full access level
 #   --phone    phone app reachable at http://<PC-IP>:8787/ (firewalld 8787)
 ```
+
+It installs to `~/observer-agent` and creates `.env` for you. Updates later are
+also curl-only — see [Updating without git](#updating-without-git).
+
 ```bash
 journalctl --user -u observer-whatsapp-agent -f  # scan the QR with the 8859555795 phone
 # …then from your 9528923866 phone, WhatsApp the agent number:  /help
@@ -34,10 +39,10 @@ Fedora ships `npm` as a **separate package** from `nodejs` — install both
 (Fedora 40 gives Node 20 LTS, 41+ gives Node 22; the agent needs ≥ 20):
 
 ```bash
-sudo dnf install nodejs npm git curl gcc-c++ make python3
+sudo dnf install nodejs npm curl gcc-c++ make python3
 node --version && npm --version
 
-cd whatsapp-agent
+cd ~/observer-agent        # jahan install-fresh.sh ne rakha (ya apna path)
 cp .env.example .env     # owner 919528923866 / agent 918859555795 already set
 npm install
 ./start.sh               # foreground run; QR in terminal + image viewer + dashboard
@@ -86,9 +91,9 @@ Then WhatsApp `/model` should report Ollama running. (`install-fedora.sh --ollam
 does all of this.) NVIDIA/AMD GPU acceleration, if wanted, is Ollama's own Fedora
 story — the agent only talks HTTP to `127.0.0.1:11434`.
 
-### Install without git (plain curl)
+### Install without git (plain curl — the supported way)
 
-First-time install, nothing but `curl`/`tar` needed:
+First-time install, nothing but `curl`/`tar` needed (no `git`, no `zip` tool):
 
 ```bash
 URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
@@ -102,7 +107,7 @@ Installs to `~/observer-agent` by default (`--dir <path>` to choose). It refuses
 to overwrite an existing install unless you pass `--force` (or use the updater
 below), and `--no-install` downloads only. Then jump to “Phone app over Wi-Fi”.
 
-### Updating without git
+### Updating without git (curl only)
 
 No `git pull` needed — the installer/repo works as a plain download:
 

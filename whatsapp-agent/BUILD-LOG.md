@@ -5,6 +5,17 @@
 >
 > Branch: `arena/20378d42-psd-observer` · Files: 41 changed, **+7190 / −452**
 > · Final state: **61 PC actions**, **44 tests pass**, ₹0 cost.
+>
+> ### ⚠️ Dhyaan do: is project me **git use nahi hota**
+>
+> Owner git nahi chalata — koi `git clone`, `git pull`, `git status` nahi.
+> Install/update **sab kuch plain `curl` se** hota hai (tarball download →
+> extract). Isliye poore doc me jo bhi install/update step hai wo curl wala hai.
+> Timeline me jo `b6faa21` jaise **commit hashes** likhe hain, wo sirf **record**
+> ke liye hain (kya kab bana) — unhe chalane ki zaroorat kabhi nahi padti.
+>
+> Yahi wajah hai ki dono helper scripts bane:
+> `install-fresh.sh` (pehli install) aur `update-from-github.sh` (baad ke updates).
 
 ---
 
@@ -23,14 +34,62 @@
 | 9 | `4314fd8` | **Screenshot banti thi par chat me nahi aati** — signal + file watch | 41 | 60 |
 | 10 | `bff22b0` | **500-character typing limit hata diya** + `/pc paste` | 44 | 61 |
 
-Verify karna ho:
+Verify karna ho (sab curl, git zero):
 
 ```bash
-cd whatsapp-agent
-git log --oneline            # ya git ke bina: ./scripts/update-from-github.sh --check
-npm test                     # 44 pass
-npm run check                # saari files ka syntax
+cd ~/observer-agent
+./scripts/update-from-github.sh --check   # local vs remote version
+npm test                                  # 44 pass
+npm run check                             # saari files ka syntax
 ```
+
+---
+
+## 0.1 Install/update sirf curl se (git nahi) — copy-paste
+
+Yehi wo commands hain jo actually use hote hain. **Git kabhi nahi.**
+
+**Pehli baar (fresh install, git ke bina):**
+
+```bash
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+
+bash /tmp/observer-setup.sh --service --ollama --power --phone
+```
+
+**Update (baad me, code naya aane pe):**
+
+```bash
+curl -fL -o /tmp/agent-update.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+bash /tmp/agent-update.sh --dir ~/observer-agent
+```
+
+**Version check:**
+
+```bash
+cd ~/observer-agent && ./scripts/update-from-github.sh --check
+```
+
+**Agar curl bhi block ho jaye** — pipe/`||` wali fallback line use karo, ya browser se zip:
+
+```bash
+# manual tarball
+curl -fL -o /tmp/agent.tar.gz \
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+tar -xzf /tmp/agent.tar.gz -C /tmp
+```
+
+```
+https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip
+```
+
+Update scripts kya **nahi** chhoote: `.env`, `auth_info/` (WhatsApp login — QR
+dobara nahi), `data/` (PIN, token, notes, reminders, todos, downloads).
+Backup khud banta hai: `~/observer-agent-backup-<date>.tar.gz`.
 
 ---
 
@@ -287,7 +346,7 @@ ls -l /dev/uinput /tmp/.ydotool_socket
 | `EADDRINUSE 0.0.0.0:8787` | purana process chal raha tha, error message dhundhla | clear message + `process.exit(1)` |
 | Tests ne home me kachra chhoda | `mkdtemp` ka cleanup nahi | `after()` hook + `rmSync` |
 | `raw.githubusercontent.com SSL_ERROR_SYSCALL` | network/ISP block | `api.github.com` contents API fallback |
-| `git push` rejected (non-fast-forward) | remote pe pehle se commits | `git fetch` + `git reset --soft origin/<branch>` + naya commit |
+| `git push` rejected (non-fast-forward) — **sirf development side**, tumhe kabhi nahi | remote pe pehle se commits | `git fetch` + `git reset --soft origin/<branch>` + naya commit (owner curl hi use karta hai) |
 
 ### 3.4 Test failures jo sudhare
 
@@ -421,4 +480,4 @@ Destructive (confirmation maangte hain): `delete_path`, `kill_process`,
 
 ---
 
-_Last updated with commit `bff22b0`._
+_Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

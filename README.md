@@ -15,7 +15,7 @@
 >
 > **Start (Fedora Linux, no git needed):**
 > see [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md#1-code-laao-git-ke-bina-bhi--2-tarike) —
-> one `curl` (no git), or `git clone -b arena/20378d42-psd-observer` if you have git.
+> one `curl` — **no git at all** (this setup is curl-only; no clone/pull needed).
 > then `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`.
 > Add `--remote` for free Tailscale access to the phone app from **outside** your home.
 > → scan the QR with the agent phone → WhatsApp it `/help` from your phone →

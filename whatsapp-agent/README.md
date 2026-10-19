@@ -26,7 +26,8 @@ Everything that was built, every command, and every error with its fix:
 
 ## 1. Install (Fedora, ~5 minutes)
 
-**No git needed** — one script downloads the branch with `curl` and installs it:
+**No git needed** — this project is installed and updated with plain `curl`
+(no `git clone`, no `git pull`). One script downloads the branch and installs it:
 
 ```bash
 URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
@@ -39,7 +40,7 @@ bash /tmp/observer-setup.sh --service --ollama --power --phone
 It lands in `~/observer-agent` (`--dir <path>` to change), creates `.env` with
 the owner/agent numbers filled in, and runs the Fedora installer below.
 
-<details><summary>Already have the code (git clone / tarball)?</summary>
+<details><summary>Already extracted the tarball somewhere?</summary>
 
 ```bash
 cd whatsapp-agent
@@ -328,7 +329,7 @@ code to `~/observer-agent-backup-<date>.tar.gz`, replaces only the code, runs
 `npm install`, and restarts the service. It never touches `.env`, `auth_info/`
 (your WhatsApp link — no re-scan) or `data/` (PIN, token, notes, reminders,
 todos). `./scripts/update-from-github.sh --check` shows the remote version.
-Git users can still `git pull` on the `arena/20378d42-psd-observer` branch.
+This workflow is **curl-only** — you never need `git clone` or `git pull`.
 
 ---
 
