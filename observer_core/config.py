@@ -162,6 +162,30 @@ class RuntimeSettings(BaseModel):
     allow_no_transcript: bool = True
 
 
+class WhatsAppSettings(BaseModel):
+    """Remote control over WhatsApp (see ``observer_core/remote``).
+
+    Phone numbers are not secrets, but they are personal data: they are masked in
+    logs. The linked-device session itself is stored separately in the data dir
+    with mode 0600 and is never written to this file.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    #: The WhatsApp account the agent runs on (linked device). Digits, optionally +CC.
+    agent_number: str = ""
+    #: The only sender allowed to give instructions. Everyone else is ignored silently.
+    allowed_number: str = ""
+    #: Used when a number is written without a country code.
+    country_code: str = "91"
+    #: Maximum model steps per instruction before the agent stops and reports back.
+    max_steps: int = 10
+    #: Seconds a shell command may run before it is killed.
+    command_timeout_s: int = 120
+    #: Seconds to wait for a YES/NO reply before a proposed command is dropped.
+    confirm_timeout_s: int = 600
+
+
 class PathsSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     #: Empty strings mean "use the XDG default".
@@ -213,6 +237,7 @@ class AppConfig(BaseModel):
     smtp: SmtpCreds = Field(default_factory=SmtpCreds)
     sendgrid: SendgridCreds = Field(default_factory=SendgridCreds)
     pushover: PushoverCreds = Field(default_factory=PushoverCreds)
+    whatsapp: WhatsAppSettings = Field(default_factory=WhatsAppSettings)
 
     #: Keys whose values are credentials and must never be logged verbatim.
     SECRET_KEYS: ClassVar[dict[str, set[str]]] = {
@@ -250,6 +275,10 @@ class AppConfig(BaseModel):
         self.sendgrid.api_key = _env("SENDGRID_API_KEY", self.sendgrid.api_key)
         self.pushover.token = _env("PUSHOVER_TOKEN", self.pushover.token)
         self.pushover.user = _env("PUSHOVER_USER", self.pushover.user)
+
+        self.whatsapp.agent_number = _env("OBSERVER_WHATSAPP_AGENT_NUMBER", self.whatsapp.agent_number)
+        self.whatsapp.allowed_number = _env("OBSERVER_WHATSAPP_ALLOWED_NUMBER", self.whatsapp.allowed_number)
+        self.whatsapp.enabled = _bool_env("OBSERVER_WHATSAPP_ENABLED", self.whatsapp.enabled)
 
         self.privacy.allow_cloud_models = _bool_env(
             "OBSERVER_CORE_ALLOW_CLOUD", self.privacy.allow_cloud_models
@@ -399,8 +428,12 @@ def skeleton_toml(cfg: AppConfig | None = None) -> str:
         "smtp": d["smtp"],
         "sendgrid": d["sendgrid"],
         "pushover": d["pushover"],
+        "whatsapp": d["whatsapp"],
     }
     help_text = {
+        ("whatsapp", "agent_number"): "the WhatsApp account the agent runs on (linked device)",
+        ("whatsapp", "allowed_number"): "the ONLY number allowed to give instructions",
+        ("whatsapp", "country_code"): "used when a number has no +country code",
         ("models", "provider"): "ollama | openai_compat | llamacpp_local | cloud",
         ("models", "endpoint"): "ollama / llama.cpp / vLLM / LM Studio base URL",
         ("models", "ollama_model"): "run `ollama list` to see what you have pulled",

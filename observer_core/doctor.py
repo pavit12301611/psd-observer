@@ -146,13 +146,42 @@ def config_diagnostic(cfg) -> Diagnostic:
     return Diagnostic(area="system", name="config.toml", ok=True, status="ok", detail=f"{cfg_path} (mode 600)")
 
 
+def whatsapp_diagnostic(cfg) -> Diagnostic:
+    """Remote control status. Optional feature: never 'error' just because it is off."""
+    try:
+        from .remote.service import RemoteConfigError, session_path, validated_numbers
+        from .remote.whatsapp import WhatsAppUnavailable, _load_neonize
+    except Exception as exc:  # pragma: no cover - import problem inside the package
+        return Diagnostic(area="remote", name="WhatsApp remote", ok=False, status="degraded", detail=str(exc)[:160])
+    w = cfg.whatsapp
+    if not w.enabled:
+        return Diagnostic(area="remote", name="WhatsApp remote", ok=True, status="ok",
+                          detail="disabled (optional)", hint="observer-core whatsapp setup --agent N --allow N")
+    try:
+        validated_numbers(cfg)
+    except RemoteConfigError as exc:
+        return Diagnostic(area="remote", name="WhatsApp remote", ok=False, status="degraded",
+                          detail=str(exc)[:160], hint="observer-core whatsapp setup --agent N --allow N")
+    try:
+        _load_neonize()
+    except WhatsAppUnavailable as exc:
+        return Diagnostic(area="remote", name="WhatsApp remote", ok=False, status="degraded",
+                          detail=str(exc)[:160], hint="sudo dnf install --needed file-libs")
+    if not session_path().exists():
+        return Diagnostic(area="remote", name="WhatsApp remote", ok=False, status="degraded",
+                          detail="enabled but not paired", hint="observer-core whatsapp pair")
+    return Diagnostic(area="remote", name="WhatsApp remote", ok=True, status="ok",
+                      detail="enabled and paired (run: observer-core whatsapp run)")
+
+
 def collect_diagnostics(app=None, *, include_model: bool = True) -> list[Diagnostic]:
     from .config import AppConfig
     from .sensors.registry import SensorRegistry
 
     cfg = app.config if app is not None else AppConfig.load(apply_env=True)
     out: list[Diagnostic] = [python_diagnostic(), os_diagnostic(), session_diagnostic(),
-                             portal_diagnostic(), gpu_diagnostic(), config_diagnostic(cfg), data_dirs_diagnostic()]
+                             portal_diagnostic(), gpu_diagnostic(), config_diagnostic(cfg), data_dirs_diagnostic(),
+                             whatsapp_diagnostic(cfg)]
     out.extend(system_tool_diagnostics())
 
     # sensors (probe without starting them)

@@ -202,6 +202,11 @@ def agent_wizard(
     a.close()
 
 
+from .remote.cli_whatsapp import whatsapp_app  # noqa: E402
+
+app.add_typer(whatsapp_app, name="whatsapp")
+
+
 def main() -> None:
     if len(sys.argv) == 1:
         sys.argv.append("run")

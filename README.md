@@ -24,6 +24,7 @@ persistent memory, a short screen clip, or a webhook.
 - [Wayland: read this first](#wayland-read-this-first)
 - [Credentials](#credentials)
 - [Agents: wizard, YAML and JSON](#agents-wizard-yaml-and-json)
+- [WhatsApp remote](#whatsapp-remote)
 - [Headless daemon and systemd](#headless-daemon-and-systemd)
 - [Command reference](#command-reference)
 - [Privacy and security](#privacy-and-security)
@@ -52,6 +53,7 @@ split:
 | Network behaviour during a monitoring run | Checked from `/proc`: no TCP connections to non-loopback endpoints in a 40 s window |
 | **PyQt6 GUI** (window, sensor previews, editor, wizard, tray, settings) | **Written and statically checked (pyflakes, compile), but not run.** The sandbox lacks `libGL`, and apt is unreachable. A Qt smoke test exists and runs where Qt loads. |
 | **Wayland screen capture via the portal (ScreenCast + PipeWire)** | **Not implemented in full.** See [Wayland](#wayland-read-this-first). |
+| **WhatsApp remote** (commands, YES/NO approval, bounded loop, owner gate, shell limits, account-mismatch refusal) | Covered by fakes in `tests/test_remote.py`. **Not run against WhatsApp:** the sandbox has no route to it. See [WhatsApp remote](#whatsapp-remote). |
 | Local Whisper transcription, llama.cpp in-process, clip recording on Wayland | Optional paths, present but not exercised here |
 
 Run `./run.sh` on a real Fedora 40–42 machine to confirm the GUI. If something
@@ -299,6 +301,77 @@ Keep `run_python` off unless you have read the snippets an agent will run.
 
 ---
 
+## WhatsApp remote
+
+Message the agent from your phone; it works on this computer and replies on WhatsApp when it is done.
+
+```text
+you (9528923866)  ──WhatsApp──▶  agent number (8859555795, linked to this computer)
+                                    │  local model proposes ONE shell command
+                                    ▼
+                         "I want to run:  df -h /   Reply YES or NO"
+you ──YES──▶ command runs (as your user, 120 s limit) ──▶ result fed back to the model
+                                    ▼
+                         "✅ Disk has 40% free."
+```
+
+### Set it up (once)
+
+1. `./run.sh` (installs the `neonize` WhatsApp library and Fedora's `file-libs`, which provides libmagic).
+2. Save the two numbers. Indian mobiles work with 10 digits; the country code defaults to 91:
+   ```bash
+   .venv/bin/observer-core whatsapp setup --agent 8859555795 --allow 9528923866
+   ```
+3. Link the agent number to this computer: `.venv/bin/observer-core whatsapp pair`, then on the phone that has **8859555795**: WhatsApp → Linked devices → Link a device, and scan the QR code shown in the terminal. Pairing fails if the scanned account is not the agent number.
+4. Keep the listener running: `.venv/bin/observer-core whatsapp run` (Ctrl-C to stop). It sends "🟢 Observer is online" to 9528923866 when connected.
+
+### Use it
+
+From **9528923866**, send a message to the **8859555795** chat:
+
+| You send | What happens |
+|---|---|
+| `how much disk space is free?` | the model proposes a command, you get a `YES / NO` prompt |
+| `YES` / `NO` | run or cancel the pending command |
+| `STOP` | cancel the current task |
+| `STATUS` | show how to use it |
+
+Messages from any other number are ignored without a reply. Messages in group chats are ignored. The agent works on one instruction at a time, and gives up after `max_steps` (default 10) model steps.
+
+If the model needs information it asks you a question, and your next message is the answer. If no reply arrives within 10 minutes (`confirm_timeout_s`), the task stops and nothing runs.
+
+### Commands and status
+
+```text
+observer-core whatsapp setup --agent N --allow N [--country 91]   save numbers, enable
+observer-core whatsapp status                                    config and install check, no network
+observer-core whatsapp pair                                      scan the QR code once
+observer-core whatsapp run                                       listen until Ctrl-C
+observer-core whatsapp disable                                   stop using it (keeps the pairing)
+observer-core whatsapp unpair --yes                              delete the local session keys
+```
+
+`observer-core doctor` shows a "WhatsApp remote" line. It is never an error when the feature is off.
+
+### Safety, read before you enable it
+
+- **Unofficial protocol.** This uses the WhatsApp Web linked-device protocol through `neonize`. Meta does not permit it in its terms of service, and the account can be restricted or banned. Use a SIM you can afford to lose for the agent number.
+- **Anyone who controls 9528923866 can run commands on this computer** once they reply YES. Protect that WhatsApp account (screen lock, two-step verification). Only YES from the allowed number runs anything.
+- **Commands run as your user, with your files, network, and display.** They are not sandboxed. `sudo` cannot prompt (stdin is closed), so it fails rather than hanging. Every command is shown to you in full before it runs. Read it before you say YES.
+- **Command output goes back to WhatsApp**, truncated. Do not run commands that print secrets if you do not want them in WhatsApp history.
+- **The model also reads command output.** A file or web page can contain text that tries to steer it into proposing something harmful. Each proposed command still needs your YES, so read it before approving.
+- **Messages travel through WhatsApp's servers**, which is how WhatsApp works. The model that reads them runs locally by default. If you configured a cloud or non-local model endpoint, `setup` warns you, and instructions and command output go to that endpoint.
+- **Wrong account protection.** If the linked account is not the agent number, the agent refuses to run and disconnects.
+- **Storage.** The linked-device keys live in `$XDG_DATA_HOME/observer-core/whatsapp/session.sqlite3`, forced to mode 0600. Nothing secret is written to `config.toml`. Logs show phone numbers masked (last four digits only).
+
+### Not yet verified
+
+- The live pairing and messaging flow has **not** been run against WhatsApp. The build sandbox has no route to WhatsApp, and `libmagic` was missing there. Behaviour is covered by fakes in `tests/test_remote.py`, and the library's own session creation was checked up to the network call.
+- Small local models may not always produce the exact JSON the loop expects. An invalid reply is retried inside the step limit.
+- Not included: images and voice notes from WhatsApp, group chats, GUI controls for the remote (use the CLI), and a systemd unit for `whatsapp run`. A simple user service is `systemctl --user` around `observer-core whatsapp run`.
+
+---
+
 ## Headless daemon and systemd
 
 ```bash
@@ -335,6 +408,7 @@ observer-core agent enable ID [--off]
 observer-core agent delete ID [--yes]
 observer-core agent run-once ID [--dry-run]
 observer-core agent wizard "your words" [--preset KEY] [--action telegram] [--name NAME]
+observer-core whatsapp setup|status|pair|run|disable|unpair   remote control over WhatsApp
 ```
 
 `python -m observer_core` behaves like `observer-core`.
@@ -460,6 +534,8 @@ observer_core/
   presets.py  daemon.py  cli.py  install.py  gui_entry.py
   sensors/   screen, screen_ocr, camera, microphone (+ system audio), clipboard,
              registry (shared captures), preview (Qt bridge, throttled)
+  remote/    WhatsApp remote: commander (owner gate, YES/NO, bounded loop), shell
+             (one bounded command), whatsapp (neonize linked device), service, cli_whatsapp, phone
   llm/       base (timeouts, retries), ollama, openai_compat, llamacpp_local,
              cloud (opt-in), factory
   tools/     base, channels (Telegram, Discord, Twilio, SMTP, SendGrid, Pushover,

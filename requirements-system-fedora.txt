@@ -63,3 +63,6 @@ xdg-desktop-portal-gtk
 util-linux
 v4l-utils
 flatpak
+
+# --- WhatsApp remote: libmagic is loaded by neonize at import time ----------
+file-libs
