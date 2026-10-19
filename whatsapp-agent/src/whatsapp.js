@@ -358,12 +358,13 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         for (let x = 0; x < marked.info.width; x++) {
           const idx = (y * marked.info.width + x) * stride;
           const r = marked.data[idx], g = marked.data[idx+1], b = marked.data[idx+2], a = marked.data[idx+3];
-          const isRedMarked = r > 170 && g < 110 && b < 110 && a > 60;
+          // JPEG compresses red to ~R140-200, so be lenient; also check R dominance
+          const isRedMarked = r > 130 && g < 130 && b < 130 && (r - g) > 30 && (r - b) > 30 && a > 40;
           if (!isRedMarked) continue;
           // If we have base, check if base was already red there — then it's not a new mark (e.g. YouTube icon)
           if (baseRaw) {
             const bR = baseRaw.data[idx], bG = baseRaw.data[idx+1], bB = baseRaw.data[idx+2];
-            const isRedBase = bR > 170 && bG < 110 && bB < 110;
+            const isRedBase = bR > 130 && bG < 130 && bB < 130 && (bR - bG) > 30 && (bR - bB) > 30;
             if (isRedBase) continue; // dock icon, not user mark
           }
           sumX += x; sumY += y; count++;
@@ -373,7 +374,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
           if (y > maxY) maxY = y;
         }
       }
-      if (count > 20 && count < 50000) {
+      if (count > 10 && count < 80000) {
         // Centroid of red cluster
         const cx = Math.round(sumX / count);
         const cy = Math.round(sumY / count);
