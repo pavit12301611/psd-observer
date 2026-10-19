@@ -121,6 +121,41 @@ Browser se bhi download kar sakte ho:
 
 ---
 
+## 1d. Exact locations — kya kahan hai (default install)
+
+| Kya | Path |
+|---|---|
+| Agent ka folder | `~/observer-agent/` |
+| Code | `~/observer-agent/src/*.js` |
+| Phone app | `~/observer-agent/webapp/` |
+| Scripts | `~/observer-agent/scripts/` |
+| **Settings** | `~/observer-agent/.env` |
+| WhatsApp login | `~/observer-agent/auth_info/` |
+| **PIN** | `~/observer-agent/data/dashboard-pin.txt` |
+| Token | `~/observer-agent/data/bridge-token.txt` |
+| Notes/todos/reminders | `~/observer-agent/data/store.json` |
+| Downloads | `~/observer-agent/data/downloads/` |
+| Shared files | `~/observer-agent/data/shared/` |
+| QR (linking ke waqt) | `~/observer-agent/data/qr.png` |
+| systemd unit | `~/.config/systemd/user/observer-whatsapp-agent.service` |
+| Logs | `journalctl --user -u observer-whatsapp-agent` |
+| Ollama models | `~/.ollama/models/` (API `127.0.0.1:11434`) |
+| ydotool socket | `/tmp/.ydotool_socket` |
+| GNOME screenshots | `~/Pictures/` |
+
+Sab kuch ek command me:
+
+```bash
+cd ~/observer-agent
+ls -la .env data/ auth_info/ 2>/dev/null
+cat data/dashboard-pin.txt
+```
+
+Har function kis file me hai, kaunsi setting kis line pe — poora detail:
+[`BUILD-LOG.md`](BUILD-LOG.md) ka section **0.2 EXACT LOCATIONS**.
+
+---
+
 ## 2. Install (ek hi command)
 
 ```bash

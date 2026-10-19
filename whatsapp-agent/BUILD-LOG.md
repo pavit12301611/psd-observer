@@ -93,6 +93,173 @@ Backup khud banta hai: `~/observer-agent-backup-<date>.tar.gz`.
 
 ---
 
+## 0.2 EXACT LOCATIONS — kaunsi cheez kahan hai
+
+Sab paths **default** hain (`install-fresh.sh` se install kiya to yahi hain).
+Apna install path pata karna ho:
+
+```bash
+find ~ -name package.json -path "*observer-agent*" -o -name package.json -path "*whatsapp-agent*" 2>/dev/null
+```
+
+### 0.2.1 Install folder aur code
+
+| Kya | Exact path | Kya hai |
+|---|---|---|
+| **Agent ka root** | `~/observer-agent/` | Poora agent yahan. (Purane installs `~/psd-observer/whatsapp-agent/` me ho sakte hain.) |
+| Entry point | `~/observer-agent/src/index.js` | `npm start` yahi chalata hai. Startup pe Desktop/PIN/URL print karta hai. |
+| Code | `~/observer-agent/src/*.js` | 23 modules (table neeche). |
+| Phone app (PWA) | `~/observer-agent/webapp/` | `index.html`, `app.js`, `styles.css`, `sw.js`, `manifest.webmanifest` |
+| Scripts | `~/observer-agent/scripts/` | 7 shell scripts |
+| systemd template | `~/observer-agent/systemd/observer-whatsapp-agent.service` | Installer iska copy banata hai |
+| Tests | `~/observer-agent/test/agent.test.js`, `test/power.test.js` | `npm test` |
+| Settings ka template | `~/observer-agent/.env.example` | Saare variables + comments |
+| **Tumhari settings** | `~/observer-agent/.env` | Yahi edit karo. Update isse nahi chhoota. |
+| Launcher | `~/observer-agent/start.sh` | Foreground run (systemd ke bina) |
+| Docs | `~/observer-agent/README.md`, `QUICKSTART.md`, `BUILD-LOG.md` | |
+| Root repo (agar git-clone style install hai) | `~/psd-observer/whatsapp-agent/` | Isi repo ka andar wala path — dono jagah same structure |
+
+Agar update karte waqt `--dir` nahi diya, script khud dhoondh leta hai
+(`src/` + `package.json` ki jagah).
+
+### 0.2.2 Runtime data (tumhara asli data — backup lo)
+
+| Kya | Exact path | Kis kaam ka |
+|---|---|---|
+| WhatsApp login | `~/observer-agent/auth_info/` | Baileys session. **Delete = QR dobara scan.** |
+| Purana/dead login | `~/observer-agent/auth_info_loggedout_<date>/` | Auto-relink inhe archive karta hai (delete nahi). |
+| Phone app **PIN** | `~/observer-agent/data/dashboard-pin.txt` | 6 digit, mode 600. `cat` karke dekh lo. |
+| Bridge **token** | `~/observer-agent/data/bridge-token.txt` | App/API ka long token. Private rakho. |
+| Settings + notes + todos + reminders + stats | `~/observer-agent/data/store.json` | JSON. Har change pe save. |
+| Downloads | `~/observer-agent/data/downloads/` | WhatsApp se aayi files. |
+| Shared | `~/observer-agent/data/shared/` | Yahan rakho → app ke Files tab me dikhega. |
+| QR ka PNG | `~/observer-agent/data/qr.png` | Jab linking chal rahi ho. |
+| Update backups | `~/observer-agent-backup-YYYYMMDD-HHMMSS.tar.gz` | `$HOME` me, code ka snapshot (`.env`/`data` nahi). |
+
+> `DATA_DIR` / `AUTH_DIR` `.env` me set karke inhe kahin aur bhi rakh sakte ho
+> (Fedora/XDG example `.env.example` ke end me comment hai).
+
+### 0.2.3 System files (agent ke bahar)
+
+| Kya | Exact path |
+|---|---|
+| systemd **user** unit | `~/.config/systemd/user/observer-whatsapp-agent.service` |
+| Service logs | `journalctl --user -u observer-whatsapp-agent` |
+| Linger (boot pe start) | `loginctl enable-linger "$USER"` |
+| Ollama service | `systemctl status ollama` · API `http://127.0.0.1:11434` |
+| Ollama models | `~/.ollama/models/` (`ollama list`) |
+| Portal (screenshot) | `systemctl --user status xdg-desktop-portal-gnome` / `xdg-desktop-portal` |
+| ydotool daemon | `systemctl status ydotool` (kabhi `ydotoold`) · socket `/tmp/.ydotool_socket` ya `/run/ydotoold/socket` |
+| uinput device | `/dev/uinput` |
+| GNOME screenshots | `~/Pictures/` (ya `XDG_PICTURES_DIR`, naam `user-dirs.dirs` se) |
+| Wayland sockets | `/run/user/$(id -u)/wayland-*` |
+| X11 sockets | `/tmp/.X11-unix/X*` |
+| Agent ke temp shots | `/tmp/observer-shot-<ms>.png` (bhejne ke baad delete) |
+
+### 0.2.4 Kaunsa code kis file me (debug karte waqt)
+
+| Function / feature | File | Line (is commit pe; badal sakti hai — `grep -n` use karo) |
+|---|---|---|
+| Session/socket detection | `src/pccontrol.js` | `detectSockets()` 36, `displayEnv()` 62, `sessionInfo()` 84 |
+| **Screenshot** (portal → grim → spectacle, black check) | `src/pccontrol.js` | `captureScreenshot()` 499, `screenshotAttempts()` 451, `portalScreenshot()` 370 |
+| Portal response parse | `src/pccontrol.js` | `parsePortalScreenshotResponse()` 250 |
+| Screenshot **file watcher** | `src/pccontrol.js` | `picturesDirs()` 272, `findNewScreenshot()` 289, `waitForCompleteFile()` 311 |
+| Black image detect | `src/imaging.js` | `decodePng()` 30, `imageStats()` 116 |
+| Keyboard / mouse | `src/pccontrol.js` | `splitForTyping()` 745, `typeText()` 764, `pasteText()` 791, `keyCombo()` ~815, `click()` ~825, `moveMouse()` ~860, `scrollMouse()` ~880 |
+| Input diagnostics | `src/pccontrol.js` | `ydotoolSocket()` 674, `inputDiagnostics()` 683 |
+| Volume / brightness / media | `src/pccontrol.js` | `volume()` 546, `brightness()` ~600, `media()` ~625 |
+| File tools | `src/files.js` | `smartHomePath()` 53, `resolvePath()` 84, `fileReply()` 205, `movePath()`/`copyPath()`/`makeDir()` ~290 |
+| Hinglish intents | `src/nlp.js` | `parseIntent()` 31 |
+| Action registry (61) | `src/actions.js` | `registry` array 57, `toolSchemas()` 623, `accessReport()` 643, `execute()` 662, `runPending()` 699 |
+| AI tool-calling | `src/agentloop.js` | `createAgentLoop()` 43, `toolsFor()` 55, `run()` 211 |
+| AI providers | `src/ai.js` | `complete()`, `describeImage()`, `aiStatus()` |
+| `/doctor` | `src/doctor.js` | `runDoctor()` 81 |
+| Command router | `src/commands.js` | `createAgent()` 62, `handleCommand()` 400, `HELP` ~26 |
+| Phone app API + PWA hosting | `src/server.js` | `createBridgeServer()` 90, static + routes ~150-380 |
+| WhatsApp link/send | `src/whatsapp.js` | `createWhatsApp()` 98, `start()` ~355, `processOwnerMessage()` ~200, `runOwner()` ~528 |
+| App discovery/launch | `src/apps.js` | `discoverApps()` 110, `matchApp()` 136, `launchApp()` 192 |
+| Wi-Fi/BT/services/record | `src/systemx.js` | poore file me feature-wise |
+| OCR / PDF | `src/ocr.js` | `ocrImage()` 37, `ocrScreen()` 55, `lookAtScreen()` 111 |
+| Voice notes | `src/transcribe.js` | `transcribeAudio()` 77 |
+| Settings load | `src/config.js` | `loadConfig()` 75; PIN `resolveDashboardPin()` 60; token `resolveBridgeToken()` 40 |
+| Reminders/todos/store | `src/store.js` | `Store`, `startReminderLoop()` |
+
+### 0.2.5 Settings kis line pe (`.env`)
+
+| Setting | Exact jagah (`.env.example` line) | Default |
+|---|---|---|
+| Owner / agent number | line 8 `OWNER_NUMBER`, line 12 `AGENT_NUMBER` | `919528923866` / `918859555795` |
+| Phone app | line 37 `HOST`, 38 `PORT`, 41 `BRIDGE_TOKEN`, 44 `DASHBOARD_PIN` | `0.0.0.0`, `8787`, auto, auto |
+| AI | line 48 `AI_PROVIDER`, `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_VISION_MODEL`, `GROQ_*`, `GEMINI_*`, `OPENROUTER_*` | auto / llama3.2 |
+| Access | line 73 `ACCESS_LEVEL`, `FILES_EXTRA_ROOTS`, `CONFIRM_TTL_MS` | `full`, —, 120000 |
+| AI tools | `AGENT_TOOLS`, `MAX_AGENT_STEPS`, `AGENT_TOOL_LIMIT`, `OLLAMA_NUM_CTX` | true, 6, 20, 8192 |
+| Typing | line 93 `TYPE_CHUNK_CHARS`, line 94 `TYPE_CHUNK_DELAY_MS` | 180, 60 |
+| Screenshot | line 98 `PORTAL_TIMEOUT_MS` | 60000 |
+| OCR / voice | `OCR_LANGS`, `WHISPER_*` | `eng`, — |
+| Shell | `ALLOW_SHELL`, `SHELL_PIN`, `SHELL_TIMEOUT_MS` | false, —, 20000 |
+| PC input | line 131 `ALLOW_PC_CONTROL`, `CONTROL_PIN`, `YDOTOOL_SOCKET` | true, —, auto |
+| Misc | `TIMEZONE`, `ALLOW_SIMULATE`, `DATA_DIR`, `AUTH_DIR` | Asia/Kolkata, false, `data`, `auth_info` |
+
+Sabse zyada edit hone wali 6 cheezein:
+
+| Karna hai | File + variable |
+|---|---|
+| AI model badalna | `~/observer-agent/.env` → `OLLAMA_MODEL=llama3.2` (ya `qwen2.5:7b`) |
+| Screenshot prompt ka wait badhana | `.env` → `PORTAL_TIMEOUT_MS=120000` |
+| Typing tez/kam karna | `.env` → `TYPE_CHUNK_CHARS`, `TYPE_CHUNK_DELAY_MS` |
+| Shell on karna | `.env` → `ALLOW_SHELL=true` + `SHELL_PIN=1234` |
+| Access kam karna | `.env` → `ACCESS_LEVEL=standard` (ya `safe`) |
+| Phone app ka PIN badalna | `.env` → `DASHBOARD_PIN=123456` (ya `data/dashboard-pin.txt` delete karke restart) |
+
+Exact line numbers badal sakte hain — dhoondhne ke liye:
+
+```bash
+cd ~/observer-agent
+grep -n "^ACCESS_LEVEL\|^PORTAL_TIMEOUT_MS\|^TYPE_CHUNK" .env
+grep -n "PORTAL_TIMEOUT_MS\|TYPE_CHUNK" .env.example
+```
+
+### 0.2.6 Scripts — exact command aur wo kya chhoote hain
+
+| Script | Path | Chalane ka tarika | Safe rakhta hai |
+|---|---|---|---|
+| Fresh install | `~/observer-agent/scripts/install-fresh.sh` | `bash /tmp/observer-setup.sh --service --ollama --power --phone` | — (naya install) |
+| Update | `~/observer-agent/scripts/update-from-github.sh` | `./scripts/update-from-github.sh --dir ~/observer-agent` | `.env`, `auth_info/`, `data/` |
+| Installer | `~/observer-agent/scripts/install-fedora.sh` | `./scripts/install-fedora.sh --service --ollama --power --phone` | `.env`, `data/` |
+| systemd | `~/observer-agent/scripts/install-systemd.sh` | `./scripts/install-systemd.sh` / `--uninstall` | `data/`, `auth_info/` |
+| Desktop repair | `~/observer-agent/scripts/fix-desktop.sh` | `./scripts/fix-desktop.sh` | kuch delete nahi |
+| Remote (Tailscale) | `~/observer-agent/scripts/setup-remote.sh` | `./scripts/setup-remote.sh` | `.env` me sirf `HOST` |
+| Relink QR | `~/observer-agent/scripts/relink-whatsapp.sh` | `./scripts/relink-whatsapp.sh` | `data/` (login archive hota hai) |
+
+### 0.2.7 Logs aur quick health checks — exact
+
+```bash
+# service
+systemctl --user status observer-whatsapp-agent
+journalctl --user -u observer-whatsapp-agent -n 100 --no-pager
+journalctl --user -u observer-whatsapp-agent -f
+
+# health + PIN + token
+curl -s http://127.0.0.1:8787/health
+cat ~/observer-agent/data/dashboard-pin.txt
+cat ~/observer-agent/data/bridge-token.txt
+
+# screenshot path (Wayland)
+gdbus introspect --session --dest org.freedesktop.portal.Desktop \
+  --object-path /org/freedesktop/portal/desktop | grep -i screenshot
+systemctl --user status xdg-desktop-portal-gnome
+
+# input path
+systemctl status ydotool; ls -l /dev/uinput /tmp/.ydotool_socket
+
+# AI
+curl -s http://127.0.0.1:11434/api/tags | head -c 200
+```
+
+Aur sab kuch ek saath: WhatsApp pe **`/doctor`**.
+
+---
+
 ## 1. Naya kya bana — file by file
 
 ### 1.1 Naye modules (`whatsapp-agent/src/`)
