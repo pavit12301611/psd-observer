@@ -171,6 +171,21 @@ Then send **`/doctor`** on WhatsApp: it takes a real screenshot, inspects the
 pixels, checks every input tool and prints the exact fix for whatever is still
 missing.
 
+**`UnknownMethod: No such interface "org.freedesktop.portal.Desktop.Screenshot"`**
+means the portal is running *without* its desktop backend, so no Screenshot
+interface is exported (a running portal alone is not enough):
+
+```bash
+sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome   # KDE: -kde
+systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal
+gdbus introspect --session --dest org.freedesktop.portal.Desktop \
+  --object-path /org/freedesktop/portal/desktop | grep -i screenshot
+```
+
+The last line must list `interface org.freedesktop.portal.Screenshot`. If it does
+not, the backend isn't installed for your desktop (GNOME vs KDE) or the session
+was started before it was installed — log out/in once.
+
 **Why screenshots are black.** X11-era tools (`gnome-screenshot`, `scrot`,
 `maim`, ImageMagick `import`, even GNOME's own Screenshot API) still *run* on
 Wayland, exit with code 0 — and hand back a perfectly black frame, because the

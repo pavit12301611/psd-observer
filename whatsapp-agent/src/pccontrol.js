@@ -75,6 +75,9 @@ export function displayEnv() {
   } else {
     delete env.DISPLAY;
   }
+  // Apps launched from a boot-time service otherwise can't tell whether they
+  // are on Wayland or X11 and fall back to the wrong toolkit.
+  if (!env.XDG_SESSION_TYPE) env.XDG_SESSION_TYPE = sockets.wayland ? 'wayland' : sockets.x11 ? 'x11' : 'tty';
   return env;
 }
 
@@ -228,12 +231,17 @@ export function normalizeKeyForXdotool(combo) {
 
 const PORTAL_DEST = 'org.freedesktop.portal.Desktop';
 const PORTAL_PATH = '/org/freedesktop/portal/desktop';
+// NOTE: the interface is org.freedesktop.portal.Screenshot — NOT
+// org.freedesktop.portal.Desktop.Screenshot. Getting this wrong produces
+// "UnknownMethod: No such interface ... on object at path", which looks exactly
+// like a broken portal but is just a bad method name.
+const PORTAL_SCREENSHOT_IFACE = 'org.freedesktop.portal.Screenshot';
 
 /** Extract "file:///..." (or a plain path) from a portal Response signal. */
 export function parsePortalScreenshotResponse(text) {
   const body = String(text ?? '');
-  // Response (uint32 0, {'uri': <'file:///home/u/Pictures/Screenshot...png'>})
-  const responseMatch = body.match(/Response\s*\(\s*uint32\s+(\d+)\s*,\s*\{(.*)\}\)/s);
+  // .../request/1_45/obs123: org.freedesktop.portal.Request.Response (uint32 0, {'uri': <'file:///…'>})
+  const responseMatch = body.match(/Response\s*\(\s*uint32\s+(\d+)\s*,\s*\{(.*)\}\s*\)/s);
   if (!responseMatch) return null;
   const code = Number.parseInt(responseMatch[1], 10);
   const uriMatch = responseMatch[2].match(/['"]uri['"]\s*:\s*<?['"]([^'">]+)['"]>?/);
@@ -248,19 +256,48 @@ export function parsePortalScreenshotResponse(text) {
 }
 
 /**
+ * Is the Screenshot interface actually exported right now?
+ * "No such interface" means the portal is running without a desktop backend
+ * (usually: xdg-desktop-portal-gnome not installed, or the backend died).
+ */
+export async function portalScreenshotAvailable(env = displayEnv()) {
+  if (!findBin('gdbus', env)) return { available: false, reason: 'gdbus is not installed (sudo dnf install glib2)' };
+  try {
+    const out = await run('gdbus', [
+      'introspect', '--session', '--dest', PORTAL_DEST, '--object-path', PORTAL_PATH,
+    ], { timeout: 6_000 });
+    const hasScreenshot = new RegExp(`interface\\s+${PORTAL_SCREENSHOT_IFACE.replace(/\./g, '\\.')}\\b`).test(out);
+    const interfaces = [...out.matchAll(/interface\s+([\w.]+)/g)].map((m) => m[1]);
+    return {
+      available: hasScreenshot,
+      interfaces,
+      reason: hasScreenshot
+        ? 'Screenshot interface present'
+        : 'The portal is running but has no Screenshot interface — its GNOME backend (xdg-desktop-portal-gnome) is missing or not running.',
+    };
+  } catch (err) {
+    const detail = String(err.stderr || err.message || '').trim().split('\n').at(-1)?.slice(0, 160);
+    return {
+      available: false,
+      reason: `Could not reach xdg-desktop-portal (${detail || 'no answer'}) — is xdg-desktop-portal installed and running?`,
+    };
+  }
+}
+
+/**
  * Screenshot through xdg-desktop-portal (works on GNOME/KDE Wayland and X11).
  * gdbus is part of glib2, present on every Fedora install.
  *
- * We start `gdbus monitor` first and then make the call, so the async Response
- * signal can't be missed. GNOME may show a one-time "Allow screenshot?" prompt
- * the first time — after that it is silent.
+ * We start `gdbus monitor` BEFORE the call so the async Response can't be
+ * missed. The Response arrives on a *request handle* object path
+ * (/org/freedesktop/portal/desktop/request/<sender>/<token>), so the monitor
+ * must not filter by object path. GNOME shows a one-time "Allow screenshot?"
+ * prompt — after that it is silent.
  */
-async function portalScreenshot(env, { timeoutMs = 20_000 } = {}) {
-  // gdbus (glib2) is on every Fedora install, but be explicit rather than
-  // letting a spawn error escape as an unhandled rejection.
-  if (!findBin('gdbus', env)) throw Object.assign(new Error('gdbus is not installed'), { code: 'ENOENT' });
+async function portalScreenshot(env, { timeoutMs = 25_000 } = {}) {
+  if (!findBin('gdbus', env)) throw Object.assign(new Error('gdbus is not installed (sudo dnf install glib2)'), { code: 'ENOENT' });
   const token = `obs${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-  const child = spawn('gdbus', ['monitor', '--session', '--dest', PORTAL_DEST, '--object-path', PORTAL_PATH], {
+  const child = spawn('gdbus', ['monitor', '--session', '--dest', PORTAL_DEST], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -268,19 +305,27 @@ async function portalScreenshot(env, { timeoutMs = 20_000 } = {}) {
   const done = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* noop */ }
-      reject(Object.assign(new Error('the portal did not answer within 20s (is xdg-desktop-portal-gnome installed?)'), { code: 'ETIMEDOUT' }));
+      reject(Object.assign(new Error('the portal did not answer in 25s — approve the "Allow screenshot?" dialog on the PC screen (or check xdg-desktop-portal-gnome)'), { code: 'ETIMEDOUT' }));
     }, timeoutMs);
     const onData = (chunk) => {
       buffer += chunk.toString();
-      // gdbus monitor may print the signal, then the response body indented.
       const parsed = parsePortalScreenshotResponse(buffer);
-      if (parsed) {
-        clearTimeout(timer);
-        try { child.kill('SIGKILL'); } catch { /* noop */ }
-        if (parsed.ok && parsed.path) resolve(parsed.path);
-        else if (parsed.cancelled) reject(new Error('cancelled in the permission dialog'));
-        else reject(new Error(`portal refused the screenshot (response code ${parsed.code})`));
+      if (!parsed) {
+        // A Response with code 2 = user dismissed/denied; the portal may send
+        // an empty options dict, so check that too.
+        if (/Request\.Response\s*\(\s*uint32\s+[12]/.test(buffer)) {
+          const code = Number.parseInt(buffer.match(/Request\.Response\s*\(\s*uint32\s+(\d+)/)[1], 10);
+          clearTimeout(timer);
+          try { child.kill('SIGKILL'); } catch { /* noop */ }
+          reject(new Error(code === 1 ? 'cancelled in the permission dialog on the PC' : 'the portal denied the screenshot'));
+        }
+        return;
       }
+      clearTimeout(timer);
+      try { child.kill('SIGKILL'); } catch { /* noop */ }
+      if (parsed.ok && parsed.path) resolve(parsed.path);
+      else if (parsed.cancelled) reject(new Error('cancelled in the permission dialog on the PC'));
+      else reject(new Error(`portal refused the screenshot (response code ${parsed.code})`));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
@@ -290,63 +335,81 @@ async function portalScreenshot(env, { timeoutMs = 20_000 } = {}) {
     });
   });
   // The call below can fail before the monitor ever answers; keep the promise
-  // handled either way so a missing/failing portal is a normal, explained error.
+  // handled either way so a failing portal is a normal, explained error.
   done.catch(() => {});
 
-  // Give the monitor a moment to attach, then ask for the screenshot.
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise((resolve) => setTimeout(resolve, 350));
   try {
     await run('gdbus', [
       'call', '--session', '--dest', PORTAL_DEST, '--object-path', PORTAL_PATH,
-      '--method', `${PORTAL_DEST}.Screenshot.Screenshot`,
+      '--method', `${PORTAL_SCREENSHOT_IFACE}.Screenshot`,
       '', `{'handle_token': <'${token}'>, 'interactive': <false>, 'modal': <false>}`,
-    ], { timeout: 10_000 });
+    ], { timeout: 15_000 });
   } catch (err) {
     try { child.kill('SIGKILL'); } catch { /* noop */ }
+    const detail = String(err.stderr || err.message || '');
+    if (/UnknownMethod|No such interface/i.test(detail) && /Screenshot/i.test(detail)) {
+      err.message = 'the portal is running but its Screenshot interface is missing — install the GNOME portal backend: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome && systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal';
+    }
     throw err;
   }
   return done;
 }
 
-/** Every capture path we know, best-first for the current session. */
+/**
+ * Every capture path we know, best-first for the current session.
+ *
+ * On Wayland we only use paths that can actually work: the portal, grim
+ * (wlroots), spectacle (KDE). The X11 tools (scrot/maim/import/gnome-screenshot)
+ * exit 0 with a black frame there, so trying them only adds delay and confusing
+ * error text.
+ */
 function screenshotAttempts(file, env) {
   const session = sessionInfo(env);
   const attempts = [];
   if (session.wayland) {
-    attempts.push({ label: 'xdg-desktop-portal', fn: () => portalScreenshot(env) });
+    attempts.push({
+      label: 'xdg-desktop-portal',
+      fn: async () => {
+        const avail = await portalScreenshotAvailable(env);
+        if (!avail.available) throw new Error(avail.reason);
+        return portalScreenshot(env);
+      },
+    });
     attempts.push({ label: 'grim', fn: async () => { await run('grim', [file], { timeout: 12_000 }); return file; } });
+    attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 15_000 }); return file; } });
+    return attempts;
   }
-  // GNOME shell's own API (X11) — also tries on Wayland in case a portal-less
-  // setup allows it; a black result is caught and skipped.
+  // X11 (or XWayland): the classic tools, GNOME shell API first.
   attempts.push({ label: 'gnome-shell', fn: async () => {
     await run('gdbus', ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell', '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'false', file], { timeout: 12_000 });
     return file;
   } });
-  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 12_000 }); return file; } });
   attempts.push({ label: 'gnome-screenshot', fn: async () => { await run('gnome-screenshot', ['-f', file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 15_000 }); return file; } });
   attempts.push({ label: 'scrot', fn: async () => { await run('scrot', ['--silent', file], { timeout: 12_000 }); return file; } });
   attempts.push({ label: 'maim', fn: async () => { await run('maim', [file], { timeout: 12_000 }); return file; } });
   attempts.push({ label: 'import', fn: async () => { await run('import', ['-window', 'root', file], { timeout: 12_000 }); return file; } });
   return attempts;
 }
 
-function screenshotFailureHint(session, failures) {
-  const tried = failures.map((f) => (f.missing ? `${f.label}: not installed` : `${f.label}: ${f.reason}`)).join(' · ');
-  if (session.type === 'wayland') {
-    const portalBroken = failures.some((f) => f.label === 'xdg-desktop-portal' && /portal|permission|refused|answer/i.test(f.reason));
-    return [
-      `Screen capture is being blocked by Wayland (this is a ${process.env.XDG_CURRENT_DESKTOP || 'Wayland'} session).`,
-      `Tried: ${tried}.`,
-      portalBroken
-        ? 'The screenshot portal is the supported Wayland path. Fix: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome grim — then restart the agent and approve the "Allow screenshot" prompt that appears on the PC screen (or tick "Always allow").'
-        : 'Fix: sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome grim — then systemctl --user restart observer-whatsapp-agent.',
-    ].join('\n');
+/** Actionable text for a Wayland failure, based on what the portal said. */
+async function waylandHint(env, tried) {
+  const portal = await portalScreenshotAvailable(env);
+  const lines = [`Screen capture is being blocked by Wayland (this is a ${process.env.XDG_CURRENT_DESKTOP || 'Wayland'} session).`];
+  if (!portal.available) {
+    lines.push(`Portal: ${portal.reason}`);
+    lines.push('Fix (copy-paste on the PC):');
+    if (/gdbus/i.test(portal.reason)) lines.push('  sudo dnf install glib2');
+    lines.push('  sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome');
+    lines.push('  systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal');
+    lines.push('  gdbus introspect --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop | grep -i screenshot');
+    lines.push('The last command must list org.freedesktop.portal.Screenshot.');
+  } else {
+    lines.push('The portal has its Screenshot interface, so it is a permission/timeout problem: approve the "Allow screenshot?" dialog on the PC screen (GNOME asks once — tick "Always allow"), then retry.');
   }
-  return [
-    'No screenshot tool produced a usable image.',
-    `Tried: ${tried}.`,
-    'Fix: sudo dnf install grim gnome-screenshot scrot (or kde-spectacle on KDE).',
-  ].join('\n');
+  lines.push(`Tried: ${tried}`);
+  return lines.join('\n');
 }
 
 export async function captureScreenshot() {
@@ -383,7 +446,13 @@ export async function captureScreenshot() {
     }
   }
   try { fs.unlinkSync(file); } catch { /* never created */ }
-  throw new Error(screenshotFailureHint(session, failures));
+  const tried = failures.map((f) => (f.missing ? `${f.label}: not installed` : `${f.label}: ${f.reason}`)).join(' · ');
+  if (session.type === 'wayland') throw new Error(await waylandHint(env, tried));
+  throw new Error([
+    'No screenshot tool produced a usable image.',
+    `Tried: ${tried}.`,
+    'Fix: sudo dnf install gnome-screenshot scrot maim   (or kde-spectacle on KDE).',
+  ].join('\n'));
 }
 
 // ── sound / brightness / media ───────────────────────────────────────────────

@@ -626,3 +626,39 @@ test('pccontrol: a black capture is rejected and explained (Wayland reality)', a
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('portal: the D-Bus interface name is org.freedesktop.portal.Screenshot', async () => {
+  // Regression: the method used to be sent as
+  // org.freedesktop.portal.Desktop.Screenshot.Screenshot, which the portal
+  // rejects with "UnknownMethod: No such interface … on object at path".
+  const src = fs.readFileSync(new URL('../src/pccontrol.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('const PORTAL_SCREENSHOT_IFACE = \'org.freedesktop.portal.Screenshot\''));
+  assert.ok(src.includes('`${PORTAL_SCREENSHOT_IFACE}.Screenshot`'));
+  assert.ok(!src.includes('${PORTAL_DEST}.Screenshot.Screenshot'));
+
+  // The monitor must NOT filter by object path: Response arrives on the
+  // per-request handle path (/org/freedesktop/portal/desktop/request/...).
+  const monitorLine = src.split('\n').find((l) => l.includes("'monitor'"));
+  assert.ok(monitorLine && !monitorLine.includes('--object-path'), 'portal monitor must not filter on object-path');
+});
+
+test('portal: response signal from the request-handle path is parsed', () => {
+  const line = "/org/freedesktop/portal/desktop/request/1_45/obsabc123: "
+    + "org.freedesktop.portal.Request.Response (uint32 0, {'uri': <'file:///home/u/Pictures/Screenshot from 2026-10-19 15-20-00.png'>})";
+  const parsed = pc.parsePortalScreenshotResponse(line);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.path, '/home/u/Pictures/Screenshot from 2026-10-19 15-20-00.png');
+
+  // "denied" (code 2) and an empty options dict must be understood too.
+  const denied = pc.parsePortalScreenshotResponse('… Request.Response (uint32 2, {})');
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, 2);
+});
+
+test('portal: availability check reports a missing interface clearly', async () => {
+  // In this sandbox there is no portal: the check must explain, not throw.
+  const result = await pc.portalScreenshotAvailable();
+  assert.equal(typeof result.available, 'boolean');
+  assert.equal(typeof result.reason, 'string');
+  assert.ok(result.reason.length > 10);
+});

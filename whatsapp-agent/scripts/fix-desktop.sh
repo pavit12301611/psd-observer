@@ -60,13 +60,49 @@ if [ ! -e /dev/uinput ]; then
   echo "  sudo modprobe uinput && echo uinput | sudo tee /etc/modules-load.d/uinput.conf"
 fi
 
-# ── 3. Let the user grab screenshots without a prompt (pipewire/wireplumber) ─
-say "Checking the desktop portal service"
-for unit in xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-kde; do
-  if systemctl --user list-unit-files 2>/dev/null | grep -q "^${unit}\."; then
+# ── 3. Desktop portal (THE Wayland screenshot path) ─────────────────────────
+say "Restarting the desktop portal"
+# A portal without its GNOME/KDE backend exports no Screenshot interface, which
+# shows up as: UnknownMethod: No such interface "org.freedesktop.portal.Desktop.Screenshot".
+# Restarting backend first, then the portal, makes the interface appear.
+for unit in xdg-desktop-portal-gnome xdg-desktop-portal-kde xdg-desktop-portal-gtk xdg-desktop-portal; do
+  if systemctl --user list-unit-files 2>/dev/null | grep -q "^${unit}\.service"; then
     systemctl --user restart "$unit" 2>/dev/null || true
   fi
 done
+sleep 1
+
+PORTAL_OK=0
+if command -v gdbus >/dev/null; then
+  if gdbus introspect --session --dest org.freedesktop.portal.Desktop \
+       --object-path /org/freedesktop/portal/desktop 2>/dev/null | grep -q "interface org.freedesktop.portal.Screenshot"; then
+    PORTAL_OK=1
+    echo "Portal: org.freedesktop.portal.Screenshot is available ✅"
+  else
+    echo "Portal: Screenshot interface still MISSING ⚠"
+    echo "  The portal is running without a desktop backend. Install the right one:"
+    echo "    sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome   # GNOME"
+    echo "    sudo dnf install xdg-desktop-portal xdg-desktop-portal-kde     # KDE"
+    echo "  Then: systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal"
+    echo "  Verify:"
+    echo "    gdbus introspect --session --dest org.freedesktop.portal.Desktop \\"
+    echo "      --object-path /org/freedesktop/portal/desktop | grep -i screenshot"
+    if [ "$(rpm -q --quiet xdg-desktop-portal-gnome && echo yes || echo no)" = "no" ] \
+       && [ "$(rpm -q --quiet xdg-desktop-portal-kde && echo yes || echo no)" = "no" ]; then
+      echo "  Installing xdg-desktop-portal-gnome now…"
+      sudo dnf install -y xdg-desktop-portal xdg-desktop-portal-gnome || true
+      systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal 2>/dev/null || true
+      sleep 1
+      gdbus introspect --session --dest org.freedesktop.portal.Desktop \
+        --object-path /org/freedesktop/portal/desktop 2>/dev/null | grep -q "interface org.freedesktop.portal.Screenshot" \
+        && { PORTAL_OK=1; echo "Portal: Screenshot interface is available now ✅"; } \
+        || echo "Portal: still missing — log out and back in, then restart the agent."
+    fi
+  fi
+else
+  echo "gdbus not found (glib2) — installing:"
+  sudo dnf install -y glib2 || true
+fi
 
 # ── 4. Restart the agent so it picks up the new tools + sockets ──────────────
 if systemctl --user is-enabled observer-whatsapp-agent >/dev/null 2>&1; then
@@ -96,7 +132,7 @@ EOF
 # ── 5. Machine-readable summary of what is still missing ─────────────────────
 say "Installed check"
 missing=""
-for bin in grim gnome-screenshot gdbus ydotool xdotool tesseract ffmpeg pdftotext nmcli; do
+for bin in grim gdbus ydotool xdotool tesseract ffmpeg pdftotext nmcli; do
   command -v "$bin" >/dev/null 2>&1 || missing="$missing $bin"
 done
 if [ -n "$missing" ]; then

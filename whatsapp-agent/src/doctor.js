@@ -93,6 +93,17 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
       fix: 'Log in on the PC\'s screen, then: systemctl --user restart observer-whatsapp-agent',
     });
   } else {
+    const portal = session.type === 'wayland' ? await pc.portalScreenshotAvailable() : null;
+    if (portal && !portal.available) {
+      checks.push({
+        icon: '❌',
+        title: 'Screenshot portal',
+        detail: portal.reason,
+        fix: 'sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome && systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal',
+      });
+    } else if (portal) {
+      checks.push({ icon: '✅', title: 'Screenshot portal', detail: 'Screenshot interface available (GNOME/KDE Wayland path)' });
+    }
     try {
       const buffer = await pc.captureScreenshot();
       const stats = imageStats(buffer);

@@ -255,6 +255,11 @@ har tool check karke exact fix batayega.
 
 - Pehli screenshot pe PC screen pe **"Allow screenshot?"** dialog aayega →
   *Allow* / *Always allow* dabao.
+- Agar error me `No such interface "org.freedesktop.portal.Desktop.Screenshot"`
+  aaye to portal ka GNOME backend missing hai:
+  `sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome` phir
+  `systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal`
+  (`fix-desktop.sh` ye khud karta hai aur verify bhi karta hai).
 - Typing/clicking ke liye `ydotool` ka daemon chahiye:
   `sudo systemctl enable --now ydotool` + `/dev/uinput` hona chahiye.
 - Jo **kabhi nahi** hoga (OS ki security, by design): lock screen / password

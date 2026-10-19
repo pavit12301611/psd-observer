@@ -359,6 +359,7 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 | Logged out / unlinked | Auto-recovered: a fresh QR appears. Manual: `./scripts/relink-whatsapp.sh`. |
 | Agent doesn't reply | Message from `9528923866`, 1-to-1. Check `/health`; logs show `ignored non-owner` (masked). |
 | No AI answers | `ollama serve` running + `ollama pull llama3.2`, then `/model`. Commands work regardless. |
+| `No such interface "…portal.Desktop.Screenshot"` | The portal has no GNOME backend: `sudo dnf install xdg-desktop-portal xdg-desktop-portal-gnome && systemctl --user restart xdg-desktop-portal-gnome xdg-desktop-portal`. `./scripts/fix-desktop.sh` does it and verifies with `gdbus introspect`. |
 | **Screenshot is black** | Wayland blocks X11 capture tools — they "succeed" and return a black frame. Run `./scripts/fix-desktop.sh`, approve the one-time "Allow screenshot?" prompt on the PC, then `/doctor`. The agent now rejects black captures instead of sending them, and names each tool that failed. |
 | Typing / clicking does nothing | Wayland needs ydotool's daemon: `sudo dnf install ydotool && sudo systemctl enable --now ydotool` (unit may be `ydotoold`); `/dev/uinput` must exist. `./scripts/fix-desktop.sh` sets this up, `/doctor` verifies it. |
 | OCR says install tesseract | `sudo dnf install tesseract tesseract-langpack-hin`. |
