@@ -84,6 +84,22 @@ Then WhatsApp `/model` should report Ollama running. (`install-fedora.sh --ollam
 does all of this.) NVIDIA/AMD GPU acceleration, if wanted, is Ollama's own Fedora
 story — the agent only talks HTTP to `127.0.0.1:11434`.
 
+### Updating without git
+
+No `git pull` needed — the installer/repo works as a plain download:
+
+```bash
+curl -fL -o /tmp/agent-update.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+```
+
+It fetches the branch tarball from `codeload.github.com`, backs up the current
+code, replaces `src/ webapp/ test/ scripts/ systemd/` + manifests, runs
+`npm install`, and restarts `observer-whatsapp-agent`. Your `.env`, `auth_info/`
+and `data/` are untouched, so the WhatsApp link survives. `--fresh <dir>` does a
+first-time install with no git at all.
+
 ### Phone app over Wi-Fi (optional, recommended)
 
 ```bash

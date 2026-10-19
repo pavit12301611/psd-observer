@@ -289,6 +289,27 @@ enable shell **and** remove that line from the unit (your PC, your call).
 
 ---
 
+## 7b. Updating (no git needed)
+
+```bash
+# already installed:
+curl -fL -o /tmp/agent-update.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+
+# first install without git:
+bash /tmp/agent-update.sh --fresh ~/observer-agent
+```
+
+The script downloads the branch tarball with plain `curl`, backs up the current
+code to `~/observer-agent-backup-<date>.tar.gz`, replaces only the code, runs
+`npm install`, and restarts the service. It never touches `.env`, `auth_info/`
+(your WhatsApp link — no re-scan) or `data/` (PIN, token, notes, reminders,
+todos). `./scripts/update-from-github.sh --check` shows the remote version.
+Git users can still `git pull` on the `arena/20378d42-psd-observer` branch.
+
+---
+
 ## 8. Bridge API (for Observer users, optional)
 
 Everything the Observer app does in the cloud also works locally:

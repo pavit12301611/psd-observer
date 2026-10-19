@@ -88,6 +88,7 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 | `whatsapp-agent/src/doctor.js` | `/doctor` — tests screenshot, keyboard/mouse, packages, AI and access, with the exact fix for each failure. |
 | `whatsapp-agent/scripts/fix-desktop.sh` | Repairs Wayland screenshots (xdg-desktop-portal + grim), input (ydotool daemon, /dev/uinput) and the rest of the toolkit. |
 | `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/download`, `/api/action`. |
+| `whatsapp-agent/scripts/update-from-github.sh` | Update/install **without git**: downloads the branch tarball with curl, backs up code, keeps `.env`/`auth_info`/`data`, restarts the service. |
 | `whatsapp-agent/scripts/setup-remote.sh` | Free Tailscale setup so the phone app works from **outside** the house (no port-forwarding). WhatsApp commands already work from anywhere. |
 
 See [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md) for the exact

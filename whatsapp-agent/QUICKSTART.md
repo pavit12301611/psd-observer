@@ -33,6 +33,58 @@ Check: `ls src/ | head` → `actions.js agentloop.js apps.js nlp.js …` dikhna 
 
 ---
 
+## 1b. Update karna (git ke bina) — jab tumhare paas pull nahi hai
+
+Git ki zaroorat nahi. Ye script GitHub se seedha **tarball** download karta hai
+(plain `curl`), purana code backup karke naya copy karta hai, `npm install`
+chalata hai aur service restart karta hai.
+
+**Jab tumhare paas pehle se install hai** (code update karna hai):
+
+```bash
+curl -fL -o /tmp/agent-update.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+```
+
+(Path apna actual install path daalo — jahan `package.json` hai wahan.
+Pata nahi? `find ~ -name package.json -path "*whatsapp-agent*" 2>/dev/null`)
+
+**Pehli baar install kar rahe ho (git clone hi nahi kiya):**
+
+```bash
+bash /tmp/agent-update.sh --fresh ~/observer-agent
+cd ~/observer-agent
+./scripts/install-fedora.sh --service --ollama --power --phone
+```
+
+Kya safe rehta hai: `.env`, `auth_info/` (WhatsApp login — QR dobara scan nahi
+karna padega), `data/` (PIN, token, notes, reminders, todos, downloads),
+`node_modules/` reinstall ho jata hai. Purana code ka backup
+`~/observer-agent-backup-<date>.tar.gz` me chala jayega.
+
+**Script bhi nahi chahiye? Sirf zip/tar manually:**
+
+```bash
+cd /tmp
+curl -fL -o agent.tar.gz \
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+tar -xzf agent.tar.gz
+cd psd-observer-arena-20378d42-psd-observer/whatsapp-agent
+# naye code ko purani install ke upar copy karo (secrets ko chhod ke)
+cp -a src webapp test scripts systemd package.json package-lock.json \
+      README.md QUICKSTART.md .env.example start.sh \
+      ~/psd-observer/whatsapp-agent/
+cd ~/psd-observer/whatsapp-agent && npm install
+systemctl --user restart observer-whatsapp-agent
+```
+
+Version check: `./scripts/update-from-github.sh --check` (remote version dikhata hai).
+Browser se bhi download kar sakte ho:
+`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip`
+
+---
+
 ## 2. Install (ek hi command)
 
 ```bash
