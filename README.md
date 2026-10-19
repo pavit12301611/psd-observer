@@ -19,6 +19,7 @@ persistent memory, a short screen clip, or a webhook.
 
 - [Status: what is verified and what is not](#status-what-is-verified-and-what-is-not)
 - [Install and first run (Fedora)](#install-and-first-run-fedora)
+- [AppImage (single-file app)](#appimage-single-file-app)
 - [Model setup](#model-setup)
 - [Sensors](#sensors)
 - [Wayland: read this first](#wayland-read-this-first)
@@ -116,6 +117,26 @@ Environment overrides: `OBSERVER_CORE_VENV`, `DNF` (the dnf binary), and
 prints the exact `dnf` line.
 
 ---
+
+## AppImage (single-file app)
+
+`packaging/appimage/build-appimage.sh` builds `dist/Observer_Core-<version>-x86_64.AppImage`. You double-click it or run it from a terminal, and the window opens. Build it on the Fedora machine that will run it, because the AppImage uses that machine's `python3`.
+
+```bash
+sudo dnf install python3 python3-pip fuse-libs
+sudo dnf install tesseract tesseract-langpack-eng portaudio xcb-util-cursor libxkbcommon mesa-libGL mesa-libEGL chromium
+cd psd-observer
+./packaging/appimage/build-appimage.sh          # about 5 minutes; needs internet (PyPI and GitHub)
+./dist/Observer_Core-0.1.0-x86_64.AppImage
+```
+
+What is inside: the Observer Core Python packages (PyQt6, OpenCV, Playwright and its Node driver, neonize, and the rest), trimmed to the Qt modules the app uses. What is not inside, and comes from Fedora: `python3`, the Qt and X11 system libraries, `tesseract`, `portaudio`, and `chromium`. Ollama is not inside either; install it as in [Model setup](#model-setup).
+
+Notes:
+- The build checks the Qt libraries with an offscreen start. Re-run the build after a Fedora Python upgrade, because the packages are built for the Python on the machine.
+- The AppImage does not add a menu entry by itself. Use AppImageLauncher, or move the file to a folder you like and start it from there.
+- Config, data and the WhatsApp session stay in your home folder (`~/.config`, `~/.local/share`), so you can delete the AppImage without losing them.
+- Before you run it on a new machine, check the SHA-256 in `dist/Observer_Core-<version>-x86_64.AppImage.sha256`.
 
 ## Model setup
 
@@ -341,7 +362,7 @@ From **9528923866**, send a message to the **8859555795** chat:
 | `ROUTINES` | list the routines in `routines.toml` |
 | `RUN <name>` / `RUN <name> IN 5 MIN` | run a routine now, or in 5 minutes (one YES approves it) |
 | `TIMERS` / `CANCEL <id>` | list scheduled routines, or cancel one |
-| `ARENA: <prompt>` | ask arena.ai to do a job in the agent's own browser (only if enabled) |
+| `ARENA: <prompt>` | open arena.ai in your own browser with the prompt copied; you paste it and press Send (manual mode) |
 | `RESEARCH: <question>` | search the web in the agent's browser and reply with an answer and sources (only if enabled) |
 
 Messages from any other number are ignored without a reply. Messages in group chats are ignored. The agent works on one instruction at a time, and gives up after `max_steps` (default 10) model steps.
@@ -379,14 +400,15 @@ Off by default. Set `browser_enabled = true` under `[whatsapp]` in `config.toml`
 Two job types, and each starts with one YES after the full prompt or question is shown:
 
 - **Research** (`RESEARCH: <question>`, or the model chooses it when you ask it to look something up). The agent searches the web (DuckDuckGo), opens two to four reliable sources, and replies with a short answer plus the URLs it used.
-- **arena.ai** (`ARENA: <prompt>`). The agent submits your prompt in Arena Agent Mode, waits for the answer, and reports it. In this mode, pages the browser opens must be on arena.ai. A page may still load images and scripts from other servers, which arena.ai needs in order to work.
+- **arena.ai, manual mode** (`ARENA: <prompt>`). arena.ai blocks automated browsers, so the agent does not drive it. After one YES, the agent opens `https://arena.ai/agent` in your own browser and copies the prompt to the clipboard (needs `wl-copy`, `xclip`, or `xsel`, and `xdg-open`). You paste it with Ctrl+V and press Send. Automated arena.ai jobs are turned off in code, so the agent never types into arena.ai. Manual mode does not need `browser_enabled`.
 
-Scope is set by `browser_scope`:
+Research scope is set by `browser_scope`:
 
 - `public` (default): any public `https` site. Local and private addresses are blocked: `localhost`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, link-local and cloud metadata addresses (`169.254.x.x`), IPv6 local addresses, and single-name hosts such as `router` or `nas`. Your router, NAS, and local services stay unreachable.
-- `arena`: the browser may only open arena.ai pages. Other servers can still supply a page's scripts and images.
 
-In both scopes, local and private addresses are blocked for every request. `browser-login` always uses the public rule, so sign-in redirects to other providers work. You log in yourself.
+Local and private addresses are blocked for every request. `browser-login` always uses the public rule, so sign-in redirects to other providers work. You log in yourself.
+
+To check whether the browser can load a page, run `observer-core whatsapp browser-test https://example.com`. It prints the title and the start of the text, then `result: loaded` or `result: blocked`. A block page exits with code 1.
 
 Rules enforced in code, whatever the model says:
 

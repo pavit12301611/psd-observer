@@ -413,9 +413,10 @@ def test_browser_scope_defaults_to_public_and_is_documented():
     assert "browser_scope" in skeleton_toml()
 
 
-def test_service_keeps_arena_jobs_on_arena_even_when_scope_is_public(tmp_path, monkeypatch):
-    """The service's browser runner must pass arena-only hosts for ARENA jobs."""
+def test_service_refuses_automated_arena_jobs_and_runs_research_on_public_web(tmp_path, monkeypatch):
+    """Automated arena.ai jobs are off; the research runner still uses the configured public scope."""
     from observer_core.remote import service as service_mod
+    from observer_core.remote.browser import BrowserJobError
 
     cfg = _cfg()
     cfg.whatsapp.browser_scope = "public"
@@ -423,7 +424,7 @@ def test_service_keeps_arena_jobs_on_arena_even_when_scope_is_public(tmp_path, m
 
     class FakeSession2:
         def __init__(self, **kwargs):
-            seen.append(kwargs["allowed_hosts"])
+            seen.append(("session", kwargs["allowed_hosts"]))
 
         def __enter__(self):
             return self
@@ -439,11 +440,11 @@ def test_service_keeps_arena_jobs_on_arena_even_when_scope_is_public(tmp_path, m
     monkeypatch.setattr(service_mod, "run_browser_job", fake_job)
     svc = SimpleNamespace(cfg=cfg, provider=None)
     runner = service_mod.WhatsAppService._make_browser_runner(svc)
-    runner("make a logo", lambda q: None, lambda t: None, mode="arena")
+    with pytest.raises(BrowserJobError, match="manual arena mode"):
+        runner("make a logo", lambda q: None, lambda t: None, mode="arena")
+    assert seen == []   # no browser session is opened for arena.ai
     runner("who makes the pi cpu", lambda q: None, lambda t: None, mode="research")
-    # order: session for the arena job, the arena job, then session and job for research
-    assert seen == [("arena.ai",), ("job", "arena", ("arena.ai",)),
-                    (PUBLIC_WEB,), ("job", "research", (PUBLIC_WEB,))]
+    assert seen == [("session", (PUBLIC_WEB,)), ("job", "research", (PUBLIC_WEB,))]
 
 
 @pytest.mark.parametrize("url, nav, scope, blocked", [

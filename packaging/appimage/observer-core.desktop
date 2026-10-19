@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Observer Core
+GenericName=Local AI micro-agents
+Comment=Local-first agents that watch your screen, camera and audio and act on what they see
+Exec=AppRun %U
+Icon=observer-core
+Terminal=false
+Categories=Utility;Qt;
+Keywords=observer;agent;monitor;local;llm;
+StartupNotify=true

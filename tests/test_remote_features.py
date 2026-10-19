@@ -496,7 +496,7 @@ def test_browser_job_model_failure_propagates_as_provider_error():
 # ----------------------------------------------------------------------- #
 # commander: direct commands and approvals
 # ----------------------------------------------------------------------- #
-def commander(tmp_path, responses=(), *, browser=None, executor=None):
+def commander(tmp_path, responses=(), *, browser=None, executor=None, arena_opener=None):
     import tomllib
 
     transport = Transport()
@@ -507,7 +507,7 @@ def commander(tmp_path, responses=(), *, browser=None, executor=None):
                     settings=CommanderSettings(owner_user=OWNER, max_steps=5, confirm_timeout_s=5,
                                                answer_timeout_s=5),
                     shell=lambda c, cwd=None, timeout_s=0: ShellResult(c, 0, "ok"),
-                    routines=svc, browser=browser)
+                    routines=svc, browser=browser, arena_opener=arena_opener)
     return cmd, transport, svc
 
 
@@ -591,57 +591,68 @@ def test_stranger_cannot_use_direct_commands(tmp_path):
     assert transport.sent == []
 
 
-def test_arena_job_shows_full_prompt_then_runs_and_reports_files(tmp_path):
-    seen = {}
+def test_arena_manual_shows_prompt_then_opens_after_yes(tmp_path):
+    opened = []
 
-    def runner(prompt, ask, say, mode="arena"):
-        seen["prompt"] = prompt
-        say("⌨️ typed on the page: " + prompt[:20])
-        return JobResult(summary="Logo concept: a fox.", downloads=["fox.png"])
+    def opener(prompt):
+        opened.append(prompt)
+        return "Opened arena.ai in your browser and copied the prompt."
 
-    cmd, transport, svc = commander(tmp_path, browser=runner)
+    cmd, transport, svc = commander(tmp_path, arena_opener=opener)
     cmd.handle_inbound(OWNER, "ARENA: make a fox logo for my shop")
-    assert wait_until(lambda: any("type this prompt" in t for t in transport.sent))
-    assert "prompt" not in seen   # nothing runs before YES
-    prompt_text = [t for t in transport.sent if "type this prompt" in t][0]
+    assert wait_until(lambda: any("I do not control the site" in t for t in transport.sent))
+    assert opened == []   # nothing opens before YES
+    prompt_text = [t for t in transport.sent if "Arena manual job" in t][0]
     assert "make a fox logo for my shop" in prompt_text
     cmd.handle_inbound(OWNER, "YES")
     assert cmd.wait_idle(5)
-    assert seen["prompt"] == "make a fox logo for my shop"
-    assert any("Logo concept: a fox." in t and "fox.png" in t for t in transport.sent)
+    assert opened == ["make a fox logo for my shop"]
+    assert transport.sent[-1] == "Opened arena.ai in your browser and copied the prompt."
 
 
-def test_arena_job_declined_does_not_start(tmp_path):
+def test_arena_manual_never_uses_the_automated_browser(tmp_path):
     called = []
-    cmd, transport, svc = commander(tmp_path, browser=lambda p, a, s: called.append(p))
+    cmd, transport, svc = commander(tmp_path, browser=lambda p, a, s, **kw: called.append(p),
+                                    arena_opener=lambda p: "opened")
     cmd.handle_inbound(OWNER, "arena: write a poem")
-    assert wait_until(lambda: any("type this prompt" in t for t in transport.sent))
-    cmd.handle_inbound(OWNER, "NO")
-    assert cmd.wait_idle(5)
-    assert called == [] and "OK, the job was not started." in transport.sent
-
-
-def test_arena_disabled_says_how_to_enable(tmp_path):
-    cmd, transport, svc = commander(tmp_path, browser=None)
-    cmd.handle_inbound(OWNER, "ARENA: hello")
-    assert cmd.wait_idle(5)
-    assert "Browser jobs are off" in transport.sent[-1]
-
-
-def test_arena_job_errors_are_reported_not_raised(tmp_path):
-    def runner(prompt, ask, say, mode="arena"):
-        raise BrowserJobError("the job did not finish within 40 steps")
-
-    cmd, transport, svc = commander(tmp_path, browser=runner)
-    cmd.handle_inbound(OWNER, "ARENA: long job")
-    assert wait_until(lambda: any("type this prompt" in t for t in transport.sent))
+    assert wait_until(lambda: any("Arena manual job" in t for t in transport.sent))
     cmd.handle_inbound(OWNER, "YES")
     assert cmd.wait_idle(5)
-    assert any("arena.ai job stopped: the job did not finish" in t for t in transport.sent)
+    assert called == []
+    assert transport.sent[-1] == "opened"
+
+
+def test_arena_manual_declined_does_not_open(tmp_path):
+    opened = []
+    cmd, transport, svc = commander(tmp_path, arena_opener=lambda p: opened.append(p) or "opened")
+    cmd.handle_inbound(OWNER, "arena: write a poem")
+    assert wait_until(lambda: any("Arena manual job" in t for t in transport.sent))
+    cmd.handle_inbound(OWNER, "NO")
+    assert cmd.wait_idle(5)
+    assert opened == [] and "OK, the job was not started." in transport.sent
+
+
+def test_arena_manual_off_when_no_opener(tmp_path):
+    cmd, transport, svc = commander(tmp_path, arena_opener=None)
+    cmd.handle_inbound(OWNER, "ARENA: hello")
+    assert cmd.wait_idle(5)
+    assert "manual mode is off" in transport.sent[-1]
+
+
+def test_arena_manual_opener_error_is_reported_not_raised(tmp_path):
+    def opener(prompt):
+        raise OSError("no display")
+
+    cmd, transport, svc = commander(tmp_path, arena_opener=opener)
+    cmd.handle_inbound(OWNER, "ARENA: hello")
+    assert wait_until(lambda: any("Arena manual job" in t for t in transport.sent))
+    cmd.handle_inbound(OWNER, "YES")
+    assert cmd.wait_idle(5)
+    assert transport.sent[-1] == "❌ Could not open arena.ai: no display"
 
 
 def test_arena_prompt_over_limit_is_refused_before_approval(tmp_path):
-    cmd, transport, svc = commander(tmp_path, browser=lambda p, a, s: None)
+    cmd, transport, svc = commander(tmp_path, arena_opener=lambda p: "opened")
     cmd.handle_inbound(OWNER, "ARENA: " + "x" * 900)
     assert cmd.wait_idle(5)
     assert "longer than 800 characters" in transport.sent[-1]

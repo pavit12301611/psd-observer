@@ -1,0 +1,16 @@
+#!/bin/sh
+# Launcher inside Observer Core AppImage. Runs the app with the Python packages bundled in the
+# AppImage, using the system python3 (Fedora ships it). With no arguments it opens the window.
+HERE="$(dirname "$(readlink -f "$0")")"
+SITE="$HERE/usr/lib/observer-core/site-packages"
+PY="${OBSERVER_CORE_PYTHON:-python3}"
+
+if ! command -v "$PY" >/dev/null 2>&1; then
+    echo "Observer Core needs python3. Install it with: sudo dnf install python3" >&2
+    exit 2
+fi
+
+export PYTHONPATH="$SITE${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONNOUSERSITE=1          # use only the bundled packages, not ~/.local
+export OBSERVER_CORE_APPIMAGE="$HERE"
+exec "$PY" -m observer_core "$@"

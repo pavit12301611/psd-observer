@@ -13,7 +13,8 @@ from .. import paths
 from ..config import AppConfig
 from ..llm.base import ModelProvider
 from ..llm.factory import default_model_spec, make_provider
-from .browser import DEFAULT_ALLOWED_HOSTS, PlaywrightSession, run_browser_job, scope_hosts
+from .browser import BrowserJobError, PlaywrightSession, run_browser_job, scope_hosts
+from .manual import open_arena_by_hand
 from .commander import Commander, CommanderSettings
 from .phone import PhoneError, mask_phone, normalize_phone
 from .routines import RoutineService, load_routines
@@ -128,7 +129,8 @@ class WhatsAppService:
         if shell is not None:
             kwargs["shell"] = shell
         self.commander = Commander(provider=self.provider, transport=self.transport, settings=settings,
-                                   routines=self.routines, browser=self.browser, **kwargs)
+                                   routines=self.routines, browser=self.browser,
+                                   arena_opener=self._open_arena_by_hand, **kwargs)
 
     # ------------------------------------------------------------------ #
     def _say(self, text: str) -> None:
@@ -138,13 +140,19 @@ class WhatsAppService:
         except Exception as exc:
             logger.warning("whatsapp say failed: {}", type(exc).__name__)
 
+    def _open_arena_by_hand(self, prompt: str) -> str:
+        """Manual arena.ai mode: open the site in the owner's browser; the owner pastes and sends."""
+        return open_arena_by_hand(prompt)
+
     def _make_browser_runner(self) -> Callable[..., Any]:
         w = self.cfg.whatsapp
 
         def run(prompt: str, ask: Callable[[str], str | None], say: Callable[[str], None],
                 mode: str = "arena") -> Any:
-            # arena.ai jobs never leave arena.ai; the wider scope applies to research jobs only.
-            hosts = scope_hosts(w.browser_scope) if mode == "research" else DEFAULT_ALLOWED_HOSTS
+            # Automated arena.ai jobs are off: arena.ai blocks automated browsers. Arena goes by hand.
+            if mode != "research":
+                raise BrowserJobError("automated arena.ai jobs are off; use manual arena mode")
+            hosts = scope_hosts(w.browser_scope)
             session = PlaywrightSession(
                 profile_dir=browser_profile_dir(),
                 downloads_dir=downloads_dir(self.cfg),

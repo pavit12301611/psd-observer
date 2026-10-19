@@ -168,6 +168,7 @@ class Commander:
         shell: Callable[..., ShellResult] = run_shell,
         routines: RoutineService | None = None,
         browser: BrowserRunner | None = None,
+        arena_opener: Callable[[str], str] | None = None,
     ) -> None:
         self.provider = provider
         self.transport = transport
@@ -175,6 +176,7 @@ class Commander:
         self._shell = shell
         self.routines = routines
         self.browser = browser
+        self.arena_opener = arena_opener
         self._lock = threading.Lock()
         self._task: _Task | None = None
         self.history: list[tuple[str, str]] = []   # (event, detail) for status output
@@ -186,10 +188,12 @@ class Commander:
                  "(0 = run now; 1-720 = schedule that many minutes from now)",
                  "Pre-approved routines you may use:"]
         extra.append(routine_context_for_prompt(self.routines.routines) if self.routines else "No routines are defined.")
+        if self.arena_opener is not None:
+            extra += ["", '  {"action": "browser", "mode": "arena", "prompt": "<exact text for the arena.ai prompt>"}',
+                      "Use mode arena only when the owner asks you to use arena.ai. It opens arena.ai on the owner's "
+                      "computer and copies the prompt; the owner pastes it and presses Send."]
         if self.browser is not None:
-            extra += ["", '  {"action": "browser", "mode": "arena", "prompt": "<exact text to submit to arena.ai Agent Mode>"}',
-                      "Use mode arena only when the owner asks you to use arena.ai or Arena Agent Mode.",
-                      '  {"action": "browser", "mode": "research", "prompt": "<the question to research on the web>"}',
+            extra += ["", '  {"action": "browser", "mode": "research", "prompt": "<the question to research on the web>"}',
                       "Use mode research when the owner asks you to look something up, find sources, or check the web. "
                       "The browser searches, opens sites, and reports back with sources."]
         return SYSTEM_PROMPT + "\n".join(extra) + "\n"
@@ -442,9 +446,44 @@ class Commander:
         self._log("scheduled", f"#{timer.id} {routine.name} in {minutes}m")
         return True
 
+    def _handle_arena_by_hand(self, task: _Task, prompt: str) -> None:
+        """Open arena.ai in the owner's own browser with the prompt copied. The owner pastes and sends."""
+        if self.arena_opener is None:
+            self._send("arena.ai manual mode is off on this computer.")
+            return
+        if len(prompt) > MAX_PROMPT_CHARS:
+            self._send(f"That prompt is longer than {MAX_PROMPT_CHARS} characters. Shorten it and send again.")
+            return
+        text = "\n".join([
+            "🌐 Arena manual job. I will open arena.ai in your own browser and copy this prompt to your clipboard:",
+            "", prompt, "",
+            "I do not control the site. You paste the prompt and press Send.",
+            "Reply YES to open it or NO to cancel.",
+        ])
+        if len(text) > MAX_REPLY_CHARS:
+            self._send("That prompt is too long to approve in one message. Shorten it and send again.")
+            return
+        decision = self._await(task, "confirm", text, self.settings.confirm_timeout_s)
+        if decision is None:
+            return
+        if decision == "NO":
+            self._send("OK, the job was not started.")
+            return
+        try:
+            message = self.arena_opener(prompt)
+        except Exception as exc:
+            self._send(f"❌ Could not open arena.ai: {exc}")
+            self._log("arena_manual_failed", str(exc)[:120])
+            return
+        self._send(message)
+        self._log("arena_manual", prompt[:60])
+
     def _handle_browser(self, task: _Task, action: dict[str, Any]) -> None:
         prompt = str(action.get("prompt", "")).strip()
         mode = "research" if action.get("mode") == "research" else "arena"
+        if mode == "arena":
+            self._handle_arena_by_hand(task, prompt)
+            return
         if self.browser is None:
             self._send("Browser jobs are off. Turn on whatsapp.browser_enabled and run "
                        "`observer-core whatsapp browser-login` once.")
@@ -544,7 +583,7 @@ class Commander:
                  "Each command is shown to you first: reply YES to run it, NO to cancel.",
                  "ROUTINES lists saved routines. RUN <name> [IN <minutes> MIN] runs one.",
                  "TIMERS lists scheduled ones; CANCEL <id> stops one.",
-                 "ARENA: <prompt> runs a job on arena.ai (if enabled).",
+                 "ARENA: <prompt> opens arena.ai in your browser with the prompt copied. You paste it and press Send.",
                  "RESEARCH: <question> searches the web and reports back with sources (if enabled).",
                  "STOP cancels the current task."]
         return "\n".join(lines)
