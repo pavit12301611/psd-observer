@@ -87,5 +87,6 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 | `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/download`, `/api/action`. |
 | `whatsapp-agent/scripts/setup-remote.sh` | Free Tailscale setup so the phone app works from **outside** the house (no port-forwarding). WhatsApp commands already work from anywhere. |
 
-See [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) for setup and
+See [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md) for the exact
+run steps, [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) for setup and
 [`whatsapp-agent/README.md`](whatsapp-agent/README.md) for the full command list.

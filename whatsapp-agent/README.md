@@ -16,6 +16,11 @@ app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 
 ---
 
+## 0. Fastest path
+
+Step-by-step, copy-paste commands (install → link → first message → phone app →
+troubleshooting): **[`QUICKSTART.md`](QUICKSTART.md)**. The short version is below.
+
 ## 1. Install (Fedora, ~5 minutes)
 
 ```bash
