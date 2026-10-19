@@ -10,12 +10,16 @@ don't paste the `journalctl` line together with the installer):
 ```bash
 git clone https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
-./scripts/install-fedora.sh --service --ollama   # deps + agent + autostart + free local AI
-# (want keyboard/mouse + power control from WhatsApp too? add --pc-control)
+./scripts/install-fedora.sh --service --ollama --power --phone
+#   --service  autostart (systemd --user + linger)
+#   --ollama   free offline AI (llama3.2)
+#   --power    OCR, recording, Wi-Fi/BT, windows, input, full access level
+#   --phone    phone app reachable at http://<PC-IP>:8787/ (firewalld 8787)
 ```
 ```bash
 journalctl --user -u observer-whatsapp-agent -f  # scan the QR with the 8859555795 phone
 # …then from your 9528923866 phone, WhatsApp the agent number:  /help
+# …and open the printed phone-app URL on your phone, enter the PIN, Add to Home screen
 ```
 
 ---
@@ -80,10 +84,26 @@ Then WhatsApp `/model` should report Ollama running. (`install-fedora.sh --ollam
 does all of this.) NVIDIA/AMD GPU acceleration, if wanted, is Ollama's own Fedora
 story — the agent only talks HTTP to `127.0.0.1:11434`.
 
-### Firewall (firewalld): nothing to open
+### Phone app over Wi-Fi (optional, recommended)
 
-The bridge binds **127.0.0.1:8787**, and WhatsApp traffic is an outbound WebSocket
-to WhatsApp's servers — Fedora's default firewalld policy needs **no changes**.
+```bash
+./scripts/install-fedora.sh --phone
+```
+
+This sets `HOST=0.0.0.0` and opens TCP **8787** in firewalld. On the phone,
+open `http://<PC-IP>:8787/`, enter the 6-digit PIN printed at startup
+(`data/dashboard-pin.txt`), then **Add to Home screen**. It is an installable
+PWA — chat, quick controls, files and the linking QR — with **no Observer app
+and no Play Store**. From outside your Wi-Fi use [Tailscale](https://tailscale.com)
+rather than port-forwarding.
+
+### Firewall (firewalld): nothing to open for WhatsApp itself
+
+The phone app binds **0.0.0.0:8787** so your phone on the same Wi-Fi can use it
+(PIN/token protected; `HOST=127.0.0.1` makes it PC-only). WhatsApp traffic is an
+outbound WebSocket to WhatsApp's servers, so Fedora's default firewalld policy
+needs **no changes for WhatsApp itself** — only TCP 8787 for the app, which
+`--phone` opens for you.
 Only if you deliberately set `HOST=0.0.0.0` for LAN access (not recommended) would
 you need `sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload`
 — and then the bridge token is your only gate, so think twice.
@@ -107,7 +127,7 @@ builds with both:
 sudo dnf install podman-compose
 cp .env.example .env
 podman-compose up -d
-podman-compose logs -f    # QR in the logs; dashboard stays at 127.0.0.1:8787
+podman-compose logs -f    # QR + phone-app URL/PIN in the logs (port 8787)
 ```
 
 Host Ollama is reached as `host.containers.internal:11434` (already set in

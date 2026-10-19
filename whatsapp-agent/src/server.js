@@ -1,21 +1,46 @@
-// server.js — local HTTP bridge (Node built-in http, no Express).
+// server.js — the local HTTP bridge + installable phone app (PWA).
 //
 // This is what the Observer app talks to instead of https://api.observer-ai.com:
 //   POST /tools/send-whatsapp   Observer agents' sendWhatsapp(), free + unlimited
 //   GET  /remote/listen         long-poll mailbox (patched app/src/mcp/remote.ts)
 //   POST /remote/reply          MCP answers coming back to WhatsApp
 //   GET  /remote/status         "is the phone linked?"
-// Plus a tiny dashboard (status + QR + command tester) and POST /api/send.
 //
-// Security: binds 127.0.0.1 by default and every route except /health needs
-// the bridge token (x-bridge-token header, Bearer token, or ?t= for the QR
-// image). Sending to any number other than the owner is refused outright.
+// And it is a complete control panel of its own — no Observer needed:
+//   GET  /                      installable phone app (chat + controls + files)
+//   POST /api/login             dashboard PIN → token
+//   POST /api/chat              talk to the agent from the app
+//   GET  /api/status            live status for the app
+//   GET  /api/files             received + shared files
+//   POST /api/action            run a single action directly
+//   POST /api/send              send a message to the owner on WhatsApp
+//
+// Security: binds 0.0.0.0 so your phone on the same Wi-Fi can use it, but
+// every data route needs the bridge token (or the PIN to get one). Login is
+// rate-limited. Sending to any number other than the owner is refused.
 
 import http from 'node:http';
 import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import { maskNumber, normalizeNumber } from './allowlist.js';
+import { ROOT } from './config.js';
+import { cachedIcon } from './webapp.js';
+import * as apps from './apps.js';
+import * as files from './files.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
+const VERSION = '2.0.0';
+const WEB_DIR = path.join(ROOT, 'webapp');
+
+const STATIC = {
+  '/': ['index.html', 'text/html; charset=utf-8'],
+  '/index.html': ['index.html', 'text/html; charset=utf-8'],
+  '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
+  '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
+};
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -36,16 +61,57 @@ function readJsonBody(req) {
 }
 
 const stripDataPrefix = (b64) => (typeof b64 === 'string' && b64.includes(',') && b64.startsWith('data:') ? b64.slice(b64.indexOf(',') + 1) : b64);
+const dataUrl = (buffer, mime = 'image/png') => `data:${mime};base64,${Buffer.from(buffer).toString('base64')}`;
 
-export function createBridgeServer({ config, store, whatsapp, mailbox, log = console }) {
+/** Shape an agent reply for the phone app. */
+export function replyForApp(reply) {
+  if (reply == null) return { ok: true, text: '' };
+  if (typeof reply === 'string') return { ok: true, text: reply };
+  const out = { ok: true, text: reply.text ?? '' };
+  const images = [];
+  if (reply.image) images.push(dataUrl(reply.image));
+  for (const extra of reply.extraImages ?? []) images.push(dataUrl(extra));
+  if (images.length) out.images = images;
+  if (reply.document) {
+    out.documentName = reply.document.fileName;
+    if (reply.document.path) out.documentPath = reply.document.path;
+  }
+  if (reply.video) out.videoName = 'screen-recording.mp4';
+  if (reply.poll) out.text = `📊 ${reply.poll.name}\n${reply.poll.values.map((v) => `• ${v}`).join('\n')}`;
+  return out;
+}
+
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a ?? '')).digest();
+  const hb = crypto.createHash('sha256').update(String(b ?? '')).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+export function createBridgeServer({ config, store, whatsapp, mailbox, actions, runOwner, log = console }) {
   const authed = (req, url) => {
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     return req.headers['x-bridge-token'] === config.bridgeToken || bearer === config.bridgeToken || url.searchParams.get('t') === config.bridgeToken;
   };
 
+  const loginAttempts = new Map(); // ip → {count, resetAt}
+  function loginAllowed(ip) {
+    const now = Date.now();
+    const entry = loginAttempts.get(ip);
+    if (!entry || entry.resetAt < now) {
+      loginAttempts.set(ip, { count: 0, resetAt: now + 5 * 60_000 });
+      return true;
+    }
+    return entry.count < 12;
+  }
+  function recordLogin(ip) {
+    const entry = loginAttempts.get(ip) ?? { count: 0, resetAt: Date.now() + 5 * 60_000 };
+    entry.count += 1;
+    loginAttempts.set(ip, entry);
+  }
+
   function json(res, status, body) {
     const payload = JSON.stringify(body);
-    res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
+    res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), 'cache-control': 'no-store' });
     res.end(payload);
   }
 
@@ -67,31 +133,94 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
     }
   }
 
+  function listShared() {
+    try {
+      return fs.readdirSync(config.sharedDir)
+        .map((name) => {
+          const full = path.join(config.sharedDir, name);
+          const stat = fs.statSync(full);
+          return stat.isFile() ? { name, path: full, size: stat.size } : null;
+        })
+        .filter(Boolean)
+        .slice(0, 100);
+    } catch {
+      return [];
+    }
+  }
+
+  function listDownloads() {
+    return (store.data.downloads ?? []).slice(0, 60).map((d) => ({
+      name: d.file,
+      file: d.file,
+      kind: d.kind,
+      ts: d.ts,
+      path: path.join(config.downloadsDir, d.file),
+    }));
+  }
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const route = `${req.method} ${url.pathname}`;
-    // CORS: the Observer webapp runs on another localhost origin. Token auth
-    // still applies to every route below except /health and the dashboard shell.
     res.setHeader('access-control-allow-origin', '*');
     res.setHeader('access-control-allow-headers', 'content-type, authorization, x-bridge-token');
     res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
     try {
+      // ── public: health, app shell, icons ─────────────────────────────────
       if (route === 'GET /health') {
         return json(res, 200, {
           ok: true,
           service: 'observer-whatsapp-agent',
+          version: VERSION,
           whatsapp: whatsapp.status(),
           owner: maskNumber(config.ownerNumber),
           agent: maskNumber(config.agentNumber),
           observerTabConnected: mailbox.observerOnline(),
         });
       }
-      if (route === 'GET /' || route === 'GET /dashboard') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        return res.end(dashboardHtml(config, authed(req, url)));
+
+      if (req.method === 'GET' && url.pathname === '/dashboard') {
+        res.writeHead(302, { location: `/${url.search}` });
+        return res.end();
       }
+
+      if (req.method === 'GET' && STATIC[url.pathname]) {
+        const [file, type] = STATIC[url.pathname];
+        try {
+          const body = fs.readFileSync(path.join(WEB_DIR, file));
+          res.writeHead(200, {
+            'content-type': type,
+            'content-length': body.length,
+            'cache-control': file === 'sw.js' ? 'no-cache' : 'public, max-age=300',
+          });
+          return res.end(body);
+        } catch {
+          return json(res, 404, { detail: 'App shell missing on disk (webapp/ folder).' });
+        }
+      }
+
+      if (req.method === 'GET' && (url.pathname === '/icon-192.png' || url.pathname === '/icon-512.png' || url.pathname === '/apple-touch-icon.png')) {
+        const size = url.pathname.includes('512') ? 512 : 192;
+        const png = cachedIcon(size);
+        res.writeHead(200, { 'content-type': 'image/png', 'content-length': png.length, 'cache-control': 'public, max-age=86400' });
+        return res.end(png);
+      }
+
+      if (route === 'POST /api/login') {
+        const ip = req.socket.remoteAddress ?? 'unknown';
+        if (!loginAllowed(ip)) return json(res, 429, { detail: 'Too many attempts. Wait 5 minutes.' });
+        const body = await readJsonBody(req);
+        const pin = String(body.pin ?? '');
+        const ok = pin && (safeEqual(pin, config.dashboardPin) || safeEqual(pin, config.bridgeToken));
+        if (!ok) {
+          recordLogin(ip);
+          return json(res, 401, { detail: 'Wrong PIN. It is printed in the agent console at startup.' });
+        }
+        loginAttempts.delete(ip);
+        return json(res, 200, { ok: true, token: config.bridgeToken });
+      }
+
       if (route === 'GET /qr.png') {
         if (!authed(req, url)) return json(res, 401, { detail: 'Bridge token required (add ?t=<token> — printed in the agent console).' });
         try {
@@ -101,11 +230,14 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
         } catch { return json(res, 404, { detail: 'No QR right now — either already linked, or WhatsApp is still connecting.' }); }
       }
 
-      if (!authed(req, url)) return json(res, 401, { detail: 'Bridge token required (x-bridge-token header or Bearer). It is printed when the agent starts.' });
+      if (!authed(req, url)) {
+        return json(res, 401, { detail: 'Bridge token required (x-bridge-token header, Bearer, or the dashboard PIN via /api/login). It is printed when the agent starts.' });
+      }
 
       switch (route) {
         case 'GET /api/status':
           return json(res, 200, {
+            version: VERSION,
             whatsapp: whatsapp.status(),
             owner: config.ownerNumber,
             agent: config.agentNumber,
@@ -114,15 +246,72 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
             observerTabConnected: mailbox.observerOnline(),
             forwardToObserver: config.forwardToObserver,
             allowSimulate: config.allowSimulate,
+            access: actions?.accessReport?.() ?? { level: config.accessLevel },
+            agentTools: Boolean(config.agentTools),
+            model: config.ollamaModel,
             stats: store.data.stats,
             reminders: store.data.reminders.length,
             openTodos: store.data.todos.filter((t) => !t.done).length,
             notes: store.data.notes.length,
+            pending: store.data.pending ? { text: store.data.pending.text, ts: store.data.pending.ts } : null,
           });
+
+        case 'POST /api/chat': {
+          const body = await readJsonBody(req);
+          const text = String(body.text ?? '').slice(0, 4000);
+          if (!text.trim()) return json(res, 400, { detail: 'text is required' });
+          if (body.from && normalizeNumber(body.from) !== config.ownerNumber) {
+            return json(res, 403, { detail: 'This agent only listens to the owner.' });
+          }
+          if (!runOwner) return json(res, 503, { detail: 'Agent is still starting up.' });
+          const reply = await runOwner(text);
+          return json(res, 200, replyForApp(reply));
+        }
+
+        case 'POST /api/action': {
+          if (!actions) return json(res, 503, { detail: 'Actions are not ready yet.' });
+          const body = await readJsonBody(req);
+          const result = await actions.execute(String(body.name ?? ''), body.args ?? {}, { source: 'app' });
+          return json(res, 200, replyForApp(result));
+        }
+
+        case 'GET /api/download': {
+          // Authenticated file download for the phone app ("Send" in chat).
+          const wanted = url.searchParams.get('path') ?? '';
+          const resolved = files.resolvePath(wanted, { extraRoots: config.filesExtraRoots ?? [], mustExist: true });
+          if (!resolved.ok) return json(res, 400, { detail: resolved.reason });
+          const stat = fs.statSync(resolved.path);
+          if (stat.isDirectory()) return json(res, 400, { detail: 'That path is a folder, not a file.' });
+          res.writeHead(200, {
+            'content-type': files.mimeFor(resolved.path),
+            'content-length': stat.size,
+            'content-disposition': `attachment; filename="${encodeURIComponent(path.basename(resolved.path))}"`,
+            'cache-control': 'no-store',
+          });
+          const stream = fs.createReadStream(resolved.path);
+          stream.on('error', (err) => {
+            log.error?.(`[bridge] download failed: ${err.message}`);
+            if (!res.headersSent) json(res, 500, { detail: err.message });
+            else res.destroy(err);
+          });
+          return stream.pipe(res);
+        }
+
+        case 'GET /api/files':
+          return json(res, 200, { downloads: listDownloads(), shared: listShared() });
+
+        case 'GET /api/apps':
+          try {
+            return json(res, 200, { apps: apps.appList(apps.discoverApps(), 200).map((a) => ({ id: a.id, name: a.name })) });
+          } catch (err) {
+            return json(res, 200, { apps: [], detail: err.message });
+          }
+
         case 'POST /api/send': {
           await sendPayload(await readJsonBody(req));
           return json(res, 200, { success: true });
         }
+
         case 'POST /tools/send-whatsapp': {
           const body = await readJsonBody(req);
           // Owner-only also on the way out: a phone-number `to_number` must be
@@ -136,17 +325,21 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
           await sendPayload(body);
           return json(res, 200, { success: true, message_sid: 'native-whatsapp' });
         }
+
         case 'POST /tools/is-whitelisted':
           return json(res, 200, { success: true, whitelisted: true, is_whitelisted: true, linked: true, channel: 'whatsapp' });
+
         case 'GET /remote/listen':
         case 'GET /remote/inbox':
           return json(res, 200, { messages: await mailbox.listen(25_000) });
+
         case 'GET /remote/status':
           return json(res, 200, {
             linked: whatsapp.status().startsWith('connected') || config.dryRun,
             name: `Native WhatsApp (+${maskNumber(config.agentNumber)})`,
             revoked: false,
           });
+
         case 'POST /remote/reply': {
           const body = await readJsonBody(req);
           const text = String(body.text ?? '').slice(0, 4000);
@@ -156,12 +349,14 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
           if (how === 'direct') await sendPayload({ message: text, images });
           return json(res, 200, { success: true, deliveredVia: how });
         }
+
         case 'POST /api/simulate': {
           if (!config.allowSimulate) return json(res, 403, { detail: 'Simulate is off. Set ALLOW_SIMULATE=true (or use --dry-run) to enable it.' });
           const body = await readJsonBody(req);
           const result = await whatsapp.simulate(String(body.text ?? ''), body.from ? normalizeNumber(body.from) : config.ownerNumber);
           return json(res, 200, result);
         }
+
         default:
           return json(res, 404, { detail: `No such route: ${route}` });
       }
@@ -173,10 +368,21 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
 
   return {
     start() {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        server.once('error', (err) => {
+          if (err.code === 'EADDRINUSE') {
+            reject(new Error(`Port ${config.port} is already in use. Another copy of the agent is probably running — check \`./start.sh --status\` / \`systemctl --user status observer-whatsapp-agent\`, or set PORT=<other> in .env.`));
+          } else if (err.code === 'EACCES') {
+            reject(new Error(`Not allowed to bind ${config.host}:${config.port}. Use a port above 1024 (PORT=8787).`));
+          } else {
+            reject(new Error(`Could not start the local bridge: ${err.message}`));
+          }
+        });
         server.listen(config.port, config.host, () => {
+          const shownHost = config.host === '0.0.0.0' ? 'PC-IP' : config.host;
           log.info?.(`[bridge] listening on http://${config.host}:${config.port}`);
-          log.info?.(`[bridge] dashboard (keep this URL private): http://${config.host}:${config.port}/?t=${config.bridgeToken}`);
+          log.info?.(`[bridge] phone app: http://${shownHost}:${config.port}/  (PIN: ${config.dashboardPin})`);
+          log.info?.(`[bridge] direct link (keep private): http://${shownHost}:${config.port}/?t=${config.bridgeToken}`);
           log.info?.(`[bridge] token: ${config.bridgeToken}`);
           resolve(server);
         });
@@ -185,59 +391,4 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, log = con
     },
     stop() { server.close(); },
   };
-}
-
-function dashboardHtml(config, hasToken) {
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Observer WhatsApp Agent</title>
-<style>
- body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#0b141a;color:#e9edef;margin:0;padding:24px}
- .card{background:#111b21;border:1px solid #222d34;border-radius:14px;padding:20px;max-width:760px;margin:0 auto 16px}
- h1{font-size:22px;margin:0 0 4px} .sub{color:#8696a0;margin:0 0 16px}
- .ok{color:#25d366} code{background:#1f2c34;padding:2px 6px;border-radius:6px}
- img.qr{background:#fff;border-radius:12px;padding:10px;max-width:320px;width:100%}
- input,button{font:inherit} input{flex:1;background:#1f2c34;border:1px solid #2a3942;color:#fff;border-radius:10px;padding:10px}
- button{background:#25d366;border:0;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer}
- .row{display:flex;gap:8px} pre{white-space:pre-wrap;background:#0b141a;border-radius:10px;padding:12px;min-height:60px}
- li{margin:3px 0} .muted{color:#8696a0}
-</style></head><body>
-<div class="card">
- <h1>🤖 Observer WhatsApp Agent</h1>
- <p class="sub">Free native WhatsApp (linked device) · Owner <b>+${config.ownerNumber}</b> only · Agent <b>+${config.agentNumber}</b> · ₹0/message</p>
- ${hasToken ? `<p>Status: <b id="status">loading…</b></p>
- <div id="qrbox" style="display:none"><p>📱 Scan with the <b>agent phone</b> (+${config.agentNumber}): WhatsApp → Linked devices → Link a device</p><img class="qr" id="qr" alt="WhatsApp linking QR"></div>
- <p id="pair" class="muted"></p>` : `<p>🔒 Open this page with the private dashboard URL printed in the agent console (it ends with <code>?t=…</code>) to see status and the linking QR.</p>`}
-</div>
-${hasToken && config.allowSimulate ? `<div class="card"><h2>🧪 Try a command (simulation)</h2>
- <div class="row"><input id="cmd" placeholder="/help, /weather Nainital, remind me in 5m to stretch, 45*12…"><button id="go">Send as owner</button></div>
- <p class="muted">This runs the real command engine + owner check without WhatsApp. Try also from another number via API to see it ignored.</p>
- <pre id="out">Replies will appear here…</pre></div>` : ''}
-<div class="card"><h2>📱 First-time linking</h2><ol>
- <li>Keep this agent running — <code>./start.sh</code> in <code>whatsapp-agent/</code>, or the Fedora systemd user service (<code>systemctl --user status observer-whatsapp-agent</code>).</li>
- <li>On the <b>agent phone +${config.agentNumber}</b>: WhatsApp → ⋮/Settings → <b>Linked devices</b> → <b>Link a device</b> → scan the QR above (or in the terminal).</li>
- <li>From <b>your phone +${config.ownerNumber}</b>, WhatsApp the agent number: <code>/help</code></li>
- <li>Anyone else messaging the agent number gets <b>silence</b> — by design.</li></ol>
- <p class="muted">Free AI brain: install Ollama, <code>ollama pull llama3.2</code>, done. Commands work even without it. Full guide: whatsapp-agent/README.md</p></div>
-<script>
-const t = new URLSearchParams(location.search).get('t') || '';
-async function refresh(){
- if(!t) return;
- try{
-  const s = await (await fetch('/api/status',{headers:{'x-bridge-token':t}})).json();
-  document.getElementById('status').innerHTML = '<span class="ok">'+s.whatsapp+'</span> · '+s.stats.received+' in · '+s.stats.replied+' out · '+s.stats.ignoredNonOwner+' non-owner ignored';
-  document.getElementById('qrbox').style.display = s.hasQr ? 'block':'none';
-  if(s.hasQr) document.getElementById('qr').src = '/qr.png?t='+t+'&_='+Date.now();
-  if(s.pairingCode) document.getElementById('pair').textContent = 'Pairing code: '+s.pairingCode;
- }catch(e){}
-}
-refresh(); setInterval(refresh, 5000);
-const go=document.getElementById('go');
-if(go) go.onclick = async () => {
- const text=document.getElementById('cmd').value;
- const out=document.getElementById('out'); out.textContent='…';
- const r=await (await fetch('/api/simulate',{method:'POST',headers:{'content-type':'application/json','x-bridge-token':t},body:JSON.stringify({text})})).json();
- out.textContent = r.ignored ? '(ignored — not the owner)' : (r.sent.map(s=>s.text||JSON.stringify(s)).join('\\n\\n') || '(no reply)');
-};
-</script></body></html>`;
 }

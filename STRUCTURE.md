@@ -41,10 +41,12 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
                                               ▼
                                         whatsapp-agent/  (your PC, free)
                                          ├─ owner-only filter (everyone else: silence)
-                                         ├─ commands + free tools (reminders, todos,
-                                         │   weather, wiki, calc, QR, currency…)
-                                         ├─ free AI brain: local Ollama first,
+                                         ├─ offline intents (Hinglish/English, zero AI)
+                                         ├─ action registry: apps, files, OCR, input,
+                                         │   Wi-Fi/BT, recording, power, shell…
+                                         ├─ free AI tool-calling: local Ollama first,
                                          │   optional Groq/Gemini/OpenRouter free tiers
+                                         ├─ installable phone app (PWA) + dashboard
                                          └─ local HTTP bridge for Observer
                                              (sendWhatsapp + remote-control mailbox,
                                               no Auth0 / Redis / quota)
@@ -68,6 +70,21 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 * **Cloud API patched (opt-in)**: `api/messaging.py` gains `WHATSAPP_MODE=native`, which
   forwards sends to the local bridge and skips Twilio, the 24 h window and quota.
   Default remains `twilio`, so upstream behaviour is unchanged.
+
+### 2.0 modules (what lives where)
+
+| File | Job |
+|---|---|
+| `whatsapp-agent/src/actions.js` | **One registry of 57 PC actions** with permission levels + destructive confirmations. Used by commands, offline intents and the AI. |
+| `whatsapp-agent/src/nlp.js` | Offline intent parser — “chrome kholo”, “wifi off karo”, “thesis.pdf dhundo” work with **no AI installed**. |
+| `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step. |
+| `whatsapp-agent/src/apps.js` | Discovers `.desktop` apps, launches **any** installed app, window control. |
+| `whatsapp-agent/src/files.js` | Home-folder file tools: list/read/write/search/zip/download/send, secret paths blocked. |
+| `whatsapp-agent/src/systemx.js` | Wi-Fi (nmcli), Bluetooth, systemd services, process kill, webcam, screen recording. |
+| `whatsapp-agent/src/ocr.js` | tesseract OCR for screenshots/photos, PDF/DOCX text extraction, `/look` answers. |
+| `whatsapp-agent/src/transcribe.js` | Voice notes → text (Groq Whisper free tier or local whisper.cpp). |
+| `whatsapp-agent/webapp/` | The installable phone app: `index.html`, `styles.css`, `app.js`, service worker, manifest. `src/webapp.js` generates the PNG icons. |
+| `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/action`. |
 
 See [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) for setup and
 [`whatsapp-agent/README.md`](whatsapp-agent/README.md) for the full command list.

@@ -53,10 +53,30 @@ export function findBin(name, env = process.env) {
 const NO_SESSION = 'No graphical session found. Log in to the Fedora desktop on the PC first — if the agent auto-started at boot (linger), restart it after login: systemctl --user restart observer-whatsapp-agent';
 
 async function run(bin, args, opts = {}) {
+  // execFile has no `input` option: clipboard writes need a real stdin pipe.
+  if (opts.input !== undefined && opts.input !== null) {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(bin, args, { env: displayEnv() });
+      let stdout = '';
+      let stderr = '';
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* noop */ }
+        reject(Object.assign(new Error(`timed out after ${(opts.timeout ?? RUN_TIMEOUT) / 1000}s`), { code: 'ETIMEDOUT' }));
+      }, opts.timeout ?? RUN_TIMEOUT);
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.on('error', (err) => { clearTimeout(timer); reject(err); });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0) return resolve(stdout);
+        reject(Object.assign(new Error(stderr.trim() || `${bin} exited with ${code}`), { code, stderr, stdout }));
+      });
+      if (child.stdin) child.stdin.end(String(opts.input));
+    });
+  }
   const { stdout } = await execFileAsync(bin, args, {
     timeout: opts.timeout ?? RUN_TIMEOUT,
     env: displayEnv(),
-    input: opts.input,
     maxBuffer: 1024 * 1024,
   });
   return stdout;

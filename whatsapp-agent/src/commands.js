@@ -15,52 +15,74 @@ import * as tools from './tools.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
+import { createActions } from './actions.js';
+import { createAgentLoop } from './agentloop.js';
+import { parseIntent } from './nlp.js';
 
 const execAsync = promisify(exec);
-const HELP = `🤖 *Observer WhatsApp Agent* — free, native, owner-only
+const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
+_No Observer app needed. No paid API. Everything runs on your own PC._
 
-*Chat*
-• Just type normally — I answer with the free local AI (Ollama) if it's running
-• /ask <question> · /forget (clear chat memory) · /model (AI status)
-• /remember <thing> · /memory · e.g. "remember wifi is on the fridge"
-• /summarize <text or URL> · /improve <text>
+*Just talk (English / Hindi / Hinglish)*
+• “chrome kholo” · “screenshot bhej do” · “awaaz kam karo”
+• “wifi off karo” · “screen pe kya hai” · “thesis.pdf dhundo”
+• “download <link>” · “10 second screen record karo” · “type karo hello”
+• /agent <task> — multi-step task handled by the free AI
+• /model — see which free brain is connected
 
+*Apps & windows*
+• /apps · /open <app> · /close <app> · /windows · /focus <title>
+*PC control*
+• /screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top
+• /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
+• /pc type <text> · /pc key ctrl+l · /pc click [x y] · /pc lock
+• /webcam · /record [seconds] · /notify <text> · /pc locate <button>
+*Network*
+• /wifi [status|on|off|list] · /wifi connect <SSID> [password]
+• /bt [on|off|status] · /svc status|restart <service> · /kill <process>
+*Files (anywhere under your home)*
+• /ls [path] · /read <path> · /write <path> | <text> · /send <path>
+• /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
+• /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
 *Do things*
-• /remind in 10m <text> · /remind at 18:30 <text> · /remind tomorrow 9am <text>
-• /reminders · /remind del <id> · /timer 5m <label>
-• /todo add <text> · /todo · /todo done <id> · /todo del <id>
-• /note <text> · /notes · /note del <id>
-• /observer <text> — hand it to Observer on my PC (screen/camera/tools)
-• /screen — what's on the PC screen (Observer if open, else a direct screenshot)
+• /remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>
+• /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
+• /observer <task> (optional Observer app) · /screen
+*Safety*
+• /access — what is allowed · /yes · /no (destructive actions ask first)
+• /run <PIN> <command> — shell, only if ALLOW_SHELL=true
 
-*Control my PC (Fedora, direct — no Observer needed)*
-• /pc screenshot · /pc status · /pc disk · /pc ip · /pc battery · /pc top
-• /pc volume up|down|mute|50 · /pc brightness up|down|70 · /pc media pause|next|status
-• /pc open firefox · /pc open https://… · /pc notify <text> · /pc lock
-• /pc clipboard · /pc clipset <text> · /pc find <name> · /pc get <path-in-home>
-• ⌨️ Input + power (needs ALLOW_PC_CONTROL=true): /pc type <text> · /pc key ctrl+l
-  /pc click [x y] · /pc suspend|reboot|shutdown (asks /pc confirm first)
-• 🎯 *Element finder*: /pc locate Login — shows where it is · /pc tap Login —
-  finds that button/field by its label and clicks it (no pixel guessing)
-
-*Look things up (all free, no keys)*
-• /weather <city> · /wiki <topic> · /define <word> · /news [topic]
-• /currency 100 USD to INR · /unit 10 km to mi · /calc 45*12+sqrt(81)
-• /url <link> — read + summarise a page
-
-*Utilities*
-• /qr <text/link> · /sticker (send with a photo) · /poll Q | A | B
-• /password [length] · /shorten <url> · /time · /date · /choose a, b, c
-• /files · /get <filename> (shared folder) · /downloads
-• /joke · /fact · /quote · /coin · /dice
-• /ping · /status · /me · /help
-
-_You can also talk naturally: "remind me in 5 minutes to drink water", "note: gate code is 4321", "what's the weather in Nainital", "45*12"._`;
+_Built-in commands work with no AI at all. Local Ollama makes conversation + multi-step tasks unlimited and offline._`;
 
 const num = (s) => Number.parseInt(String(s ?? ''), 10);
 
 export function createAgent({ config, store, log = console, forwardToObserver = async () => null, observerOnline = () => false }) {
   const tz = config.timezone;
+  const actions = createActions({ config, store, log });
+  const agentLoop = createAgentLoop({ config, store, actions, log });
+
+  /** Execute an action and shape it into a WhatsApp reply object. */
+  function toReply(result) {
+    if (typeof result === 'string') return result;
+    if (!result) return '✅ Done.';
+    const out = {};
+    if (result.text) out.text = result.text;
+    if (result.image) out.image = result.image;
+    if (result.extraImages) out.extraImages = result.extraImages;
+    if (result.document) out.document = result.document;
+    if (result.video) out.video = result.video;
+    return Object.keys(out).length ? out : '✅ Done.';
+  }
+  const act = async (name, args = {}, ctx = {}) => {
+    const result = await actions.execute(name, args, ctx);
+    // Text-only results stay strings (friendlier for WhatsApp + existing code);
+    // media results keep their reply object.
+    if (result && typeof result === 'object' && !result.image && !result.extraImages
+        && !result.document && !result.video) {
+      return result.text ?? (result.ok ? '✅ Done.' : "⚠️ That didn't work.");
+    }
+    return toReply(result);
+  };
 
   // ── individual commands ──────────────────────────────────────────────────
 
@@ -190,7 +212,11 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
         if (!['play', 'pause', 'toggle', 'next', 'prev', 'previous', 'stop', 'status'].includes(action)) return '🎵 Usage: /pc media play|pause|next|prev|stop|status';
         return pc.media(action);
       }
-      case 'open': return pc.openTarget(rest);
+      case 'open': {
+        if (!rest) return '🚀 Usage: /open <app name> — /apps lists everything installed.';
+        return act('open_app', { app: rest });
+      }
+      case 'close': case 'quit': return act('close_app', { app: rest });
       case 'notify': return rest ? pc.desktopNotify(rest) : '🔔 Usage: /pc notify <text>';
       case 'lock': return pc.lockSession();
       case 'clipboard': case 'clip': return pc.clipboardGet();
@@ -198,7 +224,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'find': {
         const found = await pc.findFiles(rest);
         return found.length
-          ? '🔎 *Found under ~*\n\n' + found.map((f) => `• ~/${f}`).join('\n') + '\n\nFetch one with /pc get ~/<path>'
+          ? '🔎 *Found under ~*\n\n' + found.map((f) => `• ~/${f}`).join('\n') + '\n\nFetch one with /send ~/<path>'
           : `🔎 Nothing under your home folder matches "${rest}".`;
       }
       case 'get': {
@@ -282,8 +308,8 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           '/pc screenshot · /pc status · /pc disk · /pc battery · /pc top · /pc ip',
           '/pc volume up|down|mute|50 · /pc brightness up|down|70',
           '/pc media play|pause|next|prev|stop|status',
-          '/pc open firefox|terminal|settings|https://… · /pc notify <text> · /pc lock',
-          '/pc clipboard · /pc clipset <text> · /pc find <name> · /pc get ~/<path>',
+          '/pc open <any app>   (/apps lists them) · /pc notify <text> · /pc lock',
+          '/pc clipboard · /pc clipset <text> · /pc find <name> · /pc get <path>',
           '/pc locate <label> — find a button/field on screen · /pc tap <label> — find + click it 🎯',
           '/pc type <text> · /pc key ctrl+l · /pc click [x y] · /pc suspend|reboot|shutdown' + (config.allowPcControl ? '' : '  (⌨️ tier-2 currently OFF — see ALLOW_PC_CONTROL)'),
         ].join('\n');
@@ -314,17 +340,20 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return { text: `📄 ${base} (${(stat.size / 1024).toFixed(0)} KB)`, document: { buffer: fs.readFileSync(file), fileName: base } };
   }
 
-  async function runShell(args) {
-    if (!config.allowShell) return '🔒 Shell is OFF (ALLOW_SHELL=false). That\'s the safe default — /pc (screenshot, volume, open, type/key/click, power…) and /observer cover most needs with fixed, non-shell actions.';
-    const m = (args || '').match(/^(\S+)\s+([\s\S]+)$/);
-    if (!m || m[1] !== config.shellPin) return '🔒 Usage: /run <PIN> <command>';
-    try {
-      const { stdout, stderr } = await execAsync(m[2], { timeout: 15_000, maxBuffer: 1024 * 1024, cwd: config.dataDir });
-      const out = `${stdout}${stderr ? `\n[stderr]\n${stderr}` : ''}`.trim().slice(0, 3500);
-      return `\`\`\`\n${out || '(no output)'}\n\`\`\``;
-    } catch (err) {
-      return `\`\`\`\n${String(err.stdout ?? '')}\n${String(err.stderr ?? err.message).slice(0, 2000)}\n\`\`\``;
+  async function runShell(args, ctx = {}) {
+    if (!config.allowShell) {
+      return '🔒 Shell is OFF (ALLOW_SHELL=false). That\'s the safe default — apps, files, Wi-Fi, OCR, input and power already work without it. To enable: ALLOW_SHELL=true + SHELL_PIN=<pin> in whatsapp-agent/.env.';
     }
+    let command = String(args ?? '').trim();
+    let pinOk = Boolean(ctx.shellPinOk);
+    if (config.shellPin && !pinOk) {
+      const m = command.match(/^(\S+)\s+([\s\S]+)$/);
+      if (!m || m[1] !== config.shellPin) return '🔒 Usage: /run <PIN> <command>  (your PIN is SHELL_PIN in .env)';
+      command = m[2];
+      pinOk = true;
+    }
+    if (!command) return '💻 Usage: /run <command>';
+    return toReply(await actions.execute('run_shell', { command }, { ...ctx, shellPinOk: pinOk, confirmed: true }));
   }
 
   async function askObserver(text) {
@@ -358,7 +387,8 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           `Uptime: ${tools.humanDuration(Date.now() - s.startedAt)}`,
           `Messages: ${s.received} in · ${s.replied} out · ${s.ignoredNonOwner} non-owner ignored`,
           `Data: ${store.data.todos.filter((t) => !t.done).length} open to-dos · ${store.data.notes.length} notes · ${store.data.reminders.length} reminders`,
-          `Observer bridge: ${observerOnline() ? 'tab connected 🖥️' : 'no Observer tab polling'}`,
+          `Observer bridge: ${observerOnline() ? 'tab connected 🖥️' : 'not needed (agent is standalone)'}`,
+          `Access: *${actions.level()}* · ${actions.accessReport().actions} tools · shell ${config.allowShell ? 'ON (PIN)' : 'off'}`,
           `PC control: tier-1 on (screenshot/volume/…) · input+power ${config.allowPcControl ? `ON ⌨️${config.controlPin ? ' (PIN)' : ''}` : 'off (ALLOW_PC_CONTROL)'}`,
           `Cost so far: ₹0 (native WhatsApp, local tools)`,
         ].join('\n');
@@ -445,21 +475,96 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'pc': return handlePc(args);
       case 'system': case 'sysinfo': return handlePc('status');
       case 'observer': case 'obs': return args ? askObserver(args) : '🖥️ Usage: /observer <what to do/look at on the PC>';
-      case 'screen': {
-        // Observer (when its tab is open) can see AND reason about the screen.
-        // Without it, fall back to a direct PC screenshot so /screen still works.
+      case 'screen': case 'look': case 'lookscreen': {
+        // Standalone first: screenshot → OCR → free AI answer. This is what
+        // makes /screen work with no Observer app at all. If an Observer tab
+        // happens to be connected, it can look too (better at images/games).
         if (observerOnline()) {
           return askObserver(args ? `Look at my screen and answer: ${args}` : 'Look at my screen and tell me briefly what is on it right now. Include a screenshot if you can.');
         }
-        try {
-          const image = await pc.captureScreenshot();
-          return { image, text: `🖥️ Direct screenshot from your PC${args ? ` (you asked: ${args} — open Observer for an AI answer about it, or look right here)` : ''}` };
-        } catch (err) {
-          return `🖥️ Observer isn't open, and a direct screenshot failed too: ${err.message}`;
-        }
+        return act('look_at_screen', { question: args || '' });
       }
-      case 'run': case 'exec': case 'shell': return runShell(args);
+      case 'ocr': return act('ocr_screen');
+      case 'screenshot': case 'shot': return act('screenshot');
+      case 'webcam': case 'cam': return act('webcam_photo');
+      case 'record': case 'screencast': return act('record_screen', { seconds: num(args) || 10 });
+      case 'run': case 'exec': case 'shell': return runShell(args, ctx);
       case 'sticker': return '🎨 Send /sticker *with a photo* (as its caption) and I\'ll turn it into a sticker.';
+
+      // ── apps & windows ──────────────────────────────────────────────────
+      case 'apps': case 'applications': return act('list_apps');
+      case 'windows': case 'tasks': return act('list_windows');
+      case 'focus': case 'switch': return act('focus_window', { title: args });
+      case 'open': return args ? act('open_app', { app: args }) : '🚀 Usage: /open <app> — /apps lists installed apps.';
+      case 'close': case 'quit': return args ? act('close_app', { app: args }) : '🚪 Usage: /close <app>';
+
+      // ── network & system ────────────────────────────────────────────────
+      case 'wifi': {
+        const [sub, ...rest] = (args || 'status').split(/\s+/);
+        if (sub === 'connect' || sub === 'join') return act('wifi', { action: 'connect', ssid: rest[0], password: rest[1] });
+        return act('wifi', { action: sub || 'status' });
+      }
+      case 'bt': case 'bluetooth': return act('bluetooth', { action: (args || 'status').trim() || 'status' });
+      case 'kill': return args ? act('kill_process', { name: args }) : '🛑 Usage: /kill <process name>';
+      case 'svc': case 'service': {
+        const [sub, name] = (args || '').split(/\s+/);
+        if (!name) return '⚙️ Usage: /svc status <name> · /svc restart <name>';
+        return sub === 'restart' ? act('service_restart', { name }) : act('service_status', { name });
+      }
+      case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
+      case 'access': {
+        const r = actions.accessReport();
+        return [
+          `🔐 *Access*: ${r.level} · ${r.actions} tools (safe ${r.byLevel.safe}, standard ${r.byLevel.standard}, full ${r.byLevel.full})`,
+          `PC input: ${r.pcControl ? 'on' : 'off'} · Shell: ${r.shell ? `on${r.shellPin ? ' (PIN)' : ''}` : 'off'}`,
+          `Files: your home folder${config.filesExtraRoots?.length ? ` + ${config.filesExtraRoots.join(', ')}` : ''}`,
+          '',
+          'Destructive actions (delete, kill, shutdown, close app, shell) always ask for /yes first.',
+          'Change the level in whatsapp-agent/.env: ACCESS_LEVEL=safe|standard|full',
+        ].join('\n');
+      }
+
+      // ── files ───────────────────────────────────────────────────────────
+      case 'ls': case 'dir': return act('list_dir', { path: args || '~' });
+      case 'read': case 'cat': return args ? act('read_file', { path: args }) : '📄 Usage: /read <path>';
+      case 'write': case 'savefile': {
+        const append = /^--append\s+/i.test(args || '');
+        const body = append ? args.replace(/^--append\s+/i, '') : args;
+        const m = String(body ?? '').match(/^([\s\S]+?)\s*(?:\||::)\s*([\s\S]+)$/);
+        if (!m) return '💾 Usage: /write <path> | <text>   (add --append to append)';
+        return act('write_file', { path: m[1].trim(), text: m[2], append });
+      }
+      case 'send': case 'getfile': return args ? act('send_file', { path: args }) : '📄 Usage: /send <path>';
+      case 'download': case 'dl': {
+        const [url, ...rest] = String(args || '').split(/\s+/);
+        if (!/^https?:\/\//i.test(url || '')) return '⬇️ Usage: /download <https://link> [save-path]';
+        return act('download_url', { url, path: rest.join(' ') || undefined });
+      }
+      case 'mv': case 'move': case 'rename': {
+        const m = String(args ?? '').match(/^([\s\S]+?)\s*(?:\||->|=>| to )\s*([\s\S]+)$/i);
+        if (!m) return '📦 Usage: /mv <from> | <to>';
+        return act('move_path', { from: m[1].trim(), to: m[2].trim() });
+      }
+      case 'cp': case 'copy': {
+        const m = String(args ?? '').match(/^([\s\S]+?)\s*(?:\||->|=>| to )\s*([\s\S]+)$/i);
+        if (!m) return '📋 Usage: /cp <from> | <to>';
+        return act('copy_path', { from: m[1].trim(), to: m[2].trim() });
+      }
+      case 'mkdir': return args ? act('make_dir', { path: args }) : '📁 Usage: /mkdir <folder>';
+      case 'zip': {
+        if (!args) return '🗜️ Usage: /zip <path> [path2 …]';
+        const paths = args.split(/\s*\|\s*/).map((x) => x.trim()).filter(Boolean);
+        const output = paths.length === 1 ? `${paths[0].replace(/\/$/, '')}.zip` : undefined;
+        return act('zip_paths', { paths, output });
+      }
+      case 'unzip': return args ? act('unzip_path', { path: args }) : '📂 Usage: /unzip <file.zip>';
+      case 'rm': case 'delete': return args ? act('delete_path', { path: args }) : '🗑️ Usage: /rm <path>  (asks for confirmation)';
+
+      // ── agent + confirmations ───────────────────────────────────────────
+      case 'agent': case 'do': return args ? (await agentLoop.run(args, ctx)) ?? '🤖 No free AI brain is reachable for multi-step tasks. Use the direct commands (/open, /pc, /ls, /wifi…) or install Ollama (/model).' : '🤖 Usage: /agent <task in plain language>';
+      case 'yes': case 'haan': return toReply(await actions.runPending(ctx));
+      case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
+      case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
       default:
         return `🤖 I don't know /${cmd} yet.\n\n${HELP.split('\n').slice(0, 6).join('\n')}\n…full list: /help`;
     }
@@ -503,28 +608,59 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return undefined;
   }
 
+  const AFFIRM = /^(?:yes|y|ya|haan|han|ha|karo|kar\s*do|kardo|confirm|theek\s*hai|thik\s*hai|हाँ|हां|हा|करो|ठीक\s*है)[.!\s]*$/i;
+  const DENY = /^(?:no|n|nahi|nah|nope|cancel|mat\s*karo|रद्द|ना|नहीं)[.!\s]*$/i;
+
   /** Main entry: owner text → reply. `ctx` may carry { waStatus(), quotedMedia }. */
   async function handle(text, ctx = {}) {
     const clean = String(text ?? '').trim();
     if (!clean) return '🤖 I got an empty message. Try /help';
     try {
-      const cmdMatch = clean.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
-      if (cmdMatch) return await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), ctx);
+      // A message starting with the shell PIN unlocks shell for this message
+      // only ("1234 df -h"), so the PIN never has to live in the AI prompt.
+      let working = clean;
+      let effCtx = ctx;
+      if (config.shellPin && working.startsWith(`${config.shellPin} `)) {
+        working = working.slice(config.shellPin.length + 1).trim();
+        effCtx = { ...ctx, shellPinOk: true };
+      }
 
-      const quick = intent(clean);
+      const cmdMatch = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+      if (cmdMatch) return await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
+
+      // A parked destructive action: "haan" runs it, "nahi" cancels.
+      if (store.data.pending) {
+        if (AFFIRM.test(working)) return toReply(await actions.runPending(effCtx));
+        if (DENY.test(working)) { actions.clearPending(); return '👍 Cancelled — kuch nahi kiya.'; }
+      }
+
+      const quick = intent(working);
       if (quick !== undefined) return await quick;
 
+      // Offline intent layer: works with zero AI, understands Hinglish.
+      const parsed = parseIntent(working);
+      if (parsed) {
+        if (parsed.reply) return parsed.reply;
+        return await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
+      }
+
+      // Free AI with tools: multi-step tasks on the PC.
+      if (agentLoop.enabled) {
+        const agentReply = await agentLoop.run(working, effCtx);
+        if (agentReply != null) return agentReply;
+      }
+
       if (config.forwardToObserver && observerOnline()) {
-        const fromObserver = await askObserver(clean);
+        const fromObserver = await askObserver(working);
         // askObserver already explains failures; only fall through on timeout handled there.
         return fromObserver;
       }
-      return await askAI(clean);
+      return await askAI(working);
     } catch (err) {
       log.error?.(`[commands] failed on "${clean.slice(0, 60)}": ${err.message}`);
       return `⚠️ That didn't work: ${err.message}\nNothing was charged (everything here is free). Try /help`;
     }
   }
 
-  return { handle, HELP };
+  return { handle, HELP, actions };
 }

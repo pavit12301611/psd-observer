@@ -7,9 +7,13 @@
 #                                            via journal/dashboard)
 #   ./scripts/install-fedora.sh --ollama   …plus install/enable local Ollama
 #                                            and pull the default free model
-#   ./scripts/install-fedora.sh --pc-control …plus PC-control tools (screenshot,
-#                                            volume/brightness, input daemon)
-#                                            and ALLOW_PC_CONTROL=true in .env
+#   ./scripts/install-fedora.sh --power    …plus the full toolkit: OCR, screen
+#                                            recording, webcam, windows, zip,
+#                                            PDF reading, Wi-Fi/Bluetooth CLIs,
+#                                            and ACCESS_LEVEL=full + input on
+#   ./scripts/install-fedora.sh --phone    …allow your phone on the same Wi-Fi
+#                                            to open the app (firewalld 8787)
+#   ./scripts/install-fedora.sh --pc-control  (old name for --power)
 #
 # Idempotent: safe to re-run. Uses sudo only for dnf (and the Ollama installer,
 # which manages its own sudo).
@@ -20,14 +24,26 @@ AGENT_DIR="$PWD"
 WANT_SERVICE=0
 WANT_OLLAMA=0
 WANT_PCCONTROL=0
+WANT_PHONE=0
 for arg in "$@"; do
   case "$arg" in
     --service) WANT_SERVICE=1 ;;
     --ollama) WANT_OLLAMA=1 ;;
-    --pc-control) WANT_PCCONTROL=1 ;;
-    *) echo "Unknown option: $arg (supported: --service, --ollama, --pc-control)" >&2; exit 2 ;;
+    --power|--pc-control) WANT_PCCONTROL=1 ;;
+    --phone) WANT_PHONE=1 ;;
+    *) echo "Unknown option: $arg (supported: --service, --ollama, --power, --phone)" >&2; exit 2 ;;
   esac
 done
+
+# set_env KEY VALUE — update or append a key in .env (idempotent).
+set_env() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=" .env; then
+    sed -i "s|^${key}=.*|${key}=${value}|" .env
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> .env
+  fi
+}
 
 say() { printf '\n== %s ==\n' "$*"; }
 
@@ -70,22 +86,38 @@ say "Agent setup in $AGENT_DIR"
 [ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example (owner +91 95289 23866, agent +91 88595 55795 already set)."; }
 npm install
 
-# ── 4b. Optional: PC-control tools + tier-2 switch ───────────────────────────
+# ── 4b. Optional: the full power toolkit ─────────────────────────────────────
 if [ "$WANT_PCCONTROL" -eq 1 ]; then
-  say "PC-control tools (screenshot/media/brightness/input)"
-  sudo dnf install -y grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool wl-clipboard libnotify tesseract || \
-    echo "⚠ Some PC-control packages failed to install — /pc subcommands that need them will name the missing one."
+  say "Full toolkit: OCR, recording, webcam, windows, files, Wi-Fi, Bluetooth"
+  sudo dnf install -y \
+    grim gnome-screenshot scrot kde-spectacle playerctl brightnessctl ydotool xdotool \
+    wl-clipboard libnotify tesseract tesseract-langpack-hin wmctrl \
+    ffmpeg wf-recorder zip unzip poppler-utils bluez NetworkManager \
+    || echo "⚠ Some packages failed to install — every action names the exact missing package when used."
   # Wayland keyboard/mouse needs the ydotool daemon (uinput). Unit name varies
   # by packaging; try both, never fatal.
   sudo systemctl enable --now ydotool 2>/dev/null || sudo systemctl enable --now ydotoold 2>/dev/null || \
     echo "⚠ Couldn't enable the ydotool daemon automatically — Wayland input needs it: check 'systemctl list-unit-files | grep ydotool'"
-  if grep -q '^ALLOW_PC_CONTROL=' .env; then
-    sed -i 's/^ALLOW_PC_CONTROL=.*/ALLOW_PC_CONTROL=true/' .env
+  set_env ALLOW_PC_CONTROL true
+  set_env ACCESS_LEVEL full
+  set_env OCR_LANGS "eng+hin"
+  echo "Full access ENABLED in .env: apps, files, Wi-Fi, input, screenshots, OCR, recording."
+  echo "Destructive actions (delete/kill/shutdown/close app) still ask for /yes first."
+  echo "Optional extra PIN for input: set CONTROL_PIN=1234 in .env"
+fi
+
+# ── 4c. Optional: phone app over Wi-Fi (firewalld) ───────────────────────────
+if [ "$WANT_PHONE" -eq 1 ]; then
+  say "Phone app access on port 8787"
+  set_env HOST 0.0.0.0
+  if command -v firewall-cmd >/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
+    sudo firewall-cmd --add-port=8787/tcp --permanent >/dev/null 2>&1 && sudo firewall-cmd --reload >/dev/null 2>&1 \
+      && echo "firewalld: port 8787 open on your LAN." \
+      || echo "⚠ Could not open 8787 in firewalld — run: sudo firewall-cmd --add-port=8787/tcp --permanent && sudo firewall-cmd --reload"
   else
-    printf '\nALLOW_PC_CONTROL=true\n' >> .env
+    echo "firewalld is not running — nothing to open. (If you use ufw/nftables, allow TCP 8787 on your LAN.)"
   fi
-  echo "Tier-2 PC control ENABLED in .env (keyboard/mouse + power, power asks /pc confirm)."
-  echo "Strongly recommended: set a PIN in .env, e.g. CONTROL_PIN=1234 (usage: /pc type 1234 hello)"
+  echo "Only devices on your Wi-Fi can reach the app, and it needs the PIN printed at startup."
 fi
 
 # ── 5. Optional: systemd user service (the Fedora way to keep it running) ────
@@ -155,7 +187,13 @@ together with this installer, it gets swallowed while the installer runs):
       under systemd: journalctl --user -u observer-whatsapp-agent -f)
   3. From YOUR phone +91 95289 23866, WhatsApp the agent number:  /help
   4. Free AI (optional): re-run with --ollama, then send  /model  to check.
+  5. Phone app (no Observer needed): open http://<this-PC-IP>:8787/ on your
+     phone, enter the PIN it prints at startup, and use "Add to Home screen".
+     Enable LAN access + firewall with:  ./scripts/install-fedora.sh --phone
 
-Nothing to open in firewalld: the bridge listens on 127.0.0.1 only.
-Full Fedora guide: ../FEDORA.md
+Optional but recommended extras:
+  ./scripts/install-fedora.sh --power    full toolkit (OCR, recording, Wi-Fi…)
+  ./scripts/install-fedora.sh --ollama   free offline AI (unlimited chat + tasks)
+
+Full Fedora guide: ../FEDORA.md · phone app + power guide: README.md
 EOF

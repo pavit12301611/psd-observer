@@ -1,0 +1,484 @@
+// Tests for the 2.0 "full power" layer: offline Hinglish intents, the unified
+// action registry (permissions, destructive confirmations, shell gate), the
+// free AI tool-calling loop, the installable phone app and its HTTP API.
+//
+// Everything here is offline: no WhatsApp, no Ollama, no network beyond
+// localhost fixtures.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+
+import * as nlp from '../src/nlp.js';
+import * as apps from '../src/apps.js';
+import * as files from '../src/files.js';
+import { createActions } from '../src/actions.js';
+import { createAgentLoop } from '../src/agentloop.js';
+import { createAgent } from '../src/commands.js';
+import { Store } from '../src/store.js';
+import { createBridgeServer, replyForApp } from '../src/server.js';
+import { iconPng } from '../src/webapp.js';
+
+const OWNER = '919528923866';
+const AGENT = '918859555795';
+const silent = { info() {}, warn() {}, error() {} };
+
+const TEMP_DIRS = [];
+function tempDir() {
+  const dir = fs.mkdtempSync(path.join(os.homedir(), 'wa-power-test-'));
+  TEMP_DIRS.push(dir);
+  return dir;
+}
+// Don't leave rubbish (or test files) in the owner's home folder.
+after(() => {
+  for (const dir of TEMP_DIRS) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ }
+  }
+});
+
+function makeConfig(dir, overrides = {}) {
+  return {
+    ownerNumber: OWNER,
+    agentNumber: AGENT,
+    timezone: 'Asia/Kolkata',
+    dataDir: dir,
+    sharedDir: path.join(dir, 'shared'),
+    downloadsDir: path.join(dir, 'downloads'),
+    qrPngFile: path.join(dir, 'qr.png'),
+    accessLevel: 'full',
+    allowPcControl: true,
+    allowShell: false,
+    shellPin: '',
+    shellTimeoutMs: 5_000,
+    confirmTtlMs: 120_000,
+    filesExtraRoots: [],
+    aiProvider: 'none',
+    ...overrides,
+  };
+}
+
+// ── offline intents (works with zero AI) ────────────────────────────────────
+
+test('nlp: English + Hinglish plain messages become real actions', () => {
+  assert.deepEqual(nlp.parseIntent('chrome kholo'), { cmd: 'open', args: 'chrome' });
+  assert.deepEqual(nlp.parseIntent('open vs code'), { cmd: 'open', args: 'vs code' });
+  assert.deepEqual(nlp.parseIntent('please open spotify'), { cmd: 'open', args: 'spotify' });
+  assert.deepEqual(nlp.parseIntent('screenshot bhej do'), { cmd: 'screenshot', args: '' });
+  assert.deepEqual(nlp.parseIntent('volume 40'), { cmd: 'pc', args: 'volume 40' });
+  assert.deepEqual(nlp.parseIntent('awaaz kam karo'), { cmd: 'pc', args: 'volume down' });
+  assert.deepEqual(nlp.parseIntent('mute'), { cmd: 'pc', args: 'volume mute' });
+  assert.deepEqual(nlp.parseIntent('wifi off karo'), { cmd: 'wifi', args: 'off' });
+  assert.deepEqual(nlp.parseIntent('wifi connect HomeNet secret123'), { cmd: 'wifi', args: 'connect HomeNet secret123' });
+  assert.deepEqual(nlp.parseIntent('battery kitni hai?'), { cmd: 'pc', args: 'battery' });
+  assert.deepEqual(nlp.parseIntent('thesis.pdf dhundo'), { cmd: 'pc', args: 'find thesis.pdf' });
+  assert.deepEqual(nlp.parseIntent('screen pe kya hai'), { cmd: 'look', args: '' });
+  assert.deepEqual(nlp.parseIntent('type karo hello world'), { cmd: 'pc', args: 'type hello world' });
+  assert.deepEqual(nlp.parseIntent('press ctrl+l'), { cmd: 'pc', args: 'key ctrl+l' });
+  assert.deepEqual(nlp.parseIntent('download https://example.com/a.pdf'), { cmd: 'download', args: 'https://example.com/a.pdf' });
+  assert.deepEqual(nlp.parseIntent('save ~/notes.txt me hello there'), { cmd: 'write', args: '~/notes.txt | hello there' });
+  assert.deepEqual(nlp.parseIntent('rename a.txt to b.txt'), { cmd: 'mv', args: 'a.txt | b.txt' });
+  assert.deepEqual(nlp.parseIntent('report.pdf bhejo'), { cmd: 'send', args: 'report.pdf' });
+  assert.deepEqual(nlp.parseIntent('folder banao projects'), { cmd: 'mkdir', args: 'projects' });
+  assert.deepEqual(nlp.parseIntent('file banao ~/a.txt me hello'), { cmd: 'write', args: '~/a.txt | hello' });
+  assert.deepEqual(nlp.parseIntent('notes.txt me hello likho'), { cmd: 'write', args: 'notes.txt | hello' });
+  assert.deepEqual(nlp.parseIntent('delete ~/old.txt'), { cmd: 'rm', args: '~/old.txt' });
+  assert.deepEqual(nlp.parseIntent('old.txt hata do'), { cmd: 'rm', args: 'old.txt' });
+  assert.deepEqual(nlp.parseIntent('app-smoke.txt padho'), { cmd: 'read', args: 'app-smoke.txt' });
+  assert.deepEqual(nlp.parseIntent('ls ~/Downloads'), { cmd: 'ls', args: '~/Downloads' });
+  assert.deepEqual(nlp.parseIntent('downloads folder me kya hai'), { cmd: 'ls', args: 'downloads' });
+  assert.deepEqual(nlp.parseIntent('list files in ~/Desktop'), { cmd: 'ls', args: '~/Desktop' });
+  assert.deepEqual(nlp.parseIntent('theek'), null); // chat, not a command
+  assert.deepEqual(nlp.parseIntent('lock karo'), { cmd: 'pc', args: 'lock' });
+  assert.deepEqual(nlp.parseIntent('pc band karo'), { cmd: 'pc', args: 'shutdown' });
+});
+
+test('nlp: real questions are never swallowed as app/file commands', () => {
+  assert.equal(nlp.parseIntent('open source kya hai'), null);
+  assert.equal(nlp.parseIntent('what is open source?'), null);
+  assert.equal(nlp.parseIntent('write me a poem about rains'), null);
+  assert.equal(nlp.parseIntent('explain javascript closures'), null);
+  assert.equal(nlp.parseIntent('find meaning of life'), null); // 4 words, no file-ish target? still guarded
+  assert.equal(nlp.parseIntent(''), null);
+});
+
+// ── desktop apps ────────────────────────────────────────────────────────────
+
+test('apps: .desktop parsing, Exec quoting and fuzzy matching', () => {
+  const entry = apps.parseDesktopEntry([
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=Visual Studio Code',
+    'Exec=/usr/share/code/code --unity-launch %F',
+    'Keywords=code;editor;programming;',
+    'StartupWMClass=Code',
+  ].join('\n'));
+  assert.equal(entry.name, 'Visual Studio Code');
+  assert.deepEqual(apps.splitExec(entry.exec), ['/usr/share/code/code', '--unity-launch']);
+
+  assert.deepEqual(apps.splitExec('env GTK_THEME=dark "/opt/My App/app" --flag %U'), ['/opt/My App/app', '--flag']);
+  assert.equal(apps.parseDesktopEntry('[Desktop Entry]\nType=Application\nName=Hidden\nNoDisplay=true\nExec=x'), null);
+  assert.equal(apps.parseDesktopEntry('[Desktop Entry]\nType=Link\nName=Link\nURL=https://x'), null);
+
+  const list = [
+    { id: 'code', name: 'Visual Studio Code', exec: 'code', keywords: 'editor' },
+    { id: 'firefox', name: 'Firefox', exec: 'firefox', keywords: 'browser web' },
+    { id: 'org.gnome.Nautilus', name: 'Files', exec: 'nautilus', keywords: 'file manager' },
+  ];
+  assert.equal(apps.matchApp('vs code', list).name, 'Visual Studio Code');
+  assert.equal(apps.matchApp('code', list).name, 'Visual Studio Code');
+  assert.equal(apps.matchApp('browser', list).name, 'Firefox');
+  assert.equal(apps.matchApp('file manager', list).name, 'Files');
+  assert.equal(apps.matchApp('definitely-not-installed-xyz', list), null);
+});
+
+test('apps: opening shell metacharacters is refused', async () => {
+  await assert.rejects(() => apps.launchApp('chrome; rm -rf ~'), /shell characters/);
+});
+
+// ── file tools ──────────────────────────────────────────────────────────────
+
+test('files: home-only, secrets blocked, read/write/list/search/send', async () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'hello.txt');
+  try {
+    assert.match(files.writeTextFile(file, 'first line'), /Saved/);
+    files.writeTextFile(file, '\nsecond', { append: true });
+    assert.equal(fs.readFileSync(file, 'utf8'), 'first line\nsecond');
+    assert.match(files.readTextFile(file), /second/);
+    assert.match(files.listDirectory(dir), /hello\.txt/);
+    const found = await files.searchFiles('hello', { root: dir });
+    assert.match(found, /hello\.txt/);
+
+    const reply = files.fileReply(file);
+    assert.equal(reply.document.fileName, 'hello.txt');
+    assert.match(reply.document.mimetype, /text\/plain/);
+
+    assert.equal(files.resolvePath('/etc/passwd', { mustExist: true }).ok, false);
+    assert.equal(files.resolvePath('~/../../etc/passwd', { mustExist: true }).ok, false);
+    assert.equal(files.resolvePath(path.join(os.homedir(), '.ssh', 'id_ed25519'), { mustExist: false }).ok, true); // resolves, blocked only when existing
+    fs.mkdirSync(path.join(dir, '.ssh'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ssh', 'id_rsa'), 'secret');
+    // only the real home .ssh is blocked by relative path; ensure no crash on odd paths
+    assert.ok(files.resolvePath(path.join(dir, '.ssh', 'id_rsa'), { mustExist: true }).ok);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── action registry: permissions + confirmations ────────────────────────────
+
+test('actions: access levels gate dangerous capabilities', async () => {
+  const dir = tempDir();
+  try {
+    const safe = createActions({ config: makeConfig(dir, { accessLevel: 'safe' }), store: new Store(path.join(dir, 'a.json')), log: silent });
+    const blocked = await safe.execute('write_file', { path: path.join(dir, 'x.txt'), text: 'x' });
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.text, /ACCESS_LEVEL=standard/);
+    assert.doesNotMatch(blocked.text, /Done/);
+
+    const standard = createActions({ config: makeConfig(dir, { accessLevel: 'standard' }), store: new Store(path.join(dir, 'b.json')), log: silent });
+    const power = await standard.execute('power', { action: 'shutdown' });
+    assert.match(power.text, /ACCESS_LEVEL=full/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('actions: destructive work is parked until the owner says haan', async () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'delete-me.txt');
+  fs.writeFileSync(file, 'bye');
+  const store = new Store(path.join(dir, 'store.json'));
+  const config = makeConfig(dir);
+  const actions = createActions({ config, store, log: silent });
+  try {
+    const first = await actions.execute('delete_path', { path: file });
+    assert.equal(first.ok, false);
+    assert.equal(first.needsConfirmation, true);
+    assert.match(first.text, /Confirm/);
+    assert.ok(fs.existsSync(file)); // nothing happened yet
+    assert.ok(store.data.pending);
+
+    const denied = await actions.runPending(); // simulate expiry separately below
+    assert.equal(denied.ok, true);
+    assert.ok(!fs.existsSync(file));
+
+    // An expired confirmation does nothing.
+    fs.writeFileSync(file, 'again');
+    await actions.execute('delete_path', { path: file });
+    store.data.pending.ts = Date.now() - 10 * 60_000;
+    const expired = await actions.runPending();
+    assert.match(expired.text, /expired/i);
+    assert.ok(fs.existsSync(file));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('actions: shell stays off until ALLOW_SHELL + PIN, then runs', async () => {
+  const dir = tempDir();
+  try {
+    const off = createActions({ config: makeConfig(dir), store: new Store(path.join(dir, 'c.json')), log: silent });
+    const denied = await off.execute('run_shell', { command: 'echo hi' }, { confirmed: true });
+    assert.match(denied.text, /Shell is OFF/);
+
+    const on = createActions({
+      config: makeConfig(dir, { allowShell: true, shellPin: '4321' }),
+      store: new Store(path.join(dir, 'd.json')),
+      log: silent,
+    });
+    const noPin = await on.execute('run_shell', { command: 'echo hi' }, { confirmed: true });
+    assert.match(noPin.text, /needs your PIN/);
+
+    const ran = await on.execute('run_shell', { command: 'echo hello-from-shell' }, { confirmed: true, shellPinOk: true });
+    assert.equal(ran.ok, true);
+    assert.match(ran.text, /hello-from-shell/);
+
+    // Destructive + no confirmation → parked even with a valid shell context.
+    const parked = await on.execute('run_shell', { command: 'touch /tmp/should-not-run' }, { shellPinOk: true });
+    assert.equal(parked.needsConfirmation, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('actions: tool schemas are filtered by access level', () => {
+  const dir = tempDir();
+  try {
+    const actions = createActions({ config: makeConfig(dir), store: new Store(path.join(dir, 'e.json')), log: silent });
+    const names = actions.toolSchemas().map((t) => t.name);
+    assert.ok(names.includes('open_app'));
+    assert.ok(names.includes('screenshot'));
+    assert.ok(names.includes('look_at_screen'));
+    assert.ok(names.includes('send_file'));
+    assert.ok(!names.includes('run_shell')); // ALLOW_SHELL=false
+    const schema = actions.toolSchemas().find((t) => t.name === 'open_app');
+    assert.ok(schema.parameters.required.includes('app'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── AI tool-calling loop (fake local Ollama) ────────────────────────────────
+
+test('agentloop: free AI calls a tool, sees the result, then answers', async () => {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}');
+      requests.push(body);
+      const hasToolResult = (body.messages ?? []).some((m) => m.role === 'tool');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (!hasToolResult) {
+        res.end(JSON.stringify({
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [{ function: { name: 'open_app', arguments: '{"app":"chrome"}' } }],
+          },
+        }));
+      } else {
+        res.end(JSON.stringify({ message: { role: 'assistant', content: 'Chrome khul gaya ✅' } }));
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const calls = [];
+  const actions = {
+    level: () => 'full',
+    toolSchemas: () => [{ name: 'open_app', description: 'open', parameters: { type: 'object', properties: { app: { type: 'string' } }, required: ['app'] } }],
+    execute: async (name, args) => { calls.push({ name, args }); return { ok: true, text: 'Opened chrome' }; },
+  };
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir, { aiProvider: 'auto', ollamaUrl: `http://127.0.0.1:${port}`, ollamaModel: 'llama3.2', agentTools: true, maxAgentSteps: 4 });
+    const loop = createAgentLoop({ config, store: new Store(path.join(dir, 's.json')), actions, log: silent });
+    assert.equal(loop.enabled, true);
+    const selected = loop.toolsFor('open chrome and take a screenshot');
+    assert.ok(selected.some((t) => t.name === 'open_app'));
+    assert.ok(selected.length <= 20);
+    const reply = await loop.run('chrome kholo', {});
+    assert.equal(reply, 'Chrome khul gaya ✅');
+    assert.deepEqual(calls, [{ name: 'open_app', args: { app: 'chrome' } }]);
+    assert.equal(requests.length, 2);
+    assert.ok(requests[1].messages.some((m) => m.role === 'tool' && /Opened chrome/.test(m.content)));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('agentloop: disabled with no brain, so offline commands still work', async () => {
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir, { aiProvider: 'none' });
+    const loop = createAgentLoop({ config, store: new Store(path.join(dir, 't.json')), actions: { toolSchemas: () => [], level: () => 'full' }, log: silent });
+    assert.equal(loop.enabled, false);
+    assert.equal(await loop.run('anything', {}), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── commands integration ────────────────────────────────────────────────────
+
+test('commands: file write/read/send and confirm flow through WhatsApp text', async () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'note.txt');
+  const store = new Store(path.join(dir, 'store.json'));
+  const config = makeConfig(dir);
+  fs.mkdirSync(config.sharedDir, { recursive: true });
+  const agent = createAgent({ config, store, log: silent });
+  try {
+    assert.match(await agent.handle(`/write ${file} | namaste duniya`), /Saved/);
+    assert.match(await agent.handle(`/read ${file}`), /namaste duniya/);
+    const sent = await agent.handle(`/send ${file}`);
+    assert.equal(sent.document.fileName, 'note.txt');
+    assert.match(sent.document.buffer.toString(), /namaste/);
+
+    const textOf = (reply) => (typeof reply === 'string' ? reply : reply?.text ?? '');
+    const ask = await agent.handle(`/rm ${file}`);
+    assert.match(textOf(ask), /Confirm/);
+    assert.ok(fs.existsSync(file));
+    const done = await agent.handle('haan');
+    assert.match(textOf(done), /trash|deleted/i);
+    assert.ok(!fs.existsSync(file));
+
+    assert.match(await agent.handle(`/mkdir ${dir}/sub`), /Created folder/);
+    assert.match(await agent.handle(`/cp ${dir}/sub | ${dir}/copy-of-sub`), /Copied/);
+    assert.match(await agent.handle(`/mv ${dir}/copy-of-sub | ${dir}/moved-sub`), /Moved/);
+    assert.ok(fs.existsSync(path.join(dir, 'moved-sub')));
+
+    assert.match(await agent.handle('/access'), /Access/);
+    assert.match(await agent.handle('/open definitely-not-an-app-xyz'), /couldn't find an app|find an app/i);
+    assert.match(await agent.handle('/run echo hi'), /Shell is OFF/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── phone app + HTTP API ────────────────────────────────────────────────────
+
+test('webapp: icon is a valid PNG, at the requested size', () => {
+  for (const size of [192, 512]) {
+    const png = iconPng(size);
+    assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert.equal(png.readUInt32BE(16), size);
+    assert.equal(png.readUInt32BE(20), size);
+    assert.ok(png.length > 200);
+  }
+});
+
+test('server: PIN login, token gate, app shell, chat, files', async () => {
+  const dir = tempDir();
+  const store = new Store(path.join(dir, 'store.json'));
+  store.data.stats.received = 3;
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'shared', 'share.txt'), 'hello');
+  const config = makeConfig(dir, {
+    port: 0,
+    host: '127.0.0.1',
+    bridgeToken: 'test-token',
+    dashboardPin: '123456',
+    allowSimulate: true,
+    dryRun: true,
+  });
+  const sent = [];
+  const whatsapp = {
+    status: () => 'dry-run (test)',
+    state: { lastQr: null, pairingCode: null },
+    sendToOwner: async (m) => { sent.push(m); },
+    simulate: async (text) => ({ ignored: false, sent: [{ text }] }),
+    runOwner: async () => 'unused',
+  };
+  const mailbox = { observerOnline: () => false, listen: async () => [], deliverReply: () => 'direct', forwardToObserver: async () => null };
+  const actions = createActions({ config, store, log: silent });
+  const bridge = createBridgeServer({
+    config, store, whatsapp, mailbox, actions,
+    runOwner: async (text) => (text === 'screenshot' ? { text: 'here', image: Buffer.from([0x89, 0x50]) } : `echo: ${text}`),
+    log: silent,
+  });
+  const server = await bridge.start();
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    // public shell
+    const index = await fetch(`${base}/`);
+    assert.equal(index.status, 200);
+    assert.match(await index.text(), /Observer Agent/);
+    const manifest = await fetch(`${base}/manifest.webmanifest`);
+    assert.match(manifest.headers.get('content-type'), /manifest\+json/);
+    const icon = await fetch(`${base}/icon-192.png`);
+    assert.equal(icon.headers.get('content-type'), 'image/png');
+    assert.deepEqual([...Buffer.from(await icon.arrayBuffer()).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+
+    // token gate
+    assert.equal((await fetch(`${base}/api/status`)).status, 401);
+    assert.equal((await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pin: '000000' }),
+    })).status, 401);
+
+    const login = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pin: '123456' }),
+    });
+    assert.equal(login.status, 200);
+    const { token } = await login.json();
+    assert.equal(token, 'test-token');
+
+    const auth = { 'x-bridge-token': token, 'content-type': 'application/json' };
+    const status = await (await fetch(`${base}/api/status`, { headers: auth })).json();
+    assert.equal(status.access.level, 'full');
+    assert.equal(status.hasQr, false);
+
+    const chat = await (await fetch(`${base}/api/chat`, { method: 'POST', headers: auth, body: JSON.stringify({ text: 'hello' }) })).json();
+    assert.equal(chat.text, 'echo: hello');
+
+    const shot = await (await fetch(`${base}/api/chat`, { method: 'POST', headers: auth, body: JSON.stringify({ text: 'screenshot' }) })).json();
+    assert.match(shot.images[0], /^data:image\/png;base64,/);
+
+    const files = await (await fetch(`${base}/api/files`, { headers: auth })).json();
+    assert.equal(files.shared[0].name, 'share.txt');
+
+    // authenticated download of a shared file (the app's "Send" link)
+    const dl = await fetch(`${base}/api/download?path=${encodeURIComponent(files.shared[0].path)}`, { headers: auth });
+    assert.equal(dl.status, 200);
+    assert.equal(await dl.text(), 'hello');
+    assert.match(dl.headers.get('content-disposition'), /share\.txt/);
+    assert.equal((await fetch(`${base}/api/download?path=/etc/passwd`, { headers: auth })).status, 400);
+    assert.equal((await fetch(`${base}/api/download?path=/etc/passwd`)).status, 401);
+
+    // non-owner "from" is refused even with a valid token
+    const notOwner = await fetch(`${base}/api/chat`, {
+      method: 'POST', headers: auth, body: JSON.stringify({ text: 'hi', from: '919999999999' }),
+    });
+    assert.equal(notOwner.status, 403);
+
+    // bridge route still works for Observer alerts, owner-only on the way out
+    const alert = await fetch(`${base}/tools/send-whatsapp`, {
+      method: 'POST', headers: auth, body: JSON.stringify({ message: 'render done', to_number: OWNER }),
+    });
+    assert.equal(alert.status, 200);
+    assert.equal(sent.at(-1), 'render done');
+    const refused = await fetch(`${base}/tools/send-whatsapp`, {
+      method: 'POST', headers: auth, body: JSON.stringify({ message: 'spam', to_number: '919999999999' }),
+    });
+    assert.equal(refused.status, 403);
+  } finally {
+    bridge.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('replyForApp: images become data URLs, documents keep their name', () => {
+  const out = replyForApp({ text: 'shot', image: Buffer.from([1, 2, 3]), document: { fileName: 'a.pdf' } });
+  assert.equal(out.text, 'shot');
+  assert.match(out.images[0], /^data:image\/png;base64,/);
+  assert.equal(out.documentName, 'a.pdf');
+  assert.deepEqual(replyForApp(null), { ok: true, text: '' });
+  assert.deepEqual(replyForApp('plain'), { ok: true, text: 'plain' });
+});

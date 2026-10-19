@@ -9,6 +9,7 @@ import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
 import { distroPrettyName } from './tools.js';
+import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
 const underSystemd = Boolean(process.env.INVOCATION_ID || process.env.NOTIFY_SOCKET);
@@ -38,22 +39,46 @@ const agent = createAgent({
 });
 
 const whatsapp = createWhatsApp({ config, store, agent, log: console });
-const bridge = createBridgeServer({ config, store, whatsapp, mailbox, log: console });
+const bridge = createBridgeServer({
+  config,
+  store,
+  whatsapp,
+  mailbox,
+  actions: agent.actions,
+  runOwner: (text) => whatsapp.runOwner(text),
+  log: console,
+});
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
 
-console.info('');
-console.info('👁️  Observer WhatsApp Agent — free native WhatsApp');
+console.info('👁️  Observer WhatsApp Agent — free, native WhatsApp + phone app');
 console.info(`   Owner (only listener): +${config.ownerNumber}`);
 console.info(`   Agent WhatsApp number: +${config.agentNumber}`);
 console.info(`   Mode: ${dryRun ? 'DRY-RUN (no WhatsApp connection)' : config.usePairingCode ? 'link by pairing code' : 'link by QR scan'}`);
-console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${config.ollamaUrl})`);
-console.info(`   Forward plain messages to Observer tab: ${config.forwardToObserver}`);
+console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${config.ollamaUrl}) · tools ${config.agentTools ? 'on' : 'off'}`);
+console.info(`   Access level: ${config.accessLevel} · full PC control (Observer app optional)`);
+console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
 const distroLine = distroPrettyName();
 if (distroLine) console.info(`   OS: ${distroLine}`);
 if (underSystemd) console.info('   Running under systemd — logs: journalctl --user -u observer-whatsapp-agent -f');
+
+const lanIps = Object.values(os.networkInterfaces()).flat()
+  .filter((n) => n && n.family === 'IPv4' && !n.internal)
+  .map((n) => n.address);
+const appHost = config.host === '0.0.0.0' ? (lanIps[0] ?? 'PC-IP') : config.host;
+console.info('');
+console.info(`   📱 Phone app: http://${appHost}:${config.port}/   (PIN: ${config.dashboardPin})`);
+if (config.host === '0.0.0.0') {
+  console.info(`   LAN IPs: ${lanIps.join(', ') || 'none'} — same Wi-Fi as the phone.`);
+  console.info('   Only your PIN/token opens it. HOST=127.0.0.1 in .env restricts it to this PC.');
+}
 console.info('');
 
-await bridge.start();
+try {
+  await bridge.start();
+} catch (err) {
+  console.error(`\n❌ ${err.message}\n`);
+  process.exit(1);
+}
 await whatsapp.start();
 
 process.on('SIGINT', shutdown);

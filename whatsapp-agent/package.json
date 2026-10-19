@@ -1,8 +1,8 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Free native-WhatsApp agent for Observer (Fedora Linux): links like WhatsApp Web (Baileys), listens ONLY to the owner number, replies and acts. No Twilio, no Meta Cloud API, no per-message cost.",
+  "description": "Observer WhatsApp Agent 2.0 - free native WhatsApp + installable phone app with full PC control (Fedora/Linux). No Twilio, no Observer app, no per-message cost.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -16,8 +16,9 @@
     "service:status": "systemctl --user status observer-whatsapp-agent",
     "service:logs": "journalctl --user -u observer-whatsapp-agent -f",
     "relink": "bash scripts/relink-whatsapp.sh",
-    "test": "node --test test/agent.test.js",
-    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/commands.js && node --check src/server.js && node --check src/ai.js && node --check src/tools.js && node --check src/store.js && node --check src/config.js && node --check src/allowlist.js && node --check src/mailbox.js && node --check src/pccontrol.js && node --check src/elementfinder.js"
+    "test": "node --test test/agent.test.js test/power.test.js",
+    "check": "for f in src/*.js; do node --check \"$f\" || exit 1; done",
+    "app": "node --env-file-if-exists=.env src/index.js"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {

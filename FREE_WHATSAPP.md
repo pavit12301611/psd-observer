@@ -14,6 +14,21 @@ Project layout reference: [`STRUCTURE.md`](STRUCTURE.md). Agent deep-dive:
 
 ---
 
+## 0. New in 2.0 — phone app + full power, still ₹0
+
+| What | How |
+|---|---|
+| **Installable phone app** | `http://<PC-IP>:8787/` → PIN → *Add to Home screen*. Chat, quick controls, files, QR. **No Observer app involved.** |
+| **Works with zero AI** | Offline Hinglish/English intents: “chrome kholo”, “screenshot bhej do”, “wifi off karo”, “thesis.pdf dhundo”, “10 second record karo”. |
+| **Free AI tool-calling** | Ollama/Groq/Gemini/OpenRouter models call 57 real PC actions in sequence (`/agent <task>` or just ask). |
+| **Full PC control** | Any installed app, files, OCR, typing/clicking, Wi-Fi, Bluetooth, services, webcam, screen recording, zip/download, power. |
+| **Voice + documents** | Voice notes transcribed (Groq Whisper free tier or local whisper.cpp); PDF/DOCX read and summarised; photos OCR'd. |
+| **Safer full access** | `ACCESS_LEVEL=safe|standard|full`, confirmations for destructive actions, shell still opt-in with a PIN. |
+
+Everything below about the cloud bridge still applies; it is simply optional now.
+
+---
+
 ## 1. Before → after
 
 | | Before (upstream) | Now (`whatsapp-agent/`) |
@@ -37,9 +52,15 @@ This fork targets **Fedora Linux** — full guide in [`FEDORA.md`](FEDORA.md). O
 
 ```bash
 cd whatsapp-agent
-./scripts/install-fedora.sh --service --ollama   # dnf deps + agent + systemd autostart + free local AI
-journalctl --user -u observer-whatsapp-agent -f  # logs + linking QR
+# dnf deps + agent + systemd autostart + free local AI + the full toolkit + LAN
+./scripts/install-fedora.sh --service --ollama --power --phone
+journalctl --user -u observer-whatsapp-agent -f  # logs + linking QR + phone-app PIN
 ```
+
+`--power` adds OCR/recording/webcam/Wi-Fi/window tools and `ACCESS_LEVEL=full`;
+`--phone` binds the app on `0.0.0.0:8787` and opens it in firewalld so your
+phone on the same Wi-Fi can use it. Your PC still only obeys the owner number,
+and every data route needs the PIN/token.
 
 Manual/foreground equivalent:
 
@@ -66,6 +87,11 @@ need a new QR scan; the session persists in `whatsapp-agent/auth_info/` (gitigno
 treat it like a password, it *is* the agent number's WhatsApp login).
 
 ## 3. Observer alerts over your native WhatsApp (optional)
+
+> You no longer need Observer for the agent to be useful: it has its own
+> installable phone app (§0) and standalone PC control. The bridge below is
+> only for people who still want Observer's micro-agents to send WhatsApp
+> alerts or use their screen/camera.
 
 So Observer micro-agents ("when render finishes, WhatsApp me") use your agent instead
 of the paid cloud, set once in the Observer webapp's browser console:
@@ -117,10 +143,21 @@ Beyond "send me an alert", the agent is now a two-way personal assistant:
 - **AI your way:** local Ollama (offline/private) → optional Groq/Gemini/OpenRouter
   *free tiers* → offline tools. `/model` reports what's live. Answers follow your
   language, Hinglish included.
+- **Phone app + PWA:** an installable app (manifest, service worker, generated
+  PNG icons) with chat, one-tap controls, files and QR linking — the same agent,
+  no Observer app needed.
+- **Offline intents (zero AI):** Hinglish/English messages turn into real
+  commands even with no model installed; `/access` shows the permission level.
+- **Free AI tool-calling:** the model can chain actions (download → rename →
+  send) using the same registry as the slash commands. Destructive steps stop
+  for confirmation.
+- **Voice/photos/documents:** transcription (Groq free tier or whisper.cpp),
+  OCR (tesseract), PDF/DOCX text extraction and summaries.
 - **Useful extras:** strong password generator, `/improve` rewriting, choices/dice,
-  local dashboard with status + QR + command tester, dry-run simulation mode,
-  Fedora dnf installer + systemd user service + Podman, `/pc battery` from Linux
-  sysfs and real distro name in `/pc status`, unit tests (`npm test` in `whatsapp-agent/`).
+  phone app + local dashboard with status + QR + command tester, dry-run
+  simulation mode, Fedora dnf installer + systemd user service + Podman,
+  `/pc battery` from Linux sysfs and real distro name in `/pc status`,
+  unit tests (`npm test` in `whatsapp-agent/`, 31 offline tests).
 
 What intentionally did **not** change: email/SMS/calls still use their cloud
 providers upstream (only WhatsApp was made native+free, as asked). For other free
