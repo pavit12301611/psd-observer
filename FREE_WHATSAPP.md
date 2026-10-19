@@ -59,8 +59,13 @@ journalctl --user -u observer-whatsapp-agent -f  # logs + linking QR + phone-app
 
 `--power` adds OCR/recording/webcam/Wi-Fi/window tools and `ACCESS_LEVEL=full`;
 `--phone` binds the app on `0.0.0.0:8787` and opens it in firewalld so your
-phone on the same Wi-Fi can use it. Your PC still only obeys the owner number,
-and every data route needs the PIN/token.
+phone on the same Wi-Fi can use it. Add `--remote` (or run
+`./scripts/setup-remote.sh` later) to install Tailscale, so the **same app also
+works from outside your home** — free, private, no router port-forwarding.
+WhatsApp commands already work from anywhere; only the app needs that route.
+Keep the laptop awake and online (lid closed = suspended = agent offline).
+Your PC still only obeys the owner number, and every data route needs the
+PIN/token.
 
 Manual/foreground equivalent:
 

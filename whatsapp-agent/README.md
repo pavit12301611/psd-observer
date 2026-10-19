@@ -88,9 +88,44 @@ Install: Chrome/Android menu → **Add to Home screen**; iOS Safari → Share �
 **Add to Home Screen**. It opens full-screen with its own icon and caches its
 shell for instant launch.
 
-**Remote access from anywhere (free):** install [Tailscale](https://tailscale.com)
-on the PC and phone and use the PC's Tailscale IP. Do **not** port-forward 8787
-to the internet.
+### Ghar se bahar? (macOS/Windows-style "remote desktop", free)
+
+**WhatsApp commands already work from anywhere** — the laptop dials out to
+WhatsApp, so you can message the agent from another city/country with no setup.
+Only the *phone app* needs a path home. Two free options:
+
+**1. Tailscale (recommended, private, no port-forwarding)**
+
+```bash
+cd whatsapp-agent
+./scripts/setup-remote.sh
+```
+
+It installs Tailscale, logs the PC in (one approval link), sets `HOST=0.0.0.0`,
+allows TCP 8787, and prints `http://<tailscale-ip>:8787/` + the PIN.
+Then install the **Tailscale app on your phone**, log in with the **same
+account**, and open that URL. Works on mobile data/other Wi-Fi, and nobody else
+on the internet can see the port. Do **not** port-forward 8787 on your router.
+
+**2. Cloudflare Tunnel (if you can't install Tailscale)**
+
+```bash
+cloudflared tunnel --url http://localhost:8787
+# → https://<random>.trycloudflare.com  (ephemeral; put Cloudflare Access in
+#   front for email-OTP, or rely on the PIN + rate limiting)
+```
+
+⚠️ **The laptop must stay awake and online.** If it suspends when you close the
+lid, the agent sleeps too. On Fedora (optional, uses more battery):
+
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+# undo: sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
+
+And the house internet must be up — if the Wi-Fi/router is down, nothing can
+reach the PC. A ₹0 trick for that: run `/sysinfo` occasionally so you notice;
+the agent also goes silent, which is itself the signal.
 
 Auth: the PIN only unlocks a session token. Every data route also accepts the
 long bridge token (`data/bridge-token.txt`, printed at startup) and refuses

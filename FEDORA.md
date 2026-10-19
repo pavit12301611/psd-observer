@@ -94,19 +94,42 @@ This sets `HOST=0.0.0.0` and opens TCP **8787** in firewalld. On the phone,
 open `http://<PC-IP>:8787/`, enter the 6-digit PIN printed at startup
 (`data/dashboard-pin.txt`), then **Add to Home screen**. It is an installable
 PWA — chat, quick controls, files and the linking QR — with **no Observer app
-and no Play Store**. From outside your Wi-Fi use [Tailscale](https://tailscale.com)
-rather than port-forwarding.
+and no Play Store**.
+
+### Phone app from outside the house (free, no port forwarding)
+
+WhatsApp commands work from **anywhere already** — the PC dials out to WhatsApp,
+so your phone just needs mobile data. Only the *phone app* needs a route home:
+
+```bash
+./scripts/setup-remote.sh          # or: ./scripts/install-fedora.sh --remote
+```
+
+This installs [Tailscale](https://tailscale.com) (free personal plan), logs the
+PC in, keeps `HOST=0.0.0.0` + TCP 8787 allowed, and prints the exact
+`http://<tailscale-ip>:8787/` URL and PIN. Install the Tailscale app on your
+phone, sign in with the **same account**, open the URL, "Add to Home screen".
+Tailscale is a private encrypted network: the port is not exposed publicly, so
+**never** port-forward 8787 on your router (Cloudflare Tunnel + Access is the
+alternative if you can't install Tailscale).
+
+Two honest caveats:
+
+- **Laptop must be awake and online.** Closing the lid usually suspends it.
+  To keep it serving while plugged in:
+  `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`
+  (undo with `unmask`, same targets). Battery drain is real.
+- **Home internet must be up.** No Wi-Fi/router → the PC is unreachable, from
+  Telegram or Tailscale alike. WhatsApp itself also queues messages until the
+  link is back.
 
 ### Firewall (firewalld): nothing to open for WhatsApp itself
 
-The phone app binds **0.0.0.0:8787** so your phone on the same Wi-Fi can use it
-(PIN/token protected; `HOST=127.0.0.1` makes it PC-only). WhatsApp traffic is an
-outbound WebSocket to WhatsApp's servers, so Fedora's default firewalld policy
-needs **no changes for WhatsApp itself** — only TCP 8787 for the app, which
-`--phone` opens for you.
-Only if you deliberately set `HOST=0.0.0.0` for LAN access (not recommended) would
-you need `sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload`
-— and then the bridge token is your only gate, so think twice.
+The phone app binds **0.0.0.0:8787** so your phone (same Wi-Fi or tailnet) can
+use it — PIN/token protected; `HOST=127.0.0.1` makes it PC-only. WhatsApp traffic
+is an outbound WebSocket to WhatsApp's servers, so Fedora's default firewalld
+policy needs **no changes for WhatsApp itself** — only TCP 8787 for the app,
+which `--phone` / `--remote` opens for you.
 
 ### SELinux notes
 

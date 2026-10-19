@@ -8,13 +8,14 @@
 > Wi-Fi/Bluetooth, downloads, recording, reminders, free local AI, and more.
 >
 > **2.0 adds:** an installable **phone app** at `http://<PC-IP>:8787/` (works
-> with **no Observer app at all**), **Hinglish offline intents** ("chrome kholo",
+> with **no Observer app at all**, and from **anywhere** over free Tailscale), **Hinglish offline intents** ("chrome kholo",
 > "wifi off karo") that work with zero AI, **free AI tool-calling** for
 > multi-step tasks, **voice-note transcription**, **PDF/DOCX reading**, and an
 > `/access` model with confirmations for destructive actions.
 >
 > **Start (Fedora Linux):**
 > `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`
+> (add `--remote` for free Tailscale access to the phone app from **outside** your home)
 > → scan the QR with the agent phone → WhatsApp it `/help` from your phone →
 > open the printed phone-app URL and enter the PIN.
 > Full story: [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) · Fedora guide: [`FEDORA.md`](FEDORA.md)

@@ -13,6 +13,8 @@
 #                                            and ACCESS_LEVEL=full + input on
 #   ./scripts/install-fedora.sh --phone    …allow your phone on the same Wi-Fi
 #                                            to open the app (firewalld 8787)
+#   ./scripts/install-fedora.sh --remote   …plus Tailscale, so the app also works
+#                                            from outside your home (free)
 #   ./scripts/install-fedora.sh --pc-control  (old name for --power)
 #
 # Idempotent: safe to re-run. Uses sudo only for dnf (and the Ollama installer,
@@ -25,13 +27,15 @@ WANT_SERVICE=0
 WANT_OLLAMA=0
 WANT_PCCONTROL=0
 WANT_PHONE=0
+WANT_REMOTE=0
 for arg in "$@"; do
   case "$arg" in
     --service) WANT_SERVICE=1 ;;
     --ollama) WANT_OLLAMA=1 ;;
     --power|--pc-control) WANT_PCCONTROL=1 ;;
     --phone) WANT_PHONE=1 ;;
-    *) echo "Unknown option: $arg (supported: --service, --ollama, --power, --phone)" >&2; exit 2 ;;
+    --remote) WANT_PHONE=1; WANT_REMOTE=1 ;;
+    *) echo "Unknown option: $arg (supported: --service, --ollama, --power, --phone, --remote)" >&2; exit 2 ;;
   esac
 done
 
@@ -176,6 +180,12 @@ if [ "$WANT_OLLAMA" -eq 1 ]; then
   setup_ollama || true
 fi
 
+# ── 7. Optional: reach the phone app from outside the house (Tailscale) ──────
+if [ "$WANT_REMOTE" -eq 1 ]; then
+  say "Remote access with Tailscale (free)"
+  bash scripts/setup-remote.sh || echo "⚠ Remote setup didn't finish — re-run ./scripts/setup-remote.sh any time. WhatsApp itself still works from anywhere."
+fi
+
 say "Done"
 cat <<EOF
 Next steps (run ONE command at a time — don't paste the journalctl line
@@ -190,10 +200,13 @@ together with this installer, it gets swallowed while the installer runs):
   5. Phone app (no Observer needed): open http://<this-PC-IP>:8787/ on your
      phone, enter the PIN it prints at startup, and use "Add to Home screen".
      Enable LAN access + firewall with:  ./scripts/install-fedora.sh --phone
+  6. Phone app from OUTSIDE your home Wi-Fi (free, no port forwarding):
+     ./scripts/setup-remote.sh    (installs Tailscale + prints the URL)
 
 Optional but recommended extras:
   ./scripts/install-fedora.sh --power    full toolkit (OCR, recording, Wi-Fi…)
   ./scripts/install-fedora.sh --ollama   free offline AI (unlimited chat + tasks)
+  ./scripts/install-fedora.sh --remote   Tailscale: phone app from anywhere
 
 Full Fedora guide: ../FEDORA.md · phone app + power guide: README.md
 EOF

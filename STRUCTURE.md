@@ -84,7 +84,8 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 | `whatsapp-agent/src/ocr.js` | tesseract OCR for screenshots/photos, PDF/DOCX text extraction, `/look` answers. |
 | `whatsapp-agent/src/transcribe.js` | Voice notes → text (Groq Whisper free tier or local whisper.cpp). |
 | `whatsapp-agent/webapp/` | The installable phone app: `index.html`, `styles.css`, `app.js`, service worker, manifest. `src/webapp.js` generates the PNG icons. |
-| `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/action`. |
+| `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/download`, `/api/action`. |
+| `whatsapp-agent/scripts/setup-remote.sh` | Free Tailscale setup so the phone app works from **outside** the house (no port-forwarding). WhatsApp commands already work from anywhere. |
 
 See [`FREE_WHATSAPP.md`](FREE_WHATSAPP.md) for setup and
 [`whatsapp-agent/README.md`](whatsapp-agent/README.md) for the full command list.
