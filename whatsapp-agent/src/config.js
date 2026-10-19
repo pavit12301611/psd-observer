@@ -154,6 +154,13 @@ export function loadConfig({ dryRun = false } = {}) {
     // screenshot from WhatsApp, and the portal keeps the image on disk anyway.
     portalTimeoutMs: int(e.PORTAL_TIMEOUT_MS, 60_000),
     ocrLangs: e.OCR_LANGS || 'eng',
+    // TTS (offline, free) — only on explicit /voicereply. Special calm voice, tez thi to 150→135
+    ttsEngine: (e.TTS_ENGINE || 'auto').toLowerCase(),
+    ttsVoice: e.TTS_VOICE || 'special',
+    ttsLang: e.TTS_LANG || 'auto',
+    ttsSpeed: int(e.TTS_SPEED, 135),
+    piperBin: e.PIPER_BIN || '',
+    piperModel: e.PIPER_MODEL || '',
     // Voice notes → text. Groq free tier if GROQ_API_KEY is set, otherwise a
     // local whisper.cpp binary + model file (fully offline).
     whisperBin: e.WHISPER_BIN || '',

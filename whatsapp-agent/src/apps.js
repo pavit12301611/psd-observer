@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { displayEnv, findBin } from './pccontrol.js';
+import { displayEnv, findBin, sessionInfo } from './pccontrol.js';
 
 const execFileAsync = promisify(execFile);
 const RUN_TIMEOUT = 8_000;
@@ -118,11 +118,12 @@ export function discoverApps({ dirs = appDirs(), force = false } = {}) {
       if (!file.endsWith('.desktop')) continue;
       const id = file.replace(/\.desktop$/, '');
       if (seen.has(id)) continue;
+      const full = path.join(dir, file);
       let parsed;
-      try { parsed = parseDesktopEntry(fs.readFileSync(path.join(dir, file), 'utf8')); } catch { continue; }
+      try { parsed = parseDesktopEntry(fs.readFileSync(full, 'utf8')); } catch { continue; }
       if (!parsed) continue;
       seen.add(id);
-      apps.push({ id, ...parsed });
+      apps.push({ id, desktopFile: full, ...parsed });
     }
   }
   apps.sort((a, b) => a.name.localeCompare(b.name));
@@ -184,49 +185,142 @@ async function tryLaunch(argv) {
   });
 }
 
+const BINARY_ALIASES = {
+  chrome: ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium'],
+  brave: ['brave-browser', 'brave'],
+  firefox: ['firefox', 'org.mozilla.firefox'],
+  code: ['code', 'codium', 'code-insiders'],
+  vscode: ['code', 'codium', 'code-insiders'],
+  'vs code': ['code', 'codium'],
+  terminal: ['ptyxis', 'gnome-terminal', 'kgx', 'konsole', 'xterm'],
+  files: ['nautilus', 'dolphin', 'thunar'],
+  settings: ['gnome-control-center', 'systemsettings'],
+  vlc: ['vlc'],
+  discord: ['discord'],
+  slack: ['slack'],
+  spotify: ['spotify'],
+  telegram: ['telegram-desktop', 'telegram'],
+};
+
+function resolveBinCandidates(query) {
+  const low = String(query ?? '').toLowerCase().trim();
+  if (BINARY_ALIASES[low]) return BINARY_ALIASES[low];
+  return [low.split(/\s+/)[0]];
+}
+
+const NO_SESSION_HINT = 'No graphical session found. Log in to the Fedora desktop on the PC first — if the agent auto-started at boot (linger), restart it after login: systemctl --user restart observer-whatsapp-agent';
+
 /**
  * Launch an installed app by name. Tries the trusted .desktop file first
- * (gtk-launch, works on GNOME + KDE), then its Exec line, then a binary of
- * the same name if the user typed an exact command.
+ * (gtk-launch, works on GNOME + KDE), then gio launch, then its Exec line,
+ * then a binary of the same name if the user typed an exact command.
  */
 export async function launchApp(query) {
   const trimmed = String(query ?? '').trim();
   if (!trimmed) throw new Error('usage: /open <app name>  (e.g. /open chrome, /open vs code)');
   if (/[;&|`$><\n]/.test(trimmed)) throw new Error('App names cannot contain shell characters.');
-  if (!/^https?:\/\//i.test(trimmed)) {
-    const app = matchApp(trimmed);
-    if (app) {
-      const launcher = findBin('gtk-launch');
-      if (launcher) {
+  // URL fast-path: hand to xdg-open
+  if (/^https?:\/\//i.test(trimmed)) {
+    const sUrl = sessionInfo(displayEnv());
+    if (!sUrl.graphical) throw new Error(NO_SESSION_HINT);
+    const xdg = findBin('xdg-open');
+    if (xdg) {
+      await tryLaunch([xdg, trimmed]);
+      return { text: `🌐 Opened ${trimmed} in the PC's browser.`, app: trimmed };
+    }
+    throw new Error('xdg-open is not installed to open links: sudo dnf install xdg-utils');
+  }
+  // Try matching a .desktop app. Force refresh if first attempt missed (cache may be stale after install).
+  let app = matchApp(trimmed);
+  if (!app) {
+    // Refresh cache once — a newly installed app or a first-run empty cache
+    const refreshed = discoverApps({ force: true });
+    if (refreshed !== cache.apps) app = matchApp(trimmed, refreshed);
+  }
+  if (app) {
+    const sessApp = sessionInfo(displayEnv());
+    if (!sessApp.graphical) throw new Error(NO_SESSION_HINT);
+    // 1) gtk-launch (GNOME/KDE standard)
+    const launcher = findBin('gtk-launch');
+    if (launcher) {
+      try {
+        await tryLaunch([launcher, app.id]);
+        return { text: `🚀 Opened *${app.name}* on the PC.`, app: app.name };
+      } catch { /* fall through */ }
+    }
+    // 2) gio launch with desktop file (modern GNOME alternative)
+    const gio = findBin('gio');
+    if (gio && app.desktopFile && fs.existsSync(app.desktopFile)) {
+      try {
+        await tryLaunch([gio, 'launch', app.desktopFile]);
+        return { text: `🚀 Opened *${app.name}* on the PC.`, app: app.name };
+      } catch { /* fall through */ }
+    }
+    // 3) dex if present
+    const dex = findBin('dex');
+    if (dex && app.desktopFile && fs.existsSync(app.desktopFile)) {
+      try {
+        await tryLaunch([dex, app.desktopFile]);
+        return { text: `🚀 Opened *${app.name}* on the PC.`, app: app.name };
+      } catch { /* fall through */ }
+    }
+    // 4) xdg-open the .desktop file (some desktops handle this)
+    const xdgOpen = findBin('xdg-open');
+    if (xdgOpen && app.desktopFile && fs.existsSync(app.desktopFile)) {
+      try {
+        await tryLaunch([xdgOpen, app.desktopFile]);
+        return { text: `🚀 Opened *${app.name}* on the PC.`, app: app.name };
+      } catch { /* fall through */ }
+    }
+    // 5) Exec line directly
+    const argv = splitExec(app.exec);
+    if (argv.length) {
+      const bin = findBin(argv[0]) ?? (path.isAbsolute(argv[0]) && fs.existsSync(argv[0]) ? argv[0] : null);
+      if (bin) {
         try {
-          await tryLaunch([launcher, app.id]);
-          return { text: `🚀 Opened *${app.name}* on the PC.`, app: app.name };
-        } catch { /* fall through to Exec */ }
-      }
-      const argv = splitExec(app.exec);
-      if (argv.length) {
-        const bin = findBin(argv[0]) ?? (path.isAbsolute(argv[0]) && fs.existsSync(argv[0]) ? argv[0] : null);
-        if (bin) {
           await tryLaunch([bin, ...argv.slice(1)]);
           return { text: `🚀 Opened *${app.name}* on the PC.`, app: app.name };
-        }
+        } catch (e) { /* fall through to terminal handling */ }
       }
-      if (app.terminal) {
-        // Terminal apps need a terminal emulator; gtk-launch handles this on a
-        // real desktop, so reaching here means the desktop is missing.
-        throw new Error(`${app.name} is a terminal app and no app launcher worked. Install gtk-launch/desktop integration.`);
-      }
-      throw new Error(`Found *${app.name}* but couldn't start it (its command is missing on this PC).`);
+    }
+    if (app.terminal) {
+      throw new Error(`${app.name} is a terminal app and no app launcher worked. Install gtk-launch or gio: sudo dnf install gtk3 xdg-utils`);
+    }
+    throw new Error(`Found *${app.name}* but couldn't start it (its command is missing on this PC). Try: /apps to see IDs, /doctor to check session.`);
+  }
+  // Exact binary fallback (e.g. "firefox" where no .desktop file exists or name mismatch)
+  const singles = resolveBinCandidates(trimmed);
+  for (const cand of singles) {
+    if (!/^[\w.+-]+$/.test(cand)) continue;
+    const direct = findBin(cand);
+    if (direct) {
+      const s = sessionInfo(displayEnv());
+      if (!s.graphical) throw new Error(NO_SESSION_HINT);
+      await tryLaunch([direct]);
+      return { text: `🚀 Launched \`${cand}\` on the PC.`, app: cand };
+    }
+    if (path.isAbsolute(cand) && fs.existsSync(cand)) {
+      const s = sessionInfo(displayEnv());
+      if (!s.graphical) throw new Error(NO_SESSION_HINT);
+      await tryLaunch([cand]);
+      return { text: `🚀 Launched \`${cand}\` on the PC.`, app: cand };
     }
   }
-  // Exact binary fallback (e.g. "firefox" where no .desktop file exists).
-  const direct = findBin(trimmed.split(/\s+/)[0]);
-  if (direct && /^[\w.+-]+$/.test(trimmed)) {
-    await tryLaunch([direct]);
-    return { text: `🚀 Launched \`${trimmed}\` on the PC.`, app: trimmed };
+  if (/^[\w.+-]+$/.test(trimmed)) {
+    const direct = findBin(trimmed);
+    if (direct) {
+      const s = sessionInfo(displayEnv());
+      if (!s.graphical) throw new Error(NO_SESSION_HINT);
+      await tryLaunch([direct]);
+      return { text: `🚀 Launched \`${trimmed}\` on the PC.`, app: trimmed };
+    }
   }
   const apps = appList(discoverApps(), 12).map((a) => `• ${a.name}`).join('\n');
-  throw new Error(`I couldn't find an app called "${trimmed}". /apps shows what's installed. A few:\n${apps}`);
+  const launcherHint = !findBin('gtk-launch') && !findBin('gio') ? '\nHint: no launcher found (gtk-launch/gio missing). Install: sudo dnf install gtk3 glib2' : '';
+  // Only hint about graphical session if we genuinely have none — otherwise not-found is just not-found.
+  let sessHint = '';
+  try { sessHint = !sessionInfo(displayEnv()).graphical ? `\n${NO_SESSION_HINT}` : ''; } catch { /* ignore */ }
+  throw new Error(`I couldn't find an app called "${trimmed}". /apps shows what's installed. A few:\n${apps}${launcherHint}${sessHint}`);
 }
 
 /** Read `wmctrl -l` output → [{id, desktop, host, title}]. */

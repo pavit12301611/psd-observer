@@ -129,6 +129,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         : {
             text: reply.text,
             hasImage: Boolean(reply.image),
+            hasAudio: Boolean(reply.audio),
             document: reply.document?.fileName,
             poll: reply.poll?.name,
             sticker: Boolean(reply.sticker),
@@ -147,6 +148,16 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       return;
     }
     if (reply.sticker) await send({ sticker: reply.sticker });
+    if (reply.audio) {
+      // Voice note / audio reply from /voicereply (TTS)
+      const mimetype = reply.mimetype ?? (reply.ptt ? 'audio/ogg; codecs=opus' : 'audio/mpeg');
+      await send({ audio: reply.audio, mimetype, ptt: Boolean(reply.ptt), caption: reply.text?.slice(0, 300) });
+      if (reply.text) {
+        // also send text caption as separate message for readability (optional)
+        // but keep it in one if Baileys supports caption with audio (some clients ignore)
+      }
+      return;
+    }
     if (reply.document) {
       await send({ document: reply.document.buffer, fileName: reply.document.fileName, mimetype: reply.document.mimetype ?? 'application/octet-stream', caption: reply.text });
       return;
