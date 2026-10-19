@@ -444,3 +444,22 @@ def test_service_keeps_arena_jobs_on_arena_even_when_scope_is_public(tmp_path, m
     # order: session for the arena job, the arena job, then session and job for research
     assert seen == [("arena.ai",), ("job", "arena", ("arena.ai",)),
                     (PUBLIC_WEB,), ("job", "research", (PUBLIC_WEB,))]
+
+
+@pytest.mark.parametrize("url, nav, scope, blocked", [
+    ("https://arena.ai/agent", True, ("arena.ai",), False),           # the page itself
+    ("https://accounts.example.com/login", True, ("arena.ai",), True),   # navigating away: no
+    ("https://cdn.example.net/app.js", False, ("arena.ai",), False),  # a script the page needs: yes
+    ("https://fonts.example.org/x.woff2", False, ("arena.ai",), False),
+    ("http://cdn.example.net/app.js", False, ("arena.ai",), True),    # plain http: no
+    ("https://192.168.1.1/admin", False, (PUBLIC_WEB,), True),       # local network: never
+    ("https://192.168.1.1/admin", True, (PUBLIC_WEB,), True),
+    ("https://router.lan/", False, ("arena.ai",), True),
+    ("https://en.wikipedia.org/wiki/X", True, (PUBLIC_WEB,), False),  # research: any public page
+    ("about:blank", True, ("arena.ai",), False),
+    ("data:text/plain,hi", False, ("arena.ai",), False),
+])
+def test_request_rule_separates_pages_from_resources(url, nav, scope, blocked):
+    from observer_core.remote.browser import should_block_request
+
+    assert should_block_request(url, nav, scope) is blocked

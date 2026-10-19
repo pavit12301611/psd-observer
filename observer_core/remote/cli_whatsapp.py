@@ -243,15 +243,22 @@ def browser_login() -> None:
 
     The agent never types your password. Close the window when you are done.
     """
-    from .browser import BrowserUnavailable, PlaywrightSession
+    from ..llm.base import sanitize_error
+    from .browser import PUBLIC_WEB, BrowserUnavailable, PlaywrightSession
     from .service import browser_profile_dir, downloads_dir
 
     cfg = load_or_create()
     try:
+        # You log in yourself, so the window may use any public site: sign-in pages often
+        # redirect to other providers. Local network addresses stay blocked.
         session = PlaywrightSession(profile_dir=browser_profile_dir(), downloads_dir=downloads_dir(cfg),
-                                    executable=cfg.whatsapp.browser_executable or None, headless=False)
+                                    executable=cfg.whatsapp.browser_executable or None, headless=False,
+                                    allowed_hosts=(PUBLIC_WEB,))
         with session:
-            session.goto("https://arena.ai/agent")
+            try:
+                session.goto("https://arena.ai/agent")
+            except Exception as exc:  # show the cause instead of a silent hang
+                _die(f"arena.ai did not open: {sanitize_error(exc)}")
             console.print("A browser window is open at arena.ai/agent. Log in there, then close the window.")
             session.wait_until_closed()
     except BrowserUnavailable as exc:

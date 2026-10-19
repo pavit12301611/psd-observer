@@ -357,9 +357,14 @@ def test_playwright_route_blocks_foreign_hosts(tmp_path):
         def continue_(self):
             calls.append("continue")
 
-    session._route(Route(), SimpleNamespace(url="https://tracker.example.net/x"))
-    session._route(Route(), SimpleNamespace(url="https://arena.ai/agent"))
-    assert calls == ["abort", "continue"]
+    def req(url, nav=False):
+        return SimpleNamespace(url=url, is_navigation_request=lambda: nav)
+
+    session._route(Route(), req("https://tracker.example.net/x", nav=True))   # a page to another site
+    session._route(Route(), req("https://arena.ai/agent", nav=True))          # the allowed page
+    session._route(Route(), req("https://cdn.example.net/app.js"))            # a resource from elsewhere
+    session._route(Route(), req("http://192.168.1.1/admin"))                  # local network: never
+    assert calls == ["abort", "continue", "continue", "abort"]
 
 
 def test_missing_chromium_is_explained(tmp_path, monkeypatch):

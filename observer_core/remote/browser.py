@@ -9,10 +9,12 @@ What the model can do: read a compact view of the page (URL, title, visible text
 interactive elements with their link targets) and choose ONE action per step: click, type,
 press, wait, read, goto, search, ask, done. What it cannot do is decided in code:
 
-* Only https pages load. In ``arena`` mode that means arena.ai only. In ``public`` scope
-  any https site may load, but never localhost, private or link-local addresses, or
-  single-name hosts (your router, NAS, and local services stay unreachable). Every request
-  is checked at the network layer (``should_block``).
+* Pages the browser navigates to must be on the allowed sites: arena.ai only in ``arena``
+  mode, any public https site in ``public`` scope. Resources a page loads from other servers
+  (scripts, styles, images, sign-in widgets) are allowed, so pages render and log in.
+* Nothing may reach localhost, private or link-local addresses, or single-name hosts (your
+  router, NAS, and local services stay unreachable). This applies to every request.
+  Checked at the network layer (``should_block_request``).
 * No typing into password, one-time-code or hidden fields, and no clicks on controls
   whose label says delete, sign out, billing, purchase or similar (``check_action``).
 * Downloads are accepted only into one folder, and files over the size cap are removed.
@@ -132,11 +134,33 @@ def is_search_page(url: str) -> bool:
     return host.endswith("duckduckgo.com")
 
 
-def should_block(url: str, allowed: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_HOSTS) -> bool:
-    """Network-level rule: every request must go to an allowed host (or be inline data)."""
+def should_block_request(url: str, is_navigation: bool,
+                         allowed: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_HOSTS) -> bool:
+    """Network rule for one request.
+
+    * Local and private addresses are blocked for every request.
+    * Top-level navigations (including redirects and frames) must be on the allowed sites.
+    * Other resources (scripts, styles, images, fonts, sign-in widgets) may come from any
+      public https host, so pages render.
+    """
     if url.startswith(("about:", "data:", "blob:")):
         return False
-    return not host_allowed(url, allowed)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return True
+    if parsed.scheme != "https" or not parsed.hostname:
+        return True
+    if is_private_host(parsed.hostname):
+        return True
+    if is_navigation:
+        return not host_allowed(url, allowed)
+    return False
+
+
+def should_block(url: str, allowed: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_HOSTS) -> bool:
+    """Blocks a top-level navigation to ``url`` (the rule for pages, not resources)."""
+    return should_block_request(url, True, allowed)
 
 
 @dataclass(frozen=True)
@@ -335,7 +359,8 @@ class PlaywrightSession:
         return self
 
     def _route(self, route: Any, request: Any) -> None:
-        if should_block(request.url, self.allowed_hosts):
+        if should_block_request(request.url, bool(request.is_navigation_request()), self.allowed_hosts):
+            logger.debug("browser: blocked request to {}", urlparse(request.url).hostname or "?")
             route.abort()
         else:
             route.continue_()
@@ -516,4 +541,5 @@ def run_browser_job(prompt: str, *, session: BrowserSession, provider: ModelProv
 __all__ = ["ARENA_URL", "PUBLIC_WEB", "BrowserSession", "BrowserUnavailable", "BrowserJobError", "PageSnapshot",
            "Element", "PlaywrightSession", "run_browser_job", "parse_browser_action", "check_action",
            "host_allowed", "is_private_host", "scope_hosts", "search_url", "unwrap_result_url", "should_block",
+           "should_block_request",
            "safe_filename", "find_chromium", "JobResult", "MAX_PROMPT_CHARS", "MODES"]

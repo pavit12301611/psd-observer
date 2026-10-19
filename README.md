@@ -379,12 +379,14 @@ Off by default. Set `browser_enabled = true` under `[whatsapp]` in `config.toml`
 Two job types, and each starts with one YES after the full prompt or question is shown:
 
 - **Research** (`RESEARCH: <question>`, or the model chooses it when you ask it to look something up). The agent searches the web (DuckDuckGo), opens two to four reliable sources, and replies with a short answer plus the URLs it used.
-- **arena.ai** (`ARENA: <prompt>`). The agent submits your prompt in Arena Agent Mode, waits for the answer, and reports it. Only arena.ai is reachable in this mode.
+- **arena.ai** (`ARENA: <prompt>`). The agent submits your prompt in Arena Agent Mode, waits for the answer, and reports it. In this mode, pages the browser opens must be on arena.ai. A page may still load images and scripts from other servers, which arena.ai needs in order to work.
 
 Scope is set by `browser_scope`:
 
 - `public` (default): any public `https` site. Local and private addresses are blocked: `localhost`, `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, link-local and cloud metadata addresses (`169.254.x.x`), IPv6 local addresses, and single-name hosts such as `router` or `nas`. Your router, NAS, and local services stay unreachable.
-- `arena`: arena.ai only, the strictest setting.
+- `arena`: the browser may only open arena.ai pages. Other servers can still supply a page's scripts and images.
+
+In both scopes, local and private addresses are blocked for every request. `browser-login` always uses the public rule, so sign-in redirects to other providers work. You log in yourself.
 
 Rules enforced in code, whatever the model says:
 
@@ -413,7 +415,7 @@ It reads your RAM and any NVIDIA GPU, suggests an Ollama model, and prints the c
 
 Terms: many websites, including arena.ai, restrict automated access in their terms of use. arena.ai's terms (last updated 2026-02-23) allow personal or internal business use only and prohibit use "in any way not expressly permitted". I did not find explicit language on automated access, but I read only part of those terms. Search engines and many sites also restrict automated queries. Read the terms of the sites you use before you enable this. You are responsible for that choice, and your accounts can be restricted.
 
-**Limits of this design.** The local-network block checks the address a page requests. It does not stop DNS rebinding, where a public name resolves to a private address. Do not rely on it as a firewall. The agent also sees whatever sites you logged into in its profile, and acts as you on them.
+**Limits of this design.** The browser only restricts which pages it opens. It does not stop a page from loading resources from other servers. The local-network block checks the address a page requests. It does not stop DNS rebinding, where a public name resolves to a private address. Do not rely on it as a firewall. The agent also sees whatever sites you logged into in its profile, and acts as you on them.
 
 ### Commands and status
 
