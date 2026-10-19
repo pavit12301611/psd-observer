@@ -1,0 +1,21 @@
+# Screen Capture Plugin Permissions
+
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Default permissions for screen capture plugin"
+permissions = [
+    "allow-start-capture-cmd",
+    "allow-stop-capture-cmd",
+    "allow-stop-video-cmd",
+    "allow-stop-audio-cmd",
+    "allow-get-frame-cmd",
+    "allow-get-broadcast-status",
+    "allow-get-capture-targets-cmd",
+    "allow-start-capture-stream-cmd",
+    "allow-start-video-stream-cmd",
+    "allow-start-audio-stream-cmd",
+    "allow-get-app-group-path-cmd",
+    "allow-read-broadcast-debug-log-cmd",
+    "allow-list-app-group-files-cmd"
+]

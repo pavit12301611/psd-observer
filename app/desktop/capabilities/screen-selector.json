@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "screen-selector",
+  "description": "Permissions for the screen/window picker. Needs window show/hide/focus (the on-show target reload listens for focus changes) and screen-capture for target enumeration and thumbnails. The selection handshake itself goes through non-ACL-gated app commands (submit/cancel/report_target_selection_error), not the event plugin. Split into its own capability and bound to a statically-declared window because on Linux runtime-created windows do not reliably pick up the shared 'default' capability.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["screen-selector"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:webview:default",
+    "screen-capture:default"
+  ]
+}

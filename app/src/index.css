@@ -1,0 +1,754 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Agent card minimize-to-tray animation */
+@keyframes minimize-to-tray {
+  0%   { transform: scale(1) translate(0, 0);         opacity: 1; }
+  100% { transform: scale(0.05) translate(80px, 80px); opacity: 0; }
+}
+.animate-minimize-to-tray {
+  animation: minimize-to-tray 0.32s cubic-bezier(0.4, 0, 0.8, 1) forwards;
+  transform-origin: bottom right;
+  pointer-events: none;
+}
+
+/* Agent chip pop-in animation */
+@keyframes chip-pop-in {
+  0%   { transform: scale(0.4); opacity: 0; }
+  65%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+.animate-chip-pop-in {
+  animation: chip-pop-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Word-ticker: each incoming word pops in briefly, used by RunningAgentsStrip's last-word display */
+@keyframes fade-in {
+  0%   { opacity: 0; transform: translateY(2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+/* One-shot "selected" confirmation flash — soft blue ring expands and fades */
+@keyframes tutorial-select-flash {
+  0%   { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05), 0 0 0 0   rgba(59,130,246,0.55); }
+  60%  { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05), 0 0 0 6px rgba(59,130,246,0.35); }
+  100% { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05), 0 0 0 14px rgba(59,130,246,0); }
+}
+.tutorial-select-flash {
+  animation: tutorial-select-flash 700ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+
+/* Copied! sparkle particles */
+@keyframes sparkle-fly {
+  0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
+}
+@keyframes copied-pop {
+  0%   { transform: translate(-50%, -50%) scale(0.5) rotate(-6deg); opacity: 0; }
+  60%  { transform: translate(-50%, -50%) scale(1.15) rotate(-6deg); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1) rotate(-6deg); opacity: 1; }
+}
+@keyframes copied-pop-tl {
+  0%   { transform: translate(-20%, -90%) scale(0.5) rotate(-6deg); opacity: 0; }
+  60%  { transform: translate(-20%, -90%) scale(1.15) rotate(-6deg); opacity: 1; }
+  100% { transform: translate(-20%, -90%) scale(1) rotate(-6deg); opacity: 1; }
+}
+@keyframes copied-fade-out {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* OptionWheel — vertical slot picker used by the onboarding RecipeSplash */
+/* Soft fade at the top/bottom edges of the wheel viewport. */
+/* Center-peaked mask: full opacity at the middle row, fading toward the edges. Text
+   scrolls through it, so opacity animates smoothly with motion (no keyframes needed). */
+.wheel-mask {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 2%, rgba(0,0,0,0.12) 20%, rgba(0,0,0,0.55) 34%, black 50%, rgba(0,0,0,0.55) 66%, rgba(0,0,0,0.12) 80%, transparent 98%);
+  mask-image: linear-gradient(to bottom, transparent 2%, rgba(0,0,0,0.12) 20%, rgba(0,0,0,0.55) 34%, black 50%, rgba(0,0,0,0.55) 66%, rgba(0,0,0,0.12) 80%, transparent 98%);
+}
+
+/* iOS WebView scroll fix: Prevent body scroll, use inner scroll container */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background-color: #f9fafb; /* bg-gray-50 - matches app background */
+}
+
+#root {
+  height: 100vh; /* Fallback */
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* App container - flex layout keeps header/footer in place */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0; /* Important for flex children to scroll */
+  overflow: hidden;
+  position: relative;
+  /* Safe area padding on the container - bottom handled by FAB/footer individually */
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Header stays at top */
+header {
+  flex-shrink: 0;
+  position: relative !important;
+  z-index: 60;
+}
+
+/* Footer is now fixed overlay on desktop, hidden on mobile */
+/* No longer part of flex layout */
+
+/* Main content scrolls */
+main {
+  flex: 1;
+  min-height: 0; /* Important for flex children to scroll */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* Shift up exactly enough to keep the focused input above the keyboard */
+  transform: translateY(calc(var(--keyboard-offset, 0px) * -1));
+  transition: transform 0.25s ease-out;
+}
+
+/* Add padding for fixed footer on desktop */
+@media (min-width: 768px) {
+  main {
+    padding-bottom: 60px; /* Approximate footer height */
+  }
+}
+
+/* Global safe area adjustments for fixed fullscreen overlays/modals */
+.fixed.inset-0,
+.fixed.top-0.left-0.right-0.bottom-0 {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  /* Shift modal up exactly enough to keep the focused input above the keyboard */
+  transform: translateY(calc(var(--keyboard-offset, 0px) * -1));
+  transition: transform 0.25s ease-out;
+}
+
+/* Modal content max height - individual modals handle their own overflow to avoid clipping dropdowns */
+.fixed.inset-0 > div {
+  max-height: calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+/* Global safe area adjustments for fixed elements positioned below header */
+.fixed.top-16 {
+  top: calc(4rem + env(safe-area-inset-top)) !important;
+}
+
+.fixed.top-20 {
+  top: calc(5rem + env(safe-area-inset-top)) !important;
+}
+
+.fixed.top-24 {
+  top: calc(6rem + env(safe-area-inset-top)) !important;
+}
+
+/* Dark mode global overrides - no component changes needed */
+.dark {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important; /* Default text color for elements without explicit color classes */
+}
+
+.dark .bg-white {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-gray-50 {
+  background-color: #0f172a !important;
+}
+
+.dark .bg-gray-100 {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-gray-200 {
+  background-color: #334155 !important;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800 {
+  color: #f1f5f9 !important;
+}
+
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-gray-500 {
+  color: #94a3b8 !important;
+}
+
+.dark .text-black {
+  color: #f1f5f9 !important;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-t {
+  border-color: #334155 !important;
+}
+
+.dark .hover\:bg-gray-100:hover {
+  background-color: #334155 !important;
+}
+
+.dark .hover\:bg-gray-200:hover,
+.dark .hover\:bg-gray-300:hover {
+  background-color: #475569 !important;
+}
+
+/* Invert black SVG logos in dark mode */
+.dark img[src*="black"] {
+  filter: invert(1);
+}
+
+/* Purple/Indigo color overrides for AI Creator components */
+.dark .from-purple-50 {
+  --tw-gradient-from: #1e293b !important;
+  --tw-gradient-to: rgb(30 41 59 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .to-indigo-50 {
+  --tw-gradient-to: #334155 !important;
+}
+
+.dark .bg-purple-100 {
+  background-color: #475569 !important;
+}
+
+.dark .bg-purple-50 {
+  background-color: #1e293b !important;
+}
+
+.dark .text-purple-600,
+.dark .text-purple-700,
+.dark .text-purple-800 {
+  color: #78b8cf !important; /* Lighter teal blue for dark mode */
+}
+
+.dark .border-purple-200 {
+  border-color: #475569 !important;
+}
+
+/* Keep purple buttons vibrant in dark mode */
+.dark .bg-purple-500 {
+  background-color: #327e9c !important;
+}
+
+.dark .bg-purple-600 {
+  background-color: #286782 !important;
+}
+
+.dark .hover\:bg-purple-600:hover {
+  background-color: #286782 !important;
+}
+
+.dark .hover\:bg-purple-700:hover {
+  background-color: #22536a !important;
+}
+
+/* Red colors for delete buttons */
+.dark .text-red-600 {
+  color: #f87171 !important;
+}
+
+.dark .text-red-800 {
+  color: #fca5a5 !important;
+}
+
+.dark .bg-red-50 {
+  background-color: #7f1d1d !important;
+}
+
+.dark .bg-red-100 {
+  background-color: #991b1b !important;
+}
+
+.dark .border-red-200 {
+  border-color: #991b1b !important;
+}
+
+.dark .hover\:bg-red-100:hover {
+  background-color: #991b1b !important;
+}
+
+/* Indigo colors for system messages */
+.dark .bg-indigo-50 {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-indigo-100 {
+  background-color: #3730a3 !important;
+}
+
+.dark .text-indigo-700 {
+  color: #818cf8 !important;
+}
+
+.dark .text-indigo-800 {
+  color: #a5b4fc !important;
+}
+
+.dark .border-indigo-200 {
+  border-color: #475569 !important;
+}
+
+.dark .hover\:bg-indigo-200:hover {
+  background-color: #4338ca !important;
+}
+
+/* Blue colors for user messages */
+.dark .bg-blue-500 {
+  background-color: #2563eb !important;
+}
+
+.dark .bg-blue-600 {
+  background-color: #1e40af !important;
+}
+
+.dark .hover\:bg-blue-600:hover {
+  background-color: #1e40af !important;
+}
+
+/* Purple borders and accents */
+.dark .border-purple-300 {
+  border-color: #475569 !important;
+}
+
+.dark .text-purple-500 {
+  color: #78b8cf !important;
+}
+
+/* Input and autocomplete styling */
+.dark .bg-gray-300 {
+  background-color: #475569 !important;
+}
+
+.dark .disabled\:bg-gray-100:disabled {
+  background-color: #334155 !important;
+}
+
+/* Semi-transparent backgrounds */
+.dark .bg-white\/80 {
+  background-color: rgba(30, 41, 59, 0.8) !important;
+}
+
+/* Green colors */
+.dark .bg-green-50 {
+  background-color: #064e3b !important;
+}
+
+.dark .bg-green-100 {
+  background-color: #166534 !important;
+}
+
+.dark .text-green-500 {
+  color: #10b981 !important;
+}
+
+.dark .text-green-600 {
+  color: #10b981 !important;
+}
+
+.dark .text-green-700 {
+  color: #4ade80 !important;
+}
+
+.dark .text-green-800 {
+  color: #86efac !important;
+}
+
+.dark .bg-green-500 {
+  background-color: #10b981 !important;
+}
+
+.dark .bg-green-600 {
+  background-color: #059669 !important;
+}
+
+.dark .border-green-500 {
+  border-color: #10b981 !important;
+}
+
+.dark .hover\:bg-green-200:hover {
+  background-color: #15803d !important;
+}
+
+.dark .hover\:bg-green-700:hover {
+  background-color: #047857 !important;
+}
+
+.dark .focus\:ring-green-500:focus {
+  --tw-ring-color: #10b981 !important;
+}
+
+/* Green button gradient colors */
+.dark .from-green-500 {
+  --tw-gradient-from: #10b981 !important;
+  --tw-gradient-to: rgb(16 185 129 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .to-emerald-600 {
+  --tw-gradient-to: #059669 !important;
+}
+
+.dark .hover\:from-green-600:hover {
+  --tw-gradient-from: #059669 !important;
+}
+
+.dark .hover\:to-emerald-700:hover {
+  --tw-gradient-to: #047857 !important;
+}
+
+/* Sensor-specific semantic colors (keep these for meaning) */
+/* Amber - Audio sensors */
+.dark .bg-amber-100 {
+  background-color: #78350f !important;
+}
+
+.dark .text-amber-600,
+.dark .text-amber-700 {
+  color: #fbbf24 !important;
+}
+
+/* Sky - Clipboard sensors */
+.dark .bg-sky-50,
+.dark .bg-sky-100 {
+  background-color: #0c4a6e !important;
+}
+
+.dark .text-sky-600,
+.dark .text-sky-700 {
+  color: #38bdf8 !important;
+}
+
+/* Orange - All Audio sensor */
+.dark .bg-orange-50 {
+  background-color: #7c2d12 !important;
+}
+
+.dark .bg-orange-100 {
+  background-color: #7c2d12 !important;
+}
+
+.dark .text-orange-500 {
+  color: #fb923c !important;
+}
+
+.dark .text-orange-600,
+.dark .text-orange-700 {
+  color: #fb923c !important;
+}
+
+.dark .border-orange-500 {
+  border-color: #f97316 !important;
+}
+
+/* Emerald - Memory sensors */
+.dark .bg-emerald-100 {
+  background-color: #064e3b !important;
+}
+
+.dark .text-emerald-600,
+.dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+
+/* Teal - Image memory hybrid */
+.dark .bg-teal-50 {
+  background-color: #134e4a !important;
+}
+
+/* Yellow - Warnings */
+.dark .bg-yellow-50 {
+  background-color: #713f12 !important;
+}
+
+.dark .border-yellow-200 {
+  border-color: #92400e !important;
+}
+
+.dark .text-yellow-700,
+.dark .text-yellow-800 {
+  color: #fbbf24 !important;
+}
+
+/* Blue colors for PricingTable Plus tier */
+.dark .bg-blue-50 {
+  background-color: #1e3a5f !important;
+}
+
+.dark .bg-blue-100 {
+  background-color: #1e40af !important;
+}
+
+.dark .text-blue-500 {
+  color: #60a5fa !important;
+}
+
+.dark .text-blue-600 {
+  color: #60a5fa !important;
+}
+
+.dark .text-blue-700 {
+  color: #93c5fd !important;
+}
+
+.dark .text-blue-800 {
+  color: #bfdbfe !important;
+}
+
+.dark .text-blue-900 {
+  color: #dbeafe !important;
+}
+
+.dark .border-blue-200 {
+  border-color: #1e40af !important;
+}
+
+.dark .border-blue-500 {
+  border-color: #3b82f6 !important;
+}
+
+.dark .hover\:bg-blue-200:hover {
+  background-color: #1e40af !important;
+}
+
+.dark .hover\:bg-blue-700:hover {
+  background-color: #1d4ed8 !important;
+}
+
+.dark .ring-blue-600 {
+  --tw-ring-color: #2563eb !important;
+}
+
+/* Additional text-gray-400 for disabled states */
+.dark .text-gray-400 {
+  color: #9ca3af !important;
+}
+
+/* Input and Select elements for forms */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark input[type="tel"],
+.dark select,
+.dark textarea {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+  border-color: #475569 !important;
+}
+
+.dark input[type="text"]:focus,
+.dark input[type="email"]:focus,
+.dark input[type="password"]:focus,
+.dark input[type="number"]:focus,
+.dark input[type="tel"]:focus,
+.dark select:focus,
+.dark textarea:focus {
+  background-color: #1e293b !important;
+  border-color: #3b82f6 !important;
+  --tw-ring-color: #3b82f6 !important;
+}
+
+.dark input[type="text"]:disabled,
+.dark input[type="email"]:disabled,
+.dark input[type="password"]:disabled,
+.dark input[type="number"]:disabled,
+.dark input[type="tel"]:disabled,
+.dark select:disabled,
+.dark textarea:disabled {
+  background-color: #0f172a !important;
+  color: #64748b !important;
+  cursor: not-allowed !important;
+}
+
+/* Checkbox styling */
+.dark input[type="checkbox"] {
+  background-color: #1e293b !important;
+  border-color: #475569 !important;
+}
+
+.dark input[type="checkbox"]:checked {
+  background-color: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+}
+
+/* Range input (sliders) */
+.dark input[type="range"] {
+  background-color: #334155 !important;
+}
+
+.dark input[type="range"]::-webkit-slider-thumb {
+  background-color: #3b82f6 !important;
+}
+
+.dark input[type="range"]::-moz-range-thumb {
+  background-color: #3b82f6 !important;
+}
+
+/* Amber/Yellow colors for PricingTable Max tier */
+.dark .bg-amber-50 {
+  background-color: #451a03 !important;
+}
+
+.dark .from-amber-50 {
+  --tw-gradient-from: #451a03 !important;
+  --tw-gradient-to: rgb(69 26 3 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .to-yellow-50 {
+  --tw-gradient-to: #713f12 !important;
+}
+
+.dark .text-amber-500 {
+  color: #fbbf24 !important;
+}
+
+.dark .text-amber-800 {
+  color: #fcd34d !important;
+}
+
+.dark .text-amber-900 {
+  color: #fde68a !important;
+}
+
+.dark .border-amber-500 {
+  border-color: #f59e0b !important;
+}
+
+.dark .border-amber-600 {
+  border-color: #d97706 !important;
+}
+
+.dark .from-amber-500 {
+  --tw-gradient-from: #f59e0b !important;
+  --tw-gradient-to: rgb(245 158 11 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .to-yellow-500 {
+  --tw-gradient-to: #eab308 !important;
+}
+
+.dark .from-amber-600 {
+  --tw-gradient-from: #d97706 !important;
+  --tw-gradient-to: rgb(217 119 6 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .to-yellow-600 {
+  --tw-gradient-to: #ca8a04 !important;
+}
+
+.dark .ring-amber-600 {
+  --tw-ring-color: #d97706 !important;
+}
+
+/* White opacity variants (used in footer, chips, modals) */
+.dark .bg-white\/95 {
+  background-color: rgba(30, 41, 59, 0.95) !important;
+}
+
+.dark .bg-white\/90 {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+.dark .bg-white\/85 {
+  background-color: rgba(30, 41, 59, 0.85) !important;
+}
+
+.dark .bg-white\/80 {
+  background-color: rgba(30, 41, 59, 0.8) !important;
+}
+
+.dark .bg-white\/70 {
+  background-color: rgba(30, 41, 59, 0.7) !important;
+}
+
+.dark .bg-white\/50 {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+}
+
+.dark .border-gray-100 {
+  border-color: #334155 !important;
+}
+
+.dark .border-gray-100\/80 {
+  border-color: rgba(51, 65, 85, 0.8) !important;
+}
+
+/* Gradient from-* classes missing from overrides */
+.dark .from-blue-50 {
+  --tw-gradient-from: #1e293b !important;
+  --tw-gradient-to: rgb(30 41 59 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .from-indigo-50 {
+  --tw-gradient-from: #1e293b !important;
+  --tw-gradient-to: rgb(30 41 59 / 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.dark .to-purple-50 {
+  --tw-gradient-to: #334155 !important;
+}
+
+.dark .to-blue-100 {
+  --tw-gradient-to: #334155 !important;
+}
+
+/* Kill react-grid-layout's default 200ms left/top/width/height/transform transition
+   on grid items — without this, switching away from the myAgents tab (which stays
+   mounted-but-invisible rather than unmounted, so its ResizeObserver keeps measuring
+   in the background) visibly animates cards sliding/resizing for ~200ms instead of
+   vanishing instantly. */
+.react-grid-item {
+  transition: none !important;
+}
+
+/* Agent grid resize handle — bigger and more visible than react-grid-layout's
+   default so it reads as a resizable corner rather than disappearing into
+   the card edge. */
+.react-grid-item > .react-resizable-handle {
+  width: 28px;
+  height: 28px;
+  opacity: 0.5;
+}
+
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 1;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  right: 4px;
+  bottom: 4px;
+  width: 10px;
+  height: 10px;
+  border-right: 3px solid rgba(0, 0, 0, 0.45);
+  border-bottom: 3px solid rgba(0, 0, 0, 0.45);
+  border-bottom-right-radius: 2px;
+}

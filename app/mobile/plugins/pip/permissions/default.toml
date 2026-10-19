@@ -1,0 +1,7 @@
+# PiP Plugin Permissions
+
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Default permissions for pip plugin"
+permissions = ["allow-start-pip-cmd", "allow-stop-pip-cmd"]

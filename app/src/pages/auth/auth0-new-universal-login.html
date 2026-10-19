@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+{% assign resolved_dir = dir | default: "auto" %}
+<html lang="{{locale}}" dir="{{resolved_dir}}">
+<head>
+  {%- auth0:head -%}
+  <style>
+    .observer-header {
+      display: flex;
+      justify-content: center;
+      padding: 32px 0 16px;
+    }
+
+    .eye-container {
+      width: 80px;
+      height: 80px;
+      color: #1a1a2e;
+    }
+
+    .eye-outer {
+      transition: ry 0.3s ease-in-out;
+    }
+
+    .eye-pupil {
+      transition: cx 0.1s ease-out, cy 0.1s ease-out, opacity 0.15s ease-in-out;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .eye-container {
+        color: #ffffff;
+      }
+    }
+  </style>
+</head>
+<body class="_widget-auto-layout">
+  <div class="observer-header">
+    <div class="eye-container" id="observer-eye">
+      <svg viewBox="-75 -75 150 150" xmlns="http://www.w3.org/2000/svg">
+        <ellipse class="eye-outer" id="eye-outer" cx="0" cy="0" rx="67" ry="67" fill="none" stroke="currentColor" stroke-width="12"/>
+        <circle class="eye-pupil" id="eye-pupil" cx="0" cy="0" r="18" fill="currentColor"/>
+      </svg>
+    </div>
+  </div>
+
+  {%- auth0:widget -%}
+
+  <script>
+    (function() {
+      var R_LONG = 67, R_SHORT = 18, IDLE_TIMEOUT = 2000, PUPIL_FADE_DELAY = 100;
+      var container = document.getElementById('observer-eye');
+      var outer = document.getElementById('eye-outer');
+      var pupil = document.getElementById('eye-pupil');
+      var seeTarget = null, mousePos = { x: innerWidth / 2, y: innerHeight / 2 };
+      var idleTimer = null, isPasswordField = false, isClosed = false;
+
+      updatePupilPosition(0, 20);
+
+      document.addEventListener('mousemove', function(e) {
+        mousePos = { x: e.clientX, y: e.clientY };
+        if (!isPasswordField && !idleTimer) {
+          seeTarget = mousePos;
+          updatePupil();
+        }
+      });
+
+      document.addEventListener('focusin', function(e) {
+        if (e.target.tagName !== 'INPUT') return;
+        var t = (e.target.type || e.target.name || '').toLowerCase();
+        isPasswordField = t.indexOf('password') !== -1;
+        isPasswordField ? closeEye() : (openEye(), seeTarget = getCursor(e.target), updatePupil());
+      });
+
+      document.addEventListener('input', function(e) {
+        if (e.target.tagName !== 'INPUT') return;
+        if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+        if (isPasswordField) { closeEye(); }
+        else { seeTarget = getCursor(e.target); openEye(); updatePupil(); }
+        idleTimer = setTimeout(function() {
+          idleTimer = null; seeTarget = mousePos;
+          if (isPasswordField) openEye();
+          updatePupil();
+        }, IDLE_TIMEOUT);
+      });
+
+      document.addEventListener('focusout', function() {
+        setTimeout(function() {
+          var a = document.activeElement;
+          if (!a || a.tagName !== 'INPUT') {
+            isPasswordField = false; openEye(); seeTarget = mousePos; updatePupil();
+          }
+        }, 100);
+      });
+
+      function getCursor(input) {
+        var r = input.getBoundingClientRect();
+        return { x: r.left + Math.min((input.value||'').length * 8 + 10, r.width - 10), y: r.top + r.height / 2 };
+      }
+
+      function updatePupil() {
+        if (!seeTarget || isClosed || !container) return;
+        var r = container.getBoundingClientRect();
+        var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        var dx = seeTarget.x - cx, dy = seeTarget.y - cy;
+        var angle = Math.atan2(dy, dx);
+        var dist = Math.min(R_LONG - R_SHORT - 7, Math.sqrt(dx*dx + dy*dy) / 8);
+        updatePupilPosition(Math.cos(angle) * dist, Math.sin(angle) * dist);
+      }
+
+      function updatePupilPosition(x, y) {
+        pupil.setAttribute('cx', x);
+        pupil.setAttribute('cy', y);
+      }
+
+      function closeEye() {
+        if (isClosed) return;
+        isClosed = true; seeTarget = null;
+        pupil.setAttribute('cx', '0'); pupil.setAttribute('cy', '0');
+        outer.setAttribute('ry', '6');
+        setTimeout(function() { pupil.style.opacity = '0'; }, PUPIL_FADE_DELAY);
+      }
+
+      function openEye() {
+        if (!isClosed) return;
+        isClosed = false;
+        outer.style.transition = 'ry 0.06s ease-out';
+        outer.setAttribute('ry', R_LONG);
+        pupil.style.opacity = '1';
+        seeTarget = mousePos; updatePupil();
+        setTimeout(function() { outer.style.transition = 'ry 0.3s ease-in-out'; }, 100);
+      }
+    })();
+  </script>
+</body>
+</html>

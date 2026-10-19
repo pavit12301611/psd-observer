@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-ios"
+description = "Enables the ios command without any pre-configured scope."
+commands.allow = ["ios"]
+
+[[permission]]
+identifier = "deny-ios"
+description = "Denies the ios command without any pre-configured scope."
+commands.deny = ["ios"]

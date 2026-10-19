@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-app-group-path-cmd"
+description = "Enables the get_app_group_path_cmd command without any pre-configured scope."
+commands.allow = ["get_app_group_path_cmd"]
+
+[[permission]]
+identifier = "deny-get-app-group-path-cmd"
+description = "Denies the get_app_group_path_cmd command without any pre-configured scope."
+commands.deny = ["get_app_group_path_cmd"]

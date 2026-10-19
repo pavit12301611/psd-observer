@@ -1,0 +1,25 @@
+{
+  "name": "observer-whatsapp-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free native-WhatsApp agent for Observer: links like WhatsApp Web (Baileys), listens ONLY to the owner number, replies and acts. No Twilio, no Meta Cloud API, no per-message cost.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "demo": "node --env-file-if-exists=.env src/index.js --dry-run",
+    "test": "node --test test/agent.test.js",
+    "check": "node --check src/index.js && node --check src/whatsapp.js && node --check src/commands.js && node --check src/server.js && node --check src/ai.js && node --check src/tools.js && node --check src/store.js && node --check src/config.js && node --check src/allowlist.js && node --check src/mailbox.js"
+  },
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.0"
+  }
+}

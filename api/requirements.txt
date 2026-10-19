@@ -1,0 +1,40 @@
+# Web framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# HTTP clients
+httpx
+requests
+websockets
+urllib3
+
+# Auth & crypto
+python-jose[cryptography]
+PyJWT[crypto]
+cryptography
+
+# Data validation
+pydantic[email]
+
+# Payments
+stripe
+
+# Messaging
+twilio
+sendgrid
+# Pre-send acceptable-use content screen on outbound SMS/WhatsApp/voice text.
+better-profanity
+
+# AI / media
+pillow
+
+# Observability
+python-json-logger
+
+# Storage
+redis
+# Usage event log (analytics only, never on the request path).
+# boto3 >= 1.36 is required for S3 conditional writes (IfMatch on put_object),
+# which r2_store relies on for optimistic concurrency on the org record.
+boto3>=1.36.0

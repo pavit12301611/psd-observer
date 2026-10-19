@@ -1,0 +1,68 @@
+id: activity_tracking_agent
+name: Activity Tracking Agent
+description: This agent tracks your activity.
+status: stopped
+model_name: deepseek-r1:8b
+loop_interval_seconds: 25
+system_prompt: |
+  You are an activity tracking agent, watch the screen and respond with what the user is doing.
+  Just respond with one sentence as the following:
+  
+  ACTIVITY: activity the user is doing
+  
+  <Screen>
+  $SCREEN_OCR
+  </Screen>
+  
+  
+  Just respond with that one sentence.
+  
+  ACTIVITY: say what the user is doing
+code: |
+  //ACTIVITY
+  function(line) {
+    const currentMemory = utilities.getAgentMemory(agentId);
+    const time = utilities.getCurrentTime();
+    currentMemory.then(memory => {
+      utilities.updateAgentMemory(agentId, memory + "\n" + "[" + time + "] " + line);
+    });
+  }
+memory: |
+  
+  [ 10:27 pm ]The user is engaged in multiple activities involving screen sharing, code documentation, focus tracking, and memory summarization.
+  [ 10:28 pm ]The user is configuring their network settings or checking their IP address via related applications.
+  [ 10:28 pm ]The user is repeatedly sending POST requests to "/api/generate" and also made a GET request to "/api/tags".
+  [ 10:29 pm ]interact with tracking agents via commands and monitor system logs.
+  [ 10:29 pm ]sending repeated POST requests to "/api/generate" and making a GET request to "/api/tags".
+  [ 10:30 pm ]The user is working on a project, running Git commands, and setting up a screen share for a presentation or demo.
+  [ 10:30 pm ]The user is running `npm run build`, compiling TypeScript files, and updating a GitHub repository while setting up a remote screen session for development work.
+  [ 10:30 pm ]Compiling a TypeScript web application using Vite and running a build command.
+  [ 10:31 pm ]Running npm build command in the app directory and starting a screen session for development.
+  [ 10:31 pm ]The user is building a React application and performing remote development work.
+  [ 10:32 pm ]The user is developing a web-based application using React and TypeScript, managing code changes with Git, and running builds with Vite.
+  [ 10:32 pm ]The user is running a build process for their web application using npm, TypeScript, and Vite.
+  [ 10:32 pm ]Running npm commands to build a web application and managing screen sessions.
+  [ 10:33 pm ]The user is running build commands and working on a web application using Vite.
+  [ 10:33 pm ]Building the application and starting a screen session to serve it remotely.
+  [ 10:34 pm ]Compiling code and running build commands, then starting a screen session.
+  [ 10:34 pm ]Updating Git repository, running build command, and starting a screen session.
+  [ 10:35 pm ]The user is running commands related to building and serving a web application, including Git operations and Vite compilation.
+  [ 10:35 pm ]View system logs using a network monitoring tool.
+  [ 10:36 pm ]configure network settings and view system logs
+  [ 10:36 pm ]the user is interacting with system logs via commands.
+  [ 10:37 pm ]The user is checking their public IP address using a command in the terminal or command line interface.
+  [ 10:37 pm ]using multiple applications such as Chrome, Discord, and a terminal where they are typing commands like "Show System Logs."
+  [ 10:38 pm ]The user is accessing network settings and viewing system logs on their device.
+  [ 10:38 pm ]viewing system logs and managing network settings.
+  [2:37 pm] Updating application code to handle server connections and configuration changes.
+  [2:38 pm] The user is running build commands, updating the Git repository, configuring network settings, and viewing system logs as they work on a web application using Vite.
+  [4:56 pm] The user is interacting with multiple AI tracking agents and attempting to manage screen sharing settings.
+  [4:56 pm] The user is actively engaged on Telegram, managing multiple groups, interacting with others, and sharing various content including personal updates and YouTube links.
+  [4:57 pm] The user is communicating via Telegram with others, sending messages, and engaging in conversations.
+  [4:57 pm] Using Telegram to communicate with others, including sending messages and joining groups.
+  [4:57 pm] Contributing to an open-source project on GitHub by forking repositories and setting up feature branches.
+  [4:58 pm] launching system logs viewer to inspect log files and monitor system activity.
+  [5:02 pm] using various software applications and tracking tools, possibly for design, documentation, and automation purposes.
+  [5:02 pm] Configuring activity tracking systems using various agents and applications.
+  [9:44 pm] The user is working on code and interacting with activity tracking agents that assist in managing focus and summarizing tasks.
+  [9:44 pm] The user is actively working on a web application using Vite, managing server connections, configuration changes, and Git repositories, while also interacting with various AI tracking agents and communication tools like Telegram.

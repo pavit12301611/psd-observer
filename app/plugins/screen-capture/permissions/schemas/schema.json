@@ -1,0 +1,510 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PermissionFile",
+  "description": "Permission file that can define a default permission, a set of permissions or a list of inlined permissions.",
+  "type": "object",
+  "properties": {
+    "default": {
+      "description": "The default permission set for the plugin",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DefaultPermission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "set": {
+      "description": "A list of permissions sets defined",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PermissionSet"
+      }
+    },
+    "permission": {
+      "description": "A list of inlined permissions",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Permission"
+      }
+    }
+  },
+  "definitions": {
+    "DefaultPermission": {
+      "description": "The default permission set of the plugin.\n\nWorks similarly to a permission with the \"default\" identifier.",
+      "type": "object",
+      "required": [
+        "permissions"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PermissionSet": {
+      "description": "A set of direct permissions grouped together under a new name.",
+      "type": "object",
+      "required": [
+        "description",
+        "identifier",
+        "permissions"
+      ],
+      "properties": {
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does.",
+          "type": "string"
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PermissionKind"
+          }
+        }
+      }
+    },
+    "Permission": {
+      "description": "Descriptions of explicit privileges of commands.\n\nIt can enable commands to be accessible in the frontend of the application.\n\nIf the scope is defined it can be used to fine grain control the access of individual or multiple commands.",
+      "type": "object",
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri internal convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "description": "Allowed or denied commands when using this permission.",
+          "default": {
+            "allow": [],
+            "deny": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commands"
+            }
+          ]
+        },
+        "scope": {
+          "description": "Allowed or denied scoped when using this permission.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Scopes"
+            }
+          ]
+        },
+        "platforms": {
+          "description": "Target platforms this permission applies. By default all platforms are affected by this permission.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Target"
+          }
+        }
+      }
+    },
+    "Commands": {
+      "description": "Allowed and denied commands inside a permission.\n\nIf two commands clash inside of `allow` and `deny`, it should be denied by default.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Allowed command.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Denied command, which takes priority.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Scopes": {
+      "description": "An argument for fine grained behavior control of Tauri commands.\n\nIt can be of any serde serializable type and is used to allow or prevent certain actions inside a Tauri command. The configured scope is passed to the command and will be enforced by the command implementation.\n\n## Example\n\n```json { \"allow\": [{ \"path\": \"$HOME/**\" }], \"deny\": [{ \"path\": \"$HOME/secret.txt\" }] } ```",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Data that defines what is allowed by the scope.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        "deny": {
+          "description": "Data that defines what is denied by the scope. This should be prioritized by validation logic.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      }
+    },
+    "Value": {
+      "description": "All supported ACL values.",
+      "anyOf": [
+        {
+          "description": "Represents a null JSON value.",
+          "type": "null"
+        },
+        {
+          "description": "Represents a [`bool`].",
+          "type": "boolean"
+        },
+        {
+          "description": "Represents a valid ACL [`Number`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Number"
+            }
+          ]
+        },
+        {
+          "description": "Represents a [`String`].",
+          "type": "string"
+        },
+        {
+          "description": "Represents a list of other [`Value`]s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        {
+          "description": "Represents a map of [`String`] keys to [`Value`]s.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      ]
+    },
+    "Number": {
+      "description": "A valid ACL number.",
+      "anyOf": [
+        {
+          "description": "Represents an [`i64`].",
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "description": "Represents a [`f64`].",
+          "type": "number",
+          "format": "double"
+        }
+      ]
+    },
+    "Target": {
+      "description": "Platform target.",
+      "oneOf": [
+        {
+          "description": "MacOS.",
+          "type": "string",
+          "enum": [
+            "macOS"
+          ]
+        },
+        {
+          "description": "Windows.",
+          "type": "string",
+          "enum": [
+            "windows"
+          ]
+        },
+        {
+          "description": "Linux.",
+          "type": "string",
+          "enum": [
+            "linux"
+          ]
+        },
+        {
+          "description": "Android.",
+          "type": "string",
+          "enum": [
+            "android"
+          ]
+        },
+        {
+          "description": "iOS.",
+          "type": "string",
+          "enum": [
+            "iOS"
+          ]
+        }
+      ]
+    },
+    "PermissionKind": {
+      "type": "string",
+      "oneOf": [
+        {
+          "description": "Enables the android command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-android",
+          "markdownDescription": "Enables the android command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the android command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-android",
+          "markdownDescription": "Denies the android command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_app_group_path_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-app-group-path-cmd",
+          "markdownDescription": "Enables the get_app_group_path_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_app_group_path_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-app-group-path-cmd",
+          "markdownDescription": "Denies the get_app_group_path_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_broadcast_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-broadcast-status",
+          "markdownDescription": "Enables the get_broadcast_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_broadcast_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-broadcast-status",
+          "markdownDescription": "Denies the get_broadcast_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_capture_targets_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-capture-targets-cmd",
+          "markdownDescription": "Enables the get_capture_targets_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_capture_targets_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-capture-targets-cmd",
+          "markdownDescription": "Denies the get_capture_targets_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_frame_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-frame-cmd",
+          "markdownDescription": "Enables the get_frame_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_frame_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-frame-cmd",
+          "markdownDescription": "Denies the get_frame_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ios command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ios",
+          "markdownDescription": "Enables the ios command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ios command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ios",
+          "markdownDescription": "Denies the ios command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_app_group_files_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-app-group-files-cmd",
+          "markdownDescription": "Enables the list_app_group_files_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_app_group_files_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-app-group-files-cmd",
+          "markdownDescription": "Denies the list_app_group_files_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_broadcast_debug_log_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-broadcast-debug-log-cmd",
+          "markdownDescription": "Enables the read_broadcast_debug_log_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_broadcast_debug_log_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-broadcast-debug-log-cmd",
+          "markdownDescription": "Denies the read_broadcast_debug_log_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_audio_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-audio-stream-cmd",
+          "markdownDescription": "Enables the start_audio_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_audio_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-audio-stream-cmd",
+          "markdownDescription": "Denies the start_audio_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_capture_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-capture-cmd",
+          "markdownDescription": "Enables the start_capture_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_capture_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-capture-cmd",
+          "markdownDescription": "Denies the start_capture_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_capture_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-capture-stream-cmd",
+          "markdownDescription": "Enables the start_capture_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_capture_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-capture-stream-cmd",
+          "markdownDescription": "Denies the start_capture_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_video_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-video-stream-cmd",
+          "markdownDescription": "Enables the start_video_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_video_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-video-stream-cmd",
+          "markdownDescription": "Denies the start_video_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_audio_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-audio-cmd",
+          "markdownDescription": "Enables the stop_audio_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_audio_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-audio-cmd",
+          "markdownDescription": "Denies the stop_audio_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_audio_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-audio-stream-cmd",
+          "markdownDescription": "Enables the stop_audio_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_audio_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-audio-stream-cmd",
+          "markdownDescription": "Denies the stop_audio_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_capture_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-capture-cmd",
+          "markdownDescription": "Enables the stop_capture_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_capture_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-capture-cmd",
+          "markdownDescription": "Denies the stop_capture_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_video_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-video-cmd",
+          "markdownDescription": "Enables the stop_video_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_video_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-video-cmd",
+          "markdownDescription": "Denies the stop_video_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_video_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-video-stream-cmd",
+          "markdownDescription": "Enables the stop_video_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_video_stream_cmd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-video-stream-cmd",
+          "markdownDescription": "Denies the stop_video_stream_cmd command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for screen capture plugin\n#### This default permission set includes:\n\n- `allow-start-capture-cmd`\n- `allow-stop-capture-cmd`\n- `allow-stop-video-cmd`\n- `allow-stop-audio-cmd`\n- `allow-get-frame-cmd`\n- `allow-get-broadcast-status`\n- `allow-get-capture-targets-cmd`\n- `allow-start-capture-stream-cmd`\n- `allow-start-video-stream-cmd`\n- `allow-start-audio-stream-cmd`\n- `allow-get-app-group-path-cmd`\n- `allow-read-broadcast-debug-log-cmd`\n- `allow-list-app-group-files-cmd`",
+          "type": "string",
+          "const": "default",
+          "markdownDescription": "Default permissions for screen capture plugin\n#### This default permission set includes:\n\n- `allow-start-capture-cmd`\n- `allow-stop-capture-cmd`\n- `allow-stop-video-cmd`\n- `allow-stop-audio-cmd`\n- `allow-get-frame-cmd`\n- `allow-get-broadcast-status`\n- `allow-get-capture-targets-cmd`\n- `allow-start-capture-stream-cmd`\n- `allow-start-video-stream-cmd`\n- `allow-start-audio-stream-cmd`\n- `allow-get-app-group-path-cmd`\n- `allow-read-broadcast-debug-log-cmd`\n- `allow-list-app-group-files-cmd`"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Sign In - Observer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+  <style>
+    /* Reset and base */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5 !important;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    html {
+      overflow-x: hidden;
+    }
+
+    /* Hide Lock's default header/logo since we're adding our own */
+    .auth0-lock-header {
+      display: none !important;
+    }
+
+    /* Style the Lock widget to look like New Universal Login */
+    .auth0-lock.auth0-lock {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-overlay {
+      background: #f0f2f5 !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-center {
+      padding-top: 40px !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-widget {
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08) !important;
+      border-radius: 12px !important;
+      overflow: hidden !important;
+    }
+
+    /* Custom header with Eye + Welcome */
+    .observer-custom-header {
+      background: #fff;
+      padding: 32px 32px 20px;
+      text-align: center;
+      border-radius: 12px 12px 0 0;
+      margin-bottom: -1px;
+    }
+
+    .observer-eye-container {
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 16px;
+      color: #1a1a2e;
+    }
+
+    .observer-eye-outer {
+      transition: ry 0.3s ease-in-out; /* Close speed - open is faster via JS */
+    }
+
+    .observer-eye-pupil {
+      transition: cx 0.1s ease-out, cy 0.1s ease-out, opacity 0.15s ease-in-out;
+    }
+
+    .observer-welcome {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1a1a2e;
+      margin-bottom: 8px;
+    }
+
+    .observer-subtitle {
+      font-size: 14px;
+      color: #65676b;
+      line-height: 1.4;
+    }
+
+    /* Style Lock content area */
+    .auth0-lock.auth0-lock .auth0-lock-content {
+      padding: 0 !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-form {
+      padding: 20px 40px 32px !important;
+    }
+
+    /* Widen the widget */
+    .auth0-lock.auth0-lock .auth0-lock-widget {
+      width: 450px !important;
+      max-width: calc(100vw - 32px) !important;
+    }
+
+    /* Responsive: smaller screens */
+    @media (max-width: 480px) {
+      .auth0-lock.auth0-lock .auth0-lock-widget {
+        width: calc(100vw - 32px) !important;
+        max-width: none !important;
+      }
+
+      .auth0-lock.auth0-lock .auth0-lock-center {
+        padding: 20px 16px !important;
+      }
+
+      .observer-custom-header {
+        padding: 24px 20px 16px !important;
+      }
+
+      .auth0-lock.auth0-lock .auth0-lock-form {
+        padding: 20px !important;
+      }
+
+      .auth0-lock.auth0-lock .auth0-lock-alternative {
+        padding: 0 20px 20px !important;
+      }
+    }
+
+    /* Form content padding */
+    .auth0-lock.auth0-lock .auth0-lock-form {
+      padding: 24px 32px !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-cred-pane {
+      background: #fff !important;
+      border-radius: 0 0 12px 12px !important;
+      overflow: hidden !important;
+    }
+
+    /* Widget container - clip overflow */
+    .auth0-lock.auth0-lock .auth0-lock-widget-container {
+      overflow: hidden !important;
+    }
+
+    /* Cred pane internal wrapper */
+    .auth0-lock.auth0-lock .auth0-lock-cred-pane-internal-wrapper {
+      overflow: hidden !important;
+    }
+
+    /* Submit button container - no padding so button spans full width */
+    .auth0-lock.auth0-lock .auth0-lock-pane-footer {
+      background: transparent !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+
+    /* Submit button - spans full bottom of card with matching corners */
+    .auth0-lock.auth0-lock .auth0-lock-submit {
+      position: relative !important;
+      border-radius: 0 0 12px 12px !important;
+      width: 100% !important;
+      max-width: none !important;
+      margin: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      transform: none !important;
+      display: block !important;
+    }
+
+    /* Reset password link */
+    .auth0-lock.auth0-lock .auth0-lock-alternative {
+      padding: 0 32px 24px !important;
+    }
+
+    /* Style inputs to match New Universal Login */
+    .auth0-lock.auth0-lock .auth0-lock-input-wrap {
+      border: 1px solid #ddd !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-input-wrap.auth0-lock-focused {
+      border-color: #0d6efd !important;
+      box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15) !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-input {
+      font-size: 16px !important;
+    }
+
+    /* Style submit button to green - full width bottom edge */
+    .auth0-lock.auth0-lock .auth0-lock-submit {
+      background: #16a34a !important;
+      border-radius: 0 0 12px 12px !important;
+      height: 52px !important;
+      font-size: 16px !important;
+      font-weight: 600 !important;
+      transition: background-color 0.15s ease !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1 !important;
+      padding: 0 !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-submit:hover {
+      background: #15803d !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-submit:active {
+      background: #14532d !important;
+    }
+
+    /* Style social buttons */
+    .auth0-lock.auth0-lock .auth0-lock-social-button {
+      border-radius: 8px !important;
+      border: 1px solid #ddd !important;
+    }
+
+    .auth0-lock.auth0-lock .auth0-lock-social-button.auth0-lock-social-big-button {
+      height: 48px !important;
+      font-size: 15px !important;
+    }
+
+    /* "or" separator styling */
+    .auth0-lock.auth0-lock .auth0-lock-separator {
+      color: #65676b !important;
+      font-size: 13px !important;
+    }
+
+    /* Links styling */
+    .auth0-lock.auth0-lock a {
+      color: #0d6efd !important;
+    }
+
+    /* Tabs styling */
+    .auth0-lock.auth0-lock .auth0-lock-tabs-container {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!--[if IE 8]>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/ie8/0.2.5/ie8.js"></script>
+  <![endif]-->
+
+  <!--[if lte IE 9]>
+  <script src="https://cdn.auth0.com/js/base64.js"></script>
+  <script src="https://cdn.auth0.com/js/es5-shim.min.js"></script>
+  <![endif]-->
+
+  <script src="https://cdn.auth0.com/js/lock/14.2.3/lock.min.js"></script>
+  <script>
+    // Decode utf8 characters properly
+    var config = JSON.parse(decodeURIComponent(escape(window.atob('@@config@@'))));
+    config.extraParams = config.extraParams || {};
+    var connection = config.connection;
+    var prompt = config.prompt;
+    var languageDictionary;
+    var language;
+
+    if (config.dict && config.dict.signin && config.dict.signin.title) {
+      languageDictionary = { title: config.dict.signin.title };
+    } else if (typeof config.dict === 'string') {
+      language = config.dict;
+    }
+    var loginHint = config.extraParams.login_hint;
+    var colors = config.colors || {};
+
+    // Get app name for subtitle
+    var appName = config.clientName || 'ObserverApp';
+
+    // Available Lock configuration options: https://auth0.com/docs/libraries/lock/lock-configuration
+    var lock = new Auth0Lock(config.clientID, config.auth0Domain, {
+      auth: {
+        redirectUrl: config.callbackURL,
+        responseType: (config.internalOptions || {}).response_type ||
+          (config.callbackOnLocationHash ? 'token' : 'code'),
+        params: config.internalOptions
+      },
+      configurationBaseUrl: config.clientConfigurationBaseUrl,
+      overrides: {
+        __tenant: config.auth0Tenant,
+        __token_issuer: config.authorizationServer.issuer
+      },
+      assetsUrl: config.assetsUrl,
+      allowedConnections: connection ? [connection] : null,
+      rememberLastLogin: !prompt,
+      language: language,
+      languageBaseUrl: config.languageBaseUrl,
+      languageDictionary: languageDictionary,
+      theme: {
+        primaryColor: '#16a34a'
+      },
+      prefill: loginHint ? { email: loginHint, username: loginHint } : null,
+      closable: false,
+      defaultADUsernameFromEmailPrefix: false,
+      allowShowPassword: true
+    });
+
+    // Inject custom header after Lock renders
+    lock.on('show', function() {
+      setTimeout(function() {
+        var widget = document.querySelector('.auth0-lock-widget');
+        if (widget && !document.querySelector('.observer-custom-header')) {
+          var header = document.createElement('div');
+          header.className = 'observer-custom-header';
+          header.innerHTML =
+            '<div class="observer-eye-container" id="observer-eye">' +
+              '<svg viewBox="-75 -75 150 150" xmlns="http://www.w3.org/2000/svg">' +
+                '<ellipse class="observer-eye-outer" id="eye-outer" cx="0" cy="0" rx="67" ry="67" fill="none" stroke="currentColor" stroke-width="12"/>' +
+                '<circle class="observer-eye-pupil" id="eye-pupil" cx="0" cy="15" r="18" fill="currentColor"/>' +
+              '</svg>' +
+            '</div>' +
+            '<div class="observer-welcome">Welcome</div>' +
+            '<div class="observer-subtitle">Log in to Observer AI to continue to ' + appName + '.</div>';
+          widget.insertBefore(header, widget.firstChild);
+
+          // Initialize eye animation
+          initEyeAnimation();
+        }
+      }, 100);
+    });
+
+    lock.show();
+
+    // ========================================
+    // Observer Eye Animation
+    // ========================================
+    function initEyeAnimation() {
+      var R_LONG = 67;
+      var R_SHORT = 18;
+      var IDLE_TIMEOUT = 2000;
+      var PUPIL_FADE_DELAY = 100;
+
+      var container = document.getElementById('observer-eye');
+      var outer = document.getElementById('eye-outer');
+      var pupil = document.getElementById('eye-pupil');
+
+      if (!container || !outer || !pupil) return;
+
+      var seeTarget = null;
+      var mousePos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+      var idleTimer = null;
+      var isPasswordField = false;
+      var isClosed = false;
+
+      // Mouse tracking
+      document.addEventListener('mousemove', function(e) {
+        mousePos = { x: e.clientX, y: e.clientY };
+        if (!isPasswordField && !idleTimer) {
+          seeTarget = mousePos;
+          updatePupil();
+        }
+      });
+
+      // Input focus detection
+      document.addEventListener('focusin', function(e) {
+        var input = e.target;
+        if (input.tagName !== 'INPUT') return;
+
+        var inputType = (input.type || input.name || input.placeholder || '').toLowerCase();
+        isPasswordField = inputType.indexOf('password') !== -1;
+
+        if (isPasswordField) {
+          closeEye();
+        } else {
+          openEye();
+          seeTarget = getInputCursorPosition(input);
+          updatePupil();
+        }
+      });
+
+      // Input typing detection
+      document.addEventListener('input', function(e) {
+        var input = e.target;
+        if (input.tagName !== 'INPUT') return;
+
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+
+        if (isPasswordField) {
+          closeEye();
+        } else {
+          seeTarget = getInputCursorPosition(input);
+          openEye();
+          updatePupil();
+        }
+
+        idleTimer = setTimeout(function() {
+          idleTimer = null;
+          seeTarget = mousePos;
+          if (isPasswordField) openEye();
+          updatePupil();
+        }, IDLE_TIMEOUT);
+      });
+
+      // Focus out detection
+      document.addEventListener('focusout', function(e) {
+        setTimeout(function() {
+          var activeEl = document.activeElement;
+          if (!activeEl || activeEl.tagName !== 'INPUT') {
+            isPasswordField = false;
+            openEye();
+            seeTarget = mousePos;
+            updatePupil();
+          }
+        }, 100);
+      });
+
+      function getInputCursorPosition(input) {
+        var rect = input.getBoundingClientRect();
+        var charWidth = 8;
+        var textLength = (input.value || '').length;
+        var cursorX = rect.left + Math.min(textLength * charWidth + 10, rect.width - 10);
+        var cursorY = rect.top + rect.height / 2;
+        return { x: cursorX, y: cursorY };
+      }
+
+      function updatePupil() {
+        if (!seeTarget || isClosed || !container) return;
+
+        var eyeRect = container.getBoundingClientRect();
+        var eyeCenterX = eyeRect.left + eyeRect.width / 2;
+        var eyeCenterY = eyeRect.top + eyeRect.height / 2;
+
+        var dx = seeTarget.x - eyeCenterX;
+        var dy = seeTarget.y - eyeCenterY;
+        var angle = Math.atan2(dy, dx);
+
+        var maxOffset = R_LONG - R_SHORT - 7;
+        var distance = Math.sqrt(dx * dx + dy * dy);
+        var scaledDist = Math.min(maxOffset, distance / 8);
+
+        pupil.setAttribute('cx', Math.cos(angle) * scaledDist);
+        pupil.setAttribute('cy', Math.sin(angle) * scaledDist);
+      }
+
+      function closeEye() {
+        if (isClosed) return;
+        isClosed = true;
+        seeTarget = null;
+
+        // Animate pupil to origin before fading
+        pupil.setAttribute('cx', '0');
+        pupil.setAttribute('cy', '0');
+
+        // Collapse outer ring to horizontal line
+        outer.setAttribute('ry', '6');
+
+        // Fade pupil after it reaches origin
+        setTimeout(function() {
+          pupil.style.opacity = '0';
+        }, PUPIL_FADE_DELAY);
+      }
+
+      function openEye() {
+        if (!isClosed) return;
+        isClosed = false;
+
+        // Fast open: expand outer ring quickly
+        outer.style.transition = 'ry 0.06s ease-out';
+        outer.setAttribute('ry', R_LONG);
+
+        // Show pupil
+        pupil.style.opacity = '1';
+
+        // Resume tracking
+        seeTarget = mousePos;
+        updatePupil();
+
+        // Reset transition speed for next close
+        setTimeout(function() {
+          outer.style.transition = 'ry 0.3s ease-in-out';
+        }, 100);
+      }
+    }
+  </script>
+</body>
+</html>

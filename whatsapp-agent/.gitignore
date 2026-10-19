@@ -1,0 +1,7 @@
+# NEVER commit these: auth_info is a full WhatsApp login for the agent number.
+auth_info/
+auth_info_baileys/
+data/
+.env
+node_modules/
+*.log

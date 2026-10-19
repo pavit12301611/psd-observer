@@ -1,0 +1,62 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Observer",
+  "version": "3.1.1",
+  "identifier": "com.observer.ai",
+  "build": {
+    "frontendDist": "/Users/jay/repos/Observer/app/dist",
+    "devUrl": "http://10.0.0.226:3001"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Observer",
+        "width": 800,
+        "height": 1000,
+        "fullscreen": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["mobile"]
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "iOS": {
+      "minimumSystemVersion": "15.0",
+      "developmentTeam": "55RWNTY4PH"
+    },
+    "android": {
+      "minSdkVersion": 24
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "mobile": [
+        { "scheme": ["observer"] },
+        {
+          "scheme": ["https"],
+          "host": "auth.observer-ai.com",
+          "pathPrefix": ["/ios/com.observer.ai/callback"],
+          "appLink": true
+        },
+        {
+          "scheme": ["https"],
+          "host": "app.observer-ai.com",
+          "pathPrefix": ["/marketplace/"],
+          "appLink": true
+        }
+      ]
+    }
+  }
+}
+

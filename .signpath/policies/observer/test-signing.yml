@@ -1,0 +1,8 @@
+# SignPath GitHub Policy for Observer test-signing
+# See: https://docs.signpath.io/trusted-build-systems/github
+
+github-policies:
+  runners:
+    require_github_hosted: true
+  build:
+    disallow_reruns: true

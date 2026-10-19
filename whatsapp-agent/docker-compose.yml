@@ -1,0 +1,19 @@
+# Run:  cp .env.example .env && docker compose up -d
+# Link: docker compose logs -f   (scan the QR with the 8859555795 phone)
+# Note: the bridge port is bound to localhost only. Token is still required.
+services:
+  whatsapp-agent:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      # If Ollama runs on the Docker host, point the agent at it:
+      OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./auth_info:/app/auth_info
+      - ./data:/app/data

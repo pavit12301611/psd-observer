@@ -1,0 +1,126 @@
+{
+  "identifier" : "Observer_IAP",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_applicationInternalID" : "6758222050",
+    "_developerTeamID" : "55RWNTY4PH",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 738570650.41968596,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21568420",
+      "localizations" : [],
+      "name" : "Observer Subscriptions",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "5.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6759164653",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited notifications and 2 hours of cloud monitoring per day",
+              "displayName" : "Observer Plus",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.observer.ai.plus.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Observer Plus Monthly",
+          "subscriptionGroupID" : "21568420",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "22.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6759164654",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "AI Studio, premium models, and 8 hours of cloud monitoring per day",
+              "displayName" : "Observer Pro",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.observer.ai.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Observer Pro Monthly",
+          "subscriptionGroupID" : "21568420",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "99.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "6759164655",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Everything unlimited - 24/7 cloud monitoring and premium features",
+              "displayName" : "Observer Max",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.observer.ai.max.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Observer Max Monthly",
+          "subscriptionGroupID" : "21568420",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

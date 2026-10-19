@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In - Observer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; }
+
+    /* Hide Lock's default header */
+    .auth0-lock-header { display: none !important; }
+
+    /* Widget sizing */
+    .auth0-lock.auth0-lock .auth0-lock-widget { width: 420px !important; max-width: calc(100vw - 32px) !important; box-shadow: 0 4px 24px rgba(0,0,0,0.08) !important; border-radius: 12px !important; }
+    .auth0-lock.auth0-lock .auth0-lock-overlay { background: #f0f2f5 !important; }
+    .auth0-lock.auth0-lock .auth0-lock-center { padding-top: 40px !important; }
+    .auth0-lock.auth0-lock .auth0-lock-cred-pane { background: #fff !important; }
+
+    /* Custom header */
+    .observer-header { background: #fff; padding: 32px 32px 20px; text-align: center; border-radius: 12px 12px 0 0; }
+    .eye-container { width: 70px; height: 70px; margin: 0 auto 16px; color: #1a1a2e; }
+    .eye-outer { transition: ry 0.3s ease-in-out; }
+    .eye-pupil { transition: cx 0.1s ease-out, cy 0.1s ease-out, opacity 0.15s ease-in-out; }
+    .observer-header h1 { font-size: 24px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
+    .observer-header p { font-size: 14px; color: #65676b; }
+
+    /* Form styling */
+    .auth0-lock.auth0-lock .auth0-lock-content { padding: 0 !important; }
+    .auth0-lock.auth0-lock .auth0-lock-form { padding: 20px 32px 24px !important; }
+    .auth0-lock.auth0-lock .auth0-lock-input-wrap { border: 1px solid #ddd !important; border-radius: 8px !important; }
+    .auth0-lock.auth0-lock .auth0-lock-input-wrap.auth0-lock-focused { border-color: #0d6efd !important; box-shadow: 0 0 0 3px rgba(13,110,253,0.15) !important; }
+
+    /* Social buttons */
+    .auth0-lock.auth0-lock .auth0-lock-social-button { border-radius: 8px !important; border: 1px solid #ddd !important; }
+
+    /* Fix submit button positioning (Lock uses absolute positioning by default) */
+    .auth0-lock.auth0-lock .auth0-lock-submit { position: relative !important; transform: none !important; }
+
+    /* Links */
+    .auth0-lock.auth0-lock .auth0-lock-alternative { padding: 0 32px 24px !important; }
+
+    /* Mobile - compact layout */
+    @media (max-width: 480px) {
+      .auth0-lock.auth0-lock .auth0-lock-widget { width: calc(100vw - 32px) !important; }
+      .auth0-lock.auth0-lock .auth0-lock-center { padding: 12px 16px !important; }
+      .observer-header { padding: 16px 20px 12px; }
+      .eye-container { width: 50px; height: 50px; margin-bottom: 10px; }
+      .observer-header h1 { font-size: 20px; margin-bottom: 4px; }
+      .observer-header p { font-size: 13px; }
+      .auth0-lock.auth0-lock .auth0-lock-form { padding: 16px !important; }
+      .auth0-lock.auth0-lock .auth0-lock-alternative { padding: 0 16px 16px !important; }
+    }
+  </style>
+</head>
+<body>
+  <script src="https://cdn.auth0.com/js/lock/14.2.3/lock.min.js"></script>
+  <script>
+    var config = JSON.parse(decodeURIComponent(escape(window.atob('@@config@@'))));
+    var lock = new Auth0Lock(config.clientID, config.auth0Domain, {
+      auth: {
+        redirectUrl: config.callbackURL,
+        responseType: (config.internalOptions || {}).response_type || (config.callbackOnLocationHash ? 'token' : 'code'),
+        params: config.internalOptions
+      },
+      configurationBaseUrl: config.clientConfigurationBaseUrl,
+      overrides: { __tenant: config.auth0Tenant, __token_issuer: config.authorizationServer.issuer },
+      assetsUrl: config.assetsUrl,
+      allowedConnections: config.connection ? [config.connection] : null,
+      rememberLastLogin: !config.prompt,
+      language: typeof config.dict === 'string' ? config.dict : undefined,
+      languageDictionary: config.dict?.signin?.title ? { title: config.dict.signin.title } : undefined,
+      languageBaseUrl: config.languageBaseUrl,
+      theme: { primaryColor: '#16a34a' },
+      prefill: config.extraParams?.login_hint ? { email: config.extraParams.login_hint, username: config.extraParams.login_hint } : null,
+      closable: false,
+      allowShowPassword: true,
+      allowSignUp: true
+    });
+
+    lock.on('show', function() {
+      setTimeout(function() {
+        var widget = document.querySelector('.auth0-lock-widget');
+        if (widget && !document.querySelector('.observer-header')) {
+          var header = document.createElement('div');
+          header.className = 'observer-header';
+          header.innerHTML = '<div class="eye-container" id="observer-eye"><svg viewBox="-75 -75 150 150"><ellipse class="eye-outer" id="eye-outer" cx="0" cy="0" rx="67" ry="67" fill="none" stroke="currentColor" stroke-width="12"/><circle class="eye-pupil" id="eye-pupil" cx="0" cy="15" r="18" fill="currentColor"/></svg></div><h1>Welcome</h1><p>Log in to Observer AI to continue to ' + (config.clientName || 'Observer') + '.</p>';
+          widget.insertBefore(header, widget.firstChild);
+          initEye();
+        }
+      }, 100);
+    });
+
+    lock.show();
+
+    function initEye() {
+      var outer = document.getElementById('eye-outer'), pupil = document.getElementById('eye-pupil'), container = document.getElementById('observer-eye');
+      if (!outer || !pupil || !container) return;
+
+      var mousePos = { x: innerWidth / 2, y: innerHeight / 2 }, seeTarget = mousePos, idleTimer = null, isPassword = false, closed = false;
+
+      document.addEventListener('mousemove', function(e) {
+        mousePos = { x: e.clientX, y: e.clientY };
+        if (!isPassword && !idleTimer) { seeTarget = mousePos; updatePupil(); }
+      });
+
+      document.addEventListener('focusin', function(e) {
+        if (e.target.tagName !== 'INPUT') return;
+        isPassword = (e.target.type || '').toLowerCase().includes('password');
+        isPassword ? closeEye() : (openEye(), seeTarget = getCursor(e.target), updatePupil());
+      });
+
+      document.addEventListener('input', function(e) {
+        if (e.target.tagName !== 'INPUT') return;
+        clearTimeout(idleTimer); idleTimer = null;
+        if (isPassword) closeEye();
+        else { seeTarget = getCursor(e.target); openEye(); updatePupil(); }
+        idleTimer = setTimeout(function() { idleTimer = null; seeTarget = mousePos; if (isPassword) openEye(); updatePupil(); }, 2000);
+      });
+
+      document.addEventListener('focusout', function() {
+        setTimeout(function() {
+          if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
+            isPassword = false; openEye(); seeTarget = mousePos; updatePupil();
+          }
+        }, 100);
+      });
+
+      function getCursor(input) {
+        var r = input.getBoundingClientRect();
+        return { x: r.left + Math.min((input.value || '').length * 8 + 10, r.width - 10), y: r.top + r.height / 2 };
+      }
+
+      function updatePupil() {
+        if (!seeTarget || closed) return;
+        var r = container.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        var dx = seeTarget.x - cx, dy = seeTarget.y - cy, angle = Math.atan2(dy, dx);
+        var dist = Math.min(42, Math.sqrt(dx * dx + dy * dy) / 8);
+        pupil.setAttribute('cx', Math.cos(angle) * dist);
+        pupil.setAttribute('cy', Math.sin(angle) * dist);
+      }
+
+      function closeEye() {
+        if (closed) return; closed = true;
+        pupil.setAttribute('cx', 0); pupil.setAttribute('cy', 0);
+        outer.setAttribute('ry', 6);
+        setTimeout(function() { pupil.style.opacity = 0; }, 100);
+      }
+
+      function openEye() {
+        if (!closed) return; closed = false;
+        outer.style.transition = 'ry 0.06s ease-out';
+        outer.setAttribute('ry', 67);
+        pupil.style.opacity = 1;
+        seeTarget = mousePos; updatePupil();
+        setTimeout(function() { outer.style.transition = 'ry 0.3s ease-in-out'; }, 100);
+      }
+    }
+  </script>
+</body>
+</html>
