@@ -281,7 +281,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       }
       if (tryMark) {
         try {
-          const hit = await handleMarkedClick(buffer, config, log);
+          const hit = await handleMarkedClick(buffer, config, log, caption);
           if (hit) {
             // Click and send back new screenshot as confirmation
             await pc.click(hit.x, hit.y);
@@ -334,12 +334,30 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote} in my downloads. (/downloads lists them)`, rawMsg);
   }
 
-  async function handleMarkedClick(buffer, config, log) {
+  function parseMarkColor(caption) {
+    const low = String(caption ?? '').toLowerCase();
+    if (/\bgreen\b|\bhara\b|\bhari\b|\bharA\b/.test(low)) return 'green';
+    if (/\bblue\b|\bneela\b|\bneeli\b/.test(low)) return 'blue';
+    if (/\byellow\b|\bpeela\b|\bpeeli\b/.test(low)) return 'yellow';
+    if (/\bred\b|\blal\b/.test(low)) return 'red';
+    return 'red'; // default
+  }
+  function isColorMarked(r,g,b,a, color) {
+    if (a < 40) return false;
+    if (color === 'green') return g > 130 && r < 120 && b < 120 && (g - r) > 25 && (g - b) > 25;
+    if (color === 'blue') return b > 130 && r < 120 && g < 120 && (b - r) > 25 && (b - g) > 25;
+    if (color === 'yellow') return r > 140 && g > 140 && b < 100 && (r - b) > 40 && (g - b) > 40;
+    // red default (lenient for JPEG)
+    return r > 130 && g < 130 && b < 130 && (r - g) > 30 && (r - b) > 30;
+  }
+  async function handleMarkedClick(buffer, config, log, caption='') {
     // If we have the original screenshot we sent, diff only NEW red pixels (so YouTube red icons in dock are ignored)
     let baseBuffer = state.lastSentImage && (Date.now() - state.lastSentImageAt < 5*60*1000) ? state.lastSentImage : null;
     // Try 1: red-pen detection via sharp (fast, offline, no AI)
     try {
       const sharp = (await import('sharp')).default;
+      const markColor = parseMarkColor(caption);
+      log?.info?.(`[wa] mark color: ${markColor} for "${caption.slice(0,40)}"`);
       // Prepare marked image raw
       const marked = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
       let baseRaw = null, baseInfo = null;
@@ -359,12 +377,12 @@ export function createWhatsApp({ config, store, agent, log = console }) {
           const idx = (y * marked.info.width + x) * stride;
           const r = marked.data[idx], g = marked.data[idx+1], b = marked.data[idx+2], a = marked.data[idx+3];
           // JPEG compresses red to ~R140-200, so be lenient; also check R dominance
-          const isRedMarked = r > 130 && g < 130 && b < 130 && (r - g) > 30 && (r - b) > 30 && a > 40;
+          const isRedMarked = isColorMarked(r,g,b,a, markColor);
           if (!isRedMarked) continue;
           // If we have base, check if base was already red there — then it's not a new mark (e.g. YouTube icon)
           if (baseRaw) {
             const bR = baseRaw.data[idx], bG = baseRaw.data[idx+1], bB = baseRaw.data[idx+2];
-            const isRedBase = bR > 130 && bG < 130 && bB < 130 && (bR - bG) > 30 && (bR - bB) > 30;
+            const isRedBase = isColorMarked(bR,bG,bB,255, markColor);
             if (isRedBase) continue; // dock icon, not user mark
           }
           sumX += x; sumY += y; count++;
