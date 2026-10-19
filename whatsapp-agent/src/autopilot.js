@@ -36,6 +36,8 @@ const WEB_URLS = {
   copilot: 'https://copilot.microsoft.com',
   arena: 'https://arena.ai',
   'arena ai': 'https://arena.ai',
+  agent: 'https://arena.ai',
+  'agent mode': 'https://arena.ai',
 };
 
 function clean(s) { return String(s ?? '').replace(/\s+/g, ' ').trim(); }
@@ -176,11 +178,30 @@ export async function runAutopilot(rawTask, { config, log } = {}) {
         const url = resolveWebUrl(target);
         if (url) {
           log?.info?.(`[auto] opening URL ${url} for "${target}"`);
-          await pc.openTarget(url);
-          outLines[outLines.length - 1] += ` → opened ${url}`;
+          try {
+            await pc.openTarget(url);
+            outLines[outLines.length - 1] += ` → opened ${url}`;
+          } catch (e) {
+            // Fallback: try desktop app if URL open fails
+            log?.info?.(`[auto] URL open failed (${e.message}), trying desktop app "${target}"`);
+            const r = await apps.launchApp(target);
+            outLines[outLines.length - 1] += ` → ${r.text} (fallback)`;
+          }
         } else {
-          const r = await apps.launchApp(target);
-          outLines[outLines.length - 1] += ` → ${r.text}`;
+          try {
+            const r = await apps.launchApp(target);
+            outLines[outLines.length - 1] += ` → ${r.text}`;
+          } catch (e) {
+            // If desktop app not found but it's a known web app alias (agent/arena), try URL
+            const fbUrl = target.toLowerCase().includes('agent') ? WEB_URLS['agent'] : null;
+            if (fbUrl && /couldn't find an app|could not find|not found/i.test(String(e.message))) {
+              log?.info?.(`[auto] app "${target}" not found, falling back to URL ${fbUrl}`);
+              await pc.openTarget(fbUrl);
+              outLines[outLines.length - 1] += ` → opened ${fbUrl} (desktop miss, URL fallback)`;
+            } else {
+              throw e;
+            }
+          }
         }
         await sleep(waitAfterOpen);
       } else if (st.op === 'tap') {
