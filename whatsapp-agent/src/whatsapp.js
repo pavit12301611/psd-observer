@@ -266,9 +266,24 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       // Marked screenshot -> click where user marked (red pen)
       // User flow: /screenshot -> mark red dot where to click -> send back with caption "click here / yahan click karo / tap this"
       const lowerCap = caption.toLowerCase();
-      const isClickMark = /click|tap|press|dabao|yahan|ispe|here|this|mark|nishan/i.test(caption) && caption.length < 80;
+      const isClickMark = /click|tap|press|dabao|yahan|ispe|here|this|mark|nishan|yes pe|no pe/i.test(caption) && caption.length < 120;
       // Also treat any image that looks like an edited screenshot with red annotation even without caption?
       // Check for red pen quickly via image analysis if caption is empty but image is from downloads (previous screenshot)
+      // If caption says "yes pe click", just OCR the live screen for "Yes" — far more reliable than red-pixel math
+      let captionTarget = extractClickTarget(caption);
+      if (captionTarget) {
+        try {
+          log?.info?.(`[wa] caption target "${captionTarget}" from "${caption.slice(0,60)}" — locating on live screen`);
+          const hit = await finder.locateOnScreen(config, captionTarget, log);
+          await pc.click(hit.x, hit.y);
+          const after = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+          const tip = `🎯 Clicked "${hit.matched}" @ ${hit.x},${hit.y} (${hit.source}${hit.confidence ? ` ${hit.confidence}%` : ''}) — from your caption "${captionTarget}"`;
+          if (after) return transportSend(chatJid, { image: after, text: tip }, rawMsg);
+          return transportSend(chatJid, tip, rawMsg);
+        } catch (e) {
+          log.info?.(`[wa] caption target locate failed (${e.message}), falling back to red-mark detection`);
+        }
+      }
       let tryMark = isClickMark;
       if (!tryMark && !caption && buffer.length > 5000) {
         // Heuristic: if user just sends back a screenshot with no caption, check if it's likely a marked one
@@ -334,6 +349,23 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote} in my downloads. (/downloads lists them)`, rawMsg);
   }
 
+  function extractClickTarget(caption) {
+    const low = String(caption ?? '').toLowerCase();
+    // Common UI labels - if caption mentions them near click, use that directly via OCR on live screen
+    const labels = ['yes','no','battle','agent','auto','ok','cancel','submit','send','save','allow','deny','close','open','next','back','login','sign in','search'];
+    for (const lab of labels) {
+      if (low.includes(lab) && /click|tap|press|dabao|yahan|ispe|here|kar/i.test(low)) return lab;
+    }
+    // Try to extract word after "click" e.g. "click on Yes"
+    const m = low.match(/click\s+(?:on\s+)?([a-z0-9_ ]{2,20})/);
+    if (m) return m[1].trim();
+    const m2 = low.match(/tap\s+(?:on\s+)?([a-z0-9_ ]{2,20})/);
+    if (m2) return m2[1].trim();
+    // Hindi: "yes pe click"
+    const m3 = low.match(/([a-z0-9_ ]{2,20})\s+pe\s+click/);
+    if (m3) return m3[1].trim();
+    return null;
+  }
   function parseMarkColor(caption) {
     const low = String(caption ?? '').toLowerCase();
     if (/\bgreen\b|\bhara\b|\bhari\b|\bharA\b/.test(low)) return 'green';
