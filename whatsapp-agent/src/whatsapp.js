@@ -115,6 +115,8 @@ export function createWhatsApp({ config, store, agent, log = console }) {
     stopped: false,
     simulated: [], // dry-run sent log for tests/dashboard
     downloadMediaMessage: null, // set by start() from the lazily loaded Baileys
+    lastSentImage: null, // last screenshot we sent to owner — used to diff red marks
+    lastSentImageAt: 0,
   };
 
   const status = () =>
@@ -165,6 +167,8 @@ export function createWhatsApp({ config, store, agent, log = console }) {
       return;
     }
     if (reply.image) {
+      // Remember last image we sent — so when owner marks it red and sends back, we can diff only the NEW red pixels (ignores YouTube/brave red icons in dock)
+      try { state.lastSentImage = Buffer.from(reply.image); state.lastSentImageAt = Date.now(); } catch {}
       await send({ image: reply.image, caption: reply.text?.slice(0, 1000) });
       for (const extra of reply.extraImages ?? []) await send({ image: extra });
       return;
@@ -331,27 +335,42 @@ export function createWhatsApp({ config, store, agent, log = console }) {
   }
 
   async function handleMarkedClick(buffer, config, log) {
+    // If we have the original screenshot we sent, diff only NEW red pixels (so YouTube red icons in dock are ignored)
+    let baseBuffer = state.lastSentImage && (Date.now() - state.lastSentImageAt < 5*60*1000) ? state.lastSentImage : null;
     // Try 1: red-pen detection via sharp (fast, offline, no AI)
     try {
       const sharp = (await import('sharp')).default;
-      const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-      // Scan for red pixels: R>180, G<90, B<90, A>80  (user's phone red pen)
+      // Prepare marked image raw
+      const marked = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      let baseRaw = null, baseInfo = null;
+      if (baseBuffer) {
+        try {
+          // Resize base to match marked dimensions (WhatsApp may have recompressed/resized)
+          baseRaw = await sharp(baseBuffer).resize(marked.info.width, marked.info.height, { fit: 'fill' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+          baseInfo = baseRaw.info;
+        } catch {}
+      }
+      // Scan for NEW red pixels: red in marked but not red in base
       let sumX = 0, sumY = 0, count = 0;
-      let minX = info.width, minY = info.height, maxX = 0, maxY = 0;
+      let minX = marked.info.width, minY = marked.info.height, maxX = 0, maxY = 0;
       const stride = 4;
-      for (let y = 0; y < info.height; y++) {
-        for (let x = 0; x < info.width; x++) {
-          const idx = (y * info.width + x) * stride;
-          const r = data[idx], g = data[idx+1], b = data[idx+2], a = data[idx+3];
-          const isRed = r > 170 && g < 110 && b < 110 && a > 60;
-          // Also accept pure red circle with white border: allow slightly less strict for high R
-          if (isRed) {
-            sumX += x; sumY += y; count++;
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
+      for (let y = 0; y < marked.info.height; y++) {
+        for (let x = 0; x < marked.info.width; x++) {
+          const idx = (y * marked.info.width + x) * stride;
+          const r = marked.data[idx], g = marked.data[idx+1], b = marked.data[idx+2], a = marked.data[idx+3];
+          const isRedMarked = r > 170 && g < 110 && b < 110 && a > 60;
+          if (!isRedMarked) continue;
+          // If we have base, check if base was already red there — then it's not a new mark (e.g. YouTube icon)
+          if (baseRaw) {
+            const bR = baseRaw.data[idx], bG = baseRaw.data[idx+1], bB = baseRaw.data[idx+2];
+            const isRedBase = bR > 170 && bG < 110 && bB < 110;
+            if (isRedBase) continue; // dock icon, not user mark
           }
+          sumX += x; sumY += y; count++;
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
         }
       }
       if (count > 20 && count < 50000) {
@@ -371,8 +390,8 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         // If we have screen size, scale marked coords to screen coords
         let sx = cx, sy = cy;
         if (screenSize) {
-          sx = Math.round((cx / info.width) * screenSize.width);
-          sy = Math.round((cy / info.height) * screenSize.height);
+          sx = Math.round((cx / marked.info.width) * screenSize.width);
+          sy = Math.round((cy / marked.info.height) * screenSize.height);
         }
         return { x: sx, y: sy, source: 'red-mark', confidence: Math.min(95, Math.round(50 + Math.min(count/200, 40))), matched: 'marked spot', width: w, height: h };
       }
