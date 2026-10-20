@@ -46,13 +46,25 @@ function systemPrompt(config, store) {
 
 async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
   if (model.provider === 'ollama') {
-    const data = await postJson(`${config.ollamaUrl}/api/chat`, {
+    const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
       model: model.model,
       messages,
       stream: false,
     }, {}, timeoutMs);
     const text = data.message?.content?.trim();
     if (!text) throw new Error('empty Ollama response');
+    return { text, provider: model.label, model: model.model };
+  }
+  if (model.provider === 'local') {
+    // llama.cpp's llama-server, LM Studio, vLLM, koboldcpp … all speak this.
+    const data = await postJson(`${model.baseUrl}/chat/completions`, {
+      model: model.model,
+      messages,
+      temperature: 0.3,
+      stream: false,
+    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, timeoutMs);
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) throw new Error('empty local model response');
     return { text, provider: model.label, model: model.model };
   }
   if (model.provider === 'gemini') {
@@ -137,12 +149,28 @@ export async function complete(config, prompt, log = console) {
 
 async function visionCall(model, config, prompt, imageBase64, mime = 'image/png') {
   if (model.provider === 'ollama') {
-    const data = await postJson(`${config.ollamaUrl}/api/chat`, {
+    const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
       model: model.model,
       stream: false,
       messages: [{ role: 'user', content: prompt, images: [imageBase64] }],
     });
     return data.message?.content?.trim() || null;
+  }
+  if (model.provider === 'local') {
+    // OpenAI-style vision (llama.cpp with an mmproj / unified multimodal GGUF).
+    const data = await postJson(`${model.baseUrl}/chat/completions`, {
+      model: model.model,
+      temperature: 0.2,
+      stream: false,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
+        ],
+      }],
+    }, { authorization: `Bearer ${model.apiKey || 'local'}` });
+    return data.choices?.[0]?.message?.content?.trim() || null;
   }
   if (model.provider === 'gemini') {
     const data = await postJson(
@@ -215,26 +243,55 @@ export async function locateInImage(config, imageBase64, description, log = cons
   }
 }
 
-/** For /model: what brains are configured, and whether Ollama is actually up. */
+/** For /model: what brains are configured, and whether they are actually up. */
 export async function aiStatus(config) {
-  const lines = [`Provider mode: *${config.aiProvider}*`];
-  try {
-    const res = await fetch(`${config.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3_000) });
-    if (!res.ok) throw new Error(String(res.status));
-    const data = await res.json();
-    const models = (data.models ?? []).map((m) => m.name);
-    lines.push(`✅ Ollama is running locally — models: ${models.join(', ') || '(none pulled yet)'}`);
-    if (!models.some((m) => m.startsWith(config.ollamaModel))) {
-      lines.push(`⬇️ Your configured model ${config.ollamaModel} isn't pulled yet: \`ollama pull ${config.ollamaModel}\``);
+  const mode = String(config.aiProvider || 'auto');
+  const localOnly = mode === 'local' || mode === 'llamacpp';
+  const lines = [`Provider mode: *${mode}*${localOnly ? ' — sirf is PC, koi cloud nahi' : ''}`];
+
+  // llama.cpp / LM Studio / vLLM: the fully-local path.
+  if (config.localApiUrl) {
+    try {
+      const res = await fetch(`${config.localApiUrl}/models`, { signal: AbortSignal.timeout(2_500) });
+      const data = res.ok ? await res.json() : null;
+      const ids = (data?.data ?? []).map((m) => m.id).filter(Boolean);
+      lines.push(`🏠 Local server: ✅ ${config.localApiUrl}${ids.length ? ` — ${ids.join(', ')}` : ''}`);
+    } catch {
+      lines.push(`🏠 Local server: ❌ not reachable at ${config.localApiUrl}`);
+      lines.push('   start it: ./scripts/local-models.sh serve <model>   (or: systemctl --user start observer-model)');
     }
-  } catch {
-    lines.push(`❌ Ollama not reachable at ${config.ollamaUrl} (install free from ollama.com, then \`ollama pull ${config.ollamaModel}\`)`);
+    if (config.localModelSmall) lines.push(`   small: ${config.localModelSmall} @ ${config.localApiUrlSmall || '(unset)'}`);
+    if (config.localModelHeavy) lines.push(`   heavy: ${config.localModelHeavy} @ ${config.localApiUrlHeavy || '(unset)'}`);
+    if (config.localModelVision) lines.push(`👁️ local vision: ${config.localModelVision}`);
+  } else if (localOnly) {
+    lines.push('🏠 Local server: ❌ LOCAL_API_URL not set');
+    lines.push('   ./scripts/local-models.sh recommend   →   ./scripts/local-models.sh setup <model>');
   }
-  lines.push(config.groqApiKey ? '✅ Groq free-tier key set' : '— Groq key not set (optional)');
-  lines.push(config.geminiApiKey ? '✅ Gemini free-tier key set' : '— Gemini key not set (optional)');
-  lines.push(config.openrouterApiKey ? '✅ OpenRouter key set' : '— OpenRouter key not set (optional)');
-  lines.push(config.ollamaVisionModel ? `👁️ Vision model: ${config.ollamaVisionModel}` : '👁️ No local vision model (set OLLAMA_VISION_MODEL) — photos go to Gemini if its key is set');
-  lines.push('', '_/brains shows workload routing + live health._');
+
+  // Ollama, unless the owner pinned another mode.
+  if (!localOnly && mode !== 'groq' && mode !== 'gemini' && mode !== 'openrouter') {
+    try {
+      const res = await fetch(`${config.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3_000) });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      const models = (data.models ?? []).map((m) => m.name);
+      lines.push(`✅ Ollama running — models: ${models.join(', ') || '(none pulled yet)'}`);
+      if (!models.some((m) => m.startsWith(config.ollamaModel))) {
+        lines.push(`⬇️ ${config.ollamaModel} isn't pulled yet: \`ollama pull ${config.ollamaModel}\``);
+      }
+    } catch {
+      lines.push(`— Ollama not reachable at ${config.ollamaUrl} (optional if you use llama.cpp or a cloud key)`);
+    }
+  }
+
+  if (!localOnly) {
+    lines.push(config.groqApiKey ? '✅ Groq free-tier key set' : '— Groq key not set (optional)');
+    lines.push(config.geminiApiKey ? '✅ Gemini free-tier key set' : '— Gemini key not set (optional)');
+    lines.push(config.openrouterApiKey ? '✅ OpenRouter key set' : '— OpenRouter key not set (optional)');
+  }
+  if (config.ollamaVisionModel && !localOnly) lines.push(`👁️ Ollama vision model: ${config.ollamaVisionModel}`);
+
+  lines.push('', '_/brains shows workload routing + live health. Local guide: LOCAL-MODELS.md_');
   return lines.join('\n');
 }
 

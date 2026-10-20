@@ -1,4 +1,4 @@
-# 👁️ Observer Agent 2.0 — your PC, in your pocket
+# 👁️ Observer Agent 2.2 — your PC, in your pocket
 
 A personal agent that runs on **your own Fedora/Linux computer for ₹0** and is
 driven from **WhatsApp** *and* from an **installable phone app** — no Observer
@@ -6,7 +6,7 @@ app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 
 - 💬 **Native WhatsApp** (linked device, [Baileys](https://github.com/WhiskeySockets/Baileys)) — agent number `+91 88595 55795`, listens **only** to you (`+91 95289 23866`), everyone else gets complete silence.
 - 📱 **Phone app (PWA)** — open `http://<PC-IP>:8787/`, enter the PIN, "Add to Home screen". Chat, quick controls, files, QR linking — full-screen, works offline as a shell.
-- 🧠 **Free AI with real tools** — local Ollama (offline/private) or free-tier Groq/Gemini/OpenRouter. Plain language becomes multi-step actions on the PC.
+- 🧠 **Free AI with real tools** — run it **100% local** with a Hugging Face GGUF on llama.cpp (`./scripts/local-models.sh setup best`, no key, offline) or use Ollama / free-tier Groq/Gemini/OpenRouter. Plain language becomes multi-step actions on the PC, routed by workload.
 - ⚡ **Offline intents** — even with **no AI at all**, "chrome kholo", "screenshot bhej do", "wifi off karo", "thesis.pdf dhundo" work instantly.
 - 🖥️ **Full PC control** — open *any* installed app, files, screenshots, OCR, typing/clicking, Wi-Fi/Bluetooth, volume/brightness/music, download links, zip, webcam, screen recording, services, processes, power.
 - 🎙️ **Voice notes & documents** — voice notes are transcribed (free), photos are OCR'd, PDFs/DOCX are read and summarised — then acted on like text.
@@ -319,6 +319,39 @@ not work. That is deliberate. If you need package installs from WhatsApp,
 enable shell **and** remove that line from the unit (your PC, your call).
 
 ---
+
+## 7z. 100% local models (Hugging Face GGUF, llama.cpp)
+
+No key, no quota, nothing leaves the PC. One command:
+
+```bash
+./scripts/local-models.sh recommend      # what fits THIS machine
+./scripts/local-models.sh setup best     # download + serve + wire
+```
+
+Then WhatsApp `/brains` shows the local model live. Full guide (model picks,
+`hf download` commands, quant advice, multi-model ports):
+[`LOCAL-MODELS.md`](LOCAL-MODELS.md).
+
+| Machine | Model | Hugging Face |
+|---|---|---|
+| 24 GB+ | Qwen3.8-27B (vision, agentic) | `unsloth/Qwen3.8-27B-GGUF` |
+| 16–24 GB CPU laptop | Gemma 4 26B-A4B (MoE, fast) | `ggml-org/gemma-4-26B-A4B-it-GGUF` |
+| 12–16 GB | Gemma 4 12B (vision, 256K ctx) | `ggml-org/gemma-4-12B-it-GGUF` |
+| 6–8 GB | Qwen3.5-4B | `unsloth/Qwen3.5-4B-GGUF` |
+| 2–4 GB | Qwen3.5-0.8B | `unsloth/Qwen3.5-0.8B-GGUF` |
+
+`.env` after wiring:
+
+```env
+AI_PROVIDER=local                              # never falls back to cloud
+LOCAL_API_URL=http://127.0.0.1:8080/v1
+LOCAL_MODEL=unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
+```
+
+Optional extra ports give the workload router a tiny model for one-liners, a
+big one for heavy jobs, and a vision model for photos (the setup script does
+this automatically).
 
 ## 7a. Workload routing — the right brain for the job (2.1)
 

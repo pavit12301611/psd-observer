@@ -7,6 +7,11 @@
 > and actually *does things* — open any app, files, screenshots, OCR, typing,
 > Wi-Fi/Bluetooth, downloads, recording, reminders, free local AI, and more.
 >
+> **2.2 = 100% local:** `./scripts/local-models.sh setup best` pulls a current
+> Hugging Face GGUF (Qwen3.8-27B, Gemma 4, gpt-oss-20b, Qwen3.5), serves it with
+> llama.cpp and wires the agent to it — no key, no cloud, works offline. Model
+> picks + exact `hf download` commands: [`whatsapp-agent/LOCAL-MODELS.md`](whatsapp-agent/LOCAL-MODELS.md).
+>
 > **2.1 fixes `/agent`:** it now actually performs the task (verified steps, real
 > tool calls) and says "step N pe ruk gaya" instead of pretending success — plus
 > **workload routing** (`/brains`): tiny jobs go to a small local model, heavy jobs

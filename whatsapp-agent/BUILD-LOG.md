@@ -65,6 +65,35 @@ chahe typing kisi random window me chali jaye. Koi verification nahi thi, aur
 
 ---
 
+## 2.2 — sab kuch local (Hugging Face + llama.cpp)
+
+Owner ne bola: "mereko sab local chahiye, aaj kal acche models aa rahe hain,
+Hugging Face se download command de do, local run karunga."
+
+Kya bana:
+
+| Cheez | Kahan |
+|---|---|
+| Naya provider `local` (OpenAI-compatible: llama.cpp / LM Studio / vLLM) | `src/router.js`, `src/ai.js`, `src/agentloop.js` |
+| Config: `AI_PROVIDER=local`, `LOCAL_API_URL`, `LOCAL_MODEL`, `_SMALL/_HEAVY/_VISION` | `src/config.js`, `.env.example` |
+| Download + serve + wire + systemd, ek script se | `scripts/local-models.sh` |
+| Guide: kaunsa model kis RAM pe, exact `hf download` commands, quants | `LOCAL-MODELS.md` |
+| `/doctor` + `/model` me local server check | `src/doctor.js`, `src/ai.js` |
+| Tests (fake llama-server): tools, chat, vision, dead server | `test/local.test.js` (9) |
+
+Model shortlist (Oct 2026, Hugging Face pe verified):
+
+- `unsloth/Qwen3.8-27B-GGUF` — best overall, vision + agentic, UD-Q4_K_XL ~17.9 GB
+- `ggml-org/gemma-4-26B-A4B-it-GGUF` — MoE (4B active), CPU laptop ka best
+- `unsloth/gpt-oss-20b-GGUF` — reasoning + tools
+- `ggml-org/gemma-4-12B-it-GGUF` — vision + 256K ctx, 7.4 GB
+- `unsloth/Qwen3.5-4B-GGUF` / `-0.8B-GGUF` — laptop / tiny slot
+
+`AI_PROVIDER=local` = cloud fallback **kabhi nahi**. Photos local vision model
+se, OCR local tesseract se, voice local whisper.cpp se — sab PC pe.
+
+---
+
 ## 0. Ek nazar me (timeline)
 
 | # | Commit | Kya hua | Tests | Tools |
@@ -80,6 +109,7 @@ chahe typing kisi random window me chali jaye. Koi verification nahi thi, aur
 | 9 | `4314fd8` | **Screenshot banti thi par chat me nahi aati** — signal + file watch | 41 | 60 |
 | 10 | `bff22b0` | **500-character typing limit hata diya** + `/pc paste` | 44 | 61 |
 | 11 | *2.1* | **`/agent` fix** (verified steps, no fake "done") + **workload routing** (`/brains`) | 69 | 61 |
+| 12 | *2.2* | **100% local**: Hugging Face GGUF + llama.cpp provider, `local-models.sh` (download/serve/wire/systemd) | 78 | 61 |
 
 Verify karna ho (sab curl, git zero):
 

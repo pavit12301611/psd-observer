@@ -118,7 +118,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     return {
       name: model.label,
       async step(messages) {
-        const data = await postJson(`${config.ollamaUrl}/api/chat`, {
+        const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
           model: model.model,
           messages,
           tools: selectedTools,
@@ -146,6 +146,8 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     const base = {
       groq: { url: 'https://api.groq.com/openai/v1', key: config.groqApiKey },
       openrouter: { url: 'https://openrouter.ai/api/v1', key: config.openrouterApiKey },
+      // Local llama.cpp / LM Studio / vLLM: no account, no quota, no network.
+      local: { url: model.baseUrl, key: model.apiKey || config.localApiKey || 'local' },
     }[model.provider];
     if (!base) throw new Error(`unknown OpenAI-compatible provider ${model.provider}`);
     const openAiTools = selectedTools.map((t) => ({ type: 'function', function: t }));

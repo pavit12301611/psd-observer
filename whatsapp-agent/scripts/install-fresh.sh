@@ -97,7 +97,7 @@ if [ "$FORCE" -eq 1 ]; then
     cp -a "$SRC/whatsapp-agent/$item" "$DEST/${item}.new" 2>/dev/null || continue
     rm -rf "$DEST/$item"; mv "$DEST/${item}.new" "$DEST/$item"
   done
-  for file in package.json package-lock.json README.md QUICKSTART.md .env.example start.sh docker-compose.yml Containerfile; do
+  for file in package.json package-lock.json README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh docker-compose.yml Containerfile; do
     [ -f "$SRC/whatsapp-agent/$file" ] && cp -a "$SRC/whatsapp-agent/$file" "$DEST/$file"
   done
 else

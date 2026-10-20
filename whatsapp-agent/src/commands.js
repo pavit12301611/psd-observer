@@ -34,8 +34,9 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • “wifi off karo” · “screen pe kya hai” · “thesis.pdf dhundo”
 • “download <link>” · “10 second screen record karo” · “type karo hello”
 • /agent <task> — samajhta hai aur PC pe *karke* dikhata hai (verified, no fake "done")
-• /brains — kaun sa free model kab use hota hai (live health + power budget)
-• /model — free brains ka setup/status
+• /brains — kaun sa model kab use hota hai (live health + power budget)
+• /model — brains ka setup/status (local + cloud)
+• 100% local chahiye? ./scripts/local-models.sh recommend — Hugging Face GGUF, koi cloud nahi
 
 *Apps & windows*
 • /apps · /open <app> · /close <app> · /windows · /focus <title>

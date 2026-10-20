@@ -134,7 +134,7 @@ BACKUP="$HOME/observer-agent-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
 say "Backing up current code → $BACKUP"
 ( cd "$DEST" && tar -czf "$BACKUP" \
     src webapp test scripts systemd package.json package-lock.json \
-    README.md QUICKSTART.md .env.example start.sh docker-compose.yml Containerfile 2>/dev/null \
+    README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh docker-compose.yml Containerfile 2>/dev/null \
     || warn "backup was partial (some files didn't exist yet)" ) || warn "backup failed — continuing anyway"
 
 say "Copying code (your .env / auth_info / data are left alone)"
@@ -145,7 +145,7 @@ for item in src webapp test scripts systemd; do
   rm -rf "$DEST/$item"
   mv "$DEST/$item.new" "$DEST/$item"
 done
-for file in package.json package-lock.json README.md QUICKSTART.md .env.example start.sh docker-compose.yml Containerfile; do
+for file in package.json package-lock.json README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh docker-compose.yml Containerfile; do
   [ -f "$AGENT_SRC/$file" ] && cp -a "$AGENT_SRC/$file" "$DEST/$file"
 done
 chmod +x "$DEST"/scripts/*.sh "$DEST/start.sh" 2>/dev/null || true

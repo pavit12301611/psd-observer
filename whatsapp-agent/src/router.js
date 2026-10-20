@@ -197,9 +197,49 @@ export function buildCatalog(config = {}) {
       vision: Boolean(m.vision),
       tools: m.tools !== false,
       quality: m.quality ?? inferQuality(m.model, 5),
+      baseUrl: m.baseUrl ?? '',
+      apiKey: m.apiKey ?? '',
       note: m.note ?? '',
     });
   };
+
+  // ── Local OpenAI-compatible server (llama.cpp / LM Studio / vLLM) ───────
+  // Any Hugging Face GGUF served by llama-server lands here. Free, private,
+  // and usually the fastest option because there is no network at all.
+  if (config.localApiUrl) {
+    const mainName = config.localModel || 'local-model';
+    if (config.localApiUrlSmall && config.localModelSmall) {
+      add({
+        provider: 'local', model: config.localModelSmall, baseUrl: config.localApiUrlSmall, apiKey: config.localApiKey,
+        label: `Local · ${config.localModelSmall}`, local: true, minTier: 1, maxTier: 2, speed: 6, tools: true,
+        quality: Math.min(4, inferQuality(config.localModelSmall, 3)),
+      });
+    }
+    add({
+      provider: 'local', model: mainName, baseUrl: config.localApiUrl, apiKey: config.localApiKey,
+      label: `Local · ${mainName}`, local: true,
+      minTier: config.localApiUrlSmall ? 2 : 1,
+      maxTier: config.localApiUrlHeavy ? 3 : 4,
+      speed: config.localApiUrlSmall ? 4 : 3,
+      tools: true,
+      quality: inferQuality(mainName, 5),
+    });
+    if (config.localApiUrlHeavy && config.localModelHeavy) {
+      add({
+        provider: 'local', model: config.localModelHeavy, baseUrl: config.localApiUrlHeavy, apiKey: config.localApiKey,
+        label: `Local · ${config.localModelHeavy}`, local: true, minTier: 3, maxTier: 4, speed: 2, tools: true,
+        quality: inferQuality(config.localModelHeavy, 6),
+      });
+    }
+    if (config.localApiUrlVision && config.localModelVision) {
+      add({
+        provider: 'local', model: config.localModelVision, baseUrl: config.localApiUrlVision, apiKey: config.localApiKey,
+        label: `Local vision · ${config.localModelVision}`, local: true,
+        minTier: 1, maxTier: 4, speed: 2, vision: true, tools: false,
+        quality: inferQuality(config.localModelVision, 5), note: 'sees images',
+      });
+    }
+  }
 
   // ── Ollama (this PC): free, private, no quota ────────────────────────────
   const main = config.ollamaModel || 'llama3.2';
@@ -207,16 +247,16 @@ export function buildCatalog(config = {}) {
   const heavy = config.ollamaModelHeavy || '';
 
   if (small && small !== main) {
-    add({ provider: 'ollama', model: small, label: `Ollama (local) · ${small}`, local: true, minTier: 1, maxTier: 2, speed: 5, tools: true, quality: Math.min(4, inferQuality(small, 3)) });
+    add({ provider: 'ollama', model: small, baseUrl: config.ollamaUrl, label: `Ollama (local) · ${small}`, local: true, minTier: 1, maxTier: 2, speed: 5, tools: true, quality: Math.min(4, inferQuality(small, 3)) });
   }
-  add({ provider: 'ollama', model: main, label: `Ollama (local) · ${main}`, local: true, minTier: small ? 2 : 1, maxTier: heavy ? 3 : 4, speed: small ? 4 : 3, tools: true, quality: inferQuality(main, 3) });
+  add({ provider: 'ollama', model: main, baseUrl: config.ollamaUrl, label: `Ollama (local) · ${main}`, local: true, minTier: small ? 2 : 1, maxTier: heavy ? 3 : 4, speed: small ? 4 : 3, tools: true, quality: inferQuality(main, 3) });
   if (heavy && heavy !== main) {
-    add({ provider: 'ollama', model: heavy, label: `Ollama (local) · ${heavy}`, local: true, minTier: 3, maxTier: 4, speed: 2, tools: true, quality: inferQuality(heavy, 6) });
+    add({ provider: 'ollama', model: heavy, baseUrl: config.ollamaUrl, label: `Ollama (local) · ${heavy}`, local: true, minTier: 3, maxTier: 4, speed: 2, tools: true, quality: inferQuality(heavy, 6) });
   }
   // A dedicated vision model (llava / qwen2.5-vl / moondream …)
   if (config.ollamaVisionModel) {
     add({
-      provider: 'ollama', model: config.ollamaVisionModel,
+      provider: 'ollama', model: config.ollamaVisionModel, baseUrl: config.ollamaUrl,
       label: `Ollama vision · ${config.ollamaVisionModel}`,
       local: true, minTier: 1, maxTier: 4, speed: 2, vision: true, tools: false,
       quality: inferQuality(config.ollamaVisionModel, 5),
@@ -305,6 +345,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     if (want === 'none') return false;
     if (want === 'auto') return true;
     if (want === 'local') return model.local;
+    if (want === 'llamacpp' || want === 'llama.cpp' || want === 'llama-server') return model.provider === 'local';
     return model.provider === want;
   }
 
@@ -496,6 +537,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       ].join('\n');
     }
     pruneHeavy();
+    const visible = catalog.filter((m) => providerAllowed(m));
     const line = (m) => {
       const h = health.get(m.id);
       const cooling = h && h.cooldownUntil > Date.now();
@@ -503,17 +545,25 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       const tiers = m.minTier === m.maxTier ? RANK_TIER[m.minTier] : `${RANK_TIER[m.minTier]}→${RANK_TIER[m.maxTier]}`;
       const bits = [tiers];
       if (m.vision) bits.push('vision');
-      if (m.local) bits.push('local');
+      if (m.local) bits.push(m.provider === 'local' ? 'llama.cpp' : 'ollama');
+      if (m.baseUrl) {
+        try { bits.push(new URL(m.baseUrl).port || '80'); } catch { /* plain name */ }
+      }
       if (h?.calls) bits.push(`${h.ok}/${h.calls} ok · ${avgMs(h)}ms`);
       const tail = cooling ? ` · cooling ${Math.ceil((h.cooldownUntil - Date.now()) / 1000)}s` : h?.lastError && h.lastOk === false ? ` · ${h.lastError.slice(0, 50)}` : '';
       return `${icon} ${m.label} — ${bits.join(' · ')}${tail}`;
     };
-    const local = catalog.filter((m) => m.local);
-    const cloud = catalog.filter((m) => !m.local);
+    const local = visible.filter((m) => m.local);
+    const cloud = visible.filter((m) => !m.local);
     const out = ['🧠 *Brains & routing*'];
     out.push(`Mode: ${config.aiProvider || 'auto'} · preference: ${prefer} · tiers tiny→light→standard→heavy`);
     if (local.length) out.push('', '*Local (free, private)*', ...local.map(line));
     if (cloud.length) out.push('', '*Cloud (free tiers)*', ...cloud.map(line));
+    if (!visible.length) {
+      out.push('', config.aiProvider === 'local' || config.aiProvider === 'llamacpp'
+        ? '❌ AI_PROVIDER=local set, but no LOCAL_API_URL — run: ./scripts/local-models.sh wire <model>'
+        : '❌ every brain is filtered out by AI_PROVIDER — check .env');
+    }
     out.push('', `⚡ Power budget: ${heavyCalls.length}/${maxHeavyPerHour || '∞'} heavy calls this hour`);
     if (decisions.length) {
       out.push('', '*Recent routing*');

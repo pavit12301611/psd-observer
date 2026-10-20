@@ -110,6 +110,24 @@ export function loadConfig({ dryRun = false } = {}) {
     //   OLLAMA_MODEL_SMALL=llama3.2:1b
     //   OLLAMA_MODEL_HEAVY=qwen2.5:14b
     ollamaModelSmall: e.OLLAMA_MODEL_SMALL || '',
+    // ── Local OpenAI-compatible servers (llama.cpp, LM Studio, vLLM) ───────
+    // This is how any Hugging Face GGUF model gets used: llama-server exposes
+    // /v1/chat/completions, and the agent talks to it like any other brain.
+    // Nothing leaves the PC — no key, no quota, no cloud.
+    //   LOCAL_API_URL=http://127.0.0.1:8080/v1
+    //   LOCAL_MODEL=unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
+    // Optional extra endpoints for the workload router (tiny jobs on a small
+    // model, heavy jobs on a big one, photos on a vision model):
+    //   LOCAL_API_URL_SMALL / LOCAL_API_URL_HEAVY / LOCAL_API_URL_VISION
+    localApiUrl: (e.LOCAL_API_URL || '').replace(/\/$/, ''),
+    localApiUrlSmall: (e.LOCAL_API_URL_SMALL || '').replace(/\/$/, ''),
+    localApiUrlHeavy: (e.LOCAL_API_URL_HEAVY || '').replace(/\/$/, ''),
+    localApiUrlVision: (e.LOCAL_API_URL_VISION || '').replace(/\/$/, ''),
+    localModel: e.LOCAL_MODEL || 'local-model',
+    localModelSmall: e.LOCAL_MODEL_SMALL || '',
+    localModelHeavy: e.LOCAL_MODEL_HEAVY || '',
+    localModelVision: e.LOCAL_MODEL_VISION || '',
+    localApiKey: e.LOCAL_API_KEY || 'local',
     ollamaModelHeavy: e.OLLAMA_MODEL_HEAVY || '',
     groqModelSmall: e.GROQ_MODEL_SMALL || 'llama-3.1-8b-instant',
     geminiModelHeavy: e.GEMINI_MODEL_HEAVY || '',

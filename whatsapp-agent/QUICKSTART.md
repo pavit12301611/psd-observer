@@ -68,6 +68,19 @@ cd ~/observer-agent
 
 ---
 
+## 1b. Sab kuch local chahiye? (Hugging Face model, koi cloud nahi)
+
+```bash
+cd ~/observer-agent
+./scripts/local-models.sh recommend     # is PC ke liye model
+./scripts/local-models.sh setup best    # download + serve + agent wire
+# WhatsApp pe: /brains
+```
+
+Poora guide + exact `hf download` commands: [`LOCAL-MODELS.md`](LOCAL-MODELS.md)
+
+---
+
 ## 1c. Update karna (git ke bina) — baad me, jab code purana ho jaye
 
 > 2.1 me `/agent` fix hua hai (ab actually kaam karta hai, jhooth nahi bolta) aur
