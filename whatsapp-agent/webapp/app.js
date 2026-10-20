@@ -452,7 +452,19 @@
     $$('.bottom-nav button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     renderKeyPad();
     const screenImg = $('#screen-img');
-    if (screenImg) screenImg.addEventListener('click', tapAt);
+    if (screenImg) {
+      screenImg.addEventListener('click', tapAt);
+      // A broken screenshot (no desktop / PC locked) must say so, not show a
+      // broken-image icon forever.
+      screenImg.addEventListener('error', () => {
+        const status = $('#screen-status');
+        if (status) status.textContent = 'Screen nahi aayi — PC unlocked hai? /doctor chalao.';
+      });
+      screenImg.addEventListener('load', () => {
+        const status = $('#screen-status');
+        if (status) status.textContent = '';
+      });
+    }
     if ($('#screen-refresh')) $('#screen-refresh').addEventListener('click', loadScreen);
     if ($('#type-form')) $('#type-form').addEventListener('submit', async (e) => {
       e.preventDefault();
