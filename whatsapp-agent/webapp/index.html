@@ -81,6 +81,27 @@
       </div>
     </section>
 
+    <!-- Screen (remote control) -->
+    <section id="tab-screen" class="tab">
+      <div class="row-between">
+        <h2>Screen</h2>
+        <button id="screen-refresh" class="ghost">↻ Refresh</button>
+      </div>
+      <div class="screen-wrap">
+        <img id="screen-img" alt="PC screen" draggable="false">
+        <div id="screen-status" class="muted small center">Screen load ho rahi hai…</div>
+      </div>
+      <p class="muted small center">Screen pe tap karo — wahin click ho jayega. Har 2.5s pe naya frame.</p>
+      <div class="card">
+        <form id="type-form" class="inline">
+          <input id="type-text" placeholder="PC pe type karo…" autocomplete="off">
+          <button class="primary" type="submit">Type</button>
+        </form>
+        <div class="grid" id="key-grid"></div>
+      </div>
+      <p class="muted small">Same Wi-Fi pe kaam karta hai. Bahar se: <code>./scripts/observer.sh remote</code> (Tailscale) — phir wahi page kahin se bhi.</p>
+    </section>
+
     <!-- Settings -->
     <section id="tab-settings" class="tab">
       <div class="card">
@@ -109,6 +130,7 @@
   <nav class="bottom-nav" role="tablist">
     <button data-tab="chat" class="active" role="tab">💬 <span>Chat</span></button>
     <button data-tab="controls" role="tab">🎛️ <span>Panel</span></button>
+    <button data-tab="screen" role="tab">🖥️ <span>Screen</span></button>
     <button data-tab="files" role="tab">📁 <span>Files</span></button>
     <button data-tab="settings" role="tab">⚙️ <span>Settings</span></button>
   </nav>

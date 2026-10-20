@@ -124,6 +124,102 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.8.0 — bharosa + poora reach: undo, watch, usage, teach, brief, resume, remote screen
+
+Owner ne kaha: "sab daal de, bas 9 wala step kahin se bhi control hone chahiye."
+2.7.0 ke `/stop` + vision ke upar 10 cheezein, saari local-first.
+
+### 1. `/undo` — galti wapas (`src/journal.js`)
+
+Har file-changing action ka receipt: `data/journal.json` + `data/undo/` me chhote
+backup (max 512 KB). Undo support: write (purana content wapas), delete (backup
+se restore), move (wapas), copy (copy delete), mkdir (khali folder hatao), zip
+(archive delete). 40 entries tak; bade file record hote hain "undo nahi ho
+sakta" — jhooth nahi bolta.
+
+### 2. `/watch` — "jab ye ho jaye to batao" (`src/watch.js`)
+
+Condition + timer → screenshot → vision model → **YES / NO / MAYBE** (strict
+parse, Hinglish "haan" bhi). YES pe screenshot + alert, phir 10 min cooldown
+(condition sach reh jaye to spam nahi). `once` ek baar. 3 fail ke baad watch
+khud band + owner ko batata hai. Store me persist — restart pe bhi zinda.
+
+### 3. `/usage` — quota ka hisaab (`src/usage.js`)
+
+`router.record()` pe hook: har call store me (per model, per din, 14 din).
+`/usage` me aaj ke calls, average latency, provider limits aur 80% pe warning.
+Groq 1000/day/model, OpenRouter 50/day (fresh), Gemini "per-project, AI Studio
+dekho", local unlimited — jo pata nahi use jhooth nahi bolta.
+
+### 4. `/teach` — ek baar karo, hamesha ke liye (`src/macro.js`)
+
+`/teach start morning` → jo commands chalao wo record hoti hain → `/teach stop`
+→ `/morning` pe poora sequence. Sirf successful commands record hoti hain
+(warna replay pe phir fail hoti). Save existing `learned` list me — replay
+wahi tested `runLearned` path hai, naya interpreter nahi.
+
+### 5. `/brief` — din ki tasveer (`src/brief.js`)
+
+Reminders (overdue + aaj), todo, aaj ke cron jobs, active watches, disk,
+battery, uptime, adhoora task. Sab local (`/proc`, store) — zero tokens.
+`/brief on 9am` ek cron job banata hai; cron ab **commands** bhi chala sakta hai
+(`runDueJobs`), isliye scheduled `/brief` bilkul wahi code hai jo manual.
+
+### 6. `/resume` + live progress
+
+Long task shuru hote hi `lastTask` store hota hai; clean finish pe `done`.
+`/stop` ke baad `/resume` wahin se. Saath me `src/progress.js`: hands loop ka
+har step WhatsApp pe "⏳ Hands · step 2/8 · click Search" (7s throttle, send fail
+pe chup-chaap band — task kabhi nahi rukta).
+
+### 7. Photo → diagnosis
+
+"ye error fix karo" caption ke saath photo bhejo: vision pehle error padhta hai,
+phir Hinglish me "kya galat + exact next step". Jo error dikh nahi raha use
+invent nahi karta.
+
+### 8. Kahin se bhi control (step 9)
+
+Teen raaste, teeno free:
+
+| Raasta | Kya milta hai |
+|---|---|
+| WhatsApp (duniya me kahin se) | `/screenshot`, `/tap 500 320`, `/tap Login`, `/pc type`, `/use` |
+| Phone app, same Wi-Fi | naya **Screen** tab: 2.5s live frames, tap-to-click, type box, keys |
+| Tailscale (`observer.sh remote`) | wahi phone app ghar se bahar bhi — koi port forward nahi |
+
+Server routes: `GET /api/screen` (JPEG, token-protected), `POST /api/tap`
+(0-1000 relative ya pixels), `/api/key`, `/api/type`. Sab bridge token ke peeche,
+`ALLOW_PC_CONTROL=false` se band.
+
+### 9. Auto-update
+
+`observer.sh autoupdate on [--time 03:00]` → systemd user timer, raat 3 baje
+(jitter 45 min) update + restart. 2.7.0 ka update message phir WhatsApp pe
+report deta hai (kya naya + kitna time).
+
+### Files
+
+| File | Kya |
+|---|---|
+| `src/journal.js` | *naya* — file op receipts + undo |
+| `src/usage.js` | *naya* — per-model/day quota + report |
+| `src/watch.js` | *naya* — screen-condition watchers |
+| `src/macro.js` | *naya* — /teach recorder + replay |
+| `src/brief.js` | *naya* — daily brief + scheduling |
+| `src/progress.js` | *naya* — throttled live progress |
+| `src/router.js` | `setRecordHook()` — usage ko har call dikhti hai |
+| `src/actions.js` | file ops journaled; `computer_use` live progress |
+| `src/commands.js` | 8 naye commands, resume/teach/brief wiring |
+| `src/server.js` | `/api/screen`, `/api/tap`, `/api/key`, `/api/type` |
+| `webapp/*` | Screen tab (live + tap), key pad, type box |
+| `scripts/observer.sh` | `autoupdate on/off/status` |
+
+Tests: **168 pass** (142 + 26 naye `test/features.test.js`).
+
+---
+
+
 ## 2.7.0 — *stop button*, screen ko aankhein, aur update ki khabar
 
 Teen cheezein maangi gayi thi:
@@ -576,6 +672,7 @@ npm test                              # 90 pass
 | 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
 | 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
 | 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 142 | 62 |
+| 22 | *2.8.0* | **Trust + reach**: `/undo` (file ops wapas), `/watch` (screen condition → alert), `/usage` (quota + 80% warning), `/teach` (record → replay), `/brief` (din ki tasveer + 9am schedule), `/resume`, live progress, photo diagnosis, **phone app Screen tab** (live + tap-to-click, Wi-Fi ya Tailscale se kahin se bhi), `observer.sh autoupdate` | 168 | 62 |
 
 Verify karna ho (sab curl, git zero):
 

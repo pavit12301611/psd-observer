@@ -10,6 +10,7 @@ import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
 import { announceUpdate, brainSummary } from './updates.js';
+import { startWatchLoop } from './watch.js';
 import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
 import { routerFor } from './router.js';
@@ -40,6 +41,9 @@ const agent = createAgent({
   log: console,
   forwardToObserver: (text) => mailbox.forwardToObserver(text),
   observerOnline: () => mailbox.observerOnline(),
+  // Live "step 2/8" lines and watch alerts come out of the agent itself, not
+  // as a reply — this is the only channel for unsolicited messages.
+  notify: (message) => whatsapp.sendToOwner(message),
 });
 
 const whatsapp = createWhatsApp({
@@ -64,7 +68,21 @@ const bridge = createBridgeServer({
   log: console,
 });
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
-const stopCron = startCronLoop(store, (text) => whatsapp.sendToOwner(text), console);
+// Scheduled jobs that are commands ("/brief") run through the agent, exactly
+// like typing them — one code path, same safety gates.
+const stopCron = startCronLoop(
+  store,
+  (text) => whatsapp.sendToOwner(text),
+  console,
+  (text) => agent.handle(text, { source: 'cron' }),
+);
+// /watch: screen-condition watchers, checked on their own timers.
+const stopWatch = startWatchLoop({
+  config,
+  store,
+  send: (message) => whatsapp.sendToOwner(message),
+  log: console,
+});
 
 console.info('👁️  Observer WhatsApp Agent — free, native WhatsApp + phone app');
 console.info(`   Owner (only listener): +${config.ownerNumber}`);
@@ -119,6 +137,7 @@ function shutdown() {
   console.info('\n[agent] shutting down…');
   stopReminders();
   stopCron();
+  stopWatch();
   whatsapp.stop();
   bridge.stop();
   store.saveNow();

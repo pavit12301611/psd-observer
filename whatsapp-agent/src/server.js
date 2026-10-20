@@ -29,10 +29,13 @@ import { ROOT } from './config.js';
 import { cachedIcon } from './webapp.js';
 import * as apps from './apps.js';
 import * as files from './files.js';
+import * as pc from './pccontrol.js';
+import * as hands from './hands.js';
+import { pngSize } from './elementfinder.js';
 import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.7.0';
+const VERSION = '2.8.0';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -322,6 +325,67 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
 
         case 'GET /api/files':
           return json(res, 200, { downloads: listDownloads(), shared: listShared() });
+
+        // ── remote control (phone app / from anywhere over Tailscale) ──────
+        // Live screen + tap-to-click. Same PC, same controls as WhatsApp —
+        // the phone is just another client of the same agent.
+        case 'GET /api/screen': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+          const size = pngSize(shot) ?? { width: 0, height: 0 };
+          const wanted = Math.max(480, Math.min(1920, Number(url.searchParams.get('w')) || 1280));
+          const { image, mime } = await hands.shrinkForModel(shot, wanted, 70);
+          res.writeHead(200, {
+            'content-type': mime,
+            'content-length': image.length,
+            'cache-control': 'no-store',
+            'x-screen-width': size.width,
+            'x-screen-height': size.height,
+          });
+          return res.end(image);
+        }
+
+        case 'POST /api/tap': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          const rx = Number(body.x);
+          const ry = Number(body.y);
+          if (!Number.isFinite(rx) || !Number.isFinite(ry)) return json(res, 400, { detail: 'x and y are required (0-1000 relative, or pixels with relative:false)' });
+          const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+          const size = pngSize(shot) ?? { width: 0, height: 0 };
+          // `relative:true` (the app sends this) means 0-1000 like the hands
+          // loop; raw pixels are accepted too.
+          const x = body.relative === false
+            ? Math.round(rx)
+            : Math.round((Math.min(1000, Math.max(0, rx)) / 1000) * (size.width || 1));
+          const y = body.relative === false
+            ? Math.round(ry)
+            : Math.round((Math.min(1000, Math.max(0, ry)) / 1000) * (size.height || 1));
+          if (!size.width || x < 0 || y < 0 || x >= size.width || y >= size.height) {
+            return json(res, 400, { detail: `Tap outside the screen (${size.width}×${size.height})` });
+          }
+          await pc.click(x, y);
+          log.info?.(`[bridge] tap ${x},${y} from the phone app`);
+          return json(res, 200, { ok: true, x, y, width: size.width, height: size.height });
+        }
+
+        case 'POST /api/key': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          const key = String(body.key ?? '').trim();
+          if (!key) return json(res, 400, { detail: 'key is required (e.g. "ctrl+l", "Return")' });
+          await pc.keyCombo(key);
+          return json(res, 200, { ok: true, key });
+        }
+
+        case 'POST /api/type': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          const text = String(body.text ?? '');
+          if (!text) return json(res, 400, { detail: 'text is required' });
+          await pc.typeText(text.slice(0, 4000));
+          return json(res, 200, { ok: true, chars: Math.min(text.length, 4000) });
+        }
 
         case 'GET /api/apps':
           try {

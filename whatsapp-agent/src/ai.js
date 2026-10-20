@@ -309,6 +309,30 @@ export async function screenStep(config, prompt, imageBase64, log = console, { m
 }
 
 /**
+ * "Ye error dekh ke batao kya galat hai" — a photo/screenshot the owner sent.
+ * Vision first (the same brains as hands), with a strict shape so the answer
+ * is useful: what is wrong, and the exact next step. Never invents a fix for
+ * an error it cannot read — it says so.
+ */
+export async function diagnoseImage(config, imageBase64, note = '', log = console, { signal = null } = {}) {
+  const question = String(note ?? '').replace(/^\/?(fix|help|error)\s*/i, '').trim();
+  const prompt = [
+    'The owner sent this screenshot/photo from their PC and wants help.',
+    question ? `Their words: "${question}"` : '',
+    '',
+    'Do this, briefly and in Hinglish (Roman script):',
+    '1. Read the error / problem exactly as shown (quote the key line).',
+    '2. In one line: what is actually wrong.',
+    '3. Give the exact next step(s) — commands or clicks. If a command is needed, put it on its own line.',
+    'If the image has no error and is just a normal screen, say what is on it and ask what they want.',
+    'Never invent an error that is not visible. Never suggest anything destructive.',
+  ].filter(Boolean).join('\n');
+  const result = await screenStep(config, prompt, imageBase64, log, { maxTokens: 700, signal });
+  if (!result?.text) return null;
+  return { text: result.text.trim(), model: result.model, local: result.local };
+}
+
+/**
  * Ask a LOCAL vision model where a UI element is in an image.
  * Returns the raw model reply (expected: {"x":0-1000,"y":0-1000} or
  * {"found":false}) or null when no vision model is available. Local-only on

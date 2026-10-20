@@ -1292,6 +1292,82 @@ cmd_relink() {
   exec "$dir/scripts/relink-whatsapp.sh"
 }
 
+# ── nightly auto-update (systemd user timer) ────────────────────────────────
+# The owner asked "update hone pe WhatsApp pe message" — this is the missing
+# half: updates land on their own at night, and the existing announceUpdate()
+# then tells them what changed and how long it took.
+cmd_autoupdate() {
+  local action="${1:-status}"; shift || true
+  local at="03:00"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --time) at="${2:-03:00}"; shift 2 ;;
+      *) break ;;
+    esac
+  done
+  local dir; dir=$(find_install "") || die "no install found — run install first"
+  local unit="observer-autoupdate"
+  local userdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+  case "$action" in
+    on|enable|start)
+      have systemctl || die "systemd is required for auto-update"
+      mkdir -p "$userdir"
+      cat > "$userdir/${unit}.service" <<EOF
+[Unit]
+Description=Observer Agent auto-update
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${dir}
+ExecStart=/usr/bin/env bash ${dir}/scripts/observer.sh update --dir ${dir}
+Nice=10
+IOSchedulingClass=idle
+EOF
+      cat > "$userdir/${unit}.timer" <<EOF
+[Unit]
+Description=Observer Agent nightly update (WhatsApp pe report aayega)
+
+[Timer]
+OnCalendar=*-*-* ${at}:00
+RandomizedDelaySec=45m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+      systemctl --user daemon-reload
+      systemctl --user enable --now "${unit}.timer" >/dev/null 2>&1 \
+        || die "timer enable nahi hua — 'systemctl --user status ${unit}.timer' dekho"
+      say "Auto-update ON — roz ~${at} (0-45 min random jitter)"
+      info "service: ${userdir}/${unit}.service"
+      info "timer  : ${userdir}/${unit}.timer"
+      info "Update ke baad WhatsApp pe 'Observer updated · x → y · took Ns' aayega."
+      info "Band karna ho: bash observer.sh autoupdate off"
+      ;;
+    off|disable|stop)
+      systemctl --user disable --now "${unit}.timer" >/dev/null 2>&1 || true
+      rm -f "$userdir/${unit}.service" "$userdir/${unit}.timer"
+      systemctl --user daemon-reload >/dev/null 2>&1 || true
+      say "Auto-update OFF"
+      ;;
+    status|show|"")
+      if systemctl --user is-enabled "${unit}.timer" >/dev/null 2>&1; then
+        say "Auto-update ON"
+        systemctl --user list-timers "${unit}.timer" --no-pager 2>/dev/null | sed -n '1,3p'
+      else
+        say "Auto-update OFF"
+        info "on karna ho: bash observer.sh autoupdate on [--time 03:00]"
+      fi
+      ;;
+    *)
+      bad "autoupdate: unknown option $action (use on | off | status)"
+      exit 2
+      ;;
+  esac
+}
+
 cmd_remote() {
   local dir; dir=$(find_install "") || die "no install found"
   exec "$dir/scripts/setup-remote.sh"
@@ -1350,6 +1426,8 @@ ${B}Run / repair${R}
   fix                         screenshots / keyboard / mouse (Fedora)
   relink                      fresh WhatsApp QR
   remote                      Tailscale access to the phone app from anywhere
+  autoupdate on|off|status    nightly auto-update (WhatsApp pe report aata hai)
+  autoupdate on --time 03:00  update ka waqt chuno
 
 ${B}Examples${R}
   bash observer.sh install --service --power --phone
@@ -1377,6 +1455,7 @@ main() {
     start|run)            cmd_start "$@" ;;
     relink|qr)            cmd_relink "$@" ;;
     remote|tailscale)     cmd_remote "$@" ;;
+    autoupdate|auto-update) cmd_autoupdate "$@" ;;
     fix|desktop)          cmd_fix "$@" ;;
     version|ver)          cmd_version "$@" ;;
     help|-h|--help|"")    cmd_help ;;

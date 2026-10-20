@@ -10,6 +10,8 @@
 
   let token = localStorage.getItem(TOKEN_KEY) || '';
   let statusTimer = null;
+  let screenTimer = null;
+  let screenBusy = false;
   let installEvent = null;
 
   // ── tiny formatting helpers ───────────────────────────────────────────────
@@ -312,6 +314,83 @@
     $$('.bottom-nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     if (name === 'files') loadFiles();
     if (name === 'settings') refreshStatus();
+    if (name === 'screen') startScreen(); else stopScreen();
+  }
+
+  // ── remote screen ─────────────────────────────────────────────────────────
+  // The phone is just another client: /api/screen returns one JPEG, /api/tap
+  // clicks at a 0-1000 relative point. Nothing extra runs on the PC.
+  function screenUrl() {
+    return `/api/screen?w=1280&t=${encodeURIComponent(token)}&ts=${Date.now()}`;
+  }
+
+  async function loadScreen() {
+    if (screenBusy) return;
+    screenBusy = true;
+    const img = $('#screen-img');
+    const status = $('#screen-status');
+    try {
+      img.src = screenUrl();
+      if (status) status.textContent = '';
+    } catch (err) {
+      if (status) status.textContent = err.message || 'Screen nahi aayi';
+    } finally {
+      setTimeout(() => { screenBusy = false; }, 300);
+    }
+  }
+
+  function startScreen() {
+    if (screenTimer) return;
+    loadScreen();
+    screenTimer = setInterval(loadScreen, 2500);
+  }
+
+  function stopScreen() {
+    if (screenTimer) { clearInterval(screenTimer); screenTimer = null; }
+  }
+
+  async function tapAt(ev) {
+    const img = $('#screen-img');
+    if (!img.naturalWidth) return;
+    const box = img.getBoundingClientRect();
+    const rx = Math.round(((ev.clientX - box.left) / box.width) * 1000);
+    const ry = Math.round(((ev.clientY - box.top) / box.height) * 1000);
+    if (rx < 0 || ry < 0 || rx > 1000 || ry > 1000) return;
+    const wrap = img.parentElement;
+    const dot = document.createElement('span');
+    dot.className = 'ripple';
+    dot.style.left = `${ev.clientX - box.left + wrap.getBoundingClientRect().left - wrap.getBoundingClientRect().left}px`;
+    dot.style.top = `${ev.clientY - box.top}px`;
+    wrap.appendChild(dot);
+    setTimeout(() => dot.remove(), 520);
+    try {
+      await api('/api/tap', { method: 'POST', body: { x: rx, y: ry, relative: true } });
+    } catch (err) {
+      $('#screen-status').textContent = err.message;
+    }
+    setTimeout(loadScreen, 250);
+  }
+
+  const KEY_BUTTONS = [
+    ['Return', '⏎'], ['Escape', 'Esc'], ['Tab', 'Tab'], ['BackSpace', '⌫'],
+    ['ctrl+l', 'Ctrl+L'], ['ctrl+a', 'Ctrl+A'], ['Page_Down', 'PgDn'], ['Page_Up', 'PgUp'],
+  ];
+
+  function renderKeyPad() {
+    const grid = $('#key-grid');
+    if (!grid || grid.dataset.ready) return;
+    grid.dataset.ready = '1';
+    for (const [key, label] of KEY_BUTTONS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ghost';
+      b.textContent = label;
+      b.addEventListener('click', async () => {
+        try { await api('/api/key', { method: 'POST', body: { key } }); } catch (err) { $('#screen-status').textContent = err.message; }
+        setTimeout(loadScreen, 200);
+      });
+      grid.appendChild(b);
+    }
   }
 
   // ── input helpers ─────────────────────────────────────────────────────────
@@ -371,6 +450,23 @@
     });
 
     $$('.bottom-nav button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    renderKeyPad();
+    const screenImg = $('#screen-img');
+    if (screenImg) screenImg.addEventListener('click', tapAt);
+    if ($('#screen-refresh')) $('#screen-refresh').addEventListener('click', loadScreen);
+    if ($('#type-form')) $('#type-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('#type-text');
+      const text = input.value;
+      if (!text) return;
+      try {
+        await api('/api/type', { method: 'POST', body: { text } });
+        input.value = '';
+      } catch (err) {
+        $('#screen-status').textContent = err.message;
+      }
+      setTimeout(loadScreen, 250);
+    });
     $('#files-refresh').addEventListener('click', loadFiles);
     $('#file-form').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -387,6 +483,11 @@
       chat = [];
       saveChat(chat);
       showLogin();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopScreen();
+      else if ($('#tab-screen')?.classList.contains('active')) startScreen();
     });
 
     // browser dictation (free, built into Chrome/Android; hidden if unsupported)

@@ -508,8 +508,16 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     };
   }
 
+  // Optional observer (usage.js): told about every call so /usage can show the
+  // day's quota. Never allowed to break a model call.
+  let recordHook = null;
+  function setRecordHook(fn) {
+    recordHook = typeof fn === 'function' ? fn : null;
+  }
+
   /** Record how a call went. Failures cool the model down, successes clear it. */
   function record(modelId, { ok, ms = 0, tier, error = '' } = {}) {
+    try { recordHook?.(modelId, { ok: Boolean(ok), ms, tier, error }); } catch { /* usage must never break a call */ }
     const entry = stat(modelId);
     entry.calls += 1;
     entry.lastUsed = Date.now();
@@ -649,6 +657,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     statusText,
     explainText,
     snapshot,
+    setRecordHook,
     reset,
     budget: () => ({ heavyUsed: (pruneHeavy(), heavyCalls.length), maxHeavyPerHour }),
     enabled: catalog.length > 0,

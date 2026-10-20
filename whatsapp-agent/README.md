@@ -122,12 +122,24 @@ calls `download_url`, `write_file`/`move`, `send_file` in sequence.
 
 - **Chat** — same agent as WhatsApp, with quick chips and browser dictation (🎤).
 - **Panel** — one-tap screenshot, volume, mute, play/pause, brightness, lock, Wi-Fi, battery, status, apps, windows, recording, webcam, processes.
+- **Screen** — live screen (2.5s frames) + **tap to click**, type box and keys (Enter, Esc, Tab, Ctrl+L…). This is the remote-desktop view; it works over the same Wi-Fi, or from anywhere through Tailscale.
 - **Files** — files received on the PC and your `data/shared/` folder, with a **Send** button that delivers to WhatsApp *and* a direct download link in the app; plus "send any path".
 - **Settings** — live status, access level, tool count, WhatsApp QR when linking, install button, logout.
 
 Install: Chrome/Android menu → **Add to Home screen**; iOS Safari → Share →
 **Add to Home Screen**. It opens full-screen with its own icon and caches its
 shell for instant launch.
+
+### Updates khud aa jayein (optional)
+
+```bash
+./scripts/observer.sh autoupdate on            # roz ~3:00 baje
+./scripts/observer.sh autoupdate on --time 02:30
+./scripts/observer.sh autoupdate status|off
+```
+
+Update ke baad WhatsApp pe ek message aata hai: version, kya naya, aur kitne
+second lage (`🔄 Observer updated · 2.7.0 → 2.8.0 · 1m 12s`).
 
 ### Ghar se bahar? (macOS/Windows-style "remote desktop", free)
 
@@ -259,6 +271,16 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 /access                   what this agent may do
 /yes · /no                answer a confirmation
 /run <PIN> <command>      shell (only if ALLOW_SHELL=true)
+
+/stop                     chal raha kaam turant roko (stacked bhi)
+/resume                   wahin se shuru jahan /stop ne roka
+/undo [N|list]            pichhla file kaam wapas (write/move/copy/delete/mkdir/zip)
+/usage                    aaj ka AI quota, model-wise + 80% warning
+/watch <condition>        "jab ye ho jaye to batao" (screenshot + vision) · list|stop
+/teach start <naam>       apne commands record karo → /teach stop → phir /<naam>
+/brief                    aaj ka brief · /brief on 9am = roz subah
+/tap <x y | 50% 40% | Login>  screen pe seedha click
+/remote                   kahin se bhi control — WhatsApp ya phone app
 ```
 
 Voice notes, photos and documents sent on WhatsApp are transcribed / OCR'd /

@@ -28,6 +28,7 @@ import * as autopilot from './autopilot.js';
 import * as hands from './hands.js';
 import { StoppedError, isStoppedError } from './cancel.js';
 import { runDoctor } from './doctor.js';
+import { createProgress, describeHandsStep } from './progress.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -46,7 +47,7 @@ function describe(entry, args) {
   return `${entry.label ?? entry.name} ${bits.map(([k, v]) => `${k}=${short(v)}`).join(' ')}`.trim();
 }
 
-export function createActions({ config, store, log = console }) {
+export function createActions({ config, store, log = console, journal = null, notify = null }) {
   const extraRoots = config.filesExtraRoots ?? [];
   const level = () => (config.accessLevel in LEVELS ? config.accessLevel : 'full');
   const audioAction = (w) => {
@@ -127,7 +128,17 @@ export function createActions({ config, store, log = console }) {
         max_steps: { type: 'integer', description: 'Step budget (default 8, max 20)' },
       },
       run: async ({ task, max_steps }, ctx) => {
-        const result = await hands.runHands(task, { config, log, maxSteps: max_steps, signal: ctx?.signal });
+        const progress = notify ? createProgress({ send: notify, label: 'Hands', total: max_steps ?? config.handsMaxSteps ?? 8, log }) : null;
+        const result = await hands.runHands(task, {
+          config, log, maxSteps: max_steps, signal: ctx?.signal,
+          onStep: progress
+            ? (entry) => {
+              if (entry?.ok === false) return;
+              const { action, detail } = describeHandsStep(entry?.action ?? entry ?? {});
+              progress.step({ n: entry?.step ?? null, action, detail }).catch(() => {});
+            }
+            : undefined,
+        });
         if (result.stopped) throw new StoppedError('Hands');
         return { text: result.text, image: result.image };
       },
@@ -347,7 +358,10 @@ export function createActions({ config, store, log = console }) {
         text: { type: 'string', description: 'Contents to write', required: true },
         append: { type: 'boolean', description: 'Append instead of overwrite' },
       },
-      run: async ({ path: p, text, append }) => files.writeTextFile(p, text, { extraRoots, append: Boolean(append) }),
+      run: async ({ path: p, text, append }) => {
+        const write = () => files.writeTextFile(p, text, { extraRoots, append: Boolean(append) });
+        return journal ? journal.wrapWrite(p, write, { append: Boolean(append) }) : write();
+      },
     },
     {
       name: 'search_files', level: 'safe', label: 'Search files',
@@ -363,7 +377,12 @@ export function createActions({ config, store, log = console }) {
       description: 'Delete a file or folder (moved to trash when possible; owner confirms first).',
       params: { path: { type: 'string', description: 'File or folder path', required: true } },
       confirmText: ({ path: p }) => `Delete ${p}`,
-      run: async ({ path: p }) => files.deletePath(p, { extraRoots }),
+      run: async ({ path: p }) => {
+        const del = () => files.deletePath(p, { extraRoots });
+        let dir = false;
+        try { dir = fs.statSync(files.resolvePath(p, { extraRoots }).path).isDirectory(); } catch { /* new */ }
+        return journal ? journal.wrapDelete(files.resolvePath(p, { extraRoots }).path ?? p, del, { isDirectory: dir }) : del();
+      },
     },
     {
       name: 'move_path', level: 'standard', label: 'Move/rename',
@@ -372,7 +391,12 @@ export function createActions({ config, store, log = console }) {
         from: { type: 'string', description: 'Source path', required: true },
         to: { type: 'string', description: 'Destination path', required: true },
       },
-      run: async ({ from, to }) => files.movePath(from, to, { extraRoots }),
+      run: async ({ from, to }) => {
+        const move = () => files.movePath(from, to, { extraRoots });
+        const a = files.resolvePath(from, { extraRoots, mustExist: true });
+        const b = files.smartHomePath(to);
+        return journal && a.ok ? journal.wrapMove(a.path, b, move) : move();
+      },
     },
     {
       name: 'copy_path', level: 'standard', label: 'Copy',
@@ -381,13 +405,20 @@ export function createActions({ config, store, log = console }) {
         from: { type: 'string', description: 'Source path', required: true },
         to: { type: 'string', description: 'Destination path', required: true },
       },
-      run: async ({ from, to }) => files.copyPath(from, to, { extraRoots }),
+      run: async ({ from, to }) => {
+        const copy = () => files.copyPath(from, to, { extraRoots });
+        const b = files.smartHomePath(to);
+        return journal ? journal.wrapCopy(from, b, copy) : copy();
+      },
     },
     {
       name: 'make_dir', level: 'standard', label: 'Create folder',
       description: 'Create a folder (including parents).',
       params: { path: { type: 'string', description: 'Folder path', required: true } },
-      run: async ({ path: p }) => files.makeDir(p, { extraRoots }),
+      run: async ({ path: p }) => {
+        const mk = () => files.makeDir(p, { extraRoots });
+        return journal ? journal.wrapMkdir(files.smartHomePath(p), mk) : mk();
+      },
     },
     {
       name: 'zip_paths', level: 'standard', label: 'Zip files',
@@ -396,7 +427,15 @@ export function createActions({ config, store, log = console }) {
         paths: { type: 'array', items: { type: 'string' }, description: 'Files/folders to zip', required: true },
         output: { type: 'string', description: 'Output .zip path (optional)' },
       },
-      run: async ({ paths, output }) => files.zipPaths(paths, output, { extraRoots }),
+      run: async ({ paths, output }) => {
+        const zip = () => files.zipPaths(paths, output, { extraRoots });
+        if (!journal) return zip();
+        const out = await zip();
+        // files.zipPaths returns the archive path text; journal the file it made.
+        const created = output ? files.smartHomePath(output) : null;
+        if (created) journal.record({ kind: 'zip', out: created, undoable: true, label: `zip ${path.basename(created)}` });
+        return out;
+      },
     },
     {
       name: 'unzip_path', level: 'standard', label: 'Unzip',

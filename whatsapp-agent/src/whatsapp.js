@@ -311,6 +311,21 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           // fall through to normal image handling so user gets at least OCR/description
         }
       }
+      // "ye error fix karo" — treat the photo as a problem to diagnose, not
+      // just a picture to describe. Any vision brain (Gemini/Groq/local).
+      if (/\b(fix|error|issue|problem|samajh nahi|kya galat|kyu aa raha|why|help me)\b/i.test(caption)) {
+        try {
+          const diagnosed = await ai.diagnoseImage(config, buffer.toString('base64'), caption, log);
+          if (diagnosed?.text) {
+            return transportSend(chatJid, {
+              text: `💾 Saved as ${savedAs}${sizeNote}\n\n🩺 *Kya galat hai*\n\n${diagnosed.text}\n\n_(${diagnosed.local ? 'local vision' : diagnosed.model})_`,
+            }, rawMsg);
+          }
+        } catch (err) {
+          log.warn?.(`[wa] diagnose failed: ${err.message}`);
+          // fall through to describe/OCR below
+        }
+      }
       // 1) local vision model (best) 2) OCR the image (works for screenshots)
       const description = await ai.describeImage(config, buffer.toString('base64'), caption, log);
       if (description) return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${description}`, rawMsg);

@@ -104,3 +104,11 @@ h3{font-size:13.5px;margin:18px 0 8px;color:var(--muted);text-transform:uppercas
   .messages{padding:20px 18px}
   .msg{max-width:70%;font-size:15px}
 }
+
+/* ── remote screen ────────────────────────────────────────────────────── */
+.screen-wrap{position:relative;background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:6px}
+.screen-wrap img{display:block;width:100%;height:auto;touch-action:manipulation;user-select:none;-webkit-user-drag:none}
+.screen-wrap .ripple{position:absolute;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:50%;border:2px solid #25d366;pointer-events:none;animation:rip .5s ease-out forwards}
+@keyframes rip{from{transform:scale(.4);opacity:1}to{transform:scale(2.4);opacity:0}}
+#screen-status{padding:8px}
+#screen-img[src=""]{min-height:140px;background:repeating-linear-gradient(45deg,#111,#111 10px,#181818 10px,#181818 20px)}
