@@ -11,6 +11,7 @@ import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
 import { announceUpdate, brainSummary } from './updates.js';
 import { startWatchLoop } from './watch.js';
+import { startShotJanitor } from './screenshots.js';
 import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
 import { routerFor } from './router.js';
@@ -76,6 +77,9 @@ const stopCron = startCronLoop(
   console,
   (text) => agent.handle(text, { source: 'cron' }),
 );
+// Screenshots are disposable: the janitor deletes every capture after a few
+// minutes (default 4). Uses the agent's own ledger so /shots shows the truth.
+const stopShots = startShotJanitor({ config, log: console, janitor: agent.shots });
 // /watch: screen-condition watchers, checked on their own timers.
 const stopWatch = startWatchLoop({
   config,
@@ -138,6 +142,7 @@ function shutdown() {
   stopReminders();
   stopCron();
   stopWatch();
+  stopShots();
   whatsapp.stop();
   bridge.stop();
   store.saveNow();

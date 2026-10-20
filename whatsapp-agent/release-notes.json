@@ -1,4 +1,14 @@
 {
+  "2.8.2": {
+    "title": "screenshot auto-delete — bhej diya, ab PC pe nahi pada",
+    "bullets": [
+      "Har screenshot 4 min baad khud delete (2–5 min set kar sakte ho: SCREENSHOT_TTL_MINUTES)",
+      "Wayland portal ~/Pictures me jo screenshot likhta hai wo bhi saaf — sirf wahi file jo agent ne li",
+      "Temp copy (observer-shot-*.png) ab turant delete hoti hai, minute bhar wait nahi",
+      "/shots — kitni files padi hain + TTL · /shots clean — abhi saaf",
+      "Tumhari apni files, downloads, recordings kabhi nahi chhute — sirf agent ke screenshots"
+    ]
+  },
   "2.8.1": {
     "title": "Screen tab: screenshot sirf jab tum maango + sab commands wahin",
     "bullets": [

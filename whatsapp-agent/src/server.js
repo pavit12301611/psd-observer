@@ -35,7 +35,7 @@ import { pngSize } from './elementfinder.js';
 import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.8.1';
+const VERSION = '2.8.2';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {

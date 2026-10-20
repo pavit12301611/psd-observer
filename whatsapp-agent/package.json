@@ -1,6 +1,6 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "2.8.1",
+  "version": "2.8.2",
   "private": true,
   "description": "Observer WhatsApp Agent 2.6 - free native WhatsApp + phone app + full PC control, workload-routed multi-model AI (local GGUF via llama.cpp, Groq/OpenRouter/Gemini free tiers), verified /agent automation and one observer.sh script for install/update/keys (Fedora/Linux).",
   "type": "module",
@@ -16,7 +16,7 @@
     "service:status": "systemctl --user status observer-whatsapp-agent",
     "service:logs": "journalctl --user -u observer-whatsapp-agent -f",
     "relink": "bash scripts/relink-whatsapp.sh",
-    "test": "node --test test/agent.test.js test/power.test.js test/router.test.js test/local.test.js test/cloud.test.js test/hands.test.js test/control.test.js test/features.test.js",
+    "test": "node --test test/agent.test.js test/power.test.js test/router.test.js test/local.test.js test/cloud.test.js test/hands.test.js test/control.test.js test/features.test.js test/screens.test.js",
     "check": "for f in src/*.js; do node --check \"$f\" || exit 1; done",
     "app": "node --env-file-if-exists=.env src/index.js",
     "models": "bash scripts/local-models.sh",

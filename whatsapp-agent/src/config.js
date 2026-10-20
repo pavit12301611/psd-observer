@@ -176,6 +176,10 @@ export function loadConfig({ dryRun = false } = {}) {
     // Set true to also OCR every frame and hand the model a word table (more
     // exact for dense text UI, but ~1-2s slower per step).
     handsUseOcr: bool(e.HANDS_USE_OCR, false),
+    // Screenshots are for sending, not keeping: every capture is deleted after
+    // this many minutes (default 4). SCREENSHOT_CLEANUP=false turns it off.
+    screenshotTtlMinutes: Number(e.SCREENSHOT_TTL_MINUTES ?? 4) || 4,
+    screenshotCleanup: bool(e.SCREENSHOT_CLEANUP, true),
     handsMaxTokens: int(e.HANDS_MAX_TOKENS, 512),
     // Which vision provider the screen loop prefers: auto | gemini | groq |
     // openrouter | local | ollama. auto = Gemini Flash → Groq → OpenRouter →

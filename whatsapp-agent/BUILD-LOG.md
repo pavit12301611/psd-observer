@@ -124,6 +124,52 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.8.2 — screenshot auto-delete
+
+Owner: "jo screenshot kheech ke bhej chuka hota hai uska use nahi hota — 2 ya 5
+minute me khud delete ho jaye."
+
+### Pehle kya hota tha
+
+- `captureScreenshot()` har baar `<tmp>/observer-shot-<ts>.png` banata tha aur
+  **success pe bhi delete nahi karta tha** — /tmp me screenshot jama hote rehte.
+- Wayland portal asli screenshot `~/Pictures` me likhta hai. Hum use padh ke
+  bhej dete the, file padi rehti — hamesha ke liye.
+
+### Ab (`src/screenshots.js`)
+
+| File | Kab delete |
+|---|---|
+| `<tmp>/observer-shot-<ts>.png` | **turant**, buffer padhne ke baad (leak hi nahi) |
+| `~/Pictures/Screenshot*.png` (portal ne likhi, humne padhi) | TTL ke baad — default **4 min**, 30s check |
+| Crash se bachi `observer-shot-*.png` | TTL ke baad, naam se sweep |
+
+- TTL: `SCREENSHOT_TTL_MINUTES=4` (2–5 recommended; 1–30 hard clamp). Off:
+  `SCREENSHOT_CLEANUP=false`.
+- Ledger `data/shots.json` — restart ke baad bhi purani captured file clean hoti hai.
+- **Safety**: sirf wahi paths delete hote hain jo agent ne khud capture kiye
+  (`observer-shot-*.png` temp me, ya portal ki likhi file pictures folder me).
+  Owner ki apni files, downloads, shared, recordings, webcam — chhoote hi nahi.
+  Folder ke bahar ka path ledger me aa jaye to ignore.
+- `/shots` — TTL + kitni files padi hain · `/shots clean` — abhi saaf.
+- Janitor fail ho to sirf warn, agent nahi girta; shutdown pe bhi ek aakhri safai.
+
+### Files
+
+| File | Kya |
+|---|---|
+| `src/screenshots.js` | *naya* — TTL, ledger, sweep, janitor, /shots report |
+| `src/pccontrol.js` | temp copy turant delete, portal file track |
+| `src/commands.js` | `/shots`, `/shots clean`, HELP |
+| `src/index.js` | janitor start/stop |
+| `src/config.js`, `.env.example` | `SCREENSHOT_TTL_MINUTES`, `SCREENSHOT_CLEANUP` |
+| `test/screens.test.js` | *naya* — 10 tests (TTL clamp, restart, sweep, safety, timer, /shots) |
+
+Tests: **182 pass**.
+
+---
+
+
 ## 2.8.1 — screen: on-demand frames, aur sab commands wahin
 
 Owner ne seedha pakda: "na har 5–10 sec me screenshot, na har 1 sec — aur
@@ -730,6 +776,7 @@ npm test                              # 90 pass
 | 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 142 | 62 |
 | 22 | *2.8.0* | **Trust + reach**: `/undo` (file ops wapas), `/watch` (screen condition → alert), `/usage` (quota + 80% warning), `/teach` (record → replay), `/brief` (din ki tasveer + 9am schedule), `/resume`, live progress, photo diagnosis, **phone app Screen tab** (live + tap-to-click, Wi-Fi ya Tailscale se kahin se bhi), `observer.sh autoupdate` | 169 | 62 |
 | 23 | *2.8.1* | **Screen on-demand**: koi 1s/5s/10s polling nahi (screenshot sirf Refresh/tab/action pe), tap pe 0 extra capture, ETag 304, aur Screen tab me **Commands console** (sab commands wahin) | 172 | 62 |
+| 24 | *2.8.2* | **Screenshot auto-delete**: har capture 4 min baad khud saaf (2–5 min configurable), temp copy turant, portal ki ~/Pictures file bhi, `/shots` + `/shots clean`; sirf agent ke screenshots, tumhari files kabhi nahi | 182 | 62 |
 
 Verify karna ho (sab curl, git zero):
 

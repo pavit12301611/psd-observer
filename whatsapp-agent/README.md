@@ -281,6 +281,7 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 /brief                    aaj ka brief · /brief on 9am = roz subah
 /tap <x y | 50% 40% | Login>  screen pe seedha click
 /remote                   kahin se bhi control — WhatsApp ya phone app
+/shots                    screenshot auto-delete (default 4 min) · /shots clean = abhi
 ```
 
 Voice notes, photos and documents sent on WhatsApp are transcribed / OCR'd /

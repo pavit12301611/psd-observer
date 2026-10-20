@@ -18,6 +18,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { imageStats } from './imaging.js';
+import { trackScreenshot } from './screenshots.js';
 
 const execFileAsync = promisify(execFile);
 const RUN_TIMEOUT = 10_000;
@@ -521,6 +522,15 @@ export async function captureScreenshot({ portalTimeoutMs } = {}) {
         failures.push({ label: attempt.label, reason: `returned a black image (${stats.width}×${stats.height})` });
         try { fs.unlinkSync(produced); } catch { /* noop */ }
         continue;
+      }
+      if (produced === file) {
+        // Our own temp copy: the caller only needs the Buffer, so the file is
+        // dead the moment it is read. No reason to wait for the janitor.
+        try { fs.unlinkSync(file); } catch { /* noop */ }
+      } else if (produced) {
+        // The portal wrote a real file into ~/Pictures. Track it so the
+        // janitor deletes it a few minutes later (never the owner's files).
+        trackScreenshot(produced, { kind: 'pictures' });
       }
       return data;
     } catch (err) {

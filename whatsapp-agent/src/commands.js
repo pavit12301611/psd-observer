@@ -34,6 +34,7 @@ import * as brief from './brief.js';
 import { createJournal, undoReply } from './journal.js';
 import { usageReport } from './usage.js';
 import { createProgress, describeHandsStep } from './progress.js';
+import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -70,6 +71,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 *Naye (2.8.0)*
 • /undo — pichhla file kaam wapas (write/move/copy/delete/mkdir/zip) · /undo list
 • /usage — aaj ka AI quota: kaun sa brain kitna kharch, 80% pe warning
+• /shots — screenshot auto-delete (default 4 min) · /shots clean — abhi saaf
 • /watch <condition> — "jab ye ho jaye to batao" (screenshot + vision) · /watch list|stop
 • /teach start <naam> → commands karo → /teach stop → phir /<naam>
 • /brief — aaj ka poora brief; /brief on 9am — roz subah khud bhejega
@@ -107,6 +109,9 @@ export function createAgent({
   // WhatsApp; in tests it stays a no-op so nothing ever sends by accident.
   const notifyOwner = typeof notify === 'function' ? notify : async () => false;
   const journal = createJournal({ config, log });
+  // Same janitor instance the background loop uses, so /shots and the timer
+  // agree on one ledger.
+  const shots = createShotJanitor({ config, log });
   const actions = createActions({ config, store, log, journal, notify: notifyOwner });
   const agentLoop = createAgentLoop({ config, store, actions, log });
   const router = routerFor(config, log);
@@ -846,6 +851,14 @@ export function createAgent({
 
   // ── new in 2.8.0 ─────────────────────────────────────────────────────────
 
+  function shotsCommand(args) {
+    const raw = String(args ?? '').trim().toLowerCase();
+    if (/^(clean|now|clear|delete|saaf|hatao)$/.test(raw)) {
+      return cleanupReply(cleanNow(shots));
+    }
+    return describeJanitor({ config, file: shots.file });
+  }
+
   async function undoCommand(args) {
     const raw = String(args ?? '').trim();
     if (/^(list|ls|journal|history)$/i.test(raw)) return journal.describe();
@@ -1055,6 +1068,7 @@ export function createAgent({
     switch (cmd) {
       case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
       case 'undo': case 'journal': return await undoCommand(args);
+      case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
       case 'watch': return watchCommand(args);
       case 'teach': return teachCommand(args);
@@ -1442,5 +1456,5 @@ export function createAgent({
     }
   }
 
-  return { handle, HELP, actions };
+  return { handle, HELP, actions, shots };
 }
