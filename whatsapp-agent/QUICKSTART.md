@@ -27,17 +27,24 @@ Everything is free; no paid API, no Observer app.
 ### 🅰️ Pehli baar install — ek script (recommended)
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+# ek hi script — install + update + models + doctor, sab isi me
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 
 Ye 4 kaam karta hai: GitHub se tarball **curl** karta hai (git nahi), code
 `~/observer-agent` me rakhta hai, `.env` bana deta hai (numbers pehle se bhare
-hue), aur `install-fedora.sh` ko wahi flags ke saath chala deta hai.
+hue), aur Fedora toolkit + service set kar deta hai. `--model auto` tumhare
+RAM/GPU ke hisaab se local model bhi download + wire kar deta hai.
+
+Puray command list: `bash /tmp/observer.sh help`. Purane script naam
+(`install-fresh.sh`, `update-from-github.sh`, `local-models.sh`) ab isi script
+ko forward karte hain — kaam karte rahenge.
 
 Dusra folder chahiye: `--dir ~/psd-observer/whatsapp-agent` add karo.
 Sirf download karna hai (install baad me): `--no-install`.
@@ -47,28 +54,64 @@ Sirf download karna hai (install baad me): `--no-install`.
 Tum git use nahi karte, isliye ye sirf record ke liye hai. Agar kabhi git chahiye:
 
 ```bash
-git clone -b arena/20378d42-psd-observer https://github.com/pavit12301611/psd-observer.git
+git clone -b arena/5f4643a1-psd-observer https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ```
 
-> ⚠️ 2.0 code sirf `arena/20378d42-psd-observer` branch pe hai, `main` pe nahi.
+> ⚠️ 2.3 code sirf `arena/5f4643a1-psd-observer` branch pe hai, `main` pe nahi.
 
 ### 🅲 Na script, na curl-fallback — seedha tar/zip manually
 
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf agent.tar.gz
-mv psd-observer-arena-20378d42-psd-observer/whatsapp-agent ~/observer-agent
+mv psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent ~/observer-agent
 cd ~/observer-agent
 ```
 
-(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip`)
+(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip`)
+
+---
+
+## 1b. Sab kuch local chahiye? (Hugging Face model, koi cloud nahi)
+
+```bash
+cd ~/observer-agent
+./scripts/observer.sh models recommend     # is PC ke liye model
+./scripts/observer.sh models setup best    # download + serve + agent wire
+# WhatsApp pe: /brains
+```
+
+Poora guide + exact `hf download` commands: [`LOCAL-MODELS.md`](LOCAL-MODELS.md)
+
+---
+
+## 1c. Free cloud brain chahiye? (Groq / OpenRouter — optional)
+
+Local model nahi chal raha, ya phone se turant jawab chahiye? Ek free key kaafi hai:
+
+```bash
+./scripts/observer.sh keys groq gsk_xxxxxxxx        # console.groq.com/keys — 1,000 req/day
+./scripts/observer.sh keys openrouter sk-or-v1-xxx  # openrouter.ai/keys — 50/day free
+./scripts/observer.sh keys --test                   # key sahi hai?
+```
+
+- **Groq** = sabse fast + free voice notes + vision (`qwen/qwen3.8-27b`)
+- **OpenRouter** = sabse zyada free models, backup ke liye badhiya
+- Local phir bhi sabse private/unlimited — keys optional hain, `AI_PROVIDER=local`
+  se cloud poori tarah band.
+
+Limits, models aur kaunsa lena chahiye: [`AI-KEYS.md`](AI-KEYS.md)
 
 ---
 
 ## 1c. Update karna (git ke bina) — baad me, jab code purana ho jaye
+
+> 2.1 me `/agent` fix hua hai (ab actually kaam karta hai, jhooth nahi bolta) aur
+> AI ab workload ke hisaab se model chunta hai. Update ke baad WhatsApp pe
+> `/brains` bhejo — live routing dikh jayega.
 
 Git ki zaroorat nahi. Ye script GitHub se seedha **tarball** download karta hai
 (plain `curl`), purana code backup karke naya copy karta hai, `npm install`
@@ -77,9 +120,13 @@ chalata hai aur service restart karta hai.
 **Jab tumhare paas pehle se install hai** (code update karna hai):
 
 ```bash
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
-bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/observer.sh update --dir ~/observer-agent
+bash /tmp/observer.sh update --check          # sirf version compare
 ```
 
 (Path apna actual install path daalo — jahan `package.json` hai wahan.
@@ -89,9 +136,7 @@ Default `~/observer-agent`. Pata nahi?
 **Pehli baar install kar rahe ho (koi code pehle se nahi hai):**
 
 ```bash
-bash /tmp/agent-update.sh --fresh ~/observer-agent
-cd ~/observer-agent
-./scripts/install-fedora.sh --service --ollama --power --phone
+bash /tmp/observer.sh install --dir ~/observer-agent --service --power --phone
 ```
 
 Kya safe rehta hai: `.env`, `auth_info/` (WhatsApp login — QR dobara scan nahi
@@ -104,20 +149,20 @@ karna padega), `data/` (PIN, token, notes, reminders, todos, downloads),
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf agent.tar.gz
-cd psd-observer-arena-20378d42-psd-observer/whatsapp-agent
+cd psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent
 # naye code ko purani install ke upar copy karo (secrets ko chhod ke)
 cp -a src webapp test scripts systemd package.json package-lock.json \
-      README.md QUICKSTART.md .env.example start.sh \
+      README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh \
       ~/psd-observer/whatsapp-agent/
 cd ~/psd-observer/whatsapp-agent && npm install
 systemctl --user restart observer-whatsapp-agent
 ```
 
-Version check: `./scripts/update-from-github.sh --check` (remote version dikhata hai).
+Version check: `./scripts/observer.sh update --check` (remote version dikhata hai).
 Browser se bhi download kar sakte ho:
-`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip`
+`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip`
 
 ---
 
@@ -318,16 +363,29 @@ nahi rakhta (chunks me type karta hai).
 
 ---
 
-## 9. Setup verify (2 minute)
+## 9. Test karo (ek command, 2 minute)
 
 ```bash
-cd ~/psd-observer/whatsapp-agent
-npm test                      # 31/31 pass hona chahiye
-node --check src/index.js     # syntax
+cd ~/observer-agent
+./scripts/observer.sh test --live
+```
+
+Ye check karta hai: version, Node, dependencies, `.env`, kaunsi keys set hain,
+local model server / Ollama chalu hai ya nahi, systemd service, unit tests
+(90), aur **asli routing** — "hi" kis model pe jayega, heavy kaam kis pe, photo
+kis pe. `--live` ek chhota asli API call bhi karta hai aur batata hai kaunsa
+brain jawab de raha hai.
+
+Bina cloud call: `./scripts/observer.sh test` (`--fast` se unit tests skip).
+
+Manual check:
+
+```bash
+npm test                      # 90/90 pass
 curl -s localhost:8787/health # {"ok":true,...}
 ```
 
-WhatsApp pe: `/access` → `61 tools`, `/model` → `Ollama · llama3.2` (ya jo bhi).
+WhatsApp pe: `/access` → `61 tools`, `/model` → kaunse brain live hain.
 
 ---
 

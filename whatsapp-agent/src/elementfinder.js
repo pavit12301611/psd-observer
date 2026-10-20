@@ -156,7 +156,7 @@ export function findTextTarget(words, query) {
   return best && best.score >= 0.55 ? best : null;
 }
 
-async function ocrScreenshot(pngBuffer) {
+export async function ocrScreenshot(pngBuffer) {
   // PSM 11 = "sparse text", the right mode for scattered UI labels.
   const { stdout } = await execFileAsync('tesseract', ['stdin', 'stdout', '--psm', '11', 'tsv'], {
     input: pngBuffer,

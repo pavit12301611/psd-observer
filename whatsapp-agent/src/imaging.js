@@ -157,6 +157,60 @@ export function imageStats(buffer, { sampleLimit = 20_000 } = {}) {
   };
 }
 
+/**
+ * A compact fingerprint of what is on the screen: sample a grid of pixels.
+ * Used to answer "did the screen actually change?" without OCR, vision models
+ * or sending anything anywhere. Returns null when the PNG can't be decoded.
+ */
+export function imageSignature(buffer, { cols = 40, rows = 24 } = {}) {
+  const decoded = decodePng(buffer);
+  if (!decoded) return null;
+  const { width, height, channels, pixels } = decoded;
+  if (!width || !height) return null;
+  const out = new Array(cols * rows);
+  for (let row = 0; row < rows; row++) {
+    const y = Math.min(height - 1, Math.floor(((row + 0.5) / rows) * height));
+    for (let col = 0; col < cols; col++) {
+      const x = Math.min(width - 1, Math.floor(((col + 0.5) / cols) * width));
+      const base = (y * width + x) * channels;
+      let r;
+      let g;
+      let b;
+      if (channels <= 2) {
+        r = g = b = pixels[base];
+      } else {
+        r = pixels[base];
+        g = pixels[base + 1];
+        b = pixels[base + 2];
+      }
+      out[row * cols + col] = Math.round(luma(r, g, b));
+    }
+  }
+  return { cols, rows, samples: out };
+}
+
+/**
+ * 0 = completely different, 1 = pixel-identical (on the sampled grid).
+ * Null when either signature is missing.
+ */
+export function imageSimilarity(a, b) {
+  if (!a?.samples || !b?.samples || a.samples.length !== b.samples.length) return null;
+  let total = 0;
+  for (let i = 0; i < a.samples.length; i++) total += Math.abs(a.samples[i] - b.samples[i]);
+  return 1 - total / a.samples.length / 255;
+}
+
+/**
+ * Did the screen meaningfully change? `threshold` 0.995 means "more than 0.5%
+ * of average brightness moved" — enough to ignore a blinking cursor but see a
+ * page load.
+ */
+export function screenChanged(before, after, threshold = 0.995) {
+  const similarity = imageSimilarity(before, after);
+  if (similarity == null) return { known: false, changed: false, similarity: null };
+  return { known: true, changed: similarity < threshold, similarity };
+}
+
 /** Human one-liner, handy in /doctor and logs. */
 export function describeImage(buffer) {
   const s = imageStats(buffer);

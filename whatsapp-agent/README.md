@@ -1,12 +1,13 @@
-# 👁️ Observer Agent 2.0 — your PC, in your pocket
+# 👁️ Observer Agent 2.4 — your PC, in your pocket
 
 A personal agent that runs on **your own Fedora/Linux computer for ₹0** and is
 driven from **WhatsApp** *and* from an **installable phone app** — no Observer
 app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 
+- 🧰 **One script, everything** — [`scripts/observer.sh`](scripts/observer.sh): `install`, `update`, `models`, `doctor`, `service`, `start`, `relink`, `remote`, `fix`. Plain `curl`, no git, nothing else to remember.
 - 💬 **Native WhatsApp** (linked device, [Baileys](https://github.com/WhiskeySockets/Baileys)) — agent number `+91 88595 55795`, listens **only** to you (`+91 95289 23866`), everyone else gets complete silence.
 - 📱 **Phone app (PWA)** — open `http://<PC-IP>:8787/`, enter the PIN, "Add to Home screen". Chat, quick controls, files, QR linking — full-screen, works offline as a shell.
-- 🧠 **Free AI with real tools** — local Ollama (offline/private) or free-tier Groq/Gemini/OpenRouter. Plain language becomes multi-step actions on the PC.
+- 🧠 **Free AI with real tools** — run it **100% local** with a Hugging Face GGUF on llama.cpp (`./scripts/observer.sh models setup best`, no key, offline) or add a **free Groq / OpenRouter / Gemini key** (`./scripts/observer.sh keys groq gsk_...`) for a fast cloud brain + free voice notes + vision. Plain language becomes multi-step actions on the PC, routed by workload.
 - ⚡ **Offline intents** — even with **no AI at all**, "chrome kholo", "screenshot bhej do", "wifi off karo", "thesis.pdf dhundo" work instantly.
 - 🖥️ **Full PC control** — open *any* installed app, files, screenshots, OCR, typing/clicking, Wi-Fi/Bluetooth, volume/brightness/music, download links, zip, webcam, screen recording, services, processes, power.
 - 🎙️ **Voice notes & documents** — voice notes are transcribed (free), photos are OCR'd, PDFs/DOCX are read and summarised — then acted on like text.
@@ -26,19 +27,33 @@ Everything that was built, every command, and every error with its fix:
 
 ## 1. Install (Fedora, ~5 minutes)
 
-**No git needed** — this project is installed and updated with plain `curl`
-(no `git clone`, no `git pull`). One script downloads the branch and installs it:
+**No git needed** — install, update, local models, service and repairs all live
+in **one script**: [`scripts/observer.sh`](scripts/observer.sh). Download it once:
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 It lands in `~/observer-agent` (`--dir <path>` to change), creates `.env` with
-the owner/agent numbers filled in, and runs the Fedora installer below.
+the owner/agent numbers filled in, installs the toolkit and sets up a local
+model that fits the machine — all from that one file.
+
+| Command | What it does |
+|---|---|
+| `observer.sh install` | first-time install (curl tarball, no git) |
+| `observer.sh update` | update code, keeps `.env` / login / `data/` |
+| `observer.sh models …` | Hugging Face GGUF: list, recommend, download, serve, wire |
+| `observer.sh doctor` | what is broken + the exact fix |
+| `observer.sh service …` | systemd unit install/restart/logs |
+| `observer.sh start` / `relink` / `remote` / `fix` | run, new QR, Tailscale, desktop fixes |
+
+The old names (`install-fresh.sh`, `update-from-github.sh`, `local-models.sh`)
+still work — they are now thin wrappers that forward to `observer.sh`.
 
 <details><summary>Already extracted the tarball somewhere?</summary>
 
@@ -107,12 +122,24 @@ calls `download_url`, `write_file`/`move`, `send_file` in sequence.
 
 - **Chat** — same agent as WhatsApp, with quick chips and browser dictation (🎤).
 - **Panel** — one-tap screenshot, volume, mute, play/pause, brightness, lock, Wi-Fi, battery, status, apps, windows, recording, webcam, processes.
+- **Screen** — tap-to-click on the PC screen, type box, keys (Enter, Esc, Tab, Ctrl+L…) and a **command console** that runs every slash command without leaving the screen. Frames are **on demand** — one when you open the tab, one per Refresh or action, never a 1s/5s/10s loop (a tap costs zero extra screenshots). Works over the same Wi-Fi, or from anywhere through Tailscale.
 - **Files** — files received on the PC and your `data/shared/` folder, with a **Send** button that delivers to WhatsApp *and* a direct download link in the app; plus "send any path".
 - **Settings** — live status, access level, tool count, WhatsApp QR when linking, install button, logout.
 
 Install: Chrome/Android menu → **Add to Home screen**; iOS Safari → Share →
 **Add to Home Screen**. It opens full-screen with its own icon and caches its
 shell for instant launch.
+
+### Updates khud aa jayein (optional)
+
+```bash
+./scripts/observer.sh autoupdate on            # roz ~3:00 baje
+./scripts/observer.sh autoupdate on --time 02:30
+./scripts/observer.sh autoupdate status|off
+```
+
+Update ke baad WhatsApp pe ek message aata hai: version, kya naya, aur kitne
+second lage (`🔄 Observer updated · 2.7.0 → 2.8.0 · 1m 12s`).
 
 ### Ghar se bahar? (macOS/Windows-style "remote desktop", free)
 
@@ -172,6 +199,8 @@ everything else. Login attempts are rate-limited.
 /ocr                      raw text on screen
 /pc locate <label>        find a button on screen (OCR)
 /pc tap <label>           find + click it
+/use <task>               *hands*: look → click/type/scroll → look again (agentic)
+/use --steps 12 <task>    same, bigger step budget (max 20)
 /pc type <text>           type into focused window
 /pc key ctrl+l            press keys
 /pc click 640 400         click coordinates
@@ -221,7 +250,14 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 
 ### Chat, notes, lookups
 ```
-/agent <task>             multi-step task with the free AI
+/agent <task>             does the task on the PC: tools, verified steps, honest report
+/agent --plan <task>      show how it would be done (no side effects)
+/agent --web <task>       force the browser path (e.g. "chatgpt pe rust vs go pooch")
+/agent --use <task>       force screen control (same as /use: click/type/scroll loop)
+/agent --fast <task>      force the small/fast model (save power) · --deep = biggest
+/brains                   which free model serves what + live health + power budget
+/brains why <task>        show the exact routing decision for a task
+/do <task>                same as /agent, quieter about routing
 /ask <question>           force AI chat        /model   AI status
 /remind in 10m <text> · /reminders · /timer
 /todo add <text> · /todo · /todo done <id>
@@ -229,10 +265,23 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 /weather <city> · /wiki · /define · /news · /currency · /unit · /calc
 /url <link> · /summarize · /improve · /qr · /password · /shorten
 /files · /downloads · /get <name>
+/auto <task>              verified UI automation: open chrome | tap Search | type hi | key enter
+/arena <prompt>           arena.ai/agent: type the prompt, read the answer, screenshot proof
 /observer <task>          optional: hand to an open Observer tab
 /access                   what this agent may do
 /yes · /no                answer a confirmation
 /run <PIN> <command>      shell (only if ALLOW_SHELL=true)
+
+/stop                     chal raha kaam turant roko (stacked bhi)
+/resume                   wahin se shuru jahan /stop ne roka
+/undo [N|list]            pichhla file kaam wapas (write/move/copy/delete/mkdir/zip)
+/usage                    aaj ka AI quota, model-wise + 80% warning
+/watch <condition>        "jab ye ho jaye to batao" (screenshot + vision) · list|stop
+/teach start <naam>       apne commands record karo → /teach stop → phir /<naam>
+/brief                    aaj ka brief · /brief on 9am = roz subah
+/tap <x y | 50% 40% | Login>  screen pe seedha click
+/remote                   kahin se bhi control — WhatsApp ya phone app
+/shots                    screenshot auto-delete (default 4 min) · /shots clean = abhi
 ```
 
 Voice notes, photos and documents sent on WhatsApp are transcribed / OCR'd /
@@ -250,8 +299,11 @@ ollama pull llama3.2          # ~2 GB, tool-calling capable
 ollama pull llava             # optional: describe photos
 ```
 
-- `/model` shows what is live. `AI_PROVIDER=auto` tries Ollama → Groq →
-  Gemini → OpenRouter (keys optional, free tiers).
+- `/model` shows what is live. `AI_PROVIDER=auto` tries local → Groq →
+  OpenRouter → Gemini (keys optional, free tiers).
+- **Cloud key in one line:** `./scripts/observer.sh keys groq gsk_...` —
+  writes `.env`, verifies the key, restarts the service. Limits, models and
+  which provider to pick: **[`AI-KEYS.md`](AI-KEYS.md).**
 - Without any brain, all built-in commands and Hinglish intents still work;
   only free-form conversation is limited.
 - `OLLAMA_VISION_MODEL=llava` describes photos. Without it, tesseract OCR still
@@ -312,23 +364,183 @@ enable shell **and** remove that line from the unit (your PC, your call).
 
 ---
 
+## 7y. Free cloud brains — Groq + OpenRouter (optional)
+
+The agent is complete without any key, but a free key adds speed, vision and
+free voice-note transcription. Both providers below cost ₹0:
+
+```bash
+./scripts/observer.sh keys groq gsk_xxxxxxxx        # console.groq.com/keys
+./scripts/observer.sh keys openrouter sk-or-v1-xxx  # openrouter.ai/keys
+./scripts/observer.sh keys --test                   # verify what is saved
+```
+
+| | Groq | OpenRouter |
+|---|---|---|
+| Free quota | **1,000 req/day** per model (30 rpm) | **50/day** (1,000 after a one-time $10) |
+| Default models | `openai/gpt-oss-120b` · `openai/gpt-oss-20b` | `google/gemma-4-31b-it:free` |
+| Vision | `qwen/qwen3.8-27b` | Gemma 4 31B |
+| Voice notes | ✅ free Whisper | ❌ |
+| Best role | primary cloud brain | backup / specific models |
+
+> Llama 3.1 8B and 3.3 70B left Groq's free tier on **16 Aug 2026** — the
+> agent's defaults are `gpt-oss` now, so old `GROQ_MODEL=llama-3.3-70b`
+> values must be replaced.
+
+Full guide: **[`AI-KEYS.md`](AI-KEYS.md)** (get keys, limits, model table,
+`.env` lines, vision, troubleshooting).
+
+---
+
+## 7z. 100% local models (Hugging Face GGUF, llama.cpp)
+
+No key, no quota, nothing leaves the PC. One command:
+
+```bash
+cd ~/observer-agent
+./scripts/observer.sh models recommend      # what fits THIS machine
+./scripts/observer.sh models setup best     # download + serve + wire
+```
+
+Then WhatsApp `/brains` shows the local model live. Full guide (model picks,
+`hf download` commands, quant advice, multi-model ports):
+[`LOCAL-MODELS.md`](LOCAL-MODELS.md).
+
+| Machine | Model | Hugging Face |
+|---|---|---|
+| 24 GB+ | Qwen3.8-27B (vision, agentic) | `unsloth/Qwen3.8-27B-GGUF` |
+| 16–24 GB CPU laptop | Gemma 4 26B-A4B (MoE, fast) | `ggml-org/gemma-4-26B-A4B-it-GGUF` |
+| 12–16 GB | Gemma 4 12B (vision, 256K ctx) | `ggml-org/gemma-4-12B-it-GGUF` |
+| 6–8 GB | Qwen3.5-4B | `unsloth/Qwen3.5-4B-GGUF` |
+| 2–4 GB | Qwen3.5-0.8B | `unsloth/Qwen3.5-0.8B-GGUF` |
+
+`.env` after wiring:
+
+```env
+AI_PROVIDER=local                              # never falls back to cloud
+LOCAL_API_URL=http://127.0.0.1:8080/v1
+LOCAL_MODEL=unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
+```
+
+Optional extra ports give the workload router a tiny model for one-liners, a
+big one for heavy jobs, and a vision model for photos (the setup script does
+this automatically).
+
+## 7a. Workload routing — the right brain for the job (2.1)
+
+Every message is sized before a model is picked, so nothing burns a 70B model
+on "hi" and nothing hands a 10-step job to a 1B model:
+
+| Work size | Example | Brain used |
+|---|---|---|
+| **tiny** | "hi", "chrome kholo", "volume 40" | small/fast model — local Ollama first, ~instant |
+| **light** | "weather batao", "notes padho" | small→mid local, cloud 8B if local is busy |
+| **standard** | "download folder saaf karo, phir screenshot bhej" | a competent model: local 14B+ **or** free 70B |
+| **heavy** | "write a script that scrapes X then emails a CSV" | best available, capped by the power budget |
+
+- **Local first** (`ROUTER_PREFER=local`): free and private. Cloud free tiers are
+  only used when the local model is too small for the job or is down.
+- **Failures cool down**: a brain that times out is skipped for 2 min, doubling
+  on repeats (max 30 min) — one dead provider never slows WhatsApp again.
+- **Power budget**: at most `MAX_HEAVY_PER_HOUR` (12) heavy calls an hour; after
+  that, work is downgraded to standard instead of waking a huge model.
+- **Multimodal**: photos go to a vision model (local `OLLAMA_VISION_MODEL`
+  first, then Gemini), and screenshots are only sent to vision when the task
+  actually needs to *read* an image.
+- `/brains` shows the live catalog, health, recent decisions and budget.
+
+### What changed in 2.1 (the `/agent` fix)
+
+`/agent` used to open arena.ai, type your text, wait 6 seconds and always reply
+"done" + a screenshot — even when the browser never opened. It now:
+
+1. **Understands the task** and runs it with real PC tools (apps, files, screen,
+   typing, downloads …), or drives a real browser when the task belongs on a site.
+2. **Verifies every step**: the opened page is confirmed by a new window title,
+   a changed screen, or a live browser process; typing is refused if the focused
+   window is not a browser (or the app just opened); buttons are found with
+   OCR/vision (no blind coordinate clicking).
+3. **Never lies**: a failed run says `step N pe ruk gaya` with the real reason,
+   and attaches a screenshot of the failure — not a fake success.
+4. **Proves its work**: `/agent` replies end with `🧠 standard · llama3.2 · 3 steps`.
+
+### What changed in 2.6 — hands (computer use)
+
+`/use` (and the `computer_use` tool the AI brain calls by itself) gives the agent
+a real feedback loop instead of one-shot commands:
+
+```
+screenshot → OCR (local, free) → vision model picks ONE action →
+click / type / scroll / drag → settle → screenshot again → …
+```
+
+Design taken from Simular's **Agent-S** (the computer-use research agent):
+
+- **One action per step**, never a burst of blind clicks. The model sees the
+  result of its last action before choosing the next one.
+- **Text is grounded to exact pixels.** OCR gives every on-screen word an id;
+  the model answers `{"action":"click","word":42}` and we click that word's
+  box. Coordinates (0-1000) are only used for icons/images.
+- **Stuck detection.** The same action three times with no screen change ends
+  the run with `same action 3 baar, screen nahi badli — stuck` instead of
+  burning the step budget.
+- **Budgets everywhere**: 8 steps / 240 s by default (`HANDS_MAX_STEPS`,
+  `HANDS_MAX_SECONDS`), screenshots downscaled to 1280 px so free-tier image
+  limits are respected.
+- **Honest replies**: every line is an action that actually ran, with the real
+  tool result; a failed run says so and attaches the screenshot.
+
+Safety: the action allowlist is `click / double_click / right_click / type /
+key / scroll / drag / move / wait / open / focus / done / fail` — there is no
+shell, and the model is instructed never to type passwords/OTPs or click
+destructive buttons. Typing still goes through the same window check as `/auto`
+(a non-browser window is never typed into blindly).
+
+Privacy: screenshots go to the vision model. With a local vision model
+(`OLLAMA_VISION_MODEL` / `LOCAL_API_URL_VISION`) that is 100% on-PC. Otherwise
+the free cloud tier sees the screenshot — set `ALLOW_CLOUD_SCREEN=false` to
+forbid that.
+
+Example:
+
+```
+/use YouTube kholo aur lofi music chalao
+/use Settings me Bluetooth on karo
+/agent instagram kholo aur pehli story dekho   ← the brain calls computer_use itself
+```
+
+### What changed in 2.5.4 (the `/arena` fix)
+
+`/arena` (and every `/agent` site task) used to fail with `browser khola par
+page load nahi hua (20s wait)` even when the page was clearly open. It waited for
+a **new window title** — which never appears when the page opens as a tab in an
+already-running browser, and never appears at all on Wayland (`wmctrl` is X11-only).
+
+Now the open step has three outcomes: **proved** (window title), **opened but
+unverified** (screen changed / browser process is alive — it focuses the browser
+and carries on, and says so in the reply), and **failed** (no browser at all, or
+the screen was readable, unchanged, and the browser was already open). Chat
+sites are typed into directly — their composer is focused on load, so no click
+is needed and Enter is pressed exactly once.
+
 ## 7b. Updating (no git needed)
 
 ```bash
-# already installed:
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
-bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+# already installed (raw.githubusercontent block ho to API fallback):
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
 
-# first install without git:
-bash /tmp/agent-update.sh --fresh ~/observer-agent
+bash /tmp/observer.sh update --dir ~/observer-agent   # apna install path
+bash /tmp/observer.sh update --check                  # sirf version dekho
 ```
 
 The script downloads the branch tarball with plain `curl`, backs up the current
 code to `~/observer-agent-backup-<date>.tar.gz`, replaces only the code, runs
 `npm install`, and restarts the service. It never touches `.env`, `auth_info/`
 (your WhatsApp link — no re-scan) or `data/` (PIN, token, notes, reminders,
-todos). `./scripts/update-from-github.sh --check` shows the remote version.
+todos). `./scripts/observer.sh update --check` shows the remote version.
 This workflow is **curl-only** — you never need `git clone` or `git pull`.
 
 ---
@@ -385,10 +597,14 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 ## 10. Tests
 
 ```bash
-npm test     # 36 offline tests: owner gate, intents, actions, permissions,
-             # confirmations, AI tool loop, HTTP API, PWA icons, black-frame
-             # detection, portal parsing, doctor
-npm run demo # dry-run: phone app + commands, no WhatsApp connection
+./scripts/observer.sh test --live   # the one to run: env, keys, brains,
+                                    # routing preview, unit tests, real call
+npm test                            # 90 offline tests: owner gate, intents,
+                                    # actions, permissions, confirmations, AI
+                                    # tool loop, HTTP API, PWA icons, black-frame
+                                    # detection, portal parsing, doctor, local
+                                    # llama.cpp, Groq/OpenRouter failover
+npm run demo                        # dry-run: phone app, no WhatsApp connection
 ```
 
 Cost so far: **₹0**. No cloud accounts are required to run any of it.

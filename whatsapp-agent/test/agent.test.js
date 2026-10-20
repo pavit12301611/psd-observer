@@ -12,6 +12,7 @@ import { Store } from '../src/store.js';
 import { createAgent } from '../src/commands.js';
 import { Mailbox } from '../src/mailbox.js';
 import * as pcctl from '../src/pccontrol.js';
+import * as files from '../src/files.js';
 import * as finder from '../src/elementfinder.js';
 import { archiveDeadAuthDir } from '../src/whatsapp.js';
 
@@ -169,6 +170,51 @@ test('pc control: home-file guard blocks escapes and secrets', async () => {
   } finally {
     fs.rmSync(inside, { recursive: true, force: true });
   }
+});
+
+test('files: protected folders are blocked for writes too, not just reads', () => {
+  const home = os.homedir();
+  const inside = fs.mkdtempSync(path.join(home, 'wa-write-guard-'));
+
+  // Regression: the block list only ran for existing paths, so
+  // `/write ~/.ssh/authorized_keys | <key>` silently worked and added an SSH key.
+  for (const target of [
+    '~/.ssh/authorized_keys',
+    '~/.ssh/config',
+    '~/.gnupg/gpg.conf',
+    path.join(home, 'auth_info', 'creds.json'),
+    '~/.local/share/keyrings/login.keyring',
+  ]) {
+    assert.equal(files.resolvePath(target, { mustExist: false }).ok, false, target);
+    assert.throws(() => files.writeTextFile(target, 'x'), /blocked on purpose/, target);
+  }
+
+  // Normal writes still work, including brand-new nested folders.
+  const fresh = path.join(inside, 'a', 'b', 'note.txt');
+  assert.match(files.writeTextFile(fresh, 'hello'), /Saved/);
+  assert.equal(fs.readFileSync(fresh, 'utf8'), 'hello');
+  assert.match(files.makeDir(path.join(inside, 'newdir')), /Created folder/);
+  assert.match(files.copyPath(fresh, path.join(inside, 'copy.txt')), /Copied/);
+
+  // Escapes are still refused.
+  assert.equal(files.resolvePath('~/../../etc/passwd', { mustExist: false }).ok, false);
+  assert.equal(files.resolvePath('/etc/passwd', { mustExist: false }).ok, false);
+  fs.rmSync(inside, { recursive: true, force: true });
+});
+
+test('tts: text is handed to the engine directly, never through a shell', async () => {
+  const src = fs.readFileSync(new URL('../src/tts.js', import.meta.url), 'utf8');
+  // Command substitution ($(…), backticks) survives sanitizeForTTS, so a
+  // `sh -c` anywhere near the message text is a command-injection hole.
+  assert.ok(!/spawn\(\s*['"]sh['"]/.test(src), 'no shell for TTS');
+  assert.ok(!/['"]-c['"]/.test(src), 'no shell -c for TTS');
+  assert.ok(src.includes("spawn('text2wave'"), 'festival gets argv + stdin');
+});
+
+test('bridge: the token is compared in constant time', async () => {
+  const src = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  assert.ok(!/=== config\.bridgeToken/.test(src), 'no plain === on the token');
+  assert.ok(/safeEqual\(candidate, config\.bridgeToken\)/.test(src), 'safeEqual used');
 });
 
 test('pc control: tier-2 input/power is gated off by default, tier-1 works', async () => {

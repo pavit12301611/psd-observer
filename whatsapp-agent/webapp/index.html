@@ -81,6 +81,43 @@
       </div>
     </section>
 
+    <!-- Screen (remote control) -->
+    <section id="tab-screen" class="tab">
+      <div class="row-between">
+        <h2>Screen</h2>
+        <button id="screen-refresh" class="ghost">↻ Refresh</button>
+      </div>
+      <div class="screen-wrap">
+        <img id="screen-img" alt="PC screen" draggable="false">
+        <div id="screen-status" class="muted small center">Tap on Refresh — screenshot sirf tab jab tum maango.</div>
+      </div>
+      <p class="muted small center">Screen pe tap = wahin click. Screenshot <b>sirf</b> tab aata hai jab tum Refresh dabao ya koi action karo — koi 1s/5s/10s wala auto loop nahi.</p>
+
+      <div class="card">
+        <form id="type-form" class="inline">
+          <input id="type-text" placeholder="PC pe type karo…" autocomplete="off">
+          <button class="primary" type="submit">Type</button>
+        </form>
+        <div class="grid" id="key-grid"></div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h3>Commands</h3>
+          <button id="cmd-clear" class="ghost">Clear</button>
+        </div>
+        <p class="muted small">Sab commands yahin — /help, /brief, /usage, /watch, /use, /undo, /screenshot…</p>
+        <div id="cmd-out" class="cmd-out"><p class="muted small">Abhi kuch nahi chalaya.</p></div>
+        <div class="chips" id="cmd-chips"></div>
+        <form id="cmd-form" class="inline">
+          <input id="cmd-input" placeholder="/brief · /usage · /help · /use …" autocomplete="off">
+          <button class="primary" type="submit">Run</button>
+        </form>
+      </div>
+
+      <p class="muted small">Same Wi-Fi pe kaam karta hai. Bahar se: <code>./scripts/observer.sh remote</code> (Tailscale) — phir wahi page kahin se bhi.</p>
+    </section>
+
     <!-- Settings -->
     <section id="tab-settings" class="tab">
       <div class="card">
@@ -109,6 +146,7 @@
   <nav class="bottom-nav" role="tablist">
     <button data-tab="chat" class="active" role="tab">💬 <span>Chat</span></button>
     <button data-tab="controls" role="tab">🎛️ <span>Panel</span></button>
+    <button data-tab="screen" role="tab">🖥️ <span>Screen</span></button>
     <button data-tab="files" role="tab">📁 <span>Files</span></button>
     <button data-tab="settings" role="tab">⚙️ <span>Settings</span></button>
   </nav>

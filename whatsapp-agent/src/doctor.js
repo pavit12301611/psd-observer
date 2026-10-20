@@ -172,6 +172,27 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
 
   // ── 4. AI brain ───────────────────────────────────────────────────────────
   const ollama = await ollamaState(config);
+
+  // Local llama.cpp / LM Studio server (Hugging Face GGUF models).
+  let localServer = null;
+  if (config.localApiUrl) {
+    try {
+      const res = await fetch(`${config.localApiUrl}/models`, { signal: AbortSignal.timeout(2_500) });
+      const data = res.ok ? await res.json() : null;
+      const ids = (data?.data ?? []).map((m) => m.id).filter(Boolean);
+      localServer = { ok: res.ok, ids, url: config.localApiUrl };
+    } catch (err) {
+      localServer = { ok: false, ids: [], url: config.localApiUrl, error: err.message };
+    }
+    checks.push(localServer.ok
+      ? { icon: '✅', title: 'Local model server', detail: `${localServer.url} — ${localServer.ids.join(', ') || 'running'}` }
+      : {
+        icon: '❌',
+        title: 'Local model server',
+        detail: `not reachable at ${localServer.url}`,
+        fix: './scripts/observer.sh models serve <model>   (or: systemctl --user start observer-model)',
+      });
+  }
   const cloudKey = config.groqApiKey ? 'Groq' : config.geminiApiKey ? 'Gemini' : config.openrouterApiKey ? 'OpenRouter' : null;
   if (ollama.reachable) {
     const hasModel = ollama.models.some((m) => m.split(':')[0] === config.ollamaModel.split(':')[0]);
@@ -183,14 +204,16 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
         : `Ollama is up but "${config.ollamaModel}" isn't pulled (have: ${ollama.models.slice(0, 4).join(', ') || 'none'})`,
       fix: hasModel ? null : `ollama pull ${config.ollamaModel}`,
     });
+  } else if (localServer?.ok) {
+    checks.push({ icon: '✅', title: 'AI (local)', detail: `${config.localModel} via llama.cpp — 100% on this PC` });
   } else if (cloudKey) {
     checks.push({ icon: '✅', title: 'AI', detail: `${cloudKey} free tier (Ollama not running: ${ollama.detail})` });
   } else {
     checks.push({
       icon: '⚠️',
       title: 'AI brain',
-      detail: 'No Ollama and no free API key — built-in commands and Hinglish intents still work, but free-form chat and multi-step tasks do not.',
-      fix: 'sudo dnf install ollama && sudo systemctl enable --now ollama && ollama pull llama3.2',
+      detail: 'No local model server, no Ollama and no free API key — built-in commands and Hinglish intents still work, but free-form chat and multi-step tasks do not.',
+      fix: './scripts/observer.sh models recommend   (downloads a Hugging Face GGUF + wires it up, fully offline after that)   ·   ya free cloud key: ./scripts/observer.sh keys groq <gsk_...>   (AI-KEYS.md)',
     });
   }
 

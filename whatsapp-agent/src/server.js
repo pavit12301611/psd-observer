@@ -11,6 +11,7 @@
 //   POST /api/login             dashboard PIN → token
 //   POST /api/chat              talk to the agent from the app
 //   GET  /api/status            live status for the app
+//   GET  /api/brains            which free model serves what (workload routing)
 //   GET  /api/files             received + shared files
 //   POST /api/action            run a single action directly
 //   POST /api/send              send a message to the owner on WhatsApp
@@ -28,9 +29,13 @@ import { ROOT } from './config.js';
 import { cachedIcon } from './webapp.js';
 import * as apps from './apps.js';
 import * as files from './files.js';
+import * as pc from './pccontrol.js';
+import * as hands from './hands.js';
+import { pngSize } from './elementfinder.js';
+import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.0.0';
+const VERSION = '2.8.2';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -85,16 +90,39 @@ export function replyForApp(reply) {
   return out;
 }
 
+/** Strong ETag for one frame, so an unchanged screen costs no bandwidth. */
+export function screenTag(buffer) {
+  return `"${crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 20)}"`;
+}
+
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a ?? '')).digest();
   const hb = crypto.createHash('sha256').update(String(b ?? '')).digest();
   return crypto.timingSafeEqual(ha, hb);
 }
 
-export function createBridgeServer({ config, store, whatsapp, mailbox, actions, runOwner, log = console }) {
+export function createBridgeServer({
+  config, store, whatsapp, mailbox, actions, runOwner, log = console,
+  // Injectable so tests never touch a real desktop, and so the number of
+  // screenshots per request is explicit and measurable.
+  screen = null,
+}) {
+  const scr = screen ?? {
+    capture: (opts) => pc.captureScreenshot(opts),
+    click: (x, y) => pc.click(x, y),
+    key: (combo) => pc.keyCombo(combo),
+    type: (text) => pc.typeText(text),
+  };
+  // Size of the last frame the phone asked for. A tap then needs ZERO extra
+  // screenshots — important on Wayland, where every capture can pop the
+  // portal's "share your screen" prompt.
+  let lastFrameSize = null;
   const authed = (req, url) => {
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-    return req.headers['x-bridge-token'] === config.bridgeToken || bearer === config.bridgeToken || url.searchParams.get('t') === config.bridgeToken;
+    // Constant-time: a plain === leaks the token a byte at a time to anything
+    // that can time requests on the LAN.
+    return [req.headers['x-bridge-token'], bearer, url.searchParams.get('t')]
+      .some((candidate) => candidate != null && safeEqual(candidate, config.bridgeToken));
   };
 
   const loginAttempts = new Map(); // ip → {count, resetAt}
@@ -239,6 +267,15 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
       }
 
       switch (route) {
+        case 'GET /api/brains': {
+          const router = routerFor(config, console);
+          return json(res, 200, {
+            ...router.snapshot(),
+            tierBudgets: { tiny: 2, light: 3, standard: 5, heavy: 8 },
+            model: config.ollamaModel,
+          });
+        }
+
         case 'GET /api/status':
           return json(res, 200, {
             version: VERSION,
@@ -253,6 +290,10 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
             access: actions?.accessReport?.() ?? { level: config.accessLevel },
             agentTools: Boolean(config.agentTools),
             model: config.ollamaModel,
+            brains: routerFor(config, console).catalog.map((m) => ({
+              id: m.id, label: m.label, local: m.local, vision: m.vision,
+              tiers: [m.minTier, m.maxTier], quality: m.quality,
+            })),
             stats: store.data.stats,
             reminders: store.data.reminders.length,
             cronJobs: (store.data.cronJobs ?? []).length,
@@ -304,6 +345,83 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
 
         case 'GET /api/files':
           return json(res, 200, { downloads: listDownloads(), shared: listShared() });
+
+        // ── remote control (phone app / from anywhere over Tailscale) ──────
+        // Live screen + tap-to-click. Same PC, same controls as WhatsApp —
+        // the phone is just another client of the same agent.
+        case 'GET /api/screen': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const shot = await scr.capture({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+          const size = pngSize(shot) ?? { width: 0, height: 0 };
+          if (size.width && size.height) lastFrameSize = size;
+          const tag = screenTag(shot);
+          // Unchanged screen → 304, no capture wasted on the phone's side and
+          // no image re-sent. The phone asks again only when it wants to.
+          if (req.headers['if-none-match'] === tag) {
+            res.writeHead(304, { etag: tag, 'cache-control': 'no-store', 'x-screen-width': size.width, 'x-screen-height': size.height });
+            return res.end();
+          }
+          const wanted = Math.max(480, Math.min(1920, Number(url.searchParams.get('w')) || 1280));
+          const { image, mime } = await hands.shrinkForModel(shot, wanted, 70);
+          res.writeHead(200, {
+            'content-type': mime,
+            'content-length': image.length,
+            'cache-control': 'no-store',
+            etag: tag,
+            'x-screen-width': size.width,
+            'x-screen-height': size.height,
+          });
+          return res.end(image);
+        }
+
+        case 'POST /api/tap': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          const rx = Number(body.x);
+          const ry = Number(body.y);
+          if (!Number.isFinite(rx) || !Number.isFinite(ry)) return json(res, 400, { detail: 'x and y are required (0-1000 relative, or pixels with relative:false)' });
+          // Prefer the size of the frame the phone is actually looking at: one
+          // screenshot per tap is exactly the "screenshot har second" cost the
+          // owner asked to avoid.
+          let size = lastFrameSize;
+          if (!size) {
+            const shot = await scr.capture({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+            size = pngSize(shot) ?? { width: 0, height: 0 };
+            if (size.width && size.height) lastFrameSize = size;
+          }
+          // `relative:true` (the app sends this) means 0-1000 like the hands
+          // loop; raw pixels are accepted too.
+          const x = body.relative === false
+            ? Math.round(rx)
+            : Math.round((Math.min(1000, Math.max(0, rx)) / 1000) * (size.width || 1));
+          const y = body.relative === false
+            ? Math.round(ry)
+            : Math.round((Math.min(1000, Math.max(0, ry)) / 1000) * (size.height || 1));
+          if (!size.width || x < 0 || y < 0 || x >= size.width || y >= size.height) {
+            return json(res, 400, { detail: `Tap outside the screen (${size.width}×${size.height})` });
+          }
+          await scr.click(x, y);
+          log.info?.(`[bridge] tap ${x},${y} from the phone app`);
+          return json(res, 200, { ok: true, x, y, width: size.width, height: size.height });
+        }
+
+        case 'POST /api/key': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          const key = String(body.key ?? '').trim();
+          if (!key) return json(res, 400, { detail: 'key is required (e.g. "ctrl+l", "Return")' });
+          await scr.key(key);
+          return json(res, 200, { ok: true, key });
+        }
+
+        case 'POST /api/type': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          const text = String(body.text ?? '');
+          if (!text) return json(res, 400, { detail: 'text is required' });
+          await scr.type(text.slice(0, 4000));
+          return json(res, 200, { ok: true, chars: Math.min(text.length, 4000) });
+        }
 
         case 'GET /api/apps':
           try {

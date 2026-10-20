@@ -6,6 +6,7 @@
 // fileName, mimetype}, sticker?: Buffer, poll?: {name, values} }
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
@@ -16,13 +17,24 @@ import * as learn from './learn.js';
 import * as cron from './cron.js';
 import * as tts from './tts.js';
 import * as autopilot from './autopilot.js';
+import { describeSite } from './sites.js';
+import * as hands from './hands.js';
+import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
+import { routerFor, looksLikeWebTask } from './router.js';
 import { parseIntent } from './nlp.js';
 import { runDoctor } from './doctor.js';
+import * as watch from './watch.js';
+import * as macro from './macro.js';
+import * as brief from './brief.js';
+import { createJournal, undoReply } from './journal.js';
+import { usageReport } from './usage.js';
+import { createProgress, describeHandsStep } from './progress.js';
+import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -32,8 +44,11 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • “chrome kholo” · “screenshot bhej do” · “awaaz kam karo”
 • “wifi off karo” · “screen pe kya hai” · “thesis.pdf dhundo”
 • “download <link>” · “10 second screen record karo” · “type karo hello”
-• /agent <task> — multi-step task handled by the free AI
-• /model — see which free brain is connected
+• /agent <task> — samajhta hai aur PC pe *karke* dikhata hai (verified, no fake "done")
+• /brains — kaun sa model kab use hota hai (live health + power budget)
+• /model — brains ka setup/status (local + cloud)
+• 100% local chahiye? ./scripts/observer.sh models recommend — Hugging Face GGUF, koi cloud nahi
+• Cloud free brain (Groq/OpenRouter): ./scripts/observer.sh keys groq gsk_... — AI-KEYS.md
 
 *Apps & windows*
 • /apps · /open <app> · /close <app> · /windows · /focus <title>
@@ -42,6 +57,9 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
 • /pc type <text> · /pc paste <long text> · /pc key ctrl+l · /pc click [x y] [double]
 • /pc mousemove <x> <y> · /pc scroll [up|down] [steps] · /pc lock
+• /stop — chal raha kaam turant roko (browser/app khula rahega; stacked kaam bhi)
+• /resume — /stop ke baad wahin se shuru (zero se nahi)
+• /tap <x y | 50% 40% | Login> — screen pe seedha click (naya screenshot saath)
 • /webcam · /record [seconds] · /notify <text> · /pc locate <button>
 *Network*
 • /wifi [status|on|off|list] · /wifi connect <SSID> [password]
@@ -50,11 +68,23 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /ls [path] · /read <path> · /write <path> | <text> · /send <path>
 • /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
+*Naye (2.8.0)*
+• /undo — pichhla file kaam wapas (write/move/copy/delete/mkdir/zip) · /undo list
+• /usage — aaj ka AI quota: kaun sa brain kitna kharch, 80% pe warning
+• /shots — screenshot auto-delete (default 4 min) · /shots clean — abhi saaf
+• /watch <condition> — "jab ye ho jaye to batao" (screenshot + vision) · /watch list|stop
+• /teach start <naam> → commands karo → /teach stop → phir /<naam>
+• /brief — aaj ka poora brief; /brief on 9am — roz subah khud bhejega
+• /remote — kahin se bhi control (WhatsApp se ya phone app se)
+
 *Do things*
 • /remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>
 • /cron add every 10m <text> · /cron add roz 9 baje <text> · /cron list|del
 • /voicereply <text> — free offline voice note (only on this command)
-• /auto <task> — one-command UI autopilot: open agent | tap battle | tap agent | type hello | key enter | screenshot
+• /auto <task> — UI autopilot (verified): open chrome | tap Search | type hello | key enter | screenshot
+• /arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)
+• /use <task> — *haath*: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)
+• /stop — jo chal raha hai wahi rukta hai (partial steps batata hai) · naya: update ka message khud aata hai
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
@@ -67,10 +97,27 @@ _Built-in commands work with no AI at all. Local Ollama makes conversation + mul
 
 const num = (s) => Number.parseInt(String(s ?? ''), 10);
 
-export function createAgent({ config, store, log = console, forwardToObserver = async () => null, observerOnline = () => false }) {
+export function createAgent({
+  config, store, log = console, forwardToObserver = async () => null, observerOnline = () => false,
+  taskRegistry = globalTasks, notify = null,
+}) {
   const tz = config.timezone;
-  const actions = createActions({ config, store, log });
+  // The signal of whatever command is running right now. Commands are
+  // serialized (isProcessing), so one slot is enough; /stop does not use it.
+  let activeSignal = null;
+  // Unsolicited messages (live progress, watch alerts). index.js wires this to
+  // WhatsApp; in tests it stays a no-op so nothing ever sends by accident.
+  const notifyOwner = typeof notify === 'function' ? notify : async () => false;
+  const journal = createJournal({ config, log });
+  // Same janitor instance the background loop uses, so /shots and the timer
+  // agree on one ledger.
+  const shots = createShotJanitor({ config, log });
+  const actions = createActions({ config, store, log, journal, notify: notifyOwner });
   const agentLoop = createAgentLoop({ config, store, actions, log });
+  const router = routerFor(config, log);
+  // /usage needs per-call counts; the router owns the calls, the store owns
+  // persistence, so the hook joins them (and never throws into a model call).
+  try { router.setRecordHook?.((modelId, info) => usage.noteUsage(store, modelId, info)); } catch { /* older router */ }
 
   /** Execute an action and shape it into a WhatsApp reply object. */
   function toReply(result) {
@@ -88,7 +135,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return Object.keys(out).length ? out : '✅ Done.';
   }
   const act = async (name, args = {}, ctx = {}) => {
-    const result = await actions.execute(name, args, ctx);
+    const result = await actions.execute(name, args, { signal: activeSignal, ...ctx });
     // Text-only results stay strings (friendlier for WhatsApp + existing code);
     // media results keep their reply object.
     if (result && typeof result === 'object' && !result.image && !result.extraImages
@@ -519,10 +566,516 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return out;
   }
 
+  // ── AI routing helpers (which brain, and prove it) ───────────────────────
+
+  const shortModel = (label) => String(label ?? '').split(' · ').slice(-1)[0] || 'AI';
+
+  /** "🧠 standard · llama3.2 · 3 steps · 1.4s" — proof of what ran. */
+  function routeLine(meta, { force = false } = {}) {
+    if (!meta?.model) return '';
+    if (!force && !config.showRoutingFooter) return '';
+    const bits = [`🧠 ${meta.tier ?? '?'}`, shortModel(meta.model)];
+    if (meta.toolCalls) bits.push(`${meta.toolCalls} tools`);
+    if (meta.steps) bits.push(`${meta.steps} steps`);
+    if (meta.ms) bits.push(meta.ms < 1000 ? `${Math.round(meta.ms)}ms` : `${(meta.ms / 1000).toFixed(1)}s`);
+    return `\n\n_${bits.join(' · ')}_`;
+  }
+
+  function withRoute(reply, meta, { force = false } = {}) {
+    const line = routeLine(meta, { force });
+    if (!line) return reply;
+    if (typeof reply === 'string') return reply + line;
+    if (reply && typeof reply === 'object') return { ...reply, text: `${reply.text ?? ''}${line}`.trim() };
+    return reply;
+  }
+
+  function planPreview(text, plan) {
+    return [
+      `🗺️ *Plan preview* — "${String(text).slice(0, 90)}"`,
+      `Work size: *${plan.tier}* — ${plan.complexity.reasons.join(', ') || 'simple ask'}`,
+      `Steps allowed: ${plan.maxSteps} · tools offered: ${plan.toolLimit}`,
+      `Needs: ${[plan.needsTools ? 'PC tools' : 'chat only', plan.needsVision ? 'vision' : null].filter(Boolean).join(' + ')}`,
+      '',
+      '*Brain order (first healthy wins):*',
+      ...(plan.candidates.length
+        ? plan.candidates.slice(0, 4).map((m, i) => `${i + 1}. ${m.label}`)
+        : ['❌ none available — see /brains']),
+      ...(plan.notes.length ? ['', `_Note: ${plan.notes.join(' · ')}_`] : []),
+      '',
+      '_Bhejo bina `--plan` ke — tab actually chalega._',
+    ].join('\n');
+  }
+
+  function noBrainReply() {
+    const catalog = String(config.aiProvider) === 'none' ? [] : router.catalog;
+    if (!catalog.length) {
+      return [
+        '🤖 *Koi free AI brain configured nahi hai* — isliye /agent kuch nahi kar sakta, aur jhooth bhi nahi bolega.',
+        '',
+        '*Free me chalu karo (ek hi baar):*',
+        '`sudo dnf install ollama && sudo systemctl enable --now ollama && ollama pull llama3.2`',
+        'ya WhatsApp-agent/.env me free key: GROQ_API_KEY / GEMINI_API_KEY',
+        '',
+        'Tab tak ye sab bina AI chalte hain:',
+        '/open chrome · /screenshot · /look · /ls · /send · /wifi · /pc type hello · /auto …',
+      ].join('\n');
+    }
+    return [
+      '⚠️ *Kaam nahi ho paaya — kuch bhi nahi kiya.*',
+      '',
+      'Sab configured brains fail / cooldown me hain. Dekho:',
+      '• /brains — kaun live hai, kaun cooling me',
+      '• /doctor — PC side problem',
+      '• /brains why <task> — kaunsa model chuna jaata',
+    ].join('\n');
+  }
+
+  // ── /agent: understand the task, DO it, verify, then report honestly ─────
+
+  const AGENT_USAGE = [
+    '🤖 *Usage:* `/agent <task>`',
+    '',
+    'Ye task ko samajh ke PC pe *actually karta hai* — apps, files, screen, typing, downloads — ',
+    'har step verify karta hai, aur jo hua bas wahi batata hai (fake "done" nahi).',
+    '',
+    '*Examples:*',
+    '• /agent download folder saaf karo aur screenshot bhejo',
+    '• /agent ~/notes.txt padh ke summary bhejo',
+    '• /agent chrome kholo aur github pe psd-observer search karo',
+    '• /agent chatgpt pe rust vs go pooch        ← browser task',
+    '• /agent --web youtube pe lofi play karo   ← force browser',
+    '• /agent --use settings me bluetooth on karo ← force screen control (/use)',
+    '• /agent --plan <task>                     ← pehle plan dekho',
+    '• /agent --fast <task>                     ← chhota model, power bachao',
+    '',
+    '_Sirf chat chahiye to seedha message bhejo — /agent ki zaroorat nahi._',
+  ].join('\n');
+
+  function parseAgentFlags(raw) {
+    let text = String(raw ?? '').trim();
+    const flags = { web: false, plan: false, deep: false, fast: false, use: false };
+    for (let i = 0; i < 6; i++) {
+      const m = text.match(/^--(web|browser|online|plan|deep|heavy|fast|quick|use|hands|screen)\s+/i);
+      if (!m) break;
+      const key = m[1].toLowerCase();
+      if (key === 'browser' || key === 'online') flags.web = true;
+      else if (key === 'heavy' || key === 'deep') flags.deep = true;
+      else if (key === 'quick') flags.fast = true;
+      else if (key === 'hands' || key === 'screen') flags.use = true;
+      else flags[key] = true;
+      text = text.slice(m[0].length).trim();
+    }
+    return { text, flags };
+  }
+
+  function forceTierFrom(flags) {
+    if (flags.deep) return 'heavy';
+    if (flags.fast) return 'light';
+    return undefined;
+  }
+
+  async function runWebTask(text, label = 'Agent', signal = null) {
+    const steps = autopilot.buildWebSteps(text);
+    if (!steps.length) return null;
+    log.info?.(`[agent] browser task: ${steps.map((s) => s.op).join(' → ')}`);
+    const result = await autopilot.executeSteps(steps, { config, log, label, signal });
+    if (!result || typeof result === 'string') return result;
+    const target = steps.find((s) => s.op === 'open')?.target;
+    const siteLine = target ? describeSite(target) : null;
+    return {
+      ...result,
+      text: `${result.text}\n\n_🌐 browser · xdg-open + OCR (no AI guesswork)_` +
+        `${siteLine ? `\n_${siteLine}_` : ''}`,
+    };
+  }
+
+  const USE_USAGE = [
+    '🖐️ *Usage:* `/use <task>`',
+    '',
+    'Main screen dekhta hoon, phir *asli* mouse/keyboard se ek-ek step karta hoon — ',
+    'aur har step ke baad dobara screen dekhta hoon (jaise insaan karta hai).',
+    '',
+    '*Examples:*',
+    '• /use YouTube kholo aur lofi music chalao',
+    '• /use Settings me Wi-Fi on karo',
+    '• /use browser me github.com/pavit12301611/psd-observer kholo aur star karo',
+    '• /use --steps 12 download page me se latest release download karo',
+    '',
+    '_Sirf ek command ka kaam ho to /open, /pc type, /pc key fast hain. /use tab jab UI me ghoomna pade._',
+  ].join('\n');
+
+  async function runUseTask(raw, signal = null) {
+    let text = String(raw ?? '').trim();
+    let maxSteps;
+    const m = text.match(/^--steps\s+(\d{1,2})\s+/i);
+    if (m) {
+      maxSteps = Number(m[1]);
+      text = text.slice(m[0].length).trim();
+    }
+    if (!text) return USE_USAGE;
+    if ((actions.level?.() ?? 'full') === 'safe') {
+      return '🔒 /use ke liye ACCESS_LEVEL=standard ya full chahiye — safe mode sirf padhta hai.';
+    }
+    const progress = createProgress({
+      send: notifyOwner, label: 'Hands', total: maxSteps ?? config.handsMaxSteps ?? 8, log,
+    });
+    rememberTask({ kind: 'use', text });
+    const result = await hands.runHands(text, {
+      config, log, maxSteps, signal,
+      onStep: (entry) => {
+        if (entry?.ok === false) return;
+        const { action, detail } = describeHandsStep(entry?.action ?? entry ?? {});
+        progress.step({ n: entry?.step ?? null, action, detail }).catch(() => {});
+      },
+    });
+    if (!result) return '⚠️ Hands: koi jawab nahi mila.';
+    if (result.ok && !result.stopped) clearTask();
+    // Keep `stopped` on the object so handle() can suppress the duplicate reply
+    // (the /stop command already told the owner what happened).
+    return { text: result.text, image: result.image ?? undefined, stopped: Boolean(result.stopped) };
+  }
+
+  async function runArenaPrompt(prompt, signal = null) {
+    if (!prompt) return '🌐 Usage: /arena <prompt> — arena.ai/agent kholke prompt poochta hai';
+    rememberTask({ kind: 'arena', text: prompt });
+    const arenaResult = await autopilot.executeSteps([
+      { op: 'open', target: 'https://arena.ai/agent' },
+      { op: 'type', text: prompt, submit: true },
+      { op: 'wait', ms: 8_000 },
+      { op: 'look', question: prompt },
+      { op: 'screenshot' },
+    ], { config, log, label: 'Arena', signal });
+    if (!arenaResult?.stopped) clearTask();
+    return arenaResult;
+  }
+
+  async function runAgentTask(raw, ctx) {
+    if (!raw || !String(raw).trim()) return AGENT_USAGE;
+    const { text, flags } = parseAgentFlags(raw);
+    if (!text) return AGENT_USAGE;
+
+    // --use: skip every heuristic and hand it to the screen-control loop.
+    if (flags.use) return runUseTask(text, ctx.signal);
+
+    const plan = agentLoop.buildPlan(text, { needsTools: true, forceTier: forceTierFrom(flags) });
+    if (flags.plan) return planPreview(text, plan);
+
+    // A task that clearly belongs on a website → real browser automation
+    // (verified open, no typing into the wrong window).
+    const webTask = flags.web || looksLikeWebTask(text);
+    if (webTask) {
+      const result = await runWebTask(text, 'Agent', ctx.signal);
+      if (result) return result;
+      if (flags.web) {
+        return '🌐 Koi site samajh nahi aayi. Example: `/agent --web chatgpt pe rust vs go pooch`\n' +
+          'Taaki main jaanta hoon: chatgpt, gemini, claude, google, youtube, github, wikipedia…';
+      }
+    }
+
+    if (!agentLoop.enabled) return noBrainReply();
+
+    const reply = await agentLoop.run(text, ctx, { forceTier: forceTierFrom(flags), nudge: true, signal: ctx.signal });
+    if (reply != null) return withRoute(reply, agentLoop.lastRun, { force: true });
+
+    const meta = agentLoop.lastRun ?? {};
+    if (!router.catalog.length) return noBrainReply();
+    return [
+      '⚠️ *Kaam nahi ho paaya — kuch bhi nahi kiya.*',
+      `_Reason: ${meta.reason || 'brain ne koi usable jawab nahi diya'}_`,
+      '',
+      `Work size: ${meta.tier ?? plan.tier} · tried: ${plan.candidates.slice(0, 2).map((m) => shortModel(m.label)).join(' → ') || 'none'}`,
+      '',
+      'Ye try karo:',
+      '• /brains — live health + power budget',
+      '• /brains why ' + text.slice(0, 40) + ' — routing dekho',
+      '• /doctor — PC side problem',
+      '• Direct chhote commands: /screenshot · /open chrome · /ls · /pc type hello',
+    ].join('\n');
+  }
+
   // ── router ───────────────────────────────────────────────────────────────
+
+  // ── adhoora kaam (for /resume) ───────────────────────────────────────────
+  // Only long-running, resumable tasks are remembered. A stop keeps it so the
+  // owner can pick up where it broke; a clean finish clears it.
+  function rememberTask({ kind, text }) {
+    store.data.lastTask = { kind, text: String(text).slice(0, 500), ts: Date.now(), done: false };
+    store.save?.();
+  }
+  function clearTask() {
+    if (store.data.lastTask) {
+      store.data.lastTask.done = true;
+      store.data.lastTask.doneTs = Date.now();
+      store.save?.();
+    }
+  }
+
+  // ── /stop ────────────────────────────────────────────────────────────────
+  // Deliberately outside the command dispatcher: it has to work while another
+  // command is mid-flight, so it never waits for the queue or the busy flag.
+  function labelFor(clean) {
+    const m = String(clean).match(/^\/([a-zA-Z]+)/);
+    const name = m ? m[1].toLowerCase() : '';
+    return ({
+      use: 'Hands', hands: 'Hands', arena: 'Arena', agent: 'Agent', do: 'Agent',
+      auto: 'Autopilot', autopilot: 'Autopilot', download: 'Download',
+      run: 'Shell', record: 'Screen recording', summarize: 'Summary', url: 'Page read',
+    })[name] ?? (name ? `/${name}` : 'AI');
+  }
+
+  function stopReply(stopped) {
+    if (!stopped.length) {
+      return '⏹ Abhi koi task nahi chal raha — rokne ko kuch nahi hai.\n_Naya kaam shuru karne ke liye bas message bhejo._';
+    }
+    const lines = stopped.map((t) => {
+      const what = t.detail ? ` — ${t.detail}` : '';
+      return `• *${t.label}*${what} · ${tools.humanDuration(t.elapsedMs)}`;
+    });
+    return [
+      `⏹ *Roka gaya* — ${stopped.length} task${stopped.length === 1 ? '' : 's'}`,
+      '',
+      ...lines,
+      '',
+      '_Jo step tak hua wahi hua — aage kuch nahi chalega, aur naya browser/app band nahi hoga._',
+    ].join('\n');
+  }
+
+  function stopCommand() {
+    return stopReply(taskRegistry.stopAll('stop'));
+  }
+
+  /** A stack like "/arena hi\n/stop" must stop, not wait 30s and then stop. */
+  function stopInStack(lines) {
+    return lines.some((line) => isStopCommand(line));
+  }
+
+  // ── new in 2.8.0 ─────────────────────────────────────────────────────────
+
+  function shotsCommand(args) {
+    const raw = String(args ?? '').trim().toLowerCase();
+    if (/^(clean|now|clear|delete|saaf|hatao)$/.test(raw)) {
+      return cleanupReply(cleanNow(shots));
+    }
+    return describeJanitor({ config, file: shots.file });
+  }
+
+  async function undoCommand(args) {
+    const raw = String(args ?? '').trim();
+    if (/^(list|ls|journal|history)$/i.test(raw)) return journal.describe();
+    const n = Math.min(5, Math.max(1, Number.parseInt(raw || '1', 10) || 1));
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const result = await journal.undo();
+      if (!result.ok) {
+        if (!out.length) return undoReply(result);
+        out.push(`⚠️ Aur peeche nahi ja sakta — ${result.error ?? result.reason}.`);
+        break;
+      }
+      out.push(undoReply(result));
+    }
+    if (n > 1) out.push(`_${n} step wapas._`);
+    return out.join('\n');
+  }
+
+  function watchCommand(args) {
+    const parsed = watch.parseWatchArgs(args);
+    if (parsed.action === 'list') {
+      const all = watch.watchers(store);
+      if (!all.length) {
+        return [
+          '👁️ Koi watch chalu nahi hai. Ek banao:',
+          '',
+          '• `/watch jab build complete ho jaye`',
+          '• `/watch every 2m OTP box khali hai kya`',
+          '• `/watch once — jab \'In stock\' dikhe`',
+        ].join('\n');
+      }
+      return `👁️ *Watches* (${all.length})\n\n${all.map(watch.describeWatcher).join('\n')}\n\n_/watch stop <#> · /watch stop all_`;
+    }
+    if (parsed.action === 'stop') {
+      if (parsed.all) {
+        const n = watch.clearWatchers(store);
+        return n ? `👁️ ${n} watch band kar diye.` : '👁️ Koi watch chalu hi nahi tha.';
+      }
+      const removed = watch.removeWatcher(store, parsed.id);
+      return removed ? `👁️ Watch band — "${removed.condition}"` : `Koi watch #${parsed.id} nahi mila. /watch list dekho.`;
+    }
+    if (parsed.action === 'invalid') {
+      return '👁️ Kya dekhna hai? Example: `/watch jab download complete ho jaye`\nOr: `/watch every 1m screen pe \'Submit\' button dikh raha hai?`';
+    }
+    const watcher = watch.addWatcher(store, parsed);
+    const every = watcher.everyMs >= 60_000 ? `${Math.round(watcher.everyMs / 60_000)}m` : `${Math.round(watcher.everyMs / 1000)}s`;
+    return [
+      '👁️ *Watch on*',
+      `_"${watcher.condition}"_`,
+      '',
+      `Har ${every} check karunga${watcher.once ? ' — ek baar milne ke baad band' : ' — sach hone pe screenshot bhejunga'}.`,
+      'Stop: /watch stop 1 (ya /watch stop all)',
+    ].join('\n');
+  }
+
+  function teachCommand(args) {
+    const parsed = macro.parseTeachArgs(args);
+    if (parsed.action === 'start') {
+      if (macro.recording(store)) return `🔴 Pehle wali recording chal rahi hai — /teach stop ya /teach cancel karo.\n\n${macro.teachStatusText(store)}`;
+      const started = macro.startRecording(store, parsed.name);
+      if (!started.ok) return `⚠️ ${started.error}`;
+      return [
+        `🔴 *Recording shuru* — /${started.name}`,
+        '',
+        'Ab jo commands tum normally bhejte ho, wahi bhejo (`/open chrome`, `/pc type …`, `/screenshot`).',
+        'Sab record hoga. Save: /teach stop · Cancel: /teach cancel',
+      ].join('\n');
+    }
+    if (parsed.action === 'stop') {
+      const rec = macro.recording(store);
+      const saved = macro.stopRecording(store);
+      if (!saved.ok) {
+        return `${saved.error}${rec ? `\n\n${macro.teachStatusText(store)}` : ''}`;
+      }
+      return [
+        `✅ *Sikha diya* — /${saved.name} (${saved.steps} steps)`,
+        '',
+        `Ab bas *${saved.name}* likho (ya /${saved.name}) — poora sequence ek baar me chalega.`,
+        '_Steps dekhne ke liye: /learn list_',
+      ].join('\n');
+    }
+    if (parsed.action === 'cancel') {
+      return macro.cancelRecording(store) ? '🗑️ Recording cancel — kuch save nahi hua.' : 'Recording chal hi nahi rahi thi.';
+    }
+    if (parsed.action === 'delete') {
+      const kw = learn.normalizeKeyword(parsed.name);
+      return store.deleteLearned(kw) ? `🗑️ /${kw} delete ho gaya.` : `/${kw} koi taught macro nahi hai.`;
+    }
+    // list
+    const status = macro.teachStatusText(store);
+    if (status) return status;
+    const all = store.listLearned();
+    if (!all.length) {
+      return '📚 Abhi kuch nahi sikhaya. `/teach start morning` bolo, phir apne commands bhejo, phir `/teach stop`.';
+    }
+    return `📚 *Taught* (${all.length})\n\n${all.map((e) => `• /${e.keyword} — ${e.commands.length} steps`).join('\n')}`;
+  }
+
+  async function briefCommand(args) {
+    const raw = String(args ?? '').trim();
+    if (!raw) return brief.buildBrief({ store, config });
+    if (/^(off|band|stop)$/i.test(raw)) {
+      return brief.unscheduleBrief(store) ? '🌅 Morning brief band kar diya.' : 'Morning brief already band tha.';
+    }
+    const time = raw.replace(/^(on|at|set)\s+/i, '').trim() || '9am';
+    // The cron parser wants a message after the time ("roz 9 baje <text>"),
+    // so the brief itself is that message.
+    const clock = /^\d{1,2}$/.test(time) ? `${time} baje` : time;
+    const parsed = cron.parseCronSchedule(`roz ${clock} /brief`);
+    if (!parsed?.schedule) return '⏰ Time samajh nahi aaya. Example: `/brief on 9am` ya `/brief on 07:30`.';
+    const nextDueTs = parsed.nextDueTs ?? cron.computeNextDue(parsed.schedule);
+    store.addCronJob('/brief', parsed.scheduleRaw ?? `roz ${clock}`, parsed.schedule, nextDueTs);
+    const at = new Date(nextDueTs).toLocaleString('en-IN', { timeZone: tz, hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+    return `🌅 *Morning brief on* — roz ${time}\nPehla: ${at}\n\n_Band karna ho to: /brief off_`;
+  }
+
+  async function resumeCommand() {
+    const last = store.data.lastTask;
+    if (!last?.text) return '📭 Koi adhoora kaam nahi hai. Kuch shuru karo — /use, /arena ya /agent.';
+    if (last.done) {
+      return `✅ Pichhla kaam poora ho gaya tha (${tools.humanDuration(Date.now() - last.doneTs)} pehle):\n_"${last.text.slice(0, 120)}"_`;
+    }
+    const when = tools.humanDuration(Date.now() - last.ts);
+    const head = `▶️ *Resume* — ${when} pe ruka tha: _${last.text.slice(0, 120)}_\n`;
+    if (last.kind === 'use') {
+      const out = await runUseTask(last.text, activeSignal);
+      return typeof out === 'string' ? head + '\n' + out : { ...out, text: head + '\n' + (out?.text ?? '') };
+    }
+    if (last.kind === 'arena') return runArenaPrompt(last.text, activeSignal);
+    return runAgentTask(last.text, { signal: activeSignal });
+  }
+
+  async function tapCommand(args) {
+    const raw = String(args ?? '').trim();
+    if (!raw) {
+      return [
+        '👆 *Tap* — screen pe kahin bhi click',
+        '',
+        '• `/tap 500 320` — exact pixels',
+        '• `/tap 50% 40%` — screen ka hissa',
+        '• `/tap Login` — text dhoondh ke click',
+        '',
+        '_Har tap ke baad naya screenshot aata hai — confirm karne ke liye._',
+      ].join('\n');
+    }
+    if ((actions.level?.() ?? 'full') === 'safe') return '🔒 Tap ke liye ACCESS_LEVEL=standard ya full chahiye.';
+    try {
+      const shot = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs });
+      const size = finder.pngSize(shot);
+      const nums = raw.match(/^(\d+(?:\.\d+)?)\s*%?\s*[, ]\s*(\d+(?:\.\d+)?)\s*%?$/);
+      let x;
+      let y;
+      let how;
+      if (nums && size) {
+        const px = Number(nums[1]);
+        const py = Number(nums[2]);
+        const pct = raw.includes('%');
+        x = Math.round(pct ? (px / 100) * size.width : px);
+        y = Math.round(pct ? (py / 100) * size.height : py);
+        if (x < 0 || y < 0 || x >= size.width || y >= size.height) {
+          return `⚠️ ${x},${y} screen (${size.width}×${size.height}) ke bahar hai.`;
+        }
+        how = `tap ${x},${y}${pct ? ` (${px}%, ${py}%)` : ''}`;
+      } else {
+        const hit = await finder.locateOnScreen(config, raw, log);
+        x = hit.x;
+        y = hit.y;
+        how = `tap "${hit.matched ?? raw}"`;
+      }
+      await pc.click(x, y);
+      await new Promise((r) => setTimeout(r, 400));
+      const after = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }).catch(() => null);
+      const text = `👆 *${how}* — ${new Date().toLocaleTimeString('en-IN', { timeZone: tz })}`;
+      return after ? { image: after, text } : text;
+    } catch (err) {
+      return `⚠️ Tap nahi hua: ${err.message}`;
+    }
+  }
+
+  function remoteCommand() {
+    const port = config.port ?? 8787;
+    const nets = Object.values(os.networkInterfaces()).flat()
+      .filter((n) => n && !n.internal && n.family === 'IPv4').map((n) => n.address);
+    const lan = nets[0];
+    let pin = null;
+    try { pin = fs.readFileSync(path.join(config.dataDir, 'dashboard-pin.txt'), 'utf8').trim(); } catch { /* not created yet */ }
+    return [
+      '📱 *Kahin se bhi control*',
+      '',
+      '*1. WhatsApp se (duniya me kahin se — bas internet)*',
+      '• `/screenshot` — screen dekho',
+      '• `/tap 500 320` ya `/tap Login` — wahin click',
+      '• `/pc type …` · `/pc key ctrl+l` · `/use <kaam>`',
+      '• `/watch jab … ho jaye` — nazar rakho',
+      '',
+      '*2. Ghar ke Wi-Fi pe phone app*',
+      lan ? `• http://${lan}:${port}/   PIN: ${pin ?? '(console me print hota hai)'}` : '• LAN IP nahi mila — /pc ip dekho',
+      '• Live screen + tap ke liye: wahi link, "Screen" tab',
+      '',
+      '*3. Ghar se bahar (free, private)*',
+      '• `./scripts/observer.sh remote` — Tailscale set karta hai (koi port forward nahi)',
+      '• Uske baad phone se wahi URL, kahin se bhi',
+    ].join('\n');
+  }
 
   async function handleCommand(cmd, args, ctx) {
     switch (cmd) {
+      case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
+      case 'undo': case 'journal': return await undoCommand(args);
+      case 'shots': case 'screenshots': return shotsCommand(args);
+      case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
+      case 'watch': return watchCommand(args);
+      case 'teach': return teachCommand(args);
+      case 'brief': return await briefCommand(args);
+      case 'resume': return await resumeCommand();
+      case 'tap': return await tapCommand(args);
+      case 'remote': case 'control': return remoteCommand();
       case 'help': case 'commands': case 'menu': case 'start': return HELP;
       case 'ping': return `🏓 Pong! Agent is alive (uptime ${tools.humanDuration(Date.now() - store.data.stats.startedAt)}).`;
       case 'me': case 'id': case 'whoami':
@@ -538,6 +1091,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           `Data: ${store.data.todos.filter((t) => !t.done).length} open to-dos · ${store.data.notes.length} notes · ${store.data.reminders.length} reminders · ${(store.data.cronJobs ?? []).length} cron jobs · ${(store.data.learned ?? []).length} learned`,
           `Observer bridge: ${observerOnline() ? 'tab connected 🖥️' : 'not needed (agent is standalone)'}`,
           `Access: *${actions.level()}* · ${actions.accessReport().actions} tools · shell ${config.allowShell ? 'ON (PIN)' : 'off'}`,
+          `Running now: ${taskRegistry.active().length ? `${taskRegistry.active().map((t) => t.label).join(', ')} (rokne ke liye /stop)` : 'kuch nahi'}`,
           `PC control: tier-1 on (screenshot/volume/…) · input+power ${config.allowPcControl ? `ON ⌨️${config.controlPin ? ' (PIN)' : ''}` : 'off (ALLOW_PC_CONTROL)'}`,
           `Cost so far: ₹0 (native WhatsApp, local tools)`,
         ].join('\n');
@@ -715,18 +1269,22 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'rm': case 'delete': return args ? act('delete_path', { path: args }) : '🗑️ Usage: /rm <path>  (asks for confirmation)';
 
       // ── agent + confirmations ───────────────────────────────────────────
-      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open agent | tap battle | tap agent | type how to use ai | key enter | screenshot\nAlso natural: /auto open agent and click battle then select agent and ask how to use ai';
-      case 'agent': {
-        // Arena Agent Mode shortcut: /agent <prompt> directly opens arena.ai/agent then types.
-        if (!args) return '🤖 Usage: /agent <prompt> — e.g. /agent how to use ai\nI will: open arena.ai/agent → type your prompt → enter → screenshot';
-        const prompt = String(args).trim();
-        if (prompt.includes('|') || /^(open|tap|click|type|key|wait|screenshot|ss)\b/i.test(prompt)) {
-          return autopilot.runAutopilot(prompt, { config, log });
+      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log, signal: ctx.signal }) : '🤖 Usage: /auto open chrome | tap Search | type hello | key enter | screenshot\nNatural: /auto open chrome and search for today weather then screenshot\nHar step verify hota hai — jo fail hua wahi batata hai.';
+      case 'agent': return runAgentTask(args, ctx);
+      case 'use': case 'hands': return runUseTask(args, ctx.signal);
+      case 'arena': return runArenaPrompt(args, ctx.signal);
+      case 'brains': case 'models': case 'router': {
+        if (args && /^(why|explain|route)\b/i.test(args)) {
+          return router.explainText(args.replace(/^(why|explain|route)\s+/i, '').trim() || 'hello');
         }
-        const task = `open agent | type ${prompt} | key enter | wait 6 | screenshot`;
-        return autopilot.runAutopilot(task, { config, log });
+        return router.statusText();
       }
-      case 'do': return args ? (await agentLoop.run(args, ctx)) ?? '🤖 No free AI brain is reachable for multi-step tasks. Use the direct commands (/open, /pc, /ls, /wifi…) or install Ollama (/model).' : '🤖 Usage: /do <task in plain language>';
+      case 'do': {
+        if (!args) return '🤖 Usage: /do <task in plain language> — same as /agent but quieter about routing.';
+        const reply = await agentLoop.run(args, ctx, { nudge: true });
+        if (reply != null) return withRoute(reply, agentLoop.lastRun);
+        return agentLoop.enabled ? noBrainReply() : '🤖 No free AI brain reachable. Direct commands still work: /open, /pc, /ls, /wifi… (/brains to fix)';
+      }
       case 'yes': case 'haan': return toReply(await actions.runPending(ctx));
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
@@ -788,14 +1346,20 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
   async function handle(text, ctx = {}) {
     const clean = String(text ?? '').trim();
     if (!clean) return '🤖 I got an empty message. Try /help';
+    // /stop is checked before everything else — before the dedup window and
+    // before the busy flag — because it must cut in while work is running.
+    if (isStopCommand(clean)) return stopCommand();
     // dedup: same exact text within 4s → ignore second copy (double tap / network retry)
     if (clean === lastHandledText && Date.now() - lastHandledTs < 4000) {
       return '⏳ Same command abhi process hua tha (4s ke andar) — duplicate ignore kiya, double kaam nahi karunga.';
     }
     if (isProcessing) {
       // queue-like behaviour: tell owner we're busy, don't run in parallel (no double work)
-      return '⏳ Ek kaam abhi chal raha hai, thoda ruko — khatam hote hi next bhej do. (Parallel double-work blocked)';
+      return '⏳ Ek kaam abhi chal raha hai — rokna ho to *\/stop* bhejo, ya khatam hone ka wait karo. (Parallel double-work blocked)';
     }
+    const label = labelFor(clean);
+    const task = taskRegistry.begin(label, { detail: clean.replace(/^\//, '').slice(0, 60) });
+    activeSignal = task.signal;
     try {
       isProcessing = true;
       // A message starting with the shell PIN unlocks shell for this message
@@ -812,6 +1376,10 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       //    Executed sequentially, results joined, no parallel double-work.
       const lines = working.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       const isStack = lines.length > 1 && lines.every(l => l.startsWith('/'));
+      if (isStack && stopInStack(lines)) {
+        // "/arena hi" + "/stop" in one bubble: stop wins, nothing else runs.
+        return `${stopCommand()}\n\n_(Stack me /stop tha — baaki lines nahi chalayi.)_`;
+      }
       if (isStack) {
         const results = [];
         for (const line of lines) {
@@ -820,6 +1388,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           const r = await handleCommand(m[1].toLowerCase(), m[2].trim(), effCtx);
           const out = typeof r === 'string' ? r : (r?.text ?? JSON.stringify(r).slice(0,500));
           results.push(out);
+          macro.recordStep(store, m[1].toLowerCase(), m[2].trim());
         }
         lastHandledText = clean; lastHandledTs = Date.now();
         return results.join('\n\n---\n\n');
@@ -829,6 +1398,16 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       if (cmdMatch) {
         const res = await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
         lastHandledText = clean; lastHandledTs = Date.now();
+        // A stopped run is reported by /stop itself; do not send a second wall of text.
+        if (res && typeof res === 'object' && res.stopped) {
+          log.info?.(`[commands] ${label} stopped by /stop`);
+          return null;
+        }
+        // /teach recorder: only commands that actually worked land in the
+        // macro. A failed step in a macro would fail again on every replay.
+        const failed = (res && typeof res === 'object' && res.ok === false)
+          || (typeof res === 'string' && /^(⚠️|🔒|⏳|🤖 I don't know)/.test(res));
+        if (!failed) macro.recordStep(store, cmdMatch[1].toLowerCase(), cmdMatch[2].trim());
         return res;
       }
 
@@ -862,14 +1441,20 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       const aiRes = await askAI(working);
       return aiRes;
     } catch (err) {
+      if (isStoppedError(err) || task.signal.aborted) {
+        log.info?.(`[commands] ${label} stopped by /stop`);
+        return null; // /stop already replied
+      }
       log.error?.(`[commands] failed on "${clean.slice(0, 60)}": ${err.message}`);
       return `⚠️ That didn't work: ${err.message}\nNothing was charged (everything here is free). Try /help`;
     } finally {
       // dedup marker — any successful handle sets it, duplicate 4s window handles double-work
       if (clean) { lastHandledText = clean; lastHandledTs = Date.now(); }
       isProcessing = false;
+      activeSignal = null;
+      task.end();
     }
   }
 
-  return { handle, HELP, actions };
+  return { handle, HELP, actions, shots };
 }

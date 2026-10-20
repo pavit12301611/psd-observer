@@ -32,6 +32,7 @@ import * as ai from './ai.js';
 import * as ocr from './ocr.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
+import { isStopCommand } from './cancel.js';
 import { transcribeAudio } from './transcribe.js';
 
 const MIME_EXT = {
@@ -97,7 +98,7 @@ export function archiveDeadAuthDir(authDir, now = new Date()) {
   return backup;
 }
 
-export function createWhatsApp({ config, store, agent, log = console }) {
+export function createWhatsApp({ config, store, agent, log = console, onConnected = null }) {
   const state = {
     sock: null,
     conn: config.dryRun ? 'dry-run' : 'starting',
@@ -310,6 +311,21 @@ export function createWhatsApp({ config, store, agent, log = console }) {
           // fall through to normal image handling so user gets at least OCR/description
         }
       }
+      // "ye error fix karo" — treat the photo as a problem to diagnose, not
+      // just a picture to describe. Any vision brain (Gemini/Groq/local).
+      if (/\b(fix|error|issue|problem|samajh nahi|kya galat|kyu aa raha|why|help me)\b/i.test(caption)) {
+        try {
+          const diagnosed = await ai.diagnoseImage(config, buffer.toString('base64'), caption, log);
+          if (diagnosed?.text) {
+            return transportSend(chatJid, {
+              text: `💾 Saved as ${savedAs}${sizeNote}\n\n🩺 *Kya galat hai*\n\n${diagnosed.text}\n\n_(${diagnosed.local ? 'local vision' : diagnosed.model})_`,
+            }, rawMsg);
+          }
+        } catch (err) {
+          log.warn?.(`[wa] diagnose failed: ${err.message}`);
+          // fall through to describe/OCR below
+        }
+      }
       // 1) local vision model (best) 2) OCR the image (works for screenshots)
       const description = await ai.describeImage(config, buffer.toString('base64'), caption, log);
       if (description) return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${description}`, rawMsg);
@@ -510,6 +526,7 @@ export function createWhatsApp({ config, store, agent, log = console }) {
 
   async function handleUpsert({ messages, type }) {
     if (type !== 'notify') return; // ignore history sync / appends
+    const queued = [];
     for (const rawMsg of messages ?? []) {
       try {
         const key = rawMsg.key ?? {};
@@ -539,7 +556,21 @@ export function createWhatsApp({ config, store, agent, log = console }) {
         state.rateStamps.push(now);
 
         try { await state.sock.readMessages([key]); } catch { /* cosmetic */ }
-        await processOwnerMessage({ chatJid, content: extractContent(rawMsg.message), rawMsg });
+        const content = extractContent(rawMsg.message);
+        // /stop must never wait behind the command it is stopping — even when
+        // it arrives in the same WhatsApp batch as that command.
+        if (content?.text && isStopCommand(content.text)) {
+          await processOwnerMessage({ chatJid, content, rawMsg });
+          continue;
+        }
+        queued.push({ chatJid, content, rawMsg });
+      } catch (err) {
+        log.error?.(`[wa] message handling failed: ${err.message}`);
+      }
+    }
+    for (const item of queued) {
+      try {
+        await processOwnerMessage(item);
       } catch (err) {
         log.error?.(`[wa] message handling failed: ${err.message}`);
       }
@@ -643,6 +674,13 @@ export function createWhatsApp({ config, store, agent, log = console }) {
           store.data.stats.lastStartupNotify = Date.now();
           store.save();
           sendToOwner('🤖 *Observer agent is online* (free native WhatsApp).\nSend /help, ask me anything, or /observer <task> to use the PC.').catch(() => {});
+        }
+        // "Updated!" message (version + what changed + how long) — the owner
+        // should never have to wonder whether an update landed.
+        if (typeof onConnected === 'function') {
+          Promise.resolve()
+            .then(() => onConnected())
+            .catch((err) => log.warn?.(`[wa] onConnected failed: ${err.message}`));
         }
       }
       if (connection === 'close') {

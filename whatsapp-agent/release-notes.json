@@ -1,0 +1,67 @@
+{
+  "2.8.2": {
+    "title": "screenshot auto-delete — bhej diya, ab PC pe nahi pada",
+    "bullets": [
+      "Har screenshot 4 min baad khud delete (2–5 min set kar sakte ho: SCREENSHOT_TTL_MINUTES)",
+      "Wayland portal ~/Pictures me jo screenshot likhta hai wo bhi saaf — sirf wahi file jo agent ne li",
+      "Temp copy (observer-shot-*.png) ab turant delete hoti hai, minute bhar wait nahi",
+      "/shots — kitni files padi hain + TTL · /shots clean — abhi saaf",
+      "Tumhari apni files, downloads, recordings kabhi nahi chhute — sirf agent ke screenshots"
+    ]
+  },
+  "2.8.1": {
+    "title": "Screen tab: screenshot sirf jab tum maango + sab commands wahin",
+    "bullets": [
+      "Koi auto loop nahi — screenshot sirf Refresh pe, tab khulne pe, ya kisi action ke baad (1s/5s/10s wala polling hata diya)",
+      "Screen tab me naya Commands console — /help, /brief, /usage, /watch, /use, /undo sab wahin chalte hain",
+      "Tap pe extra screenshot nahi — frame ka size yaad rehta hai (Wayland portal prompt kam)",
+      "Screen nahi badla to 304 — wahi image dobara download nahi hoti"
+    ]
+  },
+  "2.8.0": {
+    "title": "undo, watch, usage, teach, brief, resume + phone se remote control",
+    "bullets": [
+      "Phone app me naya *Screen* tab — live screen + tap-to-click + typing, same Wi-Fi ya Tailscale se kahin se bhi",
+      "/undo — pichhla file kaam wapas (write/move/copy/delete/mkdir/zip), /undo list se journal",
+      "/watch <condition> — screen pe nazar: 'jab ye ho jaye to batao' (screenshot + vision, cooldown ke saath)",
+      "/usage — aaj ka AI quota model-wise, 80% pe warning (Groq/OpenRouter/Gemini/local)",
+      "/teach start <naam> → commands karo → /teach stop → phir /<naam> se poora sequence",
+      "/brief — reminders + todos + jobs + disk/battery ek message me; /brief on 9am roz · /resume se adhoora kaam",
+      "Live progress 'step 2/8' long tasks me · photo bhejo + 'fix karo' to vision diagnosis",
+      "observer.sh autoupdate on — roz raat update, subah WhatsApp pe report"
+    ]
+  },
+  "2.7.0": {
+    "title": "stop button, screen vision, update messages",
+    "bullets": [
+      "/stop — chalta hua kaam turant rukta hai (stacked kaam bhi), partial steps batata hai",
+      "Screen ab OCR nahi — screenshot seedha vision model (Gemini/Groq/local) ko jaata hai",
+      "Har step tez: OCR hata, 1024px JPEG q70, 550ms settle — chhota upload, kam tokens",
+      "Update hone pe WhatsApp message: kya naya + kitna time laga"
+    ]
+  },
+  "2.6.0": {
+    "title": "hands — real computer use",
+    "bullets": [
+      "/use: screenshot → ek action → dobara screenshot (insaan ki tarah)",
+      "computer_use tool — AI khud screen pe click/type kar sakta hai",
+      "Stuck detection, 8-step budget, cloud-screen privacy toggle"
+    ]
+  },
+  "2.5.4": {
+    "title": "page load false failure fix",
+    "bullets": [
+      "Page khulne ke baad bhi 'page load nahi hua' aana band",
+      "Chat sites pe seedha type + Enter (click nahi)",
+      "Prompt se domain naam nahi kata jaata"
+    ]
+  },
+  "2.5.3": {
+    "title": "security review",
+    "bullets": [
+      "~/.ssh aur ~/.gnupg me write band (read-only block ab write pe bhi)",
+      "TTS me shell injection fix (text2wave bina shell)",
+      "Bridge token ka comparison constant-time"
+    ]
+  }
+}

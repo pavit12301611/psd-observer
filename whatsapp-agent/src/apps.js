@@ -149,9 +149,12 @@ export function matchApp(query, apps = discoverApps()) {
     else if (name.includes(q) || id.includes(q)) score = 60;
     else if (qTokens.length && qTokens.every((t) => name.includes(t) || id.includes(t) || keywords.includes(t))) score = 40;
     else {
-      // "code" should still find "Visual Studio Code"
+      // "code" should still find "Visual Studio Code" — but a long phrase must
+      // not latch onto one stray word: "definitely-not-an-app-xyz" used to
+      // match "Observer App" just because it contains "app".
       const nameTokens = name.split(' ');
-      if (qTokens.some((t) => t.length >= 3 && nameTokens.some((n) => n.startsWith(t)))) score = 20;
+      const hits = qTokens.filter((t) => t.length >= 3 && nameTokens.some((n) => n === t || n.startsWith(t)));
+      if (hits.length && qTokens.length <= 3 && hits.length >= Math.ceil(qTokens.length / 2)) score = 20;
     }
     if (score > (best?.score ?? 0)) best = { app, score };
   }
@@ -340,6 +343,21 @@ export async function listWindows() {
   if (!windows.length) return '🪟 No named windows found.';
   return '🪟 *Open windows*\n\n' + windows.map((w, i) => `${i + 1}. ${w.title}`).join('\n') +
     '\n\nFocus one: /focus <part of title> · close: /close window <part of title>';
+}
+
+/**
+ * Just the window titles, as an array — or null when the desktop cannot list
+ * windows (no wmctrl, or GNOME Wayland). Automation uses this to *verify* that
+ * a browser really opened before typing into it, so it never fails loudly.
+ */
+export async function windowTitles() {
+  if (!findBin('wmctrl')) return null;
+  try {
+    const { stdout } = await execFileAsync('wmctrl', ['-l'], { timeout: RUN_TIMEOUT, env: displayEnv() });
+    return parseWmctrl(stdout).filter((w) => w.title && w.title !== 'N/A').map((w) => w.title);
+  } catch {
+    return null;
+  }
 }
 
 export async function windowAction(action, title) {

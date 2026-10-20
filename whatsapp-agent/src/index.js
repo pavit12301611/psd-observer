@@ -9,8 +9,12 @@ import { Mailbox } from './mailbox.js';
 import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
+import { announceUpdate, brainSummary } from './updates.js';
+import { startWatchLoop } from './watch.js';
+import { startShotJanitor } from './screenshots.js';
 import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
+import { routerFor } from './router.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -38,9 +42,23 @@ const agent = createAgent({
   log: console,
   forwardToObserver: (text) => mailbox.forwardToObserver(text),
   observerOnline: () => mailbox.observerOnline(),
+  // Live "step 2/8" lines and watch alerts come out of the agent itself, not
+  // as a reply — this is the only channel for unsolicited messages.
+  notify: (message) => whatsapp.sendToOwner(message),
 });
 
-const whatsapp = createWhatsApp({ config, store, agent, log: console });
+const whatsapp = createWhatsApp({
+  config, store, agent, log: console,
+  // Runs on every successful WhatsApp connect; announceUpdate() is idempotent
+  // (it compares against store.lastVersion), so reconnects stay quiet.
+  onConnected: () => announceUpdate({
+    config,
+    store,
+    log: console,
+    send: (text) => whatsapp.sendToOwner(text),
+    brains: brainSummary(routerFor(config, console).catalog),
+  }),
+});
 const bridge = createBridgeServer({
   config,
   store,
@@ -51,13 +69,36 @@ const bridge = createBridgeServer({
   log: console,
 });
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
-const stopCron = startCronLoop(store, (text) => whatsapp.sendToOwner(text), console);
+// Scheduled jobs that are commands ("/brief") run through the agent, exactly
+// like typing them — one code path, same safety gates.
+const stopCron = startCronLoop(
+  store,
+  (text) => whatsapp.sendToOwner(text),
+  console,
+  (text) => agent.handle(text, { source: 'cron' }),
+);
+// Screenshots are disposable: the janitor deletes every capture after a few
+// minutes (default 4). Uses the agent's own ledger so /shots shows the truth.
+const stopShots = startShotJanitor({ config, log: console, janitor: agent.shots });
+// /watch: screen-condition watchers, checked on their own timers.
+const stopWatch = startWatchLoop({
+  config,
+  store,
+  send: (message) => whatsapp.sendToOwner(message),
+  log: console,
+});
 
 console.info('👁️  Observer WhatsApp Agent — free, native WhatsApp + phone app');
 console.info(`   Owner (only listener): +${config.ownerNumber}`);
 console.info(`   Agent WhatsApp number: +${config.agentNumber}`);
 console.info(`   Mode: ${dryRun ? 'DRY-RUN (no WhatsApp connection)' : config.usePairingCode ? 'link by pairing code' : 'link by QR scan'}`);
 console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${config.ollamaUrl}) · tools ${config.agentTools ? 'on' : 'off'}`);
+{
+  const catalog = routerFor(config, console).catalog;
+  const localCount = catalog.filter((m) => m.local).length;
+  console.info(`   Brains: ${catalog.length || 'none'} (${localCount} local) · routing prefers ${config.routerPrefer} · heavy ${config.maxHeavyPerHour || '∞'}/hour`);
+  if (!catalog.length) console.info('   No AI brain yet: install Ollama (free) or set GROQ_API_KEY / GEMINI_API_KEY — direct commands still work.');
+}
 console.info(`   Access level: ${config.accessLevel} · full PC control (Observer app optional)`);
 console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
 console.info(`   Cron jobs: ${store.listCronJobs().length} recurring · TTS: ${config.ttsEngine}`);
@@ -100,6 +141,8 @@ function shutdown() {
   console.info('\n[agent] shutting down…');
   stopReminders();
   stopCron();
+  stopWatch();
+  stopShots();
   whatsapp.stop();
   bridge.stop();
   store.saveNow();

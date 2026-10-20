@@ -18,6 +18,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { imageStats } from './imaging.js';
+import { trackScreenshot } from './screenshots.js';
 
 const execFileAsync = promisify(execFile);
 const RUN_TIMEOUT = 10_000;
@@ -522,6 +523,15 @@ export async function captureScreenshot({ portalTimeoutMs } = {}) {
         try { fs.unlinkSync(produced); } catch { /* noop */ }
         continue;
       }
+      if (produced === file) {
+        // Our own temp copy: the caller only needs the Buffer, so the file is
+        // dead the moment it is read. No reason to wait for the janitor.
+        try { fs.unlinkSync(file); } catch { /* noop */ }
+      } else if (produced) {
+        // The portal wrote a real file into ~/Pictures. Track it so the
+        // janitor deletes it a few minutes later (never the owner's files).
+        trackScreenshot(produced, { kind: 'pictures' });
+      }
       return data;
     } catch (err) {
       failures.push({
@@ -650,8 +660,30 @@ export async function openTarget(target) {
   if (!trimmed) throw new Error('usage: /pc open <app or https://link> — apps: ' + Object.keys(APP_ALIASES).join(', '));
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);
   if (/^https?:\/\//i.test(trimmed)) {
-    await launchDetached(findBin('xdg-open') ?? 'xdg-open', [trimmed]);
-    return `🌐 Opened ${trimmed} in the PC's browser.`;
+    // Order matters: xdg-open is the polite way, but it is missing on minimal
+    // installs, and some desktops return 0 without actually opening anything.
+    const openers = [];
+    const xdg = findBin('xdg-open');
+    if (xdg) openers.push([xdg, [trimmed], 'xdg-open']);
+    const gio = findBin('gio');
+    if (gio) openers.push([gio, ['open', trimmed], 'gio open']);
+    for (const browser of ['firefox', 'chromium', 'chromium-browser', 'google-chrome', 'brave-browser']) {
+      const bin = findBin(browser);
+      if (bin) openers.push([bin, [trimmed], browser]);
+    }
+    if (!openers.length) {
+      throw new Error('No browser opener found. Install one: sudo dnf install firefox xdg-utils  (then check: xdg-open https://example.com)');
+    }
+    const errors = [];
+    for (const [bin, args, label] of openers) {
+      try {
+        await launchDetached(bin, args);
+        return `🌐 Opened ${trimmed} in the PC's browser (${label}).`;
+      } catch (err) {
+        errors.push(`${label}: ${err.code === 'ENOENT' ? 'not installed' : err.message}`);
+      }
+    }
+    throw new Error(`Could not open a browser for ${trimmed}.\n${errors.join('\n')}\nFix: sudo dnf install firefox xdg-utils`);
   }
   const candidates = APP_ALIASES[trimmed.toLowerCase()];
   if (!candidates) throw new Error(`I only open allowlisted apps (or http links): ${Object.keys(APP_ALIASES).join(', ')}. For anything else use /observer or the gated /run.`);
@@ -854,6 +886,37 @@ export async function moveMouse(x, y) {
   if (failures.every(({ err }) => err.code === 'ENOENT')) throw new Error(INPUT_MISSING);
   const real = failures.filter(({ err }) => err.code !== 'ENOENT').at(-1);
   throw new Error(`${real.tool} mousemove failed: ${(real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160)}`);
+}
+
+/**
+ * Press, move, release — a real drag (sliders, selecting text, moving windows).
+ * xdotool is the only input tool with separate button-down/up, so on a pure
+ * ydotool/wtype setup this reports exactly that instead of faking a click.
+ */
+export async function dragMouse(x1, y1, x2, y2) {
+  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  const coords = [x1, y1, x2, y2].map(Number);
+  if (!coords.every(Number.isFinite)) throw new Error('usage: /pc drag <x1> <y1> <x2> <y2>');
+  const [left, top, right, bottom] = coords;
+  if (!findBin('xdotool')) {
+    throw new Error('drag ke liye xdotool chahiye (ydotool me button hold nahi hota): sudo dnf install xdotool');
+  }
+  const xd = findBin('xdotool');
+  await run(xd, ['mousemove', String(left), String(top)]);
+  await run(xd, ['mousedown', '1']);
+  try {
+    // Several small steps so apps see a real drag, not a teleport.
+    const steps = 12;
+    for (let i = 1; i <= steps; i++) {
+      const x = Math.round(left + ((right - left) * i) / steps);
+      const y = Math.round(top + ((bottom - top) * i) / steps);
+      await run(xd, ['mousemove', String(x), String(y)]);
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  } finally {
+    await run(xd, ['mouseup', '1']);
+  }
+  return `🖱️ Dragged ${left},${top} → ${right},${bottom} via xdotool.`;
 }
 
 /** Scroll the wheel: positive = down. */

@@ -25,7 +25,10 @@ import * as ocr from './ocr.js';
 import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
+import * as hands from './hands.js';
+import { StoppedError, isStoppedError } from './cancel.js';
 import { runDoctor } from './doctor.js';
+import { createProgress, describeHandsStep } from './progress.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -44,7 +47,7 @@ function describe(entry, args) {
   return `${entry.label ?? entry.name} ${bits.map(([k, v]) => `${k}=${short(v)}`).join(' ')}`.trim();
 }
 
-export function createActions({ config, store, log = console }) {
+export function createActions({ config, store, log = console, journal = null, notify = null }) {
   const extraRoots = config.filesExtraRoots ?? [];
   const level = () => (config.accessLevel in LEVELS ? config.accessLevel : 'full');
   const audioAction = (w) => {
@@ -112,6 +115,33 @@ export function createActions({ config, store, log = console }) {
       description: 'Take a screenshot, OCR it and answer a question about what is on the screen right now. Use for "what is on my screen", "read this error", "summarise this page".',
       params: { question: { type: 'string', description: 'What to answer about the screen (optional)' } },
       run: async ({ question }) => ocr.lookAtScreen(config, question ?? '', log),
+    },
+    {
+      name: 'computer_use', level: 'standard', label: 'Control the screen',
+      description:
+        'Do a visual task on the PC like a human: look at the screenshot, then click / type / scroll, '
+        + 'and look again after every step (up to 8 steps). Use for anything that needs the GUI — playing a '
+        + 'video, using a website, changing a setting, driving an app that has no CLI. Prefer a direct tool '
+        + '(open_app, download_url, write_file, …) when one can do it exactly.',
+      params: {
+        task: { type: 'string', description: 'What to accomplish, in plain language (Hinglish fine)', required: true },
+        max_steps: { type: 'integer', description: 'Step budget (default 8, max 20)' },
+      },
+      run: async ({ task, max_steps }, ctx) => {
+        const progress = notify ? createProgress({ send: notify, label: 'Hands', total: max_steps ?? config.handsMaxSteps ?? 8, log }) : null;
+        const result = await hands.runHands(task, {
+          config, log, maxSteps: max_steps, signal: ctx?.signal,
+          onStep: progress
+            ? (entry) => {
+              if (entry?.ok === false) return;
+              const { action, detail } = describeHandsStep(entry?.action ?? entry ?? {});
+              progress.step({ n: entry?.step ?? null, action, detail }).catch(() => {});
+            }
+            : undefined,
+        });
+        if (result.stopped) throw new StoppedError('Hands');
+        return { text: result.text, image: result.image };
+      },
     },
     {
       name: 'ocr_screen', level: 'standard', label: 'OCR screen',
@@ -328,7 +358,10 @@ export function createActions({ config, store, log = console }) {
         text: { type: 'string', description: 'Contents to write', required: true },
         append: { type: 'boolean', description: 'Append instead of overwrite' },
       },
-      run: async ({ path: p, text, append }) => files.writeTextFile(p, text, { extraRoots, append: Boolean(append) }),
+      run: async ({ path: p, text, append }) => {
+        const write = () => files.writeTextFile(p, text, { extraRoots, append: Boolean(append) });
+        return journal ? journal.wrapWrite(p, write, { append: Boolean(append) }) : write();
+      },
     },
     {
       name: 'search_files', level: 'safe', label: 'Search files',
@@ -344,7 +377,12 @@ export function createActions({ config, store, log = console }) {
       description: 'Delete a file or folder (moved to trash when possible; owner confirms first).',
       params: { path: { type: 'string', description: 'File or folder path', required: true } },
       confirmText: ({ path: p }) => `Delete ${p}`,
-      run: async ({ path: p }) => files.deletePath(p, { extraRoots }),
+      run: async ({ path: p }) => {
+        const del = () => files.deletePath(p, { extraRoots });
+        let dir = false;
+        try { dir = fs.statSync(files.resolvePath(p, { extraRoots }).path).isDirectory(); } catch { /* new */ }
+        return journal ? journal.wrapDelete(files.resolvePath(p, { extraRoots }).path ?? p, del, { isDirectory: dir }) : del();
+      },
     },
     {
       name: 'move_path', level: 'standard', label: 'Move/rename',
@@ -353,7 +391,12 @@ export function createActions({ config, store, log = console }) {
         from: { type: 'string', description: 'Source path', required: true },
         to: { type: 'string', description: 'Destination path', required: true },
       },
-      run: async ({ from, to }) => files.movePath(from, to, { extraRoots }),
+      run: async ({ from, to }) => {
+        const move = () => files.movePath(from, to, { extraRoots });
+        const a = files.resolvePath(from, { extraRoots, mustExist: true });
+        const b = files.smartHomePath(to);
+        return journal && a.ok ? journal.wrapMove(a.path, b, move) : move();
+      },
     },
     {
       name: 'copy_path', level: 'standard', label: 'Copy',
@@ -362,13 +405,20 @@ export function createActions({ config, store, log = console }) {
         from: { type: 'string', description: 'Source path', required: true },
         to: { type: 'string', description: 'Destination path', required: true },
       },
-      run: async ({ from, to }) => files.copyPath(from, to, { extraRoots }),
+      run: async ({ from, to }) => {
+        const copy = () => files.copyPath(from, to, { extraRoots });
+        const b = files.smartHomePath(to);
+        return journal ? journal.wrapCopy(from, b, copy) : copy();
+      },
     },
     {
       name: 'make_dir', level: 'standard', label: 'Create folder',
       description: 'Create a folder (including parents).',
       params: { path: { type: 'string', description: 'Folder path', required: true } },
-      run: async ({ path: p }) => files.makeDir(p, { extraRoots }),
+      run: async ({ path: p }) => {
+        const mk = () => files.makeDir(p, { extraRoots });
+        return journal ? journal.wrapMkdir(files.smartHomePath(p), mk) : mk();
+      },
     },
     {
       name: 'zip_paths', level: 'standard', label: 'Zip files',
@@ -377,7 +427,15 @@ export function createActions({ config, store, log = console }) {
         paths: { type: 'array', items: { type: 'string' }, description: 'Files/folders to zip', required: true },
         output: { type: 'string', description: 'Output .zip path (optional)' },
       },
-      run: async ({ paths, output }) => files.zipPaths(paths, output, { extraRoots }),
+      run: async ({ paths, output }) => {
+        const zip = () => files.zipPaths(paths, output, { extraRoots });
+        if (!journal) return zip();
+        const out = await zip();
+        // files.zipPaths returns the archive path text; journal the file it made.
+        const created = output ? files.smartHomePath(output) : null;
+        if (created) journal.record({ kind: 'zip', out: created, undoable: true, label: `zip ${path.basename(created)}` });
+        return out;
+      },
     },
     {
       name: 'unzip_path', level: 'standard', label: 'Unzip',
@@ -395,7 +453,7 @@ export function createActions({ config, store, log = console }) {
         url: { type: 'string', description: 'The link', required: true },
         path: { type: 'string', description: 'Save to this path (optional, default ~/Downloads)' },
       },
-      run: async ({ url, path: p }) => files.downloadUrl(url, p, { extraRoots }),
+      run: async ({ url, path: p }, ctx) => files.downloadUrl(url, p, { extraRoots, signal: ctx?.signal }),
     },
     {
       name: 'send_file', level: 'standard', label: 'Send file',
@@ -415,7 +473,7 @@ export function createActions({ config, store, log = console }) {
       name: 'record_screen', level: 'standard', label: 'Record screen',
       description: 'Record the screen for N seconds and send the video.',
       params: { seconds: { type: 'number', description: 'Duration in seconds (2-120, default 10)' } },
-      run: async ({ seconds }) => systemx.recordScreen(seconds),
+      run: async ({ seconds }, ctx) => systemx.recordScreen(seconds, { signal: ctx?.signal }),
     },
 
     // ── input ───────────────────────────────────────────────────────────────
@@ -581,7 +639,7 @@ export function createActions({ config, store, log = console }) {
       name: 'autopilot', level: 'standard', label: 'Autopilot',
       description: 'One-command UI automation: open an app, click buttons by visible label (OCR), type, press enter, wait, screenshot. Use for "open agent and click battle then agent and ask how to use ai". Pipe syntax is most reliable: "open agent | tap battle | tap agent | type how to use ai | key enter | screenshot". Also accepts natural language.',
       params: { task: { type: 'string', description: 'Task: pipe steps or natural language, e.g. "open agent | tap battle | tap agent | type hello | key enter | screenshot"', required: true } },
-      run: async ({ task }) => autopilot.runAutopilot(task, { config, log }),
+      run: async ({ task }, ctx) => autopilot.runAutopilot(task, { config, log, signal: ctx?.signal }),
     },
     {
       name: 'remember_fact', level: 'safe', label: 'Remember fact',
@@ -602,7 +660,7 @@ export function createActions({ config, store, log = console }) {
       description: 'Run a shell command on the PC and return its output. Requires ALLOW_SHELL=true and the owner\'s SHELL_PIN. Use for anything not covered by other tools (package installs, git, ffmpeg, scripts).',
       params: { command: { type: 'string', description: 'The shell command', required: true } },
       confirmText: ({ command }) => `Run shell command:\n${short(command, 300)}`,
-      run: async ({ command }) => {
+      run: async ({ command }, ctx) => {
         const cmd = String(command ?? '').trim();
         if (!cmd) throw new Error('empty command');
         const timeout = config.shellTimeoutMs ?? 20_000;
@@ -612,10 +670,13 @@ export function createActions({ config, store, log = console }) {
             maxBuffer: 4 * 1024 * 1024,
             cwd: os.homedir(),
             env: pc.displayEnv(),
+            // /stop kills the child process tree (SIGTERM from Node).
+            ...(ctx?.signal ? { signal: ctx.signal } : {}),
           });
           const out = `${stdout}${stderr ? `\n[stderr]\n${stderr}` : ''}`.trim().slice(0, MAX_OUT);
           return `💻 \`${cmd}\`\n\`\`\`\n${out || '(no output)'}\n\`\`\``;
         } catch (err) {
+          if (ctx?.signal?.aborted || err.name === 'AbortError') throw new StoppedError('Shell');
           const out = `${err.stdout ?? ''}${err.stderr ? `\n${err.stderr}` : ''}`.trim().slice(0, MAX_OUT);
           if (err.killed) throw new Error(`Command timed out after ${timeout / 1000}s.`);
           return `💻 \`${cmd}\`\n\`\`\`\n${out || err.message}\n\`\`\``;
@@ -697,6 +758,10 @@ export function createActions({ config, store, log = console }) {
       if (typeof result === 'string') return { ok: true, text: result };
       return { ok: true, ...result };
     } catch (err) {
+      // A /stop is not a failure: any rejection while the signal is aborted
+      // (curl killed, ffmpeg killed, fetch aborted) travels up so the command
+      // reply is suppressed and only /stop answers.
+      if (isStoppedError(err) || ctx?.signal?.aborted) throw new StoppedError(name);
       log.warn?.(`[actions] ${name} failed: ${err.message}`);
       return { ok: false, text: `⚠️ ${err.message}` };
     }

@@ -185,7 +185,7 @@ export async function webcamPhoto() {
 }
 
 /** Record the screen for N seconds and return an MP4 buffer (≤ 50 MB). */
-export async function recordScreen(seconds = 10) {
+export async function recordScreen(seconds = 10, { signal } = {}) {
   const secs = Math.min(Math.max(Number(seconds) || 10, 2), 120);
   const file = path.join(os.tmpdir(), `observer-rec-${Date.now()}.mp4`);
   const wayland = (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland';
@@ -196,8 +196,11 @@ export async function recordScreen(seconds = 10) {
       await new Promise((resolve, reject) => {
         const child = spawn(wf, ['-f', file, '-y'], { env: displayEnv(), stdio: 'ignore' });
         const timer = setTimeout(() => { try { child.kill('SIGINT'); } catch { /* noop */ } }, secs * 1000);
-        child.once('error', (err) => { clearTimeout(timer); reject(err); });
-        child.once('exit', () => { clearTimeout(timer); resolve(); });
+        const onAbort = () => { try { child.kill('SIGINT'); } catch { /* noop */ } };
+        signal?.addEventListener?.('abort', onAbort, { once: true });
+        const done = () => signal?.removeEventListener?.('abort', onAbort);
+        child.once('error', (err) => { clearTimeout(timer); done(); reject(err); });
+        child.once('exit', () => { clearTimeout(timer); done(); resolve(); });
       });
     } else if (ffmpeg) {
       const display = process.env.DISPLAY || ':0';
@@ -205,7 +208,7 @@ export async function recordScreen(seconds = 10) {
       await execFileAsync(ffmpeg, [
         '-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-video_size', size,
         '-i', display, '-t', String(secs), '-pix_fmt', 'yuv420p', '-y', file,
-      ], { timeout: (secs + 30) * 1000, env: displayEnv() });
+      ], { timeout: (secs + 30) * 1000, env: displayEnv(), ...(signal ? { signal } : {}) });
     } else {
       throw new Error('Screen recording needs ffmpeg (X11) or wf-recorder (Wayland): sudo dnf install ffmpeg wf-recorder');
     }

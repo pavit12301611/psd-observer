@@ -250,13 +250,18 @@ export function formatSchedule(schedule, nextDueTs, tz = 'Asia/Kolkata') {
 }
 
 /** Loop that fires due cron jobs every 30s. Recurring! Survives restarts. */
-export function startCronLoop(store, send, log = console) {
-  const timer = setInterval(async () => {
-    const now = Date.now();
+/**
+ * Fire every job whose time has come. Exported (not just inlined in the timer)
+ * so a test can run it once instead of waiting 30 seconds.
+ * Returns the list of job ids that fired.
+ */
+export async function runDueJobs(store, send, log = console, runCommand = null, now = Date.now()) {
+  const fired = [];
+  {
     const jobs = store.listCronJobs();
-    if (!jobs.length) return;
+    if (!jobs.length) return fired;
     const due = jobs.filter(j => j.nextDueTs <= now);
-    if (!due.length) return;
+    if (!due.length) return fired;
     for (const job of due) {
       try {
         // compute new nextDue BEFORE sending, so if send fails we don't spam
@@ -273,12 +278,32 @@ export function startCronLoop(store, send, log = console) {
           timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short',
           hour: 'numeric', minute: '2-digit', hour12: true,
         }).format(new Date(nextDue));
-        await send(`🔁 *Scheduled:* ${job.text}\n_${job.scheduleRaw} · next: ${nextStr}_`);
+        // A job whose text is a command ("/brief") runs through the agent, so
+        // scheduled work is the same code as manual work — not a second path.
+        let output = null;
+        if (typeof runCommand === 'function' && String(job.text).trim().startsWith('/')) {
+          try {
+            output = await runCommand(String(job.text).trim());
+          } catch (err) {
+            log.warn?.(`[cron] #${job.id} command failed: ${err.message}`);
+            output = `⚠️ Scheduled /${job.text} fail hua: ${err.message}`;
+          }
+        }
+        if (output != null) await send(output);
+        else await send(`🔁 *Scheduled:* ${job.text}\n_${job.scheduleRaw} · next ${nextStr}_`);
+        fired.push(job.id);
         log.info?.(`[cron] fired #${job.id} "${job.text.slice(0,40)}" → next ${new Date(nextDue).toISOString()}`);
       } catch (err) {
         log.error?.(`[cron] job #${job.id} failed: ${err.message}`);
       }
     }
+  }
+  return fired;
+}
+
+export function startCronLoop(store, send, log = console, runCommand = null) {
+  const timer = setInterval(() => {
+    runDueJobs(store, send, log, runCommand).catch((err) => log.error?.(`[cron] loop failed: ${err.message}`));
   }, 30_000);
   timer.unref?.();
   return () => clearInterval(timer);

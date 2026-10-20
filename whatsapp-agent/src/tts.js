@@ -214,12 +214,17 @@ export async function synthesize(text, config = {}, log = console) {
     } else if (eng.name === 'flite') {
       await execFileAsync('flite', ['-t', clean, '-o', wavPath], { timeout: 15_000 });
     } else if (eng.name === 'festival') {
+      // text2wave reads the text from stdin. Never go through `sh -c`: a "$(
+      // … )" or a stray backtick in the message would be executed by the shell
+      // (sanitizeForTTS strips balanced backticks, not command substitution).
       await new Promise((resolve, reject) => {
-        const child = spawn('sh', ['-c', `echo ${JSON.stringify(clean)} | text2wave -o ${JSON.stringify(wavPath)}`], { timeout: 15_000 });
+        const child = spawn('text2wave', ['-o', wavPath], { timeout: 15_000 });
         let err = '';
         child.stderr.on('data', d => err += d);
-        child.on('close', c => c === 0 ? resolve() : reject(new Error(`festival failed: ${err.slice(0,300)}`)));
         child.on('error', reject);
+        child.on('close', c => c === 0 ? resolve() : reject(new Error(`festival failed: ${err.slice(0,300)}`)));
+        child.stdin.on('error', () => { /* the process may exit early */ });
+        child.stdin.end(clean);
       });
     } else {
       throw new Error(`Unknown TTS engine ${eng.name}`);

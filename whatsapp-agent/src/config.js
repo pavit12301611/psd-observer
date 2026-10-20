@@ -97,12 +97,101 @@ export function loadConfig({ dryRun = false } = {}) {
     ollamaUrl: (e.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
     ollamaModel: e.OLLAMA_MODEL || 'llama3.2',
     ollamaVisionModel: e.OLLAMA_VISION_MODEL || '',
+    // ── Cloud free tiers (optional, but nice: fast + vision) ───────────────
+    // Groq killed Llama 3.1 8B / 3.3 70B on the free tier on 16 Aug 2026 —
+    // they are enterprise-only now. The free catalogue is gpt-oss + Qwen3.8:
+    //   small : openai/gpt-oss-20b     (30 rpm · 1k/day · 8k TPM)
+    //   big   : openai/gpt-oss-120b    (30 rpm · 1k/day · 8k TPM)
+    //   vision: qwen/qwen3.8-27b       (only vision model on the free tier)
+    // Override any of them from .env (GROQ_MODEL, GROQ_MODEL_SMALL,
+    // GROQ_VISION_MODEL). Set GROQ_VISION_MODEL= (empty) to switch it off.
     groqApiKey: e.GROQ_API_KEY || '',
-    groqModel: e.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    groqModel: e.GROQ_MODEL || 'openai/gpt-oss-120b',
+    groqModelSmall: e.GROQ_MODEL_SMALL || 'openai/gpt-oss-20b',
+    groqVisionModel: e.GROQ_VISION_MODEL === undefined ? 'qwen/qwen3.8-27b' : e.GROQ_VISION_MODEL,
+    groqBaseUrl: (e.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
     geminiApiKey: e.GEMINI_API_KEY || '',
-    geminiModel: e.GEMINI_MODEL || 'gemini-2.0-flash',
+    geminiModel: e.GEMINI_MODEL || 'gemini-3.8-flash',
+    // OpenRouter free models. Gemma 4 31B is free, vision-capable and speaks
+    // tool calls (262K ctx); `openrouter/free` (their auto-router) also works.
     openrouterApiKey: e.OPENROUTER_API_KEY || '',
-    openrouterModel: e.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+    openrouterModel: e.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
+    openrouterVisionModel: e.OPENROUTER_VISION_MODEL || '',
+    openrouterBaseUrl: (e.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
+
+    // ── workload routing (router.js) ───────────────────────────────────────
+    // Optional extra sizes per provider. Empty = the main model covers them.
+    // Local small model for one-liners (fast + light on the CPU):
+    //   OLLAMA_MODEL_SMALL=llama3.2:1b
+    //   OLLAMA_MODEL_HEAVY=qwen2.5:14b
+    ollamaModelSmall: e.OLLAMA_MODEL_SMALL || '',
+    // ── Local OpenAI-compatible servers (llama.cpp, LM Studio, vLLM) ───────
+    // This is how any Hugging Face GGUF model gets used: llama-server exposes
+    // /v1/chat/completions, and the agent talks to it like any other brain.
+    // Nothing leaves the PC — no key, no quota, no cloud.
+    //   LOCAL_API_URL=http://127.0.0.1:8080/v1
+    //   LOCAL_MODEL=unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
+    // Optional extra endpoints for the workload router (tiny jobs on a small
+    // model, heavy jobs on a big one, photos on a vision model):
+    //   LOCAL_API_URL_SMALL / LOCAL_API_URL_HEAVY / LOCAL_API_URL_VISION
+    localApiUrl: (e.LOCAL_API_URL || '').replace(/\/$/, ''),
+    localApiUrlSmall: (e.LOCAL_API_URL_SMALL || '').replace(/\/$/, ''),
+    localApiUrlHeavy: (e.LOCAL_API_URL_HEAVY || '').replace(/\/$/, ''),
+    localApiUrlVision: (e.LOCAL_API_URL_VISION || '').replace(/\/$/, ''),
+    localModel: e.LOCAL_MODEL || 'local-model',
+    localModelSmall: e.LOCAL_MODEL_SMALL || '',
+    localModelHeavy: e.LOCAL_MODEL_HEAVY || '',
+    localModelVision: e.LOCAL_MODEL_VISION || '',
+    localApiKey: e.LOCAL_API_KEY || 'local',
+    ollamaModelHeavy: e.OLLAMA_MODEL_HEAVY || '',
+    geminiModelHeavy: e.GEMINI_MODEL_HEAVY || '',
+    // local (default) = free/private first · cloud = fastest cloud first ·
+    // balanced = local for light work, cloud for heavy work.
+    routerPrefer: (e.ROUTER_PREFER || 'local').toLowerCase(),
+    // A failing brain is skipped for this long, doubling on each repeat
+    // failure (cap = MODEL_COOLDOWN_MAX_MS) so WhatsApp never waits for it.
+    modelCooldownMs: int(e.MODEL_COOLDOWN_MS, 120_000),
+    modelCooldownMaxMs: int(e.MODEL_COOLDOWN_MAX_MS, 1_800_000),
+    // Power budget: how many "heavy" (big-model) calls are allowed per hour.
+    maxHeavyPerHour: int(e.MAX_HEAVY_PER_HOUR, 12),
+    heavyWindowMs: int(e.HEAVY_WINDOW_MS, 3_600_000),
+    aiTimeoutMs: int(e.AI_TIMEOUT_MS, 60_000),
+
+    // Automation safety: older builds clicked hard-coded screen coordinates
+    // when OCR missed a button. Off by default — blind clicking can hit
+    // anything. Turn on only if you know your screen layout.
+    allowBlindClicks: bool(e.ALLOW_BLIND_CLICKS, false),
+    // ── "hands" (src/hands.js): look-at-screen → click/type loop ───────────
+    // One screenshot per step, one vision call per step. 8 steps is enough for
+    // "YouTube kholo aur lofi chalao" without burning the whole free tier.
+    handsMaxSteps: int(e.HANDS_MAX_STEPS, 8),
+    handsMaxSeconds: int(e.HANDS_MAX_SECONDS, 240),
+    handsStepDelayMs: int(e.HANDS_STEP_DELAY_MS, 550),
+    // Screenshots are downscaled to this width (JPEG) before leaving the PC:
+    // smaller = fewer vision tokens = faster steps, and a 4K screen still fits
+    // Groq's 4MB image limit.
+    handsImageWidth: int(e.HANDS_IMAGE_WIDTH, 1024),
+    handsJpegQuality: int(e.HANDS_JPEG_QUALITY, 70),
+    // Screen control is vision-first: the model reads the screenshot itself.
+    // Set true to also OCR every frame and hand the model a word table (more
+    // exact for dense text UI, but ~1-2s slower per step).
+    handsUseOcr: bool(e.HANDS_USE_OCR, false),
+    // Screenshots are for sending, not keeping: every capture is deleted after
+    // this many minutes (default 4). SCREENSHOT_CLEANUP=false turns it off.
+    screenshotTtlMinutes: Number(e.SCREENSHOT_TTL_MINUTES ?? 4) || 4,
+    screenshotCleanup: bool(e.SCREENSHOT_CLEANUP, true),
+    handsMaxTokens: int(e.HANDS_MAX_TOKENS, 512),
+    // Which vision provider the screen loop prefers: auto | gemini | groq |
+    // openrouter | local | ollama. auto = Gemini Flash → Groq → OpenRouter →
+    // local → Ollama.
+    screenProvider: (e.SCREEN_PROVIDER || 'auto').toLowerCase(),
+    // Local vision is preferred; when there is none, cloud vision is allowed.
+    // ALLOW_CLOUD_SCREEN=false keeps every screenshot on the PC (and hands
+    // only works if OLLAMA_VISION_MODEL / LOCAL_API_URL_VISION is set).
+    allowCloudScreen: bool(e.ALLOW_CLOUD_SCREEN, true),
+    // Show "🧠 standard · llama3.2 · 3 steps" under AI replies. Off by default
+    // for normal chat; /agent always shows it (so "done" is provable).
+    showRoutingFooter: bool(e.SHOW_ROUTING_FOOTER, false),
 
     forwardToObserver: bool(e.FORWARD_TO_OBSERVER, false),
     observerWaitMs: int(e.OBSERVER_WAIT_MS, 90_000),
@@ -186,6 +275,12 @@ export function loadConfig({ dryRun = false } = {}) {
   }
   if (config.allowShell && !config.shellPin) problems.push('ALLOW_SHELL=true but SHELL_PIN is empty. Set a PIN or turn ALLOW_SHELL off.');
   if (!['safe', 'standard', 'full'].includes(config.accessLevel)) problems.push(`ACCESS_LEVEL must be safe, standard or full (got "${config.accessLevel}").`);
+  if (!['auto', 'local', 'ollama', 'groq', 'gemini', 'openrouter', 'none'].includes(config.aiProvider)) {
+    problems.push(`AI_PROVIDER must be auto, local, ollama, groq, gemini, openrouter or none (got "${config.aiProvider}").`);
+  }
+  if (!['local', 'cloud', 'balanced'].includes(config.routerPrefer)) {
+    problems.push(`ROUTER_PREFER must be local, cloud or balanced (got "${config.routerPrefer}").`);
+  }
   if (problems.length) {
     throw new Error(`Configuration problem(s):\n  - ${problems.join('\n  - ')}`);
   }
