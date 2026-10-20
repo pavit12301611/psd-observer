@@ -360,10 +360,13 @@ on "hi" and nothing hands a 10-step job to a 1B model:
 ## 7b. Updating (no git needed)
 
 ```bash
-# already installed:
+# already installed (raw.githubusercontent block ho to API fallback):
 curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
-bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh" \
+  || curl -fL -o /tmp/agent-update.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/update-from-github.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/agent-update.sh --dir ~/observer-agent     # apna install path
 
 # first install without git:
 bash /tmp/agent-update.sh --fresh ~/observer-agent
