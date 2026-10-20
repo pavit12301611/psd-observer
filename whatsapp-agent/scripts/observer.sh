@@ -1065,11 +1065,25 @@ cmd_test() {
   # ── 5. unit tests ────────────────────────────────────────────────────────
   if [ "$runtests" -eq 1 ]; then
     local out; out=$(mktemp)
-    if ( cd "$dir" && npm test >"$out" 2>&1 ); then
+    # A dead session bus keeps the tests hermetic: on a real desktop the
+    # xdg-desktop-portal would answer (and pop a screenshot dialog) where the
+    # suite expects a normal "no portal here" failure.
+    if ( cd "$dir" && DBUS_SESSION_BUS_ADDRESS="unix:path=${TMPDIR:-/tmp}/observer-test-no-bus" \
+         npm test >"$out" 2>&1 ); then
       ok "unit tests: $(grep -E '^# pass' "$out" | awk '{print $3}') pass"
     else
-      bad "unit tests failed"
-      tail -15 "$out" | sed 's/^/      /'
+      local failed passed
+      failed=$(grep -c '^not ok' "$out" 2>/dev/null || echo '?')
+      passed=$(grep -E '^# pass' "$out" | awk '{print $3}')
+      bad "unit tests failed — ${failed} fail, ${passed:-?} pass"
+      # Show every failing test with its assertion, not just the tail.
+      awk '/^not ok/ {show=1; print "      ✗ " substr($0, index($0," - ")+3); next}
+           show && /^  \.\.\.$/ {show=0; print ""; next}
+           show {print "      " $0}' "$out" | head -70
+      local copy="${XDG_CACHE_HOME:-$HOME/.cache}/observer-agent/last-test.log"
+      if mkdir -p "$(dirname "$copy")" 2>/dev/null && cp "$out" "$copy" 2>/dev/null; then
+        hint "poora log: $copy"
+      fi
       warnings=$((warnings+1))
     fi
     rm -f "$out"

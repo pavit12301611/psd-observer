@@ -12,6 +12,12 @@ import path from 'node:path';
 import http from 'node:http';
 import zlib from 'node:zlib';
 
+// Tests must never touch the machine's real desktop: with a live session bus,
+// xdg-desktop-portal would answer the screenshot checks and pop a dialog (and
+// stall this file for ~20s). A dead bus address makes the portal genuinely
+// unavailable, which is exactly the condition these tests are written for.
+process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent-observer-test-bus';
+
 import * as nlp from '../src/nlp.js';
 import * as apps from '../src/apps.js';
 import * as files from '../src/files.js';
@@ -598,10 +604,19 @@ test('pccontrol: a black capture is rejected and explained (Wayland reality)', a
   // grim "succeeds" and hands back a black frame — exactly what Wayland does.
   shim('grim', `node -e "process.stdout.write('')" ; printf '%s' "${makePng(8, [0, 0, 0]).toString('base64')}" | base64 -d > "$1"`);
 
-  const saved = { PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE };
+  const saved = {
+    PATH: process.env.PATH,
+    XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+    XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE,
+    DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+  };
   process.env.PATH = `${shimDir}:${saved.PATH}`;
   process.env.XDG_RUNTIME_DIR = runtimeDir;
   process.env.XDG_SESSION_TYPE = 'wayland';
+  // Point D-Bus at a dead socket: on a real desktop a working
+  // xdg-desktop-portal would pop a screenshot dialog here and this test (which
+  // is about the grim/black-frame path) would take the portal path instead.
+  process.env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${path.join(dir, 'no-bus')}`;
   pc.detectSockets({ force: true });
   try {
     await assert.rejects(pc.captureScreenshot(), (err) => {
@@ -622,6 +637,8 @@ test('pccontrol: a black capture is rejected and explained (Wayland reality)', a
     else process.env.XDG_RUNTIME_DIR = saved.XDG_RUNTIME_DIR;
     if (saved.XDG_SESSION_TYPE === undefined) delete process.env.XDG_SESSION_TYPE;
     else process.env.XDG_SESSION_TYPE = saved.XDG_SESSION_TYPE;
+    if (saved.DBUS_SESSION_BUS_ADDRESS === undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS;
+    else process.env.DBUS_SESSION_BUS_ADDRESS = saved.DBUS_SESSION_BUS_ADDRESS;
     pc.detectSockets({ force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }

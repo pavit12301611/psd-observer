@@ -124,6 +124,34 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.5.1 — test output that names the failure (aur desktop tests hermetic)
+
+Owner ne `observer.sh test` chalaya: 88/90 pass, do fail — par script ne sirf
+`tail -15` dikhaya, jisme failing test ke naam hi nahi the. Aur poora run 43
+second le raha tha (sandbox me 2.4 s).
+
+**Root cause (do cheezein):**
+
+1. `cmd_test` failure par output ka last 15 line print karta tha — TAP me fail
+   ka block upar hota hai. Ab har `not ok` ka **naam + assertion** dikhta hai,
+   aur poora log `~/.cache/observer-agent/last-test.log` me rehta hai.
+2. Tests **asli desktop** ko chhoo rahe the. `captureScreenshot()` Wayland pe
+   pehle `xdg-desktop-portal` try karta hai; asli GNOME session me portal
+   available hota hai, to test jisme `grim` ka black-frame shim check hota hai
+   wo portal path pe chala jata hai (dialog + ~20 s wait) aur fail ho jata hai.
+   Wahi `doctor` test bhi 20 s tak atakta tha → poora suite 43 s.
+   Fix: test process me `DBUS_SESSION_BUS_ADDRESS` ek dead socket pe set —
+   portal genuinely unavailable, jaisa test maanta hai. Production code same.
+
+Verify:
+
+```bash
+./scripts/observer.sh test --live    # ab failing test ka naam + error dikhta hai
+npm test                             # 90 pass, ~2.5s
+```
+
+---
+
 ## 2.5 — `observer.sh test` (ek command me poora verification)
 
 Owner ne poocha "ab batao kaise test karun". Do jagah dekhna padta tha (`npm
@@ -218,6 +246,7 @@ npm test                              # 90 pass
 | 13 | *2.3* | **Ek hi script**: `observer.sh` — install/update/models/doctor/service/start/relink/remote/fix; purane scripts wrappers | 78 | 61 |
 | 14 | *2.4* | **Free cloud keys**: Groq gpt-oss defaults (Llama free tier se gaya), OpenRouter Gemma 4, cloud vision, `observer.sh keys` | 90 | 61 |
 | 15 | *2.5* | **`observer.sh test`**: keys, brains, routing preview, asli API call (`--live`), unit tests — ek command | 90 | 61 |
+| 16 | *2.5.1* | **Test report fix**: failing test ka naam + log path; tests asli portal ko touch nahi karte (dead D-Bus) — 43s → 2.5s | 90 | 61 |
 
 Verify karna ho (sab curl, git zero):
 
