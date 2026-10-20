@@ -259,7 +259,12 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
 
     // ── DeepSeek Harness (`@deepseek-ai/dsh`) full-power Linux integration ──
     deepseekApiKey: e.DEEPSEEK_API_KEY || '',
+    deepseekModel: e.DEEPSEEK_MODEL || 'deepseek-chat',
     deepseekBaseUrl: (e.DEEPSEEK_BASE_URL || '').replace(/\/$/, ''),
+    // ── Ultra-Accuracy Question Image Solver (`src/solver.js`) ─────────────
+    solverAutoImages: bool(e.SOLVER_AUTO_IMAGES, true),
+    solverAutoBootstrap: bool(e.SOLVER_AUTO_BOOTSTRAP, true),
+    solverVenvDir: e.OBSERVER_SOLVER_VENV || '',
     dshHome: e.DSH_HOME || '',
     dshBin: e.DSH_BIN || '',
     dshNodeBin: e.DSH_NODE_BIN || '',

@@ -813,9 +813,9 @@ Yehi wo commands hain jo actually use hote hain. **Git kabhi nahi.**
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/1cff19d3-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
 
 bash /tmp/observer.sh install --service --power --phone --model auto
 ```
@@ -824,7 +824,7 @@ bash /tmp/observer.sh install --service --power --phone --model auto
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh"
 bash /tmp/observer.sh update --dir ~/observer-agent
 ```
 
@@ -839,12 +839,12 @@ cd ~/observer-agent && ./scripts/observer.sh update --check
 ```bash
 # manual tarball
 curl -fL -o /tmp/agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/1cff19d3-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5055bd15-psd-observer"
 tar -xzf /tmp/agent.tar.gz -C /tmp
 ```
 
 ```
-https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/1cff19d3-psd-observer.zip
+https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5055bd15-psd-observer.zip
 ```
 
 Update scripts kya **nahi** chhoote: `.env`, `auth_info/` (WhatsApp login — QR

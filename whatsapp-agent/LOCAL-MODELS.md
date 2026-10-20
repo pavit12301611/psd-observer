@@ -22,7 +22,7 @@ Script file nahi hai? Ek hi file me sab kuch hai — pehle ise le lo:
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh"
 bash /tmp/observer.sh models recommend
 ```
 

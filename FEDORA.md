@@ -9,9 +9,9 @@ Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/1cff19d3-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
 
 bash /tmp/observer.sh install --service --power --phone --model auto
 #   --service  autostart (systemd --user + linger)
@@ -39,7 +39,7 @@ DeepSeek has **not** released a native `.rpm` / `.AppImage` Desktop package for 
 ```bash
 # 1. Update Observer to v2.9.0 (curl-only, keeps .env + WhatsApp login + data)
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh"
 bash /tmp/observer.sh update
 
 # 2. One-command DeepSeek Harness setup on Fedora (zero sudo required —
@@ -129,9 +129,9 @@ First-time install, nothing but `curl`/`tar` needed (no `git`, no `zip` tool):
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/1cff19d3-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
 bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
@@ -145,7 +145,7 @@ No `git pull` needed — the installer/repo works as a plain download:
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh"
 bash /tmp/observer.sh update --dir ~/psd-observer/whatsapp-agent
 bash /tmp/observer.sh update --check          # version compare only
 ```

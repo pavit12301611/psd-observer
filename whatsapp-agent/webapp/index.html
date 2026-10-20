@@ -48,9 +48,12 @@
     <section id="tab-chat" class="tab active">
       <div id="messages" class="messages" aria-live="polite"></div>
       <div id="chips" class="chips"></div>
+      <div id="attach-preview" class="chips" hidden style="padding:6px 12px;align-items:center"></div>
       <form id="chat-form" class="composer">
+        <input type="file" id="question-file" accept="image/*,.pdf,.docx,.txt" hidden>
+        <button type="button" id="attach-question" class="icon-btn" title="Question Photo / Screenshot / PDF daalo (100% Verified Answer)">📷</button>
         <button type="button" id="mic" class="icon-btn" title="Voice input (browser dictation)">🎤</button>
-        <textarea id="chat-input" rows="1" placeholder="Kuch bhi likho… /help" autocomplete="off"></textarea>
+        <textarea id="chat-input" rows="1" placeholder="Kuch bhi likho ya 📷 question image daalo… /solve · /help" autocomplete="off"></textarea>
         <button type="submit" class="send" title="Send">➤</button>
       </form>
     </section>

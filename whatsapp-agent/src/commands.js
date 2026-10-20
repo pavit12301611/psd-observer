@@ -36,6 +36,7 @@ import { usageReport } from './usage.js';
 import { createProgress, describeHandsStep } from './progress.js';
 import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
 import { createHarness } from './harness.js';
+import * as solver from './solver.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -69,6 +70,13 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /ls [path] · /read <path> · /write <path> | <text> · /send <path>
 • /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
+*🧠 Ultra-Accuracy Question Image Solver (2.10.0 — 100% Verified)*
+• Bas WhatsApp pe *question photo / screenshot / PDF* bhej do — auto-detect + solve!
+• /solve [instructions] — attached ya pichli photo ke saare questions 100% verify karke solve karo
+• /solve screen [instructions] — laptop screen pe khule online test / LeetCode / PDF question ko solve karo
+• /solve <question text> — typed math / physics / code / SQL / GK question full Python+Audit check ke saath
+• /solve status · /solve setup — SymPy + NumPy + Pillow + OCR + Vision readiness check
+
 *🚀 DeepSeek Harness (2.9.0 — Full Linux Coding & System Agent)*
 • /dsh <task> — poora DeepSeek Harness power (bash + coding + files + subagents + WhatsApp MCP!)
 • /dsh auto on|off — har WhatsApp message seedha DeepSeek Harness se chalao
@@ -1206,6 +1214,139 @@ export function createAgent({
     }
   }
 
+  async function handleSolve(args = '', ctx = {}) {
+    const raw = String(args ?? '').trim();
+    const sub = raw.split(/\s+/)[0]?.toLowerCase() || '';
+
+    if (sub === 'status') {
+      const s = await solver.solverStatus(config, log);
+      return [
+        '🧠 *Ultra-Accuracy Question Solver — Status*',
+        `• Ready: ${s.ok ? '✅ Active' : '⚠️ Missing vision/OCR or reasoning model'}`,
+        `• HD Image Enhancer (\`sharp\`): ${s.sharp ? '✅' : '—'}`,
+        `• Local OCR (\`tesseract\`): ${s.tesseract ? '✅' : '— (optional)'}`,
+        `• Scientific Python Venv: ${s.python ? `✅ (${s.python})` : '—'}`,
+        `• Symbolic Math (\`SymPy\` + \`NumPy\` + \`Pillow\`): ${s.sympy ? '✅ SymPy' : 'auto'} · ${s.numpy ? '✅ NumPy' : 'auto'} · ${s.pillow ? '✅ Pillow' : 'auto'}`,
+        `• Code Runtimes: Node ✅ · Python ${s.python ? '✅' : '—'} · SQLite ✅ · C/C++ ${s.gcc ? '✅' : '—'}`,
+        `• Vision Brains: ${s.visionModels.length ? s.visionModels.join(', ') : '(none)'}`,
+        `• Reasoning Brains: ${s.reasoningModels.length ? s.reasoningModels.join(', ') : '(none)'}`,
+        '',
+        '_Tip: Seedha WhatsApp pe question photo / screenshot / PDF bhej do (caption ke bina bhi!) — automatic solve ho jayega._',
+      ].join('\n');
+    }
+
+    if (sub === 'setup' || sub === 'install') {
+      notify?.('⚙️ *Question Solver setup:* Scientific Python venv (`sympy`, `numpy`, `pillow`) verify/install ho raha hai…');
+      const py = await solver.ensureSolverPython({ config, autoInstall: true, log });
+      const s = await solver.solverStatus(config, log);
+      return [
+        '✅ *Question Solver Scientific Engine Ready!*',
+        `• Python: \`${py.pythonBin || 'not found'}\``,
+        `• SymPy: ${py.mods?.sympy ? '✅ Installed' : '— (stdlib high-precision fallback active)'}`,
+        `• NumPy: ${py.mods?.numpy ? '✅ Installed' : '—'}`,
+        `• Pillow: ${py.mods?.PIL ? '✅ Installed' : '—'}`,
+        `• Sharp HD Tiler: ${s.sharp ? '✅ Installed' : '—'}`,
+      ].join('\n');
+    }
+
+    const onProgress = (msg) => {
+      try { notify?.(msg); } catch { /* ignore */ }
+    };
+
+    // 1. `/solve screen [instructions]` -> capture live PC screen & solve visible questions!
+    if (sub === 'screen' || sub === 'pc' || sub === 'desktop') {
+      const note = raw.replace(/^(?:screen|pc|desktop)\s*/i, '').trim();
+      const shot = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs });
+      const res = await solver.solveQuestionImage(config, shot, {
+        caption: note || 'Solve every question visible on this screen accurately.',
+        autoDetect: false,
+        harness,
+        onProgress,
+        log,
+        signal: activeSignal,
+      });
+      if (!res.ok) return `⚠️ ${res.error || 'Screen question solve failed.'}`;
+      return { image: shot, text: res.text };
+    }
+
+    // 2. Attached image or document sent directly with `/solve ...` caption
+    const media = ctx?.mediaMeta;
+    if (media?.buffer) {
+      if (media.mediaKind === 'document') {
+        const res = await solver.solveQuestionDocument(config, media.buffer, {
+          fileName: media.savedAs || 'document',
+          mimeType: media.mimeType || '',
+          caption: raw,
+          harness,
+          onProgress,
+          log,
+          signal: activeSignal,
+        });
+        return res.ok ? res.text : `⚠️ ${res.error || 'Document question solve failed.'}`;
+      }
+      const res = await solver.solveQuestionImage(config, media.buffer, {
+        caption: raw,
+        autoDetect: false,
+        savedPath: media.savedPath || '',
+        harness,
+        onProgress,
+        log,
+        signal: activeSignal,
+      });
+      return res.ok ? res.text : `⚠️ ${res.error || 'Image question solve failed.'}`;
+    }
+
+    // 3. No attachment, AND either empty `/solve` OR refers to previous photo (`Q3`, `pichli photo`, `hindi me`, etc.)
+    const recentMedia = (store.data.downloads ?? []).find((d) => d.kind === 'image' || d.kind === 'document');
+    const refersToLastMedia = !raw || /^(?:q\s*\.?\s*\d+|question\s*\d+|all|sab|saare|hindi|english|step|detail|short|option|options|pichli|pichhli|last|previous|ye|is|iss|dubara|recheck|verify)\b/i.test(raw);
+    if (recentMedia && refersToLastMedia) {
+      const fullPath = path.join(config.downloadsDir, recentMedia.file);
+      if (fs.existsSync(fullPath)) {
+        const buf = fs.readFileSync(fullPath);
+        if (recentMedia.kind === 'document') {
+          const res = await solver.solveQuestionDocument(config, buf, {
+            fileName: recentMedia.file,
+            caption: raw,
+            harness,
+            onProgress,
+            log,
+            signal: activeSignal,
+          });
+          return res.ok ? res.text : `⚠️ ${res.error}`;
+        }
+        const res = await solver.solveQuestionImage(config, buf, {
+          caption: raw,
+          autoDetect: false,
+          savedPath: fullPath,
+          harness,
+          onProgress,
+          log,
+          signal: activeSignal,
+        });
+        return res.ok ? res.text : `⚠️ ${res.error}`;
+      }
+    }
+
+    // 4. Direct text question (`/solve Integrate x^2 sin(x) from 0 to pi`)
+    if (raw) {
+      const res = await solver.solveQuestionText(config, raw, {
+        harness,
+        onProgress,
+        log,
+        signal: activeSignal,
+      });
+      return res.ok ? res.text : `⚠️ ${res.error || 'Could not solve question.'}`;
+    }
+
+    return [
+      '🧠 *Question Solver — Kaise use karein:*',
+      '1. Seedha *question ki photo / screenshot / PDF* WhatsApp pe bhej do (bina caption ke bhi chalega!)',
+      '2. `/solve screen` — laptop screen pe jo online test / coding / PDF question khula hai uska answer',
+      '3. `/solve <question>` — koi bhi math / physics / coding / SQL / MCQ type karke verified answer pao',
+      '4. `/solve status` · `/solve setup` — SymPy + NumPy + Vision status',
+    ].join('\n');
+  }
+
   function remoteCommand() {
     const port = config.port ?? 8787;
     const nets = Object.values(os.networkInterfaces()).flat()
@@ -1388,6 +1529,7 @@ export function createAgent({
       }
       case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
       case 'dsh': case 'harness': case 'deepseek': return handleDsh(args, ctx);
+      case 'solve': case 'ans': case 'answer': case 'q': return handleSolve(args, ctx);
       case 'doctor': case 'diag': case 'diagnose': return runDoctor({ config, ctx, log });
       case 'access': {
         const r = actions.accessReport();

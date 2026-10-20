@@ -163,6 +163,19 @@ const TOOLS = [
       required: ['op'],
     },
   },
+  {
+    name: 'solve_question_image',
+    description: 'Solve exam / math / physics / coding / SQL / MCQ questions from an image path, live PC screen (`screen: true`), or question text using HD zoom tiling + OCR + Python/SymPy + real compilers + live fact search + independent adversarial audit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Optional path to question image or PDF' },
+        screen: { type: 'boolean', description: 'Capture and solve questions on live PC screen' },
+        text: { type: 'string', description: 'Optional typed question text' },
+        instructions: { type: 'string', description: 'Optional instructions (e.g. "Solve Q3 & Q4 in Hinglish")' },
+      },
+    },
+  },
 ];
 
 const expandHome = (p) => (String(p || '').startsWith('~/')
@@ -277,6 +290,24 @@ async function handleToolCall(name, args = {}) {
       else if (what === 'notify') out = await pc.desktopNotify('DeepSeek Harness', val || 'Task update');
       else throw new Error(`Unknown pc_system query: ${what}`);
       return [{ type: 'text', text: String(out) }];
+    }
+
+    case 'solve_question_image': {
+      const payload = { instructions: String(args.instructions || '') };
+      if (args.screen) {
+        payload.screen = true;
+      } else if (args.filePath) {
+        const filePath = expandHome(args.filePath);
+        if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
+        payload.imageBase64 = fs.readFileSync(filePath).toString('base64');
+        payload.fileName = path.basename(filePath);
+      } else if (args.text) {
+        payload.text = String(args.text);
+      } else {
+        throw new Error('Provide filePath, screen: true, or text.');
+      }
+      const data = await callBridge('/api/solve', payload);
+      return [{ type: 'text', text: data.text || JSON.stringify(data) }];
     }
 
     case 'observer_action': {

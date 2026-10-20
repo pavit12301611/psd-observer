@@ -48,6 +48,15 @@ export function parseIntent(input) {
     return asCmd('dsh', clean(m[1]));
   }
 
+  // ── Question Solver (MUST run before generic `screen pe` -> `/look` rule!) ──
+  if (/\b(?:screen\s*(?:pe|ka|ki|ke|par)|on\s*(?:my\s*)?screen)\b.*\b(?:question|questions|mcq|quiz|test|solve|answer|jawab|hal)\b/i.test(text)
+      || /\b(?:solve|answer)\b.*\b(?:question|questions|mcq|problem)s?\s+(?:on|from)\s+(?:the\s+|my\s+)?screen\b/i.test(text)) {
+    return asCmd('solve', `screen ${text}`);
+  }
+  if (/^(?:pichli|pichhli|last|previous|ye|is|iss)\s+(?:photo|image|pic|screenshot|paper|sheet)\s+(?:(?:ka|ke|ki|ko|wali|wale)\s+)?(?:question|questions|sawal|answer|answers|solve|hal)(?:\s+[\s\S]*)?$/i.test(text)) {
+    return asCmd('solve', text);
+  }
+
   // ── app control ───────────────────────────────────────────────────────────
   if ((m = text.match(/^(?:open|launch|khol(?:o|do|de)?|chalu\s+kar(?:o|do)?|start)\s+(?:the\s+|app\s+)?(.+)$/i))) {
     const rest = clean(m[1]).replace(/\s+(?:app|application)$/i, '').replace(/\s+(?:karo|kar do|kholo|khol do)$/i, '');
