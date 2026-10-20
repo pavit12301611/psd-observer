@@ -33,9 +33,10 @@ import * as pc from './pccontrol.js';
 import * as hands from './hands.js';
 import { pngSize } from './elementfinder.js';
 import { routerFor } from './router.js';
+import * as solver from './solver.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.9.0';
+const VERSION = '2.10.0';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -512,6 +513,46 @@ export function createBridgeServer({
           }
           await whatsapp.sendToOwner(String(body.text || ''));
           return json(res, 200, { ok: true, via: whatsapp.status() });
+        }
+
+        case 'GET /api/solve/status':
+          return json(res, 200, await solver.solverStatus(config, log));
+
+        case 'POST /api/solve': {
+          const body = await readJsonBody(req);
+          const instructions = String(body.instructions ?? body.caption ?? '').slice(0, 2000).trim();
+          if (body.screen) {
+            const shot = await scr.capture({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+            const solved = await solver.solveQuestionImage(config, shot, {
+              caption: instructions || 'Solve every question visible on this screen accurately.',
+              autoDetect: false,
+              harness,
+              log,
+            });
+            if (!solved.ok) return json(res, 502, { ok: false, detail: solved.error || 'Solver failed.' });
+            return json(res, 200, { ok: true, text: solved.text, stages: solved.stages, images: [dataUrl(shot)] });
+          }
+          if (body.imageBase64) {
+            const rawBuf = Buffer.from(stripDataPrefix(body.imageBase64), 'base64');
+            const mimeType = String(body.mimeType || 'image/png');
+            const isDoc = mimeType === 'application/pdf' || /\.(pdf|docx|txt)$/i.test(String(body.fileName || ''));
+            fs.mkdirSync(config.downloadsDir, { recursive: true });
+            const cleanName = String(body.fileName || `question-${Date.now()}.${isDoc ? 'pdf' : 'png'}`).replace(/[^\w.\- ]/g, '_');
+            const savedPath = path.join(config.downloadsDir, cleanName);
+            fs.writeFileSync(savedPath, rawBuf);
+            store.addDownload({ file: cleanName, kind: isDoc ? 'document' : 'image', ts: Date.now(), caption: instructions });
+            const solved = isDoc
+              ? await solver.solveQuestionDocument(config, rawBuf, { fileName: cleanName, mimeType, caption: instructions, harness, log })
+              : await solver.solveQuestionImage(config, rawBuf, { caption: instructions, autoDetect: false, savedPath, harness, log });
+            if (!solved.ok) return json(res, 502, { ok: false, detail: solved.error || 'Solver failed.' });
+            return json(res, 200, { ok: true, text: solved.text, stages: solved.stages });
+          }
+          if (body.text) {
+            const solved = await solver.solveQuestionText(config, String(body.text), { caption: instructions, harness, log });
+            if (!solved.ok) return json(res, 502, { ok: false, detail: solved.error || 'Solver failed.' });
+            return json(res, 200, { ok: true, text: solved.text, stages: solved.stages });
+          }
+          return json(res, 400, { detail: 'Provide imageBase64, screen:true, or text.' });
         }
 
         case 'GET /api/harness':

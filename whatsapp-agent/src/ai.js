@@ -162,33 +162,50 @@ export async function complete(config, prompt, log = console) {
 
 // ── multimodal: images ───────────────────────────────────────────────────────
 
-async function visionCall(model, config, prompt, imageBase64, mime = 'image/png', opts = {}) {
+/**
+ * Call a single vision-capable model with ONE OR MORE images (`[{ base64, mime }]`).
+ * Passing both full-page view + zoomed high-DPI crop tiles stops small text,
+ * superscripts (`x²`, `10⁻⁶`), minus signs, and option letters from blurring.
+ */
+export async function visionMultiCall(model, config, prompt, images, opts = {}) {
+  const list = (Array.isArray(images) ? images : [{ base64: images, mime: opts.mime || 'image/png' }])
+    .filter((img) => img && img.base64);
+  if (!list.length) return null;
   const maxTokens = Number(opts.maxTokens) > 0 ? Math.trunc(opts.maxTokens) : null;
+  const temperature = Number.isFinite(opts.temperature) ? Number(opts.temperature) : 0.15;
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Math.trunc(opts.timeoutMs) : TIMEOUT_MS;
   const signal = opts.signal ?? null;
+
   if (model.provider === 'ollama') {
     const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
       model: model.model,
       stream: false,
-      messages: [{ role: 'user', content: prompt, images: [imageBase64] }],
-      ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
-    }, {}, TIMEOUT_MS, signal);
+      messages: [{ role: 'user', content: prompt, images: list.map((x) => x.base64) }],
+      options: {
+        temperature,
+        ...(maxTokens ? { num_predict: maxTokens } : {}),
+      },
+    }, {}, timeoutMs, signal);
     return data.message?.content?.trim() || null;
   }
   if (model.provider === 'local') {
     // OpenAI-style vision (llama.cpp with an mmproj / unified multimodal GGUF).
     const data = await postJson(`${model.baseUrl}/chat/completions`, {
       model: model.model,
-      temperature: 0.2,
+      temperature,
       stream: false,
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
       messages: [{
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
+          ...list.map((x) => ({
+            type: 'image_url',
+            image_url: { url: `data:${x.mime || 'image/png'};base64,${x.base64}` },
+          })),
         ],
       }],
-    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, TIMEOUT_MS, signal);
+    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, timeoutMs, signal);
     return data.choices?.[0]?.message?.content?.trim() || null;
   }
   if (model.provider === 'gemini') {
@@ -197,12 +214,17 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
       {
         contents: [{
           role: 'user',
-          parts: [{ text: prompt }, { inlineData: { mimeType: mime, data: imageBase64 } }],
+          parts: [
+            { text: prompt },
+            ...list.map((x) => ({ inlineData: { mimeType: x.mime || 'image/png', data: x.base64 } })),
+          ],
         }],
-        // Screen control wants one short JSON action, not an essay.
-        ...(maxTokens ? { generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens } } : {}),
+        generationConfig: {
+          temperature,
+          ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+        },
       },
-      {}, TIMEOUT_MS, signal,
+      {}, timeoutMs, signal,
     );
     return data.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('').trim() || null;
   }
@@ -212,20 +234,158 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
     // take OpenAI-style image parts. Data URLs avoid any public exposure.
     const data = await postJson(`${cloud.url}/chat/completions`, {
       model: model.model,
-      temperature: 0.2,
+      temperature,
       stream: false,
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
       messages: [{
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
+          ...list.map((x) => ({
+            type: 'image_url',
+            image_url: { url: `data:${x.mime || 'image/png'};base64,${x.base64}` },
+          })),
         ],
       }],
-    }, { authorization: `Bearer ${cloud.key}` }, TIMEOUT_MS, signal);
+    }, { authorization: `Bearer ${cloud.key}` }, timeoutMs, signal);
     return data.choices?.[0]?.message?.content?.trim() || null;
   }
   return null;
+}
+
+async function visionCall(model, config, prompt, imageBase64, mime = 'image/png', opts = {}) {
+  return visionMultiCall(model, config, prompt, [{ base64: imageBase64, mime }], opts);
+}
+
+/**
+ * Ranked list of vision-capable brains for accuracy-critical tasks (exam / question solving).
+ * Quality-sorted while respecting ALLOW_CLOUD_SCREEN / AI_PROVIDER settings.
+ */
+export function visionCandidates(config, log = console) {
+  const router = routerFor(config, log);
+  const plan = router.plan({ text: ' carefully transcribe and solve complex exam questions with diagrams and equations', needsVision: true, forceTier: 'heavy' });
+  const seen = new Set();
+  const out = [];
+  for (const m of [...plan.candidates, ...router.catalog]) {
+    if (!m.vision || seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+  }
+  return out.sort((a, b) => (b.quality ?? 5) - (a.quality ?? 5));
+}
+
+/**
+ * Ranked list of strongest reasoning brains (including DeepSeek official API if set,
+ * plus 120B Groq, Gemini, Gemma-4-31B OpenRouter, heavy local GGUF, Ollama).
+ */
+export function reasoningCandidates(config, log = console) {
+  const router = routerFor(config, log);
+  const plan = router.plan({
+    text: 'solve multi-step mathematical, scientific, coding, and analytical exam questions with step-by-step proof verification',
+    forceTier: 'heavy',
+  });
+  const extras = [];
+  if (config.deepseekApiKey) {
+    extras.push({
+      id: `deepseek:${config.deepseekModel || 'deepseek-reasoner'}`,
+      provider: 'deepseek',
+      model: config.deepseekModel || 'deepseek-chat',
+      label: `DeepSeek (${config.deepseekModel || 'deepseek-chat'})`,
+      local: false,
+      vision: false,
+      quality: 10,
+    });
+  }
+  const seen = new Set();
+  const out = [];
+  for (const m of [...extras, ...plan.candidates, ...router.catalog]) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+  }
+  return out.sort((a, b) => (b.quality ?? 5) - (a.quality ?? 5));
+}
+
+/**
+ * Direct low-temperature call to a specific model (`temperature`, `maxTokens`, `signal`),
+ * used by the multi-stage Question Solver & independent Adversarial Auditor.
+ */
+export async function callDirectModel(model, config, messages, opts = {}) {
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Math.trunc(opts.timeoutMs) : Math.max(TIMEOUT_MS, Number(config.aiTimeoutMs) || TIMEOUT_MS);
+  const temperature = Number.isFinite(opts.temperature) ? Number(opts.temperature) : 0.1;
+  const maxTokens = Number(opts.maxTokens) > 0 ? Math.trunc(opts.maxTokens) : undefined;
+  const signal = opts.signal ?? null;
+
+  if (model.provider === 'deepseek') {
+    const base = (config.deepseekBaseUrl || 'https://api.deepseek.com').replace(/\/$/, '');
+    const url = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
+    const data = await postJson(url, {
+      model: model.model,
+      messages,
+      temperature,
+      stream: false,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+    }, { authorization: `Bearer ${config.deepseekApiKey}` }, timeoutMs, signal);
+    const msg = data.choices?.[0]?.message;
+    const text = (msg?.content || '').trim();
+    if (!text) throw new Error('empty DeepSeek response');
+    return { text, reasoning: (msg?.reasoning_content || '').trim(), provider: model.label, model: model.model, id: model.id };
+  }
+  if (model.provider === 'ollama') {
+    const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
+      model: model.model,
+      messages,
+      stream: false,
+      options: { temperature, ...(maxTokens ? { num_predict: maxTokens } : {}) },
+    }, {}, timeoutMs, signal);
+    const text = data.message?.content?.trim();
+    if (!text) throw new Error('empty Ollama response');
+    return { text, provider: model.label, model: model.model, id: model.id };
+  }
+  if (model.provider === 'local') {
+    const data = await postJson(`${model.baseUrl}/chat/completions`, {
+      model: model.model,
+      messages,
+      temperature,
+      stream: false,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, timeoutMs, signal);
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) throw new Error('empty local model response');
+    return { text, provider: model.label, model: model.model, id: model.id };
+  }
+  if (model.provider === 'gemini') {
+    const system = messages.find((m) => m.role === 'system')?.content ?? '';
+    const contents = messages.filter((m) => m.role !== 'system').map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+    const data = await postJson(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model.model}:generateContent?key=${config.geminiApiKey}`,
+      {
+        contents,
+        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        generationConfig: { temperature, ...(maxTokens ? { maxOutputTokens: maxTokens } : {}) },
+      },
+      {},
+      timeoutMs,
+      signal,
+    );
+    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('').trim();
+    if (!text) throw new Error('empty Gemini response');
+    return { text, provider: model.label, model: model.model, id: model.id };
+  }
+  const endpoint = cloudEndpoint(model, config);
+  if (!endpoint?.key) throw new Error(`no credentials for ${model.provider}`);
+  const data = await postJson(`${endpoint.url}/chat/completions`, {
+    model: model.model,
+    messages,
+    temperature,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
+  }, { authorization: `Bearer ${endpoint.key}` }, timeoutMs, signal);
+  const text = data.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error(`empty ${model.provider} response`);
+  return { text, provider: model.label, model: model.model, id: model.id };
 }
 
 /**

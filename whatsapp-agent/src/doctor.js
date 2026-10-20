@@ -17,6 +17,7 @@ import * as pc from './pccontrol.js';
 import { imageStats } from './imaging.js';
 import { humanSize } from './files.js';
 import { findDshBinary, findSupportedNode } from './harness.js';
+import { solverStatus } from './solver.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -218,8 +219,15 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
     });
   }
 
-  // ── 5. DeepSeek Harness + Access + WhatsApp ───────────────────────────────
+  // ── 5. DeepSeek Harness + Question Solver + Access + WhatsApp ───────────
   {
+    const ss = await solverStatus(config, log);
+    checks.push({
+      icon: ss.ok ? '✅' : '⚠️',
+      title: 'Question Solver',
+      detail: `sharp ${ss.sharp ? '✅' : '—'} · SymPy ${ss.sympy ? '✅' : 'auto'} · OCR ${ss.tesseract ? '✅' : '—'} · vision ${ss.visionModels.length || 0} · reasoners ${ss.reasoningModels.length || 0}`,
+      fix: ss.ok ? null : 'Send `/solve setup` or configure a free vision/reasoning key (`./scripts/observer.sh keys groq <gsk_...>`)',
+    });
     const dshBin = findDshBinary(config);
     const dshNode = findSupportedNode(config.dshNodeBin);
     if (dshBin && dshNode?.supported) {

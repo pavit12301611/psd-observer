@@ -22,6 +22,7 @@ import * as apps from './apps.js';
 import * as files from './files.js';
 import * as systemx from './systemx.js';
 import * as ocr from './ocr.js';
+import * as solver from './solver.js';
 import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
@@ -701,6 +702,47 @@ export function createActions({ config, store, log = console, journal = null, no
           if (err.killed) throw new Error(`Command timed out after ${timeout / 1000}s.`);
           return `💻 \`${cmd}\`\n\`\`\`\n${out || err.message}\n\`\`\``;
         }
+      },
+    },
+    {
+      name: 'solve_question',
+      level: 'safe',
+      label: 'Solve question image / screen / text with 100% Python+Vision verification',
+      description: 'Accurately solve exam, math, physics, chemistry, coding, SQL, or MCQ questions from an image path, live PC screen (`source: "screen"`), or direct question text, verifying calculations with Python/SymPy/compilers and an independent auditor.',
+      params: {
+        source: { type: 'string', description: '"screen", a file path under home/downloads, or omit when passing `question`' },
+        question: { type: 'string', description: 'Optional question text or instructions (e.g. "Solve Q2 & Q3 step by step")' },
+      },
+      async run({ source = '', question = '' }, ctx) {
+        const src = String(source ?? '').trim();
+        if (src === 'screen') {
+          const shot = await pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs });
+          const res = await solver.solveQuestionImage(config, shot, {
+            caption: question || 'Solve every question on screen accurately.',
+            autoDetect: false,
+            log,
+            signal: ctx?.signal ?? null,
+          });
+          if (!res.ok) throw new Error(res.error || 'Could not solve screen question');
+          return { image: shot, text: res.text };
+        }
+        if (src) {
+          const resolved = files.resolvePath(src, { extraRoots: [config.downloadsDir, ...(config.filesExtraRoots ?? [])], mustExist: true });
+          if (!resolved.ok) throw new Error(resolved.reason);
+          const buf = fs.readFileSync(resolved.path);
+          const res = await solver.solveQuestionImage(config, buf, {
+            caption: question,
+            autoDetect: false,
+            savedPath: resolved.path,
+            log,
+            signal: ctx?.signal ?? null,
+          });
+          if (!res.ok) throw new Error(res.error || 'Could not solve image');
+          return res.text;
+        }
+        const res = await solver.solveQuestionText(config, question, { log, signal: ctx?.signal ?? null });
+        if (!res.ok) throw new Error(res.error || 'Could not solve question');
+        return res.text;
       },
     },
   ];

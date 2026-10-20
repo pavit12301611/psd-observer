@@ -1,4 +1,14 @@
 {
+  "2.10.0": {
+    "title": "Ultra-Accuracy Question Image Solver — 100% Verified Answers 🧠🔬",
+    "bullets": [
+      "WhatsApp pe seedha *kisi bhi question ki photo / screenshot / PDF* bhej do (bina caption ke bhi!) — agent khud question detect karke 100% verified answer deta hai!",
+      "Multi-Scale HD Image Enhancer + 3x Digital Magnifier (`sharp`): camera shadows hatata hai, chhote superscripts (`x³`, `10⁻⁶`, `-`, `≤`) ke zoom tiles banata hai, aur Vision + Dual-Pass OCR dono se cross-read karta hai",
+      "Zero Mental-Math Hallucination: har math, calculus, matrix, physics/chemistry numerical, SQL (`sqlite3`), aur C/C++/JS/Python output question ko PC pe *asli Python + SymPy + NumPy + Compilers* chala ke verify karta hai!",
+      "Live Encyclopedia + Adversarial Auditor: GK/Science/Polity/Vocab facts live verify hote hain aur dusra independent Auditor model `NOT`/`EXCEPT` traps aur `(A)/(B)/(C)/(D)` option-letter matching check karke galti pakad leta hai",
+      "`/solve`, `/solve screen` (laptop pe khule online test/LeetCode question ka instant answer!), `/solve setup`, aur Phone Web App me 📷 Upload / `Ctrl+V` Paste support!"
+    ]
+  },
   "2.9.0": {
     "title": "DeepSeek Harness on Fedora Linux + Full WhatsApp Power 🚀",
     "bullets": [

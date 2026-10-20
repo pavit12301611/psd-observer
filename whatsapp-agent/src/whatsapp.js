@@ -30,6 +30,7 @@ import {
 } from './allowlist.js';
 import * as ai from './ai.js';
 import * as ocr from './ocr.js';
+import * as solver from './solver.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import { isStopCommand } from './cancel.js';
@@ -323,9 +324,8 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           // fall through to normal image handling so user gets at least OCR/description
         }
       }
-      // "ye error fix karo" — treat the photo as a problem to diagnose, not
-      // just a picture to describe. Any vision brain (Gemini/Groq/local).
-      if (/\b(fix|error|issue|problem|samajh nahi|kya galat|kyu aa raha|why|help me)\b/i.test(caption)) {
+      // "ye error fix karo" — treat the photo as a PC error to diagnose ONLY when not a question sheet
+      if (/\b(fix|error|issue|problem|kya galat|kyu aa raha)\b/i.test(caption) && !solver.captionExplicitlyWantsSolve(caption)) {
         try {
           const diagnosed = await ai.diagnoseImage(config, buffer.toString('base64'), caption, log);
           if (diagnosed?.text) {
@@ -335,10 +335,36 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           }
         } catch (err) {
           log.warn?.(`[wa] diagnose failed: ${err.message}`);
-          // fall through to describe/OCR below
         }
       }
-      // 1) local vision model (best) 2) OCR the image (works for screenshots)
+      // ── Ultra-Accuracy Question Image Solver (auto-detects questions even with empty caption!) ──
+      if (config.solverAutoImages !== false) {
+        try {
+          let notifiedSolving = false;
+          const solved = await solver.solveQuestionImage(config, buffer, {
+            caption,
+            autoDetect: true,
+            savedPath: path.join(config.downloadsDir, savedAs),
+            harness: agent.harness ?? null,
+            log,
+            onProgress: (msg) => {
+              if (!notifiedSolving) {
+                notifiedSolving = true;
+                transportSend(chatJid, msg, rawMsg).catch(() => {});
+              }
+            },
+          });
+          if (solved?.isQuestion && solved.ok && solved.text) {
+            return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n${solved.text}`, rawMsg);
+          }
+          if (solved && !solved.isQuestion && solved.casualDescription) {
+            return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${solved.casualDescription}`, rawMsg);
+          }
+        } catch (err) {
+          log.warn?.(`[wa] question solver failed (${err.message}), falling back to standard vision/OCR`);
+        }
+      }
+      // Fallback: 1) vision description 2) local OCR text
       const description = await ai.describeImage(config, buffer.toString('base64'), caption, log);
       if (description) return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n👁️ ${description}`, rawMsg);
       try {
@@ -363,10 +389,23 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
       }
     }
     if (content.kind === 'document' && buffer) {
-      // PDF / DOCX / TXT: read it on the PC and summarise for free.
+      // PDF / DOCX / TXT: if it has questions (or caption asks to solve), run the verified solver!
       try {
         const text = await ocr.extractDocumentText(buffer, content.fileName, content.media?.mimetype);
         if (text) {
+          if (config.solverAutoImages !== false && (solver.captionExplicitlyWantsSolve(caption) || solver.looksLikeQuestionText(text))) {
+            const solvedDoc = await solver.solveQuestionDocument(config, buffer, {
+              fileName: content.fileName,
+              mimeType: content.media?.mimetype,
+              caption,
+              harness: agent.harness ?? null,
+              log,
+              onProgress: (msg) => transportSend(chatJid, msg, rawMsg).catch(() => {}),
+            });
+            if (solvedDoc?.ok && solvedDoc.text) {
+              return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n📄 *${content.fileName ?? 'Question Sheet'}*\n\n${solvedDoc.text}`, rawMsg);
+            }
+          }
           const summary = await ai.complete(config, `Summarise this document briefly for WhatsApp (language: same as the document, Hinglish if mixed). Bullet points, max 12 lines.\n\n${text.slice(0, 8000)}`, log);
           return transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}\n\n📄 *${content.fileName ?? 'document'}*\n\n${summary ? summary.text : `${text.slice(0, 1800)}${text.length > 1800 ? '\n…' : ''}`}`, rawMsg);
         }

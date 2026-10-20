@@ -153,8 +153,77 @@
     return el;
   }
 
+  let pendingUpload = null; // { base64, dataUrl, mimeType, fileName, size }
+
+  function renderPendingUpload() {
+    const bar = $('#attach-preview');
+    if (!bar) return;
+    if (!pendingUpload) {
+      bar.hidden = true;
+      bar.innerHTML = '';
+      return;
+    }
+    bar.hidden = false;
+    bar.innerHTML = `<span class="chip">🧠 <b>${escapeHtml(pendingUpload.fileName)}</b> (${humanSize(pendingUpload.size)}) — Send dabao 100% verified answer ke liye!</span><button type="button" id="clear-upload" class="ghost">✕ Hatao</button>`;
+    $('#clear-upload')?.addEventListener('click', () => {
+      pendingUpload = null;
+      if ($('#question-file')) $('#question-file').value = '';
+      renderPendingUpload();
+    });
+  }
+
+  function loadSelectedFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result || '');
+      const comma = url.indexOf(',');
+      pendingUpload = {
+        base64: comma >= 0 ? url.slice(comma + 1) : url,
+        dataUrl: url,
+        mimeType: file.type || 'image/png',
+        fileName: file.name || `question-${Date.now()}.png`,
+        size: file.size || 0,
+      };
+      renderPendingUpload();
+      $('#chat-input')?.focus();
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function sendText(text) {
     const clean = String(text || '').trim();
+    if (pendingUpload) {
+      const upload = pendingUpload;
+      pendingUpload = null;
+      if ($('#question-file')) $('#question-file').value = '';
+      renderPendingUpload();
+      const isImg = /^image\//i.test(upload.mimeType);
+      addMessage('user', clean ? `📷 ${clean}` : `📷 *${upload.fileName}* — Solve accurately`, {
+        images: isImg ? [upload.dataUrl] : [],
+        documentName: isImg ? '' : upload.fileName,
+      });
+      $('#chat-input').value = '';
+      autosize($('#chat-input'));
+      const typing = showTyping();
+      try {
+        const data = await api('/api/solve', {
+          method: 'POST',
+          body: {
+            imageBase64: upload.base64,
+            mimeType: upload.mimeType,
+            fileName: upload.fileName,
+            instructions: clean,
+          },
+        });
+        typing.remove();
+        addMessage('bot', data.text || '✅ Solved.', { images: data.images || [] });
+      } catch (err) {
+        typing.remove();
+        if (err.message !== 'unauthorised') addMessage('bot', `⚠️ ${err.message}`);
+      }
+      return;
+    }
     if (!clean) return;
     addMessage('user', clean);
     $('#chat-input').value = '';
@@ -545,6 +614,36 @@
       e.preventDefault();
       sendText($('#chat-input').value);
     });
+    if ($('#attach-question')) {
+      $('#attach-question').addEventListener('click', () => $('#question-file')?.click());
+    }
+    if ($('#question-file')) {
+      $('#question-file').addEventListener('change', (e) => {
+        const f = e.target.files?.[0];
+        if (f) loadSelectedFile(f);
+      });
+    }
+    // Support pasting a screenshot straight from clipboard (`Ctrl+V`) OR dragging a file onto Chat!
+    window.addEventListener('paste', (e) => {
+      const items = [...(e.clipboardData?.items || [])];
+      const imgItem = items.find((i) => i.type?.startsWith('image/'));
+      if (imgItem) {
+        const file = imgItem.getAsFile();
+        if (file) {
+          switchTab('chat');
+          loadSelectedFile(file);
+        }
+      }
+    });
+    const chatTab = $('#tab-chat');
+    if (chatTab) {
+      chatTab.addEventListener('dragover', (e) => { e.preventDefault(); });
+      chatTab.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const f = e.dataTransfer?.files?.[0];
+        if (f) loadSelectedFile(f);
+      });
+    }
     $('#chat-input').addEventListener('input', (e) => autosize(e.target));
     $('#chat-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 700) {
