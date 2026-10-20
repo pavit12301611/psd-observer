@@ -1,5 +1,20 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v2.9.0 — DeepSeek Harness (`@deepseek-ai/dsh`) on Fedora Linux + Full WhatsApp Power 🚀
+
+- **Real world constraint**: DeepSeek ka official Desktop installer abhi sirf macOS/Windows ke liye hai — Linux ke liye unka official open-source agent engine **`@deepseek-ai/dsh`** (`0.2.1-rc.2`, MIT, Node `>=22.19` ya `>=24`) hai. Alag third-party WhatsApp plugin lagane se second competing WhatsApp linked device banta aur Fedora desktop/OCR/PWA tools cut ho jaate.
+- **Asli traps jo live Linux run me pakde gaye aur theek kiye**:
+  1. `DSH_TELEMETRY_MODE=OFF` Cordis schema warning deta hai — exact valid enum `DSH_TELEMETRY_MODE=DISABLED` hai.
+  2. Cordis `--patch` YAML me existing base plugin (`llm-pi-ai`) top-level `- id: llm-pi-ai` se patch hota hai, jabki naya host plugin (`@deepseek-ai/dsh-mcp-client`) **hamesha `- insert:` array ke andar** hona chahiye (`- insert: [{ id: mcp-observer, name: ..., config: ... }]`), warna silently ignore ho jata hai.
+  3. `dsh` launcher parser me `--profile web --patch <file>` **hamesha `--port` / `--no-open` se pehle** aana chahiye warna `--patch` web app ko forward hoke `unknown option '--patch'` throw karta hai.
+  4. `dsh web` `127.0.0.1` pe bind hota hai aur `Host` header authority ke against `dsh-auth-*` cookie sign karta hai — isliye `src/harness.js` har LAN/Tailscale IP ke liye `--trusted-host <ip>:3081` pass karke pure-Node HTTP + WebSocket `upgrade` tunnel proxy chalata hai, taaki Fedora PC (`127.0.0.1:3080`) aur Phone/Tailscale (`<PC-IP>:3081`) **dono** pe 100% official DeepSeek Harness Web UI bina kisi path-rewrite bug ke chale!
+- **Files added / upgraded**:
+  - `src/harness.js` — Warm persistent `dsh --profile sdk` JSON-RPC 2.0 daemon, zero-sudo portable Node `v22.22.0` + `@deepseek-ai/dsh` auto-installer, multi-brain provider sync (`deepseek`, `deepseek-account`, `observer-groq`, `observer-openrouter`, `observer-local` llama.cpp, `observer-ollama`), `dsh web` + LAN tunnel manager, aur Fedora GNOME `.desktop` launcher.
+  - `src/mcp-server.js` — Zero-dep stdio MCP server (`mcp-observer`) sharing live `whatsapp_send_message`, `whatsapp_send_file`, `whatsapp_send_screenshot`, `pc_screenshot` (image + OCR), `pc_ui_act`, `pc_system`, `observer_action`, aur `observer_memory` across both WhatsApp `/dsh` and browser `dsh web` sessions!
+  - `src/commands.js`, `src/whatsapp.js`, `src/server.js`, `src/nlp.js`, `src/actions.js`, `src/doctor.js`, `webapp/`, `scripts/observer.sh`, `FEDORA.md`, `test/harness.test.js`.
+
+---
+
 > Ye file poore 2.0 ka **honest engineering log** hai: har feature, har command,
 > har error jo asli machine pe aaya, aur uska exact fix (commit ke saath).
 >
@@ -798,9 +813,9 @@ Yehi wo commands hain jo actually use hote hain. **Git kabhi nahi.**
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/1cff19d3-psd-observer"
 
 bash /tmp/observer.sh install --service --power --phone --model auto
 ```
@@ -809,7 +824,7 @@ bash /tmp/observer.sh install --service --power --phone --model auto
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/1cff19d3-psd-observer/whatsapp-agent/scripts/observer.sh"
 bash /tmp/observer.sh update --dir ~/observer-agent
 ```
 
@@ -824,12 +839,12 @@ cd ~/observer-agent && ./scripts/observer.sh update --check
 ```bash
 # manual tarball
 curl -fL -o /tmp/agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/1cff19d3-psd-observer"
 tar -xzf /tmp/agent.tar.gz -C /tmp
 ```
 
 ```
-https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip
+https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/1cff19d3-psd-observer.zip
 ```
 
 Update scripts kya **nahi** chhoote: `.env`, `auth_info/` (WhatsApp login — QR

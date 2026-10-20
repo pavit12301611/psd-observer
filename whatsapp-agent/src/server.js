@@ -35,7 +35,7 @@ import { pngSize } from './elementfinder.js';
 import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.8.2';
+const VERSION = '2.9.0';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -102,7 +102,7 @@ function safeEqual(a, b) {
 }
 
 export function createBridgeServer({
-  config, store, whatsapp, mailbox, actions, runOwner, log = console,
+  config, store, whatsapp, mailbox, actions, harness = null, runOwner, log = console,
   // Injectable so tests never touch a real desktop, and so the number of
   // screenshots per request is explicit and measurable.
   screen = null,
@@ -294,6 +294,7 @@ export function createBridgeServer({
               id: m.id, label: m.label, local: m.local, vision: m.vision,
               tiers: [m.minTier, m.maxTier], quality: m.quality,
             })),
+            harness: harness ? harness.status() : null,
             stats: store.data.stats,
             reminders: store.data.reminders.length,
             cronJobs: (store.data.cronJobs ?? []).length,
@@ -478,6 +479,63 @@ export function createBridgeServer({
           const body = await readJsonBody(req);
           const result = await whatsapp.simulate(String(body.text ?? ''), body.from ? normalizeNumber(body.from) : config.ownerNumber);
           return json(res, 200, result);
+        }
+
+        // ── DeepSeek Harness IPC + Phone/Desktop Control Routes ──────────
+        case 'POST /api/whatsapp/send': {
+          const body = await readJsonBody(req);
+          const kind = String(body.kind || 'text');
+          if (kind === 'screenshot') {
+            const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 25_000) });
+            await whatsapp.sendToOwner({ image: shot, text: String(body.caption || '📸 Fedora Desktop') });
+            return json(res, 200, { ok: true, via: whatsapp.status() });
+          }
+          if (kind === 'file') {
+            const target = path.resolve(String(body.filePath || ''));
+            if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+              return json(res, 400, { ok: false, detail: `File not found: ${target}` });
+            }
+            const buf = fs.readFileSync(target);
+            const ext = path.extname(target).toLowerCase();
+            const isImg = Boolean(body.asImage) || ['.png', '.jpg', '.jpeg', '.webp'].includes(ext);
+            if (isImg) {
+              await whatsapp.sendToOwner({ image: buf, text: String(body.caption || path.basename(target)) });
+            } else {
+              await whatsapp.sendToOwner({
+                document: buf,
+                fileName: path.basename(target),
+                mimetype: files.mimeFor(target),
+                text: String(body.caption || ''),
+              });
+            }
+            return json(res, 200, { ok: true, via: whatsapp.status(), file: target });
+          }
+          await whatsapp.sendToOwner(String(body.text || ''));
+          return json(res, 200, { ok: true, via: whatsapp.status() });
+        }
+
+        case 'GET /api/harness':
+          return json(res, 200, harness ? harness.status() : { installed: false });
+
+        case 'GET /api/harness/web-url': {
+          if (!harness) return json(res, 503, { detail: 'Harness not initialised.' });
+          const ws = harness.webStatus().running ? harness.webStatus() : await harness.startWeb();
+          res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(ws.localUrl || '');
+        }
+
+        case 'POST /api/harness/web': {
+          if (!harness) return json(res, 503, { detail: 'Harness not initialised.' });
+          const body = await readJsonBody(req);
+          const action = String(body.action || 'start');
+          const out = action === 'stop' ? await harness.stopWeb() : await harness.startWeb();
+          return json(res, 200, { ok: true, web: out });
+        }
+
+        case 'POST /api/harness/install': {
+          if (!harness) return json(res, 503, { detail: 'Harness not initialised.' });
+          const out = await harness.install();
+          return json(res, 200, out);
         }
 
         default:

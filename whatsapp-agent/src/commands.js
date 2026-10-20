@@ -35,6 +35,7 @@ import { createJournal, undoReply } from './journal.js';
 import { usageReport } from './usage.js';
 import { createProgress, describeHandsStep } from './progress.js';
 import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
+import { createHarness } from './harness.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -68,6 +69,13 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /ls [path] · /read <path> · /write <path> | <text> · /send <path>
 • /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
+*🚀 DeepSeek Harness (2.9.0 — Full Linux Coding & System Agent)*
+• /dsh <task> — poora DeepSeek Harness power (bash + coding + files + subagents + WhatsApp MCP!)
+• /dsh auto on|off — har WhatsApp message seedha DeepSeek Harness se chalao
+• /dsh web [open|stop|desktop] — Fedora browser/desktop aur phone pe official DeepSeek Harness UI
+• /dsh install · /dsh status · /dsh key <sk-...> · /dsh model [provider/model]
+• /dsh cd <folder> · /dsh new [task] · /dsh sessions · /dsh use <id> · /dsh mode full|safe|readonly
+
 *Naye (2.8.0)*
 • /undo — pichhla file kaam wapas (write/move/copy/delete/mkdir/zip) · /undo list
 • /usage — aaj ka AI quota: kaun sa brain kitna kharch, 80% pe warning
@@ -112,7 +120,8 @@ export function createAgent({
   // Same janitor instance the background loop uses, so /shots and the timer
   // agree on one ledger.
   const shots = createShotJanitor({ config, log });
-  const actions = createActions({ config, store, log, journal, notify: notifyOwner });
+  const harness = createHarness({ config, store, log });
+  const actions = createActions({ config, store, log, journal, notify: notifyOwner, harness });
   const agentLoop = createAgentLoop({ config, store, actions, log });
   const router = routerFor(config, log);
   // /usage needs per-call counts; the router owns the calls, the store owns
@@ -144,6 +153,165 @@ export function createAgent({
     }
     return toReply(result);
   };
+
+  async function handleDsh(args, ctx = {}) {
+    const raw = String(args ?? '').trim();
+    const [subRaw, ...restParts] = raw.split(/\s+/);
+    const sub = (subRaw || '').toLowerCase();
+    const rest = raw.slice(subRaw ? subRaw.length : 0).trim();
+    const media = ctx?.mediaMeta;
+
+    if (!raw || sub === 'status') {
+      const s = harness.status();
+      const lines = [
+        `🚀 *DeepSeek Harness* — ${s.installed ? `✅ ready (${s.version})` : '📦 install pending (`/dsh install`)'}`,
+        `• Runtime: ${s.sdkRunning ? '🟢 warm SDK daemon active' : '⚪ idle (starts automatically on first task)'}`,
+        `• Primary mode: ${s.autoRoute ? '*ON* (every WhatsApp message uses DSH)' : 'off (use `/dsh <task>` or `/dsh auto on`)'}`,
+        `• Permission: \`${s.permissionMode}\` · Node: \`${s.nodeVersion || 'auto'}\``,
+        `• Brain: \`${s.selectedModel}\``,
+        `• Folder: \`${s.cwd}\``,
+        `• Session: ${s.activeSessionId ? `\`${s.activeSessionId.slice(0, 12)}\`` : '_new session on next prompt_'}`,
+        s.web.running
+          ? `• Web UI (PC): ${s.web.localUrl}${s.web.lanUrls?.length ? `\n• Web UI (Phone/LAN): ${s.web.lanUrls[0]}` : ''}`
+          : '• Web UI: stopped — `/dsh web` to launch official UI',
+        '',
+        '*Quick commands*',
+        '• `/dsh <task>` — full coding, bash, files, subagents & WhatsApp MCP',
+        '• `/dsh auto on` — har WhatsApp message seedha DeepSeek Harness se',
+        '• `/dsh web open` — Fedora PC pe official DeepSeek Harness window kholo',
+        '• `/dsh web desktop` — Fedora App Grid me native *DeepSeek Harness* icon jodo',
+        '• `/dsh cd ~/project` · `/dsh new` · `/dsh sessions` · `/dsh model`',
+      ];
+      return lines.join('\n');
+    }
+
+    if ((sub === 'install' || sub === 'setup' || sub === 'upgrade') && !rest) {
+      const res = await harness.install({
+        force: sub === 'upgrade',
+        onProgress: (msg) => notifyOwner(msg),
+      });
+      return [
+        `✅ *DeepSeek Harness ${res.alreadyInstalled ? 'ready' : 'installed'}!*`,
+        `• Version: \`${res.version}\``,
+        `• Binary: \`${res.dshBin}\``,
+        `• Node: \`v${res.nodeVersion}\``,
+        '',
+        'Ab bhejo: `/dsh <apna kaam>` ya `/dsh web` ya `/dsh auto on` 🚀',
+      ].join('\n');
+    }
+
+    if (sub === 'key' && rest) {
+      const s = await harness.setApiKey(rest);
+      return `🔑 *DeepSeek API key saved* (\`~/.dsh/.credentials.yaml\`, \`0600\`).\nActive brain: \`${s.selectedModel}\`\nTry: \`/dsh build a status script and send output\``;
+    }
+
+    if (sub === 'model' || sub === 'models') {
+      if (!rest) {
+        const s = harness.status();
+        const avail = s.availableModels.length
+          ? s.availableModels.map((m) => `• \`${m}\``).join('\n')
+          : '• _(No API key configured yet — run `/dsh key sk-...`, sign into DeepSeek Account via `/dsh web`, or add Groq/OpenRouter/Local model)_';
+        return `🧠 *DeepSeek Harness Brains*\nCurrent: \`${s.selectedModel}\`\n\n*Configured models*\n${avail}\n\nSwitch: \`/dsh model deepseek/deepseek-reasoner\` or \`/dsh model auto\``;
+      }
+      const next = harness.setModel(rest);
+      return `🧠 DeepSeek Harness model set to \`${next}\`.`;
+    }
+
+    if (sub === 'mode') {
+      if (!rest) return '🔐 Usage: `/dsh mode full` (danger-full-access) · `/dsh mode safe` (workspace-write) · `/dsh mode readonly`';
+      const next = await harness.setPermissionMode(rest);
+      return `🔐 DeepSeek Harness permission mode → \`${next}\` (SDK runtime restarted).`;
+    }
+
+    if (sub === 'auto') {
+      const flag = /^(on|true|1|yes|haan|chalu)$/i.test(rest || 'on');
+      const off = /^(off|false|0|no|band)$/i.test(rest);
+      const enabled = harness.setAutoRoute(off ? false : flag);
+      return enabled
+        ? '🚀 *DeepSeek Harness Auto Mode: ON*\nAb aapka har normal WhatsApp message seedha full-power DeepSeek Harness agent (`bash` + coding + subagents + Fedora MCP) me jayega!\n_(Band karne ke liye `/dsh auto off`)_'
+        : '👍 *DeepSeek Harness Auto Mode: OFF*\nNormal chat Observer router pe wapas aa gaya. Jab bhi full power chahiye ho, `/dsh <task>` likho.';
+    }
+
+    if (sub === 'cd' || sub === 'workdir' || sub === 'dir') {
+      if (!rest) return `📂 Current folder: \`${harness.status().cwd}\`\nChange: \`/dsh cd ~/projects/my-app\``;
+      const next = harness.setWorkdir(rest);
+      return `📂 DeepSeek Harness working folder → \`${next}\``;
+    }
+
+    if (sub === 'sessions' || sub === 'list') {
+      const s = harness.status();
+      if (!s.sessions.length) return '🗂️ Abhi koi saved WhatsApp DSH session nahi hai. `/dsh <task>` bhejo!';
+      return [
+        '🗂️ *Recent DeepSeek Harness Sessions*',
+        ...s.sessions.slice(0, 12).map((item, idx) => (
+          `${item.id === s.activeSessionId ? '👉' : `${idx + 1}.`} \`${item.id.slice(0, 12)}\` — ${item.title || 'Session'} _(${item.turns || 1} turns · \`${item.cwd}\`)_`
+        )),
+        '',
+        'Switch: `/dsh use <id>` · Fresh session: `/dsh new`',
+      ].join('\n');
+    }
+
+    if ((sub === 'use' || sub === 'resume') && rest) {
+      const hit = harness.useSession(rest);
+      return `🔄 Switched to DeepSeek Harness session \`${hit.id}\` (${hit.title}). Ab seedha agla message bhejo!`;
+    }
+
+    if (sub === 'new' || sub === 'reset') {
+      harness.resetSession();
+      if (!rest) return '✨ Fresh DeepSeek Harness session ready! Ab `/dsh <task>` bhejo.';
+      return handleDsh(rest, ctx);
+    }
+
+    if (sub === 'web') {
+      const action = (restParts[0] || 'start').toLowerCase();
+      if (action === 'stop' || action === 'off' || action === 'band') {
+        await harness.stopWeb();
+        return '🛑 DeepSeek Harness Web UI stopped.';
+      }
+      if (action === 'desktop' || action === 'app') {
+        const res = await harness.installDesktopLauncher();
+        return [
+          '🖥️ *DeepSeek Harness Desktop App Installed!*',
+          `• Launcher: \`${res.desktopFile}\``,
+          `• PC URL: ${res.web.localUrl}`,
+          ...(res.web.lanUrls?.length ? [`• Phone/LAN URL: ${res.web.lanUrls[0]}`] : []),
+          '',
+          'Ab Fedora Activities / App Grid me **DeepSeek Harness** search karke native app window me khol sakte ho!',
+        ].join('\n');
+      }
+      const ws = await harness.startWeb({ onProgress: (msg) => notifyOwner(msg) });
+      if (action === 'open' || action === 'kholo') {
+        try { await pc.openTarget(ws.localUrl); } catch { /* headless fallback */ }
+      }
+      return [
+        '🌐 *DeepSeek Harness Official Web UI Running!*',
+        `• 🖥️ Fedora PC: ${ws.localUrl}`,
+        ...(ws.lanUrls?.length ? [`• 📱 Phone / Tailscale: ${ws.lanUrls[0]}`] : []),
+        '',
+        '_Tip: WhatsApp sessions aur Web UI sessions ek hi `~/.dsh` share karte hain — dono jagah live dikhenge!_',
+      ].join('\n');
+    }
+
+    // ── Full-power task execution inside DeepSeek Harness ──────────────────
+    const images = [];
+    const attachedFiles = [];
+    if (media?.buffer && media.mediaKind === 'image') {
+      images.push({ buffer: media.buffer, mimeType: media.mimeType || 'image/jpeg' });
+    }
+    if (media?.savedPath) {
+      attachedFiles.push({ path: media.savedPath, mimeType: media.mimeType || '' });
+    }
+
+    const out = await harness.runTask(raw, {
+      images,
+      files: attachedFiles,
+      signal: activeSignal,
+      onProgress: (stepLine) => notifyOwner(stepLine),
+    });
+
+    const footer = `\n\n_⚡ DeepSeek Harness · session \`${String(out.sessionId).slice(0, 8)}\`${out.toolCalls.length ? ` · ${out.toolCalls.length} tool(s)` : ''}_`;
+    return `${out.text}${footer}`;
+  }
 
   // ── individual commands ──────────────────────────────────────────────────
 
@@ -1219,6 +1387,7 @@ export function createAgent({
         return sub === 'restart' ? act('service_restart', { name }) : act('service_status', { name });
       }
       case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
+      case 'dsh': case 'harness': case 'deepseek': return handleDsh(args, ctx);
       case 'doctor': case 'diag': case 'diagnose': return runDoctor({ config, ctx, log });
       case 'access': {
         const r = actions.accessReport();
@@ -1427,6 +1596,11 @@ export function createAgent({
         return await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
       }
 
+      // Full-power DeepSeek Harness primary mode (`/dsh auto on` or AI_PROVIDER=dsh).
+      if (harness.status().autoRoute) {
+        return await handleDsh(working, effCtx);
+      }
+
       // Free AI with tools: multi-step tasks on the PC.
       if (agentLoop.enabled) {
         const agentReply = await agentLoop.run(working, effCtx);
@@ -1456,5 +1630,5 @@ export function createAgent({
     }
   }
 
-  return { handle, HELP, actions, shots };
+  return { handle, HELP, actions, shots, harness, isHarnessAuto: () => harness.status().autoRoute };
 }

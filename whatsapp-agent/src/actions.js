@@ -47,7 +47,7 @@ function describe(entry, args) {
   return `${entry.label ?? entry.name} ${bits.map(([k, v]) => `${k}=${short(v)}`).join(' ')}`.trim();
 }
 
-export function createActions({ config, store, log = console, journal = null, notify = null }) {
+export function createActions({ config, store, log = console, journal = null, notify = null, harness = null }) {
   const extraRoots = config.filesExtraRoots ?? [];
   const level = () => (config.accessLevel in LEVELS ? config.accessLevel : 'full');
   const audioAction = (w) => {
@@ -59,6 +59,26 @@ export function createActions({ config, store, log = console, journal = null, no
   };
 
   const registry = [
+    // ── DeepSeek Harness full-power coding / shell / repo engine ────────────
+    ...(harness ? [{
+      name: 'dsh_run',
+      level: 'full',
+      label: 'DeepSeek Harness agent task',
+      description: 'Delegate multi-step coding, shell scripting, repository edits, debugging, or system automation to the full-power DeepSeek Harness (`@deepseek-ai/dsh`) Linux agent.',
+      params: {
+        task: { type: 'string', description: 'Detailed task instructions for DeepSeek Harness', required: true },
+        cwd: { type: 'string', description: 'Optional working directory path on Linux' },
+      },
+      run: async ({ task, cwd }, ctx = {}) => {
+        const res = await harness.runTask(String(task ?? ''), {
+          cwd,
+          signal: ctx.signal,
+          onProgress: notify ? (msg) => notify(msg) : null,
+        });
+        return `🚀 *DeepSeek Harness*\n\n${res.text}\n\n_Session \`${String(res.sessionId).slice(0, 8)}\` · ${res.toolCalls.length} tool call(s)_`;
+      },
+    }] : []),
+
     // ── apps & windows ──────────────────────────────────────────────────────
     {
       name: 'list_apps', level: 'safe', label: 'List installed apps',

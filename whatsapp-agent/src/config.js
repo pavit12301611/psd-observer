@@ -72,9 +72,9 @@ function resolveDashboardPin(dataDir, fromEnv) {
   return pin;
 }
 
-export function loadConfig({ dryRun = false } = {}) {
-  loadDotEnv();
-  const e = process.env;
+export function loadConfig({ dryRun = false, env = null } = {}) {
+  if (!env) loadDotEnv();
+  const e = env ?? process.env;
 
   const dataDir = path.resolve(ROOT, e.DATA_DIR || 'data');
   const config = {
@@ -257,6 +257,27 @@ export function loadConfig({ dryRun = false } = {}) {
     whisperModelGroq: e.WHISPER_MODEL_GROQ || 'whisper-large-v3-turbo',
     whisperLanguage: e.WHISPER_LANGUAGE || 'auto',
 
+    // ── DeepSeek Harness (`@deepseek-ai/dsh`) full-power Linux integration ──
+    deepseekApiKey: e.DEEPSEEK_API_KEY || '',
+    deepseekBaseUrl: (e.DEEPSEEK_BASE_URL || '').replace(/\/$/, ''),
+    dshHome: e.DSH_HOME || '',
+    dshBin: e.DSH_BIN || '',
+    dshNodeBin: e.DSH_NODE_BIN || '',
+    dshInstallDir: e.DSH_INSTALL_DIR || '',
+    dshAutoInstall: bool(e.DSH_AUTO_INSTALL, true),
+    dshAutoStartWeb: bool(e.DSH_AUTO_START_WEB, false),
+    dshAutoRoute: bool(e.DSH_AUTO_ROUTE, false) || ['dsh', 'harness'].includes((e.AI_PROVIDER || '').toLowerCase()),
+    dshPermissionMode: e.DSH_PERMISSION_MODE || 'danger-full-access',
+    dshModel: e.DSH_MODEL || '',
+    dshWorkdir: e.DSH_WORKDIR || '',
+    dshWebPort: int(e.DSH_WEB_PORT, 3080),
+    dshRemotePort: int(e.DSH_REMOTE_PORT, 3081),
+    dshTrustedHosts: (e.DSH_TRUSTED_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    dshCustomBaseUrl: (e.DSH_CUSTOM_BASE_URL || '').replace(/\/$/, ''),
+    dshCustomApiKey: e.DSH_CUSTOM_API_KEY || '',
+    dshCustomModel: e.DSH_CUSTOM_MODEL || '',
+    dshTaskTimeoutMs: int(e.DSH_TASK_TIMEOUT_MS, 600_000),
+
     dataDir,
     authDir: path.resolve(ROOT, e.AUTH_DIR || 'auth_info'),
     downloadsDir: path.join(dataDir, 'downloads'),
@@ -275,8 +296,8 @@ export function loadConfig({ dryRun = false } = {}) {
   }
   if (config.allowShell && !config.shellPin) problems.push('ALLOW_SHELL=true but SHELL_PIN is empty. Set a PIN or turn ALLOW_SHELL off.');
   if (!['safe', 'standard', 'full'].includes(config.accessLevel)) problems.push(`ACCESS_LEVEL must be safe, standard or full (got "${config.accessLevel}").`);
-  if (!['auto', 'local', 'ollama', 'groq', 'gemini', 'openrouter', 'none'].includes(config.aiProvider)) {
-    problems.push(`AI_PROVIDER must be auto, local, ollama, groq, gemini, openrouter or none (got "${config.aiProvider}").`);
+  if (!['auto', 'local', 'ollama', 'groq', 'gemini', 'openrouter', 'dsh', 'harness', 'none'].includes(config.aiProvider)) {
+    problems.push(`AI_PROVIDER must be auto, local, ollama, groq, gemini, openrouter, dsh, harness or none (got "${config.aiProvider}").`);
   }
   if (!['local', 'cloud', 'balanced'].includes(config.routerPrefer)) {
     problems.push(`ROUTER_PREFER must be local, cloud or balanced (got "${config.routerPrefer}").`);

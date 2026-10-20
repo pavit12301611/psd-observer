@@ -65,6 +65,7 @@ const bridge = createBridgeServer({
   whatsapp,
   mailbox,
   actions: agent.actions,
+  harness: agent.harness,
   runOwner: (text) => whatsapp.runOwner(text),
   log: console,
 });
@@ -133,11 +134,22 @@ try {
   console.error(`\n❌ ${err.message}\n`);
   process.exit(1);
 }
+if (config.dshAutoStartWeb && agent.harness) {
+  agent.harness.startWeb().then((ws) => {
+    console.info(`   🚀 DeepSeek Harness Web UI: ${ws.localUrl}`);
+    if (ws.lanUrls?.length) console.info(`   📱 Phone / LAN Harness UI : ${ws.lanUrls[0]}`);
+  }).catch((err) => {
+    console.warn(`   ⚠️ Could not auto-start dsh web: ${err.message}`);
+  });
+} else if (agent.harness) {
+  const hs = agent.harness.status();
+  console.info(`   🚀 DeepSeek Harness: ${hs.installed ? `installed (${hs.version}) · /dsh <task> · /dsh web` : 'auto-installs on first /dsh or /dsh install'}`);
+}
 await whatsapp.start();
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
-function shutdown() {
+async function shutdown() {
   console.info('\n[agent] shutting down…');
   stopReminders();
   stopCron();
@@ -145,6 +157,7 @@ function shutdown() {
   stopShots();
   whatsapp.stop();
   bridge.stop();
+  await agent.harness?.close?.().catch(() => {});
   store.saveNow();
   process.exit(0);
 }

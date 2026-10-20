@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import * as pc from './pccontrol.js';
 import { imageStats } from './imaging.js';
 import { humanSize } from './files.js';
+import { findDshBinary, findSupportedNode } from './harness.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -217,7 +218,25 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
     });
   }
 
-  // ── 5. Access + WhatsApp ──────────────────────────────────────────────────
+  // ── 5. DeepSeek Harness + Access + WhatsApp ───────────────────────────────
+  {
+    const dshBin = findDshBinary(config);
+    const dshNode = findSupportedNode(config.dshNodeBin);
+    if (dshBin && dshNode?.supported) {
+      checks.push({
+        icon: '✅',
+        title: 'DeepSeek Harness',
+        detail: `installed (${dshBin}) · Node v${dshNode.version} · use \`/dsh <task>\` or \`/dsh web\``,
+      });
+    } else {
+      checks.push({
+        icon: 'ℹ️',
+        title: 'DeepSeek Harness',
+        detail: `${dshBin ? 'installed' : 'not installed yet'} · Node ${dshNode?.version ? `v${dshNode.version}` : 'not detected'}`,
+        fix: 'Send `/dsh install` on WhatsApp or run `bash scripts/observer.sh harness setup`',
+      });
+    }
+  }
   checks.push({
     icon: 'ℹ️',
     title: 'Access',
