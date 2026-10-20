@@ -72,12 +72,15 @@ remote_version() {
   printf '%s' "$json" | grep -m1 '"version"' | sed -E 's/.*"version" *: *"([^"]+)".*/\1/'
 }
 
-# Download a file from the repo: raw first, GitHub API as fallback.
+# Download a file from the repo: raw branch first, then API, then `main` post-merge fallback.
 fetch_repo_file() {
   local rel="$1" out="$2"
   curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 -o "$out" "${RAW}/${rel}" 2>/dev/null \
     || curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 \
-         -H 'Accept: application/vnd.github.raw' -o "$out" "${API}/${rel}?ref=${BRANCH}"
+         -H 'Accept: application/vnd.github.raw' -o "$out" "${API}/${rel}?ref=${BRANCH}" 2>/dev/null \
+    || curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 -o "$out" "https://raw.githubusercontent.com/${REPO}/main/${rel}" 2>/dev/null \
+    || curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 \
+         -H 'Accept: application/vnd.github.raw' -o "$out" "${API}/${rel}?ref=main"
 }
 
 download_tarball() {
