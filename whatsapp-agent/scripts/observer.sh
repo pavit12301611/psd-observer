@@ -82,17 +82,32 @@ fetch_repo_file() {
 
 download_tarball() {
   local tmp="$1"
-  say "Downloading the code (curl, no git)"
-  info "branch: ${BRANCH}"
-  if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$tmp/src.tar.gz" "$ARCHIVE" \
-     && ! curl -fL --retry 2 --retry-delay 2 --connect-timeout 15 -o "$tmp/src.tar.gz" "https://codeload.github.com/${REPO}/tar.gz/refs/heads/main"; then
+  local expected_ver=""
+  expected_ver=$(remote_version 2>/dev/null || echo "")
+
+  say "Downloading Observer WhatsApp Agent fast bundle (~380 KB, curl, no git)"
+  info "branch: ${BRANCH}${expected_ver:+ · target: v${expected_ver}}"
+
+  if fetch_repo_file "whatsapp-agent/release-bundle.tar.gz" "$tmp/bundle.tar.gz" \
+     && tar -xzf "$tmp/bundle.tar.gz" -C "$tmp" 2>/dev/null; then
+    local bundled_src bundled_ver
+    bundled_src=$(find_extracted_agent "$tmp")
+    bundled_ver=$(local_version "$bundled_src" 2>/dev/null || echo "")
+    if [ -n "$bundled_src" ] && { [ -z "$expected_ver" ] || [ "$bundled_ver" = "$expected_ver" ]; }; then
+      ok "fast bundle verified (v${bundled_ver})"
+      return 0
+    fi
+    rm -rf "$tmp/whatsapp-agent" "$tmp/bundle.tar.gz"
+  fi
+
+  say "Falling back to full branch archive (${BRANCH})"
+  if ! curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o "$tmp/src.tar.gz" "$ARCHIVE"; then
     cat >&2 <<EOF
 
-Could not download the code. Common causes:
-  • no internet / firewall on this network — try a phone hotspot
-  • the branch name changed — check: $SELF_URL
-  • GitHub blocked by DNS — test: curl -I https://codeload.github.com
-Manual alternative (opens in a browser):
+Could not download branch ${BRANCH}. Common causes:
+  • unstable Wi-Fi / hotspot reset — simply run the command once more
+  • GitHub blocked by DNS — test: curl -I https://raw.githubusercontent.com
+Manual zip alternative:
   https://github.com/${REPO}/archive/refs/heads/${BRANCH}.zip
 EOF
     return 1
@@ -1504,9 +1519,15 @@ cmd_harness() {
       ok "Node runtime ready: $($node_bin -v) ($node_bin)"
 
       say "Installing official DeepSeek Harness (@deepseek-ai/dsh) on Linux"
+      info "Downloading from npm registry (first time takes ~1-2 min on slow networks — retries automatically)..."
       mkdir -p "$DSH_INSTALL_DIR" "$HOME/.local/bin" "$DSH_HOME_DIR"
       [ -f "$DSH_INSTALL_DIR/package.json" ] || printf '{"name":"observer-deepseek-harness","private":true}\n' > "$DSH_INSTALL_DIR/package.json"
-      ( cd "$DSH_INSTALL_DIR" && PATH="$(dirname "$node_bin"):$PATH" "$npm_bin" install @deepseek-ai/dsh@latest --no-audit --no-fund )
+      (
+        cd "$DSH_INSTALL_DIR" && \
+        PATH="$(dirname "$node_bin"):$PATH" "$npm_bin" install @deepseek-ai/dsh@latest \
+          --no-audit --no-fund --progress=true \
+          --fetch-retries=6 --fetch-retry-mintimeout=3000 --fetch-retry-maxtimeout=30000 --fetch-timeout=300000
+      )
 
       cat > "$HOME/.local/bin/dsh" <<WRAP
 #!/usr/bin/env bash

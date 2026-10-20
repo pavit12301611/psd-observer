@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import readline from 'node:readline';
 
 import { loadConfig } from '../src/config.js';
@@ -137,6 +137,17 @@ test('Node version gate + Hinglish DeepSeek Harness intents', () => {
     cmd: 'dsh',
     args: 'repo ke sare tests chala ke dikhao',
   });
+});
+
+test('Fast release-bundle.tar.gz matches current package.json version and contains updated observer.sh', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
+  const bundlePath = path.resolve('release-bundle.tar.gz');
+  assert.equal(fs.existsSync(bundlePath), true, 'release-bundle.tar.gz exists for fast curl updates');
+  const bundledPkgRaw = execFileSync('tar', ['-xzOf', bundlePath, 'whatsapp-agent/package.json'], { encoding: 'utf8' });
+  const bundledPkg = JSON.parse(bundledPkgRaw);
+  assert.equal(bundledPkg.version, pkg.version, 'bundle version matches package.json');
+  const bundledScript = execFileSync('tar', ['-xzOf', bundlePath, 'whatsapp-agent/scripts/observer.sh'], { encoding: 'utf8' });
+  assert.match(bundledScript, /cmd_harness/, 'bundled observer.sh includes cmd_harness');
 });
 
 test('Observer MCP stdio server + live Bridge /api/whatsapp/send outbound delivery', async () => {

@@ -23,7 +23,8 @@
     "models:list": "bash scripts/local-models.sh list",
     "models:recommend": "bash scripts/local-models.sh recommend",
     "keys": "bash scripts/observer.sh keys",
-    "harness": "bash scripts/observer.sh harness"
+    "harness": "bash scripts/observer.sh harness",
+    "build:bundle": "bash scripts/build-bundle.sh"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {
