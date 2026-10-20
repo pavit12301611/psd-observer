@@ -140,6 +140,14 @@ test('apps: .desktop parsing, Exec quoting and fuzzy matching', () => {
   assert.equal(apps.matchApp('browser', list).name, 'Firefox');
   assert.equal(apps.matchApp('file manager', list).name, 'Files');
   assert.equal(apps.matchApp('definitely-not-installed-xyz', list), null);
+
+  // Regression: a nonsense phrase must not open the first app whose name shares
+  // one word ("Observer App" matched "definitely-not-an-app-xyz" via "app").
+  const withObserver = [...list, { id: 'observer', name: 'Observer App', exec: 'observer' }];
+  assert.equal(apps.matchApp('definitely-not-an-app-xyz', withObserver), null);
+  assert.equal(apps.matchApp('not a real app please', withObserver), null);
+  assert.equal(apps.matchApp('app', withObserver).name, 'Observer App');
+  assert.equal(apps.matchApp('vs code', withObserver).name, 'Visual Studio Code');
 });
 
 test('apps: opening shell metacharacters is refused', async () => {

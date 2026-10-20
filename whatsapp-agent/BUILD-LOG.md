@@ -124,6 +124,31 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.5.2 — `/open` ka fuzzy match kisi bhi bakwaas naam pe app khol deta tha
+
+Owner ke PC pe test fail: `/open definitely-not-an-app-xyz` ne asli app khol di —
+**"Observer App"**. Sandbox me koi .desktop app nahi, isliye wahan test pass
+tha; owner ke Fedora pe Observer installed hai.
+
+**Root cause:** `matchApp()` ka last-resort tier 20 — query ka **koi ek** word
+(>=3 letters) app ke naam ke kisi word se start ho jaye to match. Query ke
+tokens: `definitely not an app xyz` → `app` ne "Observer **App**" pakad liya.
+Matlab koi bhi lamba bakwaas sentence jisme "app" ho, Observer App khol deta.
+
+**Fix:** tier 20 ab sirf chhoti query pe (<= 3 words) chalta hai **aur** tab jab
+aadhe se zyada words match karein. `vs code` / `code` / `app` waise hi kaam
+karte hain; `definitely-not-an-app-xyz` ab "couldn't find an app" deta hai.
+
+```js
+const hits = qTokens.filter((t) => t.length >= 3 && nameTokens.some((n) => n === t || n.startsWith(t)));
+if (hits.length && qTokens.length <= 3 && hits.length >= Math.ceil(qTokens.length / 2)) score = 20;
+```
+
+Regression test: fake list me "Observer App" daal ke `definitely-not-an-app-xyz`
+→ `null`, `not a real app please` → `null`, par `app` → Observer App.
+
+---
+
 ## 2.5.1 — test output that names the failure (aur desktop tests hermetic)
 
 Owner ne `observer.sh test` chalaya: 88/90 pass, do fail — par script ne sirf
@@ -247,6 +272,7 @@ npm test                              # 90 pass
 | 14 | *2.4* | **Free cloud keys**: Groq gpt-oss defaults (Llama free tier se gaya), OpenRouter Gemma 4, cloud vision, `observer.sh keys` | 90 | 61 |
 | 15 | *2.5* | **`observer.sh test`**: keys, brains, routing preview, asli API call (`--live`), unit tests — ek command | 90 | 61 |
 | 16 | *2.5.1* | **Test report fix**: failing test ka naam + log path; tests asli portal ko touch nahi karte (dead D-Bus) — 43s → 2.5s | 90 | 61 |
+| 17 | *2.5.2* | **`/open` fuzzy-match bug**: bakwaas phrase se asli app khul jati thi (`app` → Observer App) | 90 | 61 |
 
 Verify karna ho (sab curl, git zero):
 
