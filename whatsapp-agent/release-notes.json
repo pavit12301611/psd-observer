@@ -4,9 +4,8 @@
     "bullets": [
       "/stop — chalta hua kaam turant rukta hai (stacked kaam bhi), partial steps batata hai",
       "Screen ab OCR nahi — screenshot seedha vision model (Gemini/Groq/local) ko jaata hai",
-      "Faster loop: OCR step hataya, screenshot 1024px JPEG q70 (chhota upload), settle 550ms",
-      "Update hote hi WhatsApp pe message: kya naya + kitna time laga",
-      "Naya /stop, /use speed, aur 'Computer use' vision-first grounding"
+      "Har step tez: OCR hata, 1024px JPEG q70, 550ms settle — chhota upload, kam tokens",
+      "Update hone pe WhatsApp message: kya naya + kitna time laga"
     ]
   },
   "2.6.0": {

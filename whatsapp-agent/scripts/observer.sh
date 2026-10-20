@@ -266,8 +266,8 @@ cmd_update() {
   say "Backing up the current code → $backup"
   ( cd "$dest" && tar -czf "$backup" \
       src webapp test scripts systemd package.json package-lock.json \
-      README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md .env.example start.sh \
-      docker-compose.yml Containerfile 2>/dev/null ) \
+      README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md BUILD-LOG.md \
+      release-notes.json .env.example start.sh docker-compose.yml Containerfile 2>/dev/null ) \
     || warn "backup was partial (some files don't exist yet) — continuing"
 
   say "Copying code (your .env / auth_info / data stay untouched)"
@@ -280,7 +280,7 @@ cmd_update() {
     mv "$dest/$item.new" "$dest/$item"
   done
   for file in package.json package-lock.json README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md \
-              .env.example start.sh docker-compose.yml Containerfile; do
+              BUILD-LOG.md release-notes.json .env.example start.sh docker-compose.yml Containerfile; do
     [ -f "$src/$file" ] && cp -a "$src/$file" "$dest/$file"
   done
   chmod +x "$dest"/scripts/*.sh "$dest/start.sh" 2>/dev/null || true
