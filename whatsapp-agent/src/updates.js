@@ -125,7 +125,8 @@ export function buildUpdateMessage({ from, to, seconds, changes = [], brains }) 
   const lines = [head, ''];
   if (changes.length) {
     lines.push('*Kya naya:*');
-    for (const change of changes.slice(0, 6)) lines.push(`• ${change}`);
+    // 1 title line + 6 bullets; the biggest changes must survive the cut.
+    for (const change of changes.slice(0, 7)) lines.push(`• ${change}`);
   } else {
     lines.push('_Release notes nahi mile — /help se naye commands dekho._');
   }

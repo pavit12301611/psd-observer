@@ -20,6 +20,7 @@ import { Store } from '../src/store.js';
 import { runDueJobs, parseCronSchedule } from '../src/cron.js';
 import { createAgent } from '../src/commands.js';
 import { createBridgeServer } from '../src/server.js';
+import { buildUpdateMessage } from '../src/updates.js';
 
 const silent = { info() {}, warn() {}, error() {} };
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'observer-feat-'));
@@ -120,6 +121,19 @@ test('journal: undo on an empty journal says so instead of throwing', async () =
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('updates: the message keeps a title plus six bullets, not five', () => {
+  const text = buildUpdateMessage({
+    from: '2.7.0',
+    to: '2.8.0',
+    seconds: 62,
+    changes: ['*title*', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'],
+  });
+  const bullets = text.split('\n').filter((l) => l.startsWith('• '));
+  assert.equal(bullets.length, 7, 'title + six changes');
+  assert.ok(!bullets.some((b) => b.includes('seven')), 'the oldest change is dropped');
+  assert.match(text, /2\.7\.0 → 2\.8\.0 · 1m 2s/);
 });
 
 // ── /usage ──────────────────────────────────────────────────────────────────

@@ -215,7 +215,7 @@ report deta hai (kya naya + kitna time).
 | `webapp/*` | Screen tab (live + tap), key pad, type box |
 | `scripts/observer.sh` | `autoupdate on/off/status` |
 
-Tests: **168 pass** (142 + 26 naye `test/features.test.js`).
+Tests: **169 pass** (142 + 27 naye `test/features.test.js`).
 
 ---
 
@@ -672,7 +672,7 @@ npm test                              # 90 pass
 | 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
 | 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
 | 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 142 | 62 |
-| 22 | *2.8.0* | **Trust + reach**: `/undo` (file ops wapas), `/watch` (screen condition → alert), `/usage` (quota + 80% warning), `/teach` (record → replay), `/brief` (din ki tasveer + 9am schedule), `/resume`, live progress, photo diagnosis, **phone app Screen tab** (live + tap-to-click, Wi-Fi ya Tailscale se kahin se bhi), `observer.sh autoupdate` | 168 | 62 |
+| 22 | *2.8.0* | **Trust + reach**: `/undo` (file ops wapas), `/watch` (screen condition → alert), `/usage` (quota + 80% warning), `/teach` (record → replay), `/brief` (din ki tasveer + 9am schedule), `/resume`, live progress, photo diagnosis, **phone app Screen tab** (live + tap-to-click, Wi-Fi ya Tailscale se kahin se bhi), `observer.sh autoupdate` | 169 | 62 |
 
 Verify karna ho (sab curl, git zero):
 
