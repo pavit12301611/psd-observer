@@ -261,31 +261,30 @@ export function createHarness({ config, store, log = console }) {
     return store.data.harness;
   };
 
-  /** Build custom providers + MCP patch & return synced env + available model catalog. */
+  /** Inspect `.credentials.yaml` non-destructively so DeepSeek Account OAuth grants written by `dsh web` are NEVER overwritten! */
   function syncConfig(dshRealPath) {
     fs.mkdirSync(dshHome, { recursive: true });
     fs.mkdirSync(sdkHome, { recursive: true });
-    const creds = readCredentialsMap(credFile);
-
-    const dsKey = config.deepseekApiKey || process.env.DEEPSEEK_API_KEY || creds.get('DEEPSEEK_API_KEY') || '';
-    if (dsKey) creds.set('DEEPSEEK_API_KEY', dsKey);
-    if (config.deepseekBaseUrl || process.env.DEEPSEEK_BASE_URL) {
-      creds.set('DEEPSEEK_BASE_URL', config.deepseekBaseUrl || process.env.DEEPSEEK_BASE_URL);
+    let rawCreds = '';
+    try { rawCreds = fs.readFileSync(credFile, 'utf8'); } catch { /* not created yet */ }
+    if (rawCreds) {
+      try { fs.writeFileSync(sdkCredFile, rawCreds, { mode: 0o600 }); } catch { /* ignore */ }
     }
-    if (config.groqApiKey) creds.set('GROQ_API_KEY', config.groqApiKey);
-    if (config.openrouterApiKey) creds.set('OPENROUTER_API_KEY', config.openrouterApiKey);
-    if (config.dshCustomApiKey) creds.set('DSH_CUSTOM_API_KEY', config.dshCustomApiKey);
-    writeCredentialsMap(credFile, creds);
-    writeCredentialsMap(sdkCredFile, creds);
+    const savedMap = readCredentialsMap(credFile);
+
+    const dsKey = config.deepseekApiKey || process.env.DEEPSEEK_API_KEY || savedMap.get('DEEPSEEK_API_KEY') || '';
+    const hasAccountToken = /\bkind:\s*["']?grant["']?/m.test(rawCreds)
+      || /\btoken:\s*\S+/m.test(rawCreds)
+      || Boolean(savedMap.get('DEEPSEEK_ACCOUNT_TOKEN'));
 
     const providers = [];
     const availableModels = [];
 
+    if (hasAccountToken) {
+      availableModels.push('deepseek-account/deepseek-chat', 'deepseek-account/deepseek-reasoner');
+    }
     if (dsKey) {
       availableModels.push('deepseek-official/deepseek-chat', 'deepseek-official/deepseek-reasoner');
-    }
-    if (creds.get('DEEPSEEK_ACCOUNT_TOKEN')) {
-      availableModels.push('deepseek-account/deepseek-chat', 'deepseek-account/deepseek-reasoner');
     }
 
     if (config.dshCustomBaseUrl) {
@@ -425,7 +424,7 @@ export function createHarness({ config, store, log = console }) {
       ...(config.openrouterApiKey ? { OPENROUTER_API_KEY: config.openrouterApiKey } : {}),
     };
 
-    return { childEnv, availableModels, dsKey: Boolean(dsKey), hasAccountToken: Boolean(creds.get('DEEPSEEK_ACCOUNT_TOKEN')) };
+    return { childEnv, availableModels, dsKey: Boolean(dsKey), hasAccountToken };
   }
 
   /** Pick `{ provider, model }` for SDK `initialize`, falling back gracefully across configured brains. */
