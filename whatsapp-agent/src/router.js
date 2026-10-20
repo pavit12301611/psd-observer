@@ -561,7 +561,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     if (cloud.length) out.push('', '*Cloud (free tiers)*', ...cloud.map(line));
     if (!visible.length) {
       out.push('', config.aiProvider === 'local' || config.aiProvider === 'llamacpp'
-        ? '❌ AI_PROVIDER=local set, but no LOCAL_API_URL — run: ./scripts/local-models.sh wire <model>'
+        ? '❌ AI_PROVIDER=local set, but no LOCAL_API_URL — run: ./scripts/observer.sh models wire <model>'
         : '❌ every brain is filtered out by AI_PROVIDER — check .env');
     }
     out.push('', `⚡ Power budget: ${heavyCalls.length}/${maxHeavyPerHour || '∞'} heavy calls this hour`);

@@ -92,6 +92,38 @@ Model shortlist (Oct 2026, Hugging Face pe verified):
 `AI_PROVIDER=local` = cloud fallback **kabhi nahi**. Photos local vision model
 se, OCR local tesseract se, voice local whisper.cpp se — sab PC pe.
 
+## 2.3 — ek hi script (`observer.sh`)
+
+Owner: "bhai inhe combine karke ek hi script dede." Pehle 8 alag scripts the
+(`install-fresh`, `install-fedora`, `update-from-github`, `local-models`,
+`install-systemd`, `relink-whatsapp`, `setup-remote`, `fix-desktop`) — yaad
+rakhna padta tha kaunsa kab chalana hai. Ab ek file:
+
+```bash
+bash observer.sh <command>
+```
+
+| Command | Purana script | Kya karta hai |
+|---|---|---|
+| `install` | `install-fresh.sh` | tarball curl → `~/observer-agent` → `.env` → `npm install` |
+| `update` | `update-from-github.sh` | backup → code swap → npm → restart (`.env`/`auth_info`/`data` safe) |
+| `models …` | `local-models.sh` | Hugging Face GGUF: list/recommend/detect/download/serve/wire/setup/ollama/status |
+| `service …` | `install-systemd.sh` | systemd unit install/restart/status/logs/enable/disable/uninstall |
+| `relink` | `relink-whatsapp.sh` | naya QR |
+| `remote` | `setup-remote.sh` | Tailscale se phone app bahar se |
+| `fix` | `fix-desktop.sh` | screenshot/keyboard/mouse (Wayland) |
+| `doctor` | — | kya toota + exact fix |
+| `start` / `version` / `help` | — | foreground run, local vs remote version, help |
+
+Purane teen user-facing naam ab **thin wrappers** hain jo `observer.sh` ko
+forward karte hain (`--fresh <dir>` bhi `install --dir` me translate hota hai).
+Koi git nahi — script khud tarball `curl` karta hai.
+
+Bug jo testing me mila: `trap 'rm -rf "$tmp"' EXIT` + `set -u` → function ke
+baad `tmp` local scope se bahar chala jata tha, script exit pe
+`line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
+Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
+
 ---
 
 ## 0. Ek nazar me (timeline)
@@ -110,13 +142,15 @@ se, OCR local tesseract se, voice local whisper.cpp se — sab PC pe.
 | 10 | `bff22b0` | **500-character typing limit hata diya** + `/pc paste` | 44 | 61 |
 | 11 | *2.1* | **`/agent` fix** (verified steps, no fake "done") + **workload routing** (`/brains`) | 69 | 61 |
 | 12 | *2.2* | **100% local**: Hugging Face GGUF + llama.cpp provider, `local-models.sh` (download/serve/wire/systemd) | 78 | 61 |
+| 13 | *2.3* | **Ek hi script**: `observer.sh` — install/update/models/doctor/service/start/relink/remote/fix; purane scripts wrappers | 78 | 61 |
 
 Verify karna ho (sab curl, git zero):
 
 ```bash
 cd ~/observer-agent
-./scripts/update-from-github.sh --check   # local vs remote version
-npm test                                  # 44 pass
+./scripts/observer.sh update --check      # local vs remote version
+./scripts/observer.sh doctor              # kya theek hai, kya nahi
+npm test                                  # 78 pass
 npm run check                             # saari files ka syntax
 ```
 
@@ -129,26 +163,26 @@ Yehi wo commands hain jo actually use hote hain. **Git kabhi nahi.**
 **Pehli baar (fresh install, git ke bina):**
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
 
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 **Update (baad me, code naya aane pe):**
 
 ```bash
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
-bash /tmp/agent-update.sh --dir ~/observer-agent
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh"
+bash /tmp/observer.sh update --dir ~/observer-agent
 ```
 
 **Version check:**
 
 ```bash
-cd ~/observer-agent && ./scripts/update-from-github.sh --check
+cd ~/observer-agent && ./scripts/observer.sh update --check
 ```
 
 **Agar curl bhi block ho jaye** — pipe/`||` wali fallback line use karo, ya browser se zip:
@@ -156,12 +190,12 @@ cd ~/observer-agent && ./scripts/update-from-github.sh --check
 ```bash
 # manual tarball
 curl -fL -o /tmp/agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf /tmp/agent.tar.gz -C /tmp
 ```
 
 ```
-https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip
+https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip
 ```
 
 Update scripts kya **nahi** chhoote: `.env`, `auth_info/` (WhatsApp login — QR
@@ -172,7 +206,7 @@ Backup khud banta hai: `~/observer-agent-backup-<date>.tar.gz`.
 
 ## 0.2 EXACT LOCATIONS — kaunsi cheez kahan hai
 
-Sab paths **default** hain (`install-fresh.sh` se install kiya to yahi hain).
+Sab paths **default** hain (`observer.sh install` se kiya to yahi hain).
 Apna install path pata karna ho:
 
 ```bash

@@ -258,14 +258,14 @@ export async function aiStatus(config) {
       lines.push(`🏠 Local server: ✅ ${config.localApiUrl}${ids.length ? ` — ${ids.join(', ')}` : ''}`);
     } catch {
       lines.push(`🏠 Local server: ❌ not reachable at ${config.localApiUrl}`);
-      lines.push('   start it: ./scripts/local-models.sh serve <model>   (or: systemctl --user start observer-model)');
+      lines.push('   start it: ./scripts/observer.sh models serve <model>   (or: systemctl --user start observer-model)');
     }
     if (config.localModelSmall) lines.push(`   small: ${config.localModelSmall} @ ${config.localApiUrlSmall || '(unset)'}`);
     if (config.localModelHeavy) lines.push(`   heavy: ${config.localModelHeavy} @ ${config.localApiUrlHeavy || '(unset)'}`);
     if (config.localModelVision) lines.push(`👁️ local vision: ${config.localModelVision}`);
   } else if (localOnly) {
     lines.push('🏠 Local server: ❌ LOCAL_API_URL not set');
-    lines.push('   ./scripts/local-models.sh recommend   →   ./scripts/local-models.sh setup <model>');
+    lines.push('   ./scripts/observer.sh models recommend   →   ./scripts/observer.sh models setup <model>');
   }
 
   // Ollama, unless the owner pinned another mode.

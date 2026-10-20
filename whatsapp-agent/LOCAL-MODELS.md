@@ -14,9 +14,19 @@ llama.cpp se hai kyunki wo sabse halka aur Fedora pe sabse aasan hai.
 
 ```bash
 cd ~/observer-agent          # jahan package.json hai
-./scripts/local-models.sh recommend     # dekho tumhare PC pe kya chalega
-./scripts/local-models.sh setup best    # download + serve + agent wire (all-in-one)
+./scripts/observer.sh models recommend     # dekho tumhare PC pe kya chalega
+./scripts/observer.sh models setup best    # download + serve + agent wire (all-in-one)
 ```
+
+Script file nahi hai? Ek hi file me sab kuch hai — pehle ise le lo:
+
+```bash
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh"
+bash /tmp/observer.sh models recommend
+```
+
+Installed folder ke andar hai to `./scripts/observer.sh` bhi wahi command hai.
 
 `setup` ye 4 kaam karta hai:
 
@@ -30,7 +40,7 @@ Phir WhatsApp pe **`/brains`** bhejo — local model live dikhega.
 Chhota model chahiye:
 
 ```bash
-./scripts/local-models.sh setup balanced --small tiny --vision balanced
+./scripts/observer.sh models setup balanced --small tiny --vision balanced
 ```
 
 - `--small` = chhote kaam ("chrome kholo", "hi") isi pe jayenge → fast + light
@@ -44,7 +54,7 @@ Chhota model chahiye:
 Pehle apna budget dekho:
 
 ```bash
-./scripts/local-models.sh detect
+./scripts/observer.sh models detect
 ```
 
 | Tumhare paas | Model | Hugging Face | ~Size | Kyun |
@@ -133,8 +143,8 @@ hf download unsloth/Qwen3.5-4B-GGUF   --include "*Q4_K_M*" --local-dir ~/models/
 ### 2g. Koi bhi aur repo (script se)
 
 ```bash
-./scripts/local-models.sh download Qwen/Qwen3.5-9B-GGUF --quant Q4_K_M
-./scripts/local-models.sh commands Qwen/Qwen3.5-9B-GGUF --quant Q4_K_M   # sirf commands print
+./scripts/observer.sh models download Qwen/Qwen3.5-9B-GGUF --quant Q4_K_M
+./scripts/observer.sh models commands Qwen/Qwen3.5-9B-GGUF --quant Q4_K_M   # sirf commands print
 ```
 
 ### 2h. Ollama pasand hai? (same GGUF, Ollama manage karega)
@@ -142,7 +152,7 @@ hf download unsloth/Qwen3.5-4B-GGUF   --include "*Q4_K_M*" --local-dir ~/models/
 ```bash
 ollama pull hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
 # ya
-./scripts/local-models.sh ollama best
+./scripts/observer.sh models ollama best
 ```
 
 ---
@@ -152,7 +162,7 @@ ollama pull hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
 ### Sabse aasan
 
 ```bash
-./scripts/local-models.sh serve best
+./scripts/observer.sh models serve best
 ```
 
 ### Manually (llama.cpp direct, HF se auto-download)
@@ -192,7 +202,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
 Script se (recommended):
 
 ```bash
-./scripts/local-models.sh wire best --small tiny --vision balanced
+./scripts/observer.sh models wire best --small tiny --vision balanced
 systemctl --user restart observer-whatsapp-agent
 ```
 
@@ -235,16 +245,16 @@ Photos / screenshots **PC se bahar nahi jaate**:
 
 | Command | Kaam |
 |---|---|
-| `./scripts/local-models.sh list` | models + RAM requirement |
-| `./scripts/local-models.sh detect` | tumhare PC ka RAM/GPU |
-| `./scripts/local-models.sh recommend` | is machine ke liye best combo |
-| `./scripts/local-models.sh commands <model>` | Hugging Face download + run commands print |
-| `./scripts/local-models.sh download <model>` | GGUF download (`hf`, fallback curl) |
-| `./scripts/local-models.sh serve <model>` | llama-server chalao |
-| `./scripts/local-models.sh wire <model>` | `.env` likho |
-| `./scripts/local-models.sh setup <model>` | download + serve + wire (all-in-one) |
-| `./scripts/local-models.sh ollama <model>` | wahi GGUF Ollama se |
-| `./scripts/local-models.sh status` | kya install/chalu hai |
+| `./scripts/observer.sh models list` | models + RAM requirement |
+| `./scripts/observer.sh models detect` | tumhare PC ka RAM/GPU |
+| `./scripts/observer.sh models recommend` | is machine ke liye best combo |
+| `./scripts/observer.sh models commands <model>` | Hugging Face download + run commands print |
+| `./scripts/observer.sh models download <model>` | GGUF download (`hf`, fallback curl) |
+| `./scripts/observer.sh models serve <model>` | llama-server chalao |
+| `./scripts/observer.sh models wire <model>` | `.env` likho |
+| `./scripts/observer.sh models setup <model>` | download + serve + wire (all-in-one) |
+| `./scripts/observer.sh models ollama <model>` | wahi GGUF Ollama se |
+| `./scripts/observer.sh models status` | kya install/chalu hai |
 
 WhatsApp pe: `/brains`, `/brains why <task>`, `/model`, `/doctor`.
 

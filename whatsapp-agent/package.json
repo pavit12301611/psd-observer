@@ -1,6 +1,6 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Observer WhatsApp Agent 2.2 - free native WhatsApp + phone app + full PC control, workload-routed multi-model AI, verified /agent automation and 100% local Hugging Face GGUF models via llama.cpp (Fedora/Linux).",
   "type": "module",

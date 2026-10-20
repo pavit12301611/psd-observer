@@ -27,17 +27,24 @@ Everything is free; no paid API, no Observer app.
 ### 🅰️ Pehli baar install — ek script (recommended)
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/5f4643a1-psd-observer"
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+# ek hi script — install + update + models + doctor, sab isi me
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 
 Ye 4 kaam karta hai: GitHub se tarball **curl** karta hai (git nahi), code
 `~/observer-agent` me rakhta hai, `.env` bana deta hai (numbers pehle se bhare
-hue), aur `install-fedora.sh` ko wahi flags ke saath chala deta hai.
+hue), aur Fedora toolkit + service set kar deta hai. `--model auto` tumhare
+RAM/GPU ke hisaab se local model bhi download + wire kar deta hai.
+
+Puray command list: `bash /tmp/observer.sh help`. Purane script naam
+(`install-fresh.sh`, `update-from-github.sh`, `local-models.sh`) ab isi script
+ko forward karte hain — kaam karte rahenge.
 
 Dusra folder chahiye: `--dir ~/psd-observer/whatsapp-agent` add karo.
 Sirf download karna hai (install baad me): `--no-install`.
@@ -51,7 +58,7 @@ git clone -b arena/5f4643a1-psd-observer https://github.com/pavit12301611/psd-ob
 cd psd-observer/whatsapp-agent
 ```
 
-> ⚠️ 2.1 code sirf `arena/5f4643a1-psd-observer` branch pe hai, `main` pe nahi.
+> ⚠️ 2.3 code sirf `arena/5f4643a1-psd-observer` branch pe hai, `main` pe nahi.
 
 ### 🅲 Na script, na curl-fallback — seedha tar/zip manually
 
@@ -60,7 +67,7 @@ cd /tmp
 curl -fL -o agent.tar.gz \
   "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf agent.tar.gz
-mv psd-observer-arena-20378d42-psd-observer/whatsapp-agent ~/observer-agent
+mv psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent ~/observer-agent
 cd ~/observer-agent
 ```
 
@@ -72,8 +79,8 @@ cd ~/observer-agent
 
 ```bash
 cd ~/observer-agent
-./scripts/local-models.sh recommend     # is PC ke liye model
-./scripts/local-models.sh setup best    # download + serve + agent wire
+./scripts/observer.sh models recommend     # is PC ke liye model
+./scripts/observer.sh models setup best    # download + serve + agent wire
 # WhatsApp pe: /brains
 ```
 
@@ -94,11 +101,13 @@ chalata hai aur service restart karta hai.
 **Jab tumhare paas pehle se install hai** (code update karna hai):
 
 ```bash
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh" \
-  || curl -fL -o /tmp/agent-update.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/update-from-github.sh?ref=arena/5f4643a1-psd-observer"
-bash /tmp/agent-update.sh --dir ~/observer-agent
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/observer.sh update --dir ~/observer-agent
+bash /tmp/observer.sh update --check          # sirf version compare
 ```
 
 (Path apna actual install path daalo — jahan `package.json` hai wahan.
@@ -108,9 +117,7 @@ Default `~/observer-agent`. Pata nahi?
 **Pehli baar install kar rahe ho (koi code pehle se nahi hai):**
 
 ```bash
-bash /tmp/agent-update.sh --fresh ~/observer-agent
-cd ~/observer-agent
-./scripts/install-fedora.sh --service --ollama --power --phone
+bash /tmp/observer.sh install --dir ~/observer-agent --service --power --phone
 ```
 
 Kya safe rehta hai: `.env`, `auth_info/` (WhatsApp login — QR dobara scan nahi
@@ -125,16 +132,16 @@ cd /tmp
 curl -fL -o agent.tar.gz \
   "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf agent.tar.gz
-cd psd-observer-arena-20378d42-psd-observer/whatsapp-agent
+cd psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent
 # naye code ko purani install ke upar copy karo (secrets ko chhod ke)
 cp -a src webapp test scripts systemd package.json package-lock.json \
-      README.md QUICKSTART.md .env.example start.sh \
+      README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh \
       ~/psd-observer/whatsapp-agent/
 cd ~/psd-observer/whatsapp-agent && npm install
 systemctl --user restart observer-whatsapp-agent
 ```
 
-Version check: `./scripts/update-from-github.sh --check` (remote version dikhata hai).
+Version check: `./scripts/observer.sh update --check` (remote version dikhata hai).
 Browser se bhi download kar sakte ho:
 `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip`
 

@@ -1,12 +1,13 @@
-# 👁️ Observer Agent 2.2 — your PC, in your pocket
+# 👁️ Observer Agent 2.3 — your PC, in your pocket
 
 A personal agent that runs on **your own Fedora/Linux computer for ₹0** and is
 driven from **WhatsApp** *and* from an **installable phone app** — no Observer
 app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 
+- 🧰 **One script, everything** — [`scripts/observer.sh`](scripts/observer.sh): `install`, `update`, `models`, `doctor`, `service`, `start`, `relink`, `remote`, `fix`. Plain `curl`, no git, nothing else to remember.
 - 💬 **Native WhatsApp** (linked device, [Baileys](https://github.com/WhiskeySockets/Baileys)) — agent number `+91 88595 55795`, listens **only** to you (`+91 95289 23866`), everyone else gets complete silence.
 - 📱 **Phone app (PWA)** — open `http://<PC-IP>:8787/`, enter the PIN, "Add to Home screen". Chat, quick controls, files, QR linking — full-screen, works offline as a shell.
-- 🧠 **Free AI with real tools** — run it **100% local** with a Hugging Face GGUF on llama.cpp (`./scripts/local-models.sh setup best`, no key, offline) or use Ollama / free-tier Groq/Gemini/OpenRouter. Plain language becomes multi-step actions on the PC, routed by workload.
+- 🧠 **Free AI with real tools** — run it **100% local** with a Hugging Face GGUF on llama.cpp (`./scripts/observer.sh models setup best`, no key, offline) or use Ollama / free-tier Groq/Gemini/OpenRouter. Plain language becomes multi-step actions on the PC, routed by workload.
 - ⚡ **Offline intents** — even with **no AI at all**, "chrome kholo", "screenshot bhej do", "wifi off karo", "thesis.pdf dhundo" work instantly.
 - 🖥️ **Full PC control** — open *any* installed app, files, screenshots, OCR, typing/clicking, Wi-Fi/Bluetooth, volume/brightness/music, download links, zip, webcam, screen recording, services, processes, power.
 - 🎙️ **Voice notes & documents** — voice notes are transcribed (free), photos are OCR'd, PDFs/DOCX are read and summarised — then acted on like text.
@@ -26,19 +27,33 @@ Everything that was built, every command, and every error with its fix:
 
 ## 1. Install (Fedora, ~5 minutes)
 
-**No git needed** — this project is installed and updated with plain `curl`
-(no `git clone`, no `git pull`). One script downloads the branch and installs it:
+**No git needed** — install, update, local models, service and repairs all live
+in **one script**: [`scripts/observer.sh`](scripts/observer.sh). Download it once:
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/5f4643a1-psd-observer"
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 It lands in `~/observer-agent` (`--dir <path>` to change), creates `.env` with
-the owner/agent numbers filled in, and runs the Fedora installer below.
+the owner/agent numbers filled in, installs the toolkit and sets up a local
+model that fits the machine — all from that one file.
+
+| Command | What it does |
+|---|---|
+| `observer.sh install` | first-time install (curl tarball, no git) |
+| `observer.sh update` | update code, keeps `.env` / login / `data/` |
+| `observer.sh models …` | Hugging Face GGUF: list, recommend, download, serve, wire |
+| `observer.sh doctor` | what is broken + the exact fix |
+| `observer.sh service …` | systemd unit install/restart/logs |
+| `observer.sh start` / `relink` / `remote` / `fix` | run, new QR, Tailscale, desktop fixes |
+
+The old names (`install-fresh.sh`, `update-from-github.sh`, `local-models.sh`)
+still work — they are now thin wrappers that forward to `observer.sh`.
 
 <details><summary>Already extracted the tarball somewhere?</summary>
 
@@ -325,8 +340,9 @@ enable shell **and** remove that line from the unit (your PC, your call).
 No key, no quota, nothing leaves the PC. One command:
 
 ```bash
-./scripts/local-models.sh recommend      # what fits THIS machine
-./scripts/local-models.sh setup best     # download + serve + wire
+cd ~/observer-agent
+./scripts/observer.sh models recommend      # what fits THIS machine
+./scripts/observer.sh models setup best     # download + serve + wire
 ```
 
 Then WhatsApp `/brains` shows the local model live. Full guide (model picks,
@@ -394,22 +410,20 @@ on "hi" and nothing hands a 10-step job to a 1B model:
 
 ```bash
 # already installed (raw.githubusercontent block ho to API fallback):
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh" \
-  || curl -fL -o /tmp/agent-update.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/update-from-github.sh?ref=arena/5f4643a1-psd-observer"
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
 
-bash /tmp/agent-update.sh --dir ~/observer-agent     # apna install path
-
-# first install without git:
-bash /tmp/agent-update.sh --fresh ~/observer-agent
+bash /tmp/observer.sh update --dir ~/observer-agent   # apna install path
+bash /tmp/observer.sh update --check                  # sirf version dekho
 ```
 
 The script downloads the branch tarball with plain `curl`, backs up the current
 code to `~/observer-agent-backup-<date>.tar.gz`, replaces only the code, runs
 `npm install`, and restarts the service. It never touches `.env`, `auth_info/`
 (your WhatsApp link — no re-scan) or `data/` (PIN, token, notes, reminders,
-todos). `./scripts/update-from-github.sh --check` shows the remote version.
+todos). `./scripts/observer.sh update --check` shows the remote version.
 This workflow is **curl-only** — you never need `git clone` or `git pull`.
 
 ---

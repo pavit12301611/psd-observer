@@ -7,7 +7,7 @@
 > and actually *does things* — open any app, files, screenshots, OCR, typing,
 > Wi-Fi/Bluetooth, downloads, recording, reminders, free local AI, and more.
 >
-> **2.2 = 100% local:** `./scripts/local-models.sh setup best` pulls a current
+> **2.2 = 100% local, one script for everything:** `bash observer.sh models setup best` pulls a current
 > Hugging Face GGUF (Qwen3.8-27B, Gemma 4, gpt-oss-20b, Qwen3.5), serves it with
 > llama.cpp and wires the agent to it — no key, no cloud, works offline. Model
 > picks + exact `hf download` commands: [`whatsapp-agent/LOCAL-MODELS.md`](whatsapp-agent/LOCAL-MODELS.md).
@@ -24,8 +24,9 @@
 >
 > **Start (Fedora Linux, no git needed):**
 > see [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md#1-code-laao-git-ke-bina-bhi--2-tarike) —
-> one `curl` — **no git at all** (this setup is curl-only; no clone/pull needed).
-> then `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`.
+> one `curl` of [`observer.sh`](whatsapp-agent/scripts/observer.sh) — **no git at all**,
+> then `bash /tmp/observer.sh install --service --power --phone --model auto`.
+> Install, update, local models, service, doctor and repairs are all in that **one file**.
 > Add `--remote` for free Tailscale access to the phone app from **outside** your home.
 > → scan the QR with the agent phone → WhatsApp it `/help` from your phone →
 > open the printed phone-app URL and enter the PIN.

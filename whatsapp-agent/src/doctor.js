@@ -190,7 +190,7 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
         icon: '❌',
         title: 'Local model server',
         detail: `not reachable at ${localServer.url}`,
-        fix: './scripts/local-models.sh serve <model>   (or: systemctl --user start observer-model)',
+        fix: './scripts/observer.sh models serve <model>   (or: systemctl --user start observer-model)',
       });
   }
   const cloudKey = config.groqApiKey ? 'Groq' : config.geminiApiKey ? 'Gemini' : config.openrouterApiKey ? 'OpenRouter' : null;
@@ -213,7 +213,7 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
       icon: '⚠️',
       title: 'AI brain',
       detail: 'No local model server, no Ollama and no free API key — built-in commands and Hinglish intents still work, but free-form chat and multi-step tasks do not.',
-      fix: './scripts/local-models.sh recommend   (downloads a Hugging Face GGUF + wires it up, fully offline after that)',
+      fix: './scripts/observer.sh models recommend   (downloads a Hugging Face GGUF + wires it up, fully offline after that)',
     });
   }
 
