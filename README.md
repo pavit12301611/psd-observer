@@ -7,7 +7,21 @@
 > and actually *does things* — open any app, files, screenshots, OCR, typing,
 > Wi-Fi/Bluetooth, downloads, recording, reminders, free local AI, and more.
 >
-> **2.0 adds:** an installable **phone app** at `http://<PC-IP>:8787/` (works
+> **2.2 = 100% local, one script for everything:** `bash observer.sh models setup best` pulls a current
+> Hugging Face GGUF (Qwen3.8-27B, Gemma 4, gpt-oss-20b, Qwen3.5), serves it with
+> llama.cpp and wires the agent to it — no key, no cloud, works offline. Model
+> picks + exact `hf download` commands: [`whatsapp-agent/LOCAL-MODELS.md`](whatsapp-agent/LOCAL-MODELS.md).
+>
+> **2.4 = free cloud keys (optional):** `bash observer.sh keys groq gsk_...` — Groq free tier
+> (1,000 requests/day, tool calling, free voice notes, vision via Qwen3.8-27B) or
+> OpenRouter (Gemma 4 31B free) as a second brain. Limits + model table:
+> [`whatsapp-agent/AI-KEYS.md`](whatsapp-agent/AI-KEYS.md). Local stays the default.
+>
+> **2.1 fixes `/agent`:** it now actually performs the task (verified steps, real
+> tool calls) and says "step N pe ruk gaya" instead of pretending success — plus
+> **workload routing** (`/brains`): tiny jobs go to a small local model, heavy jobs
+> to the best free model, failing brains cool down, and heavy calls have an hourly
+> budget. **2.0 added:** an installable **phone app** at `http://<PC-IP>:8787/` (works
 > with **no Observer app at all**, and from **anywhere** over free Tailscale), **Hinglish offline intents** ("chrome kholo",
 > "wifi off karo") that work with zero AI, **free AI tool-calling** for
 > multi-step tasks, **voice-note transcription**, **PDF/DOCX reading**, and an
@@ -15,8 +29,9 @@
 >
 > **Start (Fedora Linux, no git needed):**
 > see [`whatsapp-agent/QUICKSTART.md`](whatsapp-agent/QUICKSTART.md#1-code-laao-git-ke-bina-bhi--2-tarike) —
-> one `curl` — **no git at all** (this setup is curl-only; no clone/pull needed).
-> then `cd whatsapp-agent && ./scripts/install-fedora.sh --service --ollama --power --phone`.
+> one `curl` of [`observer.sh`](whatsapp-agent/scripts/observer.sh) — **no git at all**,
+> then `bash /tmp/observer.sh install --service --power --phone --model auto`.
+> Install, update, local models, service, doctor and repairs are all in that **one file**.
 > Add `--remote` for free Tailscale access to the phone app from **outside** your home.
 > → scan the QR with the agent phone → WhatsApp it `/help` from your phone →
 > open the printed phone-app URL and enter the PIN.

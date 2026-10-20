@@ -8,16 +8,17 @@ Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 `git pull`.** (Owner ka workflow git ke bina chalta hai.)
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
 
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+bash /tmp/observer.sh install --service --power --phone --model auto
 #   --service  autostart (systemd --user + linger)
-#   --ollama   free offline AI (llama3.2)
 #   --power    OCR, recording, Wi-Fi/BT, windows, input, full access level
 #   --phone    phone app reachable at http://<PC-IP>:8787/ (firewalld 8787)
+#   --model auto   download a local Hugging Face model that fits this PC
+#   (--ollama keeps the older Ollama path instead of llama.cpp)
 ```
 
 It installs to `~/observer-agent` and creates `.env` for you. Updates later are
@@ -42,7 +43,7 @@ Fedora ships `npm` as a **separate package** from `nodejs` — install both
 sudo dnf install nodejs npm curl gcc-c++ make python3
 node --version && npm --version
 
-cd ~/observer-agent        # jahan install-fresh.sh ne rakha (ya apna path)
+cd ~/observer-agent        # jahan `observer.sh install` ne rakha (ya apna path)
 cp .env.example .env     # owner 919528923866 / agent 918859555795 already set
 npm install
 ./start.sh               # foreground run; QR in terminal + image viewer + dashboard
@@ -96,11 +97,11 @@ story — the agent only talks HTTP to `127.0.0.1:11434`.
 First-time install, nothing but `curl`/`tar` needed (no `git`, no `zip` tool):
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
-curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
-  -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
-bash /tmp/observer-setup.sh --service --ollama --power --phone
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5f4643a1-psd-observer"
+bash /tmp/observer.sh install --service --power --phone --model auto
 ```
 
 Installs to `~/observer-agent` by default (`--dir <path>` to choose). It refuses
@@ -112,16 +113,17 @@ below), and `--no-install` downloads only. Then jump to “Phone app over Wi-Fi�
 No `git pull` needed — the installer/repo works as a plain download:
 
 ```bash
-curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
-bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
+curl -fL -o /tmp/observer.sh \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/observer.sh"
+bash /tmp/observer.sh update --dir ~/psd-observer/whatsapp-agent
+bash /tmp/observer.sh update --check          # version compare only
 ```
 
 It fetches the branch tarball from `codeload.github.com`, backs up the current
 code, replaces `src/ webapp/ test/ scripts/ systemd/` + manifests, runs
 `npm install`, and restarts `observer-whatsapp-agent`. Your `.env`, `auth_info/`
-and `data/` are untouched, so the WhatsApp link survives. `--fresh <dir>` does a
-first-time install with no git at all.
+and `data/` are untouched, so the WhatsApp link survives. First-time install is
+`bash observer.sh install --dir <dir>` — same file, no git at all.
 
 ### Phone app over Wi-Fi (optional, recommended)
 

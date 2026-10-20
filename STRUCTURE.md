@@ -77,7 +77,12 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 |---|---|
 | `whatsapp-agent/src/actions.js` | **One registry of 61 PC actions** with permission levels + destructive confirmations. Used by commands, offline intents and the AI. |
 | `whatsapp-agent/src/nlp.js` | Offline intent parser — “chrome kholo”, “wifi off karo”, “thesis.pdf dhundo” work with **no AI installed**. |
-| `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step. |
+| `whatsapp-agent/scripts/observer.sh` | **The one script**: `install` / `update` / `keys` / `models` / `test` / `doctor` / `service` / `start` / `relink` / `remote` / `fix` / `version`. Plain curl, no git. |
+| `whatsapp-agent/scripts/local-models.sh` | Compatibility wrapper → `observer.sh models` (Hugging Face GGUF download + `llama-server` + `.env` wiring + systemd). |
+| `whatsapp-agent/AI-KEYS.md` | Free cloud keys (Groq / OpenRouter / Gemini): limits, model IDs, `.env` lines, vision + voice, which one to pick. |
+| `whatsapp-agent/LOCAL-MODELS.md` | Local model guide: hardware tiers, HF links, `hf download` commands, quants. |
+| `whatsapp-agent/src/router.js` | **Workload routing**: sizes each task (tiny→heavy), picks the cheapest capable free model, cooldowns failing brains, hourly power budget. |
+| `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step, routed + escalating. |
 | `whatsapp-agent/src/apps.js` | Discovers `.desktop` apps, launches **any** installed app, window control. |
 | `whatsapp-agent/src/files.js` | Home-folder file tools: list/read/write/search/zip/download/send, secret paths blocked. |
 | `whatsapp-agent/src/systemx.js` | Wi-Fi (nmcli), Bluetooth, systemd services, process kill, webcam, screen recording. |
@@ -88,8 +93,8 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 | `whatsapp-agent/src/doctor.js` | `/doctor` — tests screenshot, keyboard/mouse, packages, AI and access, with the exact fix for each failure. |
 | `whatsapp-agent/scripts/fix-desktop.sh` | Repairs Wayland screenshots (xdg-desktop-portal + grim), input (ydotool daemon, /dev/uinput) and the rest of the toolkit. |
 | `whatsapp-agent/src/server.js` | Bridge API + PWA hosting + PIN login + `/api/chat`, `/api/files`, `/api/download`, `/api/action`. |
-| `whatsapp-agent/scripts/install-fresh.sh` | **First-time install with no git**: curl the tarball, extract, create `.env`, run the installer (`--dir`, `--no-install`, `--force`). |
-| `whatsapp-agent/scripts/update-from-github.sh` | Update/install **without git**: downloads the branch tarball with curl, backs up code, keeps `.env`/`auth_info`/`data`, restarts the service. |
+| `whatsapp-agent/scripts/install-fresh.sh` | Compatibility wrapper → `observer.sh install`. |
+| `whatsapp-agent/scripts/update-from-github.sh` | Compatibility wrapper → `observer.sh update` (backup + code swap, keeps `.env`/`auth_info`/`data`). |
 | `whatsapp-agent/BUILD-LOG.md` | Engineering log: every feature, commit, command, error and its fix. |
 | `whatsapp-agent/scripts/setup-remote.sh` | Free Tailscale setup so the phone app works from **outside** the house (no port-forwarding). WhatsApp commands already work from anywhere. |
 
