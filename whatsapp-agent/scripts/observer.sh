@@ -283,6 +283,8 @@ cmd_update() {
   done
   chmod +x "$dest"/scripts/*.sh "$dest/start.sh" 2>/dev/null || true
 
+  migrate_groq_env "$dest/.env"
+
   if [ -f "$dest/.env.example" ] && [ -f "$dest/.env" ]; then
     local missing
     missing=$(comm -23 <(grep -oE '^[A-Z_]+=' "$dest/.env.example" | sort -u) \
@@ -807,6 +809,26 @@ key_check() {  # key_check provider key → warns, never blocks saving
   return 0
 }
 
+# Groq retired Llama 3.1 8B / 3.3 70B from the free tier on 16 Aug 2026
+# (enterprise-only now). An old .env created before that still pins those IDs,
+# and every call would 404 — so migrate the two Groq model keys on update.
+migrate_groq_env() {
+  local env="$1" var old new
+  [ -f "$env" ] || return 0
+  for var in GROQ_MODEL GROQ_MODEL_SMALL; do
+    old=$(env_read "$env" "$var")
+    new='openai/gpt-oss-120b'
+    [ "$var" = "GROQ_MODEL_SMALL" ] && new='openai/gpt-oss-20b'
+    case "$old" in
+      *llama-3.3*|*llama-3.1*)
+        env_set "$env" "$var" "$new"
+        warn "$var=$old → $new  (Groq ne Llama free tier se 16 Aug 2026 ko hata diya)"
+        ;;
+    esac
+  done
+  return 0
+}
+
 keys_list() {  # keys_list ENV [only-provider]
   local env="$1" only="${2:-}" provider var val
   say "API keys"
@@ -853,6 +875,9 @@ keys_test() {  # keys_test ENV
 cmd_keys() {
   local dir; dir=$(find_install "") || die "no install found — bash observer.sh install"
   local env="$dir/.env"
+
+  # Old Groq Llama IDs would 404 — fix them before showing/testing anything.
+  migrate_groq_env "$env"
 
   case "${1:-}" in
     ""|list|status) keys_list "$env"; return 0 ;;

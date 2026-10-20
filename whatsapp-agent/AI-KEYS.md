@@ -58,6 +58,8 @@ login, card nahi chahiye).
 > ⚠️ **Llama 3.1 8B aur 3.3 70B 16 Aug 2026 se free tier pe nahi hain**
 > (enterprise-only). Isliye is agent ka default ab `gpt-oss` hai — purane
 > `GROQ_MODEL=llama-3.3-70b-versatile` se 404 aayega.
+> `observer.sh update` aur `observer.sh keys` purane Llama IDs ko khud
+> `gpt-oss` pe badal dete hain (warning ke saath), to key daalte hi kaam karega.
 
 ### Kaun sa model kya karta hai
 

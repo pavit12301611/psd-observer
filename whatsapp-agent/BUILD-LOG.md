@@ -146,6 +146,12 @@ key daalne pe har call 404/`model_decommissioned` hoti.
 | Guide: limits, models, kaunsa lena chahiye | `AI-KEYS.md` |
 | Tests: defaults, chat, vision parts, failover, tool loop | `test/cloud.test.js` (12) |
 
+**2.4.1 fix:** update `.env` ko chhodta hai (sahi baat), par purane install me
+`GROQ_MODEL=llama-3.3-70b-versatile` pada reh jata tha — nayi key ke saath bhi
+har call 404. Ab `update` aur `keys` dono stale Groq Llama IDs detect karke
+`gpt-oss` pe migrate kar dete hain (output me warning ke saath), taaki key
+daalte hi kaam kare.
+
 **Kyun Groq primary:** 1,000 requests/day per model, ~500 tok/sec, tool
 calling, free Whisper voice notes, aur ek hi free vision model.
 **OpenRouter:** 50/day (1,000 after one-time $10), 20+ free models — backup ke
