@@ -36,6 +36,18 @@ export function parseIntent(input) {
   if (!text) return null;
   let m;
 
+  // ── DeepSeek Harness (before app open/close so "harness web kholo" routes cleanly) ──
+  if (/^(?:dsh|deepseek\s+harness|harness)\s*(?:status|kya\s+haal|check)?\??$/i.test(text)) {
+    return asCmd('dsh', 'status');
+  }
+  if (/^(?:dsh\s+web|deepseek\s+harness\s+web|harness\s+web)(?:\s+(open|kholo|khol|start|chalu|stop|band))?(?:\s+kar(?:o|do))?$/i.test(text)) {
+    const sub = (text.match(/\b(open|kholo|khol|stop|band)\b/i)?.[1] || 'start').toLowerCase();
+    return asCmd('dsh', `web ${/open|khol/.test(sub) ? 'open' : /stop|band/.test(sub) ? 'stop' : 'start'}`);
+  }
+  if ((m = text.match(/^(?:dsh\s+(?:se|me|mein)|harness\s+(?:se|me|mein)|deepseek\s+harness\s+(?:se|me|mein))\s+([\s\S]+)$/i))) {
+    return asCmd('dsh', clean(m[1]));
+  }
+
   // ── app control ───────────────────────────────────────────────────────────
   if ((m = text.match(/^(?:open|launch|khol(?:o|do|de)?|chalu\s+kar(?:o|do)?|start)\s+(?:the\s+|app\s+)?(.+)$/i))) {
     const rest = clean(m[1]).replace(/\s+(?:app|application)$/i, '').replace(/\s+(?:karo|kar do|kholo|khol do)$/i, '');

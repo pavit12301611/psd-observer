@@ -27,7 +27,7 @@
 set -euo pipefail
 
 REPO="${REPO:-pavit12301611/psd-observer}"
-BRANCH="${BRANCH:-arena/5f4643a1-psd-observer}"
+BRANCH="${BRANCH:-arena/1cff19d3-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 API="https://api.github.com/repos/${REPO}/contents"
@@ -72,26 +72,45 @@ remote_version() {
   printf '%s' "$json" | grep -m1 '"version"' | sed -E 's/.*"version" *: *"([^"]+)".*/\1/'
 }
 
-# Download a file from the repo: raw first, GitHub API as fallback.
+# Download a file from the repo: raw branch first, then API, then `main` post-merge fallback.
 fetch_repo_file() {
   local rel="$1" out="$2"
   curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 -o "$out" "${RAW}/${rel}" 2>/dev/null \
     || curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 \
-         -H 'Accept: application/vnd.github.raw' -o "$out" "${API}/${rel}?ref=${BRANCH}"
+         -H 'Accept: application/vnd.github.raw' -o "$out" "${API}/${rel}?ref=${BRANCH}" 2>/dev/null \
+    || curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 -o "$out" "https://raw.githubusercontent.com/${REPO}/main/${rel}" 2>/dev/null \
+    || curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 90 \
+         -H 'Accept: application/vnd.github.raw' -o "$out" "${API}/${rel}?ref=main"
 }
 
 download_tarball() {
   local tmp="$1"
-  say "Downloading the code (curl, no git)"
-  info "branch: ${BRANCH}"
-  if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$tmp/src.tar.gz" "$ARCHIVE"; then
+  local expected_ver=""
+  expected_ver=$(remote_version 2>/dev/null || echo "")
+
+  say "Downloading Observer WhatsApp Agent fast bundle (~380 KB, curl, no git)"
+  info "branch: ${BRANCH}${expected_ver:+ · target: v${expected_ver}}"
+
+  if fetch_repo_file "whatsapp-agent/release-bundle.tar.gz" "$tmp/bundle.tar.gz" \
+     && tar -xzf "$tmp/bundle.tar.gz" -C "$tmp" 2>/dev/null; then
+    local bundled_src bundled_ver
+    bundled_src=$(find_extracted_agent "$tmp")
+    bundled_ver=$(local_version "$bundled_src" 2>/dev/null || echo "")
+    if [ -n "$bundled_src" ] && { [ -z "$expected_ver" ] || [ "$bundled_ver" = "$expected_ver" ]; }; then
+      ok "fast bundle verified (v${bundled_ver})"
+      return 0
+    fi
+    rm -rf "$tmp/whatsapp-agent" "$tmp/bundle.tar.gz"
+  fi
+
+  say "Falling back to full branch archive (${BRANCH})"
+  if ! curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o "$tmp/src.tar.gz" "$ARCHIVE"; then
     cat >&2 <<EOF
 
-Could not download the code. Common causes:
-  • no internet / firewall on this network — try a phone hotspot
-  • the branch name changed — check: $SELF_URL
-  • GitHub blocked by DNS — test: curl -I https://codeload.github.com
-Manual alternative (opens in a browser):
+Could not download branch ${BRANCH}. Common causes:
+  • unstable Wi-Fi / hotspot reset — simply run the command once more
+  • GitHub blocked by DNS — test: curl -I https://raw.githubusercontent.com
+Manual zip alternative:
   https://github.com/${REPO}/archive/refs/heads/${BRANCH}.zip
 EOF
     return 1
@@ -756,6 +775,7 @@ key_var() {
     groq)       echo GROQ_API_KEY ;;
     openrouter) echo OPENROUTER_API_KEY ;;
     gemini)     echo GEMINI_API_KEY ;;
+    deepseek)   echo DEEPSEEK_API_KEY ;;
     *) return 1 ;;
   esac
 }
@@ -765,6 +785,7 @@ key_slug() {
     groq|groq.com|api.groq.com)                 echo groq ;;
     openrouter|or|openrouter.ai|open-router)    echo openrouter ;;
     gemini|google|google-ai|aistudio|ai-studio) echo gemini ;;
+    deepseek|dsh|api.deepseek.com)              echo deepseek ;;
     *) return 1 ;;
   esac
 }
@@ -774,6 +795,7 @@ key_label() {
     groq) echo 'fast free tier · 1,000 req/day · also free voice notes' ;;
     openrouter) echo 'wide free model menu · 50 req/day, 1,000 after a $10 top-up' ;;
     gemini) echo 'free tier · vision + long context' ;;
+    deepseek) echo 'DeepSeek V3.2 / R1 Reasoner · native brain for DeepSeek Harness' ;;
   esac
 }
 
@@ -782,6 +804,7 @@ key_url() {
     groq) echo 'https://console.groq.com/keys' ;;
     openrouter) echo 'https://openrouter.ai/keys' ;;
     gemini) echo 'https://aistudio.google.com/apikey' ;;
+    deepseek) echo 'https://platform.deepseek.com/api_keys' ;;
   esac
 }
 
@@ -1400,9 +1423,13 @@ ${B}Setup${R}
   update [--dir PATH] [--check]
                               update the code (keeps .env, WhatsApp login, data)
   keys                        which API keys are set (masked) + where to get them
-  keys groq <gsk_...>         add/replace a free Groq key (also: openrouter, gemini)
+  keys groq <gsk_...>         add/replace a free Groq key (also: deepseek, openrouter, gemini)
   keys --test                 test every saved key
   keys --remove groq          remove a key
+  harness setup               install official DeepSeek Harness (@deepseek-ai/dsh) + Fedora app + WhatsApp MCP
+  harness web                 launch official DeepSeek Harness Web UI on Fedora
+  harness key <sk-...>        save DeepSeek API key in .env + ~/.dsh/.credentials.yaml
+  harness auto on|off         route every WhatsApp message through DeepSeek Harness
   version                     local vs remote version
 
 ${B}100% local AI (Hugging Face GGUF, llama.cpp)${R}
@@ -1442,11 +1469,163 @@ EOF
 
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DEEPSEEK HARNESS — Official `@deepseek-ai/dsh` on Fedora Linux + WhatsApp MCP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DSH_INSTALL_DIR="${DSH_INSTALL_DIR:-$HOME/.local/share/observer-harness}"
+DSH_NODE_DIR="${DSH_NODE_DIR:-$HOME/.local/share/observer-node}"
+DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
+
+dsh_node_supported() {
+  local bin="${1:-}"
+  [ -x "$bin" ] || return 1
+  "$bin" -e '
+    const [maj, min] = process.versions.node.split(".").map(Number);
+    process.exit((maj >= 24 || (maj === 22 && min >= 19)) ? 0 : 1);
+  ' >/dev/null 2>&1
+}
+
+ensure_dsh_node() {
+  local cand
+  for cand in "${DSH_NODE_BIN:-}" "$DSH_NODE_DIR/bin/node" "$(command -v node 2>/dev/null || true)"; do
+    if [ -n "$cand" ] && dsh_node_supported "$cand"; then
+      printf '%s' "$cand"
+      return 0
+    fi
+  done
+  say "Installing portable Node v22.22.0 LTS for DeepSeek Harness (no sudo needed)"
+  local arch
+  case "$(uname -m)" in
+    x86_64) arch="x64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) die "Unsupported architecture $(uname -m) — install Node 22+ manually." ;;
+  esac
+  mkdir -p "$DSH_NODE_DIR"
+  curl -fsSL "https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-${arch}.tar.xz" \
+    | tar -xJ --strip-components=1 -C "$DSH_NODE_DIR"
+  dsh_node_supported "$DSH_NODE_DIR/bin/node" || die "Portable Node v22.22.0 verification failed"
+  printf '%s' "$DSH_NODE_DIR/bin/node"
+}
+
+cmd_harness() {
+  local sub="${1:-status}"; shift || true
+  local dir=""
+  dir=$(find_install "" 2>/dev/null || echo "$DEFAULT_DIR")
+
+  case "$sub" in
+    setup|install|upgrade)
+      local node_bin npm_bin
+      node_bin=$(ensure_dsh_node)
+      npm_bin="$(dirname "$node_bin")/npm"
+      [ -x "$npm_bin" ] || npm_bin="npm"
+      ok "Node runtime ready: $($node_bin -v) ($node_bin)"
+
+      say "Installing official DeepSeek Harness (@deepseek-ai/dsh) on Linux"
+      info "Downloading from npm registry (first time takes ~1-2 min on slow networks — retries automatically)..."
+      mkdir -p "$DSH_INSTALL_DIR" "$HOME/.local/bin" "$DSH_HOME_DIR"
+      [ -f "$DSH_INSTALL_DIR/package.json" ] || printf '{"name":"observer-deepseek-harness","private":true}\n' > "$DSH_INSTALL_DIR/package.json"
+      (
+        cd "$DSH_INSTALL_DIR" && \
+        PATH="$(dirname "$node_bin"):$PATH" "$npm_bin" install @deepseek-ai/dsh@latest \
+          --no-audit --no-fund --progress=true \
+          --fetch-retries=6 --fetch-retry-mintimeout=3000 --fetch-retry-maxtimeout=30000 --fetch-timeout=300000
+      )
+
+      cat > "$HOME/.local/bin/dsh" <<WRAP
+#!/usr/bin/env bash
+exec "$node_bin" "$DSH_INSTALL_DIR/node_modules/.bin/dsh" "\$@"
+WRAP
+      chmod +x "$HOME/.local/bin/dsh"
+      ok "Installed \`dsh\` CLI → $HOME/.local/bin/dsh"
+
+      if [ -f "$dir/.env" ]; then
+        grep -q '^DSH_AUTO_START_WEB=' "$dir/.env" \
+          && sed -i 's/^DSH_AUTO_START_WEB=.*/DSH_AUTO_START_WEB=true/' "$dir/.env" \
+          || printf '\nDSH_AUTO_START_WEB=true\n' >> "$dir/.env"
+        ok "Enabled automatic DeepSeek Harness Web UI alongside Observer in $dir/.env"
+      fi
+
+      mkdir -p "$HOME/.local/share/applications"
+      cat > "$HOME/.local/share/applications/deepseek-harness.desktop" <<DESK
+[Desktop Entry]
+Type=Application
+Name=DeepSeek Harness
+Comment=DeepSeek Harness on Fedora Linux (Synced with WhatsApp & Observer)
+Exec=$HOME/.local/bin/dsh web
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;IDE;Utility;
+StartupNotify=true
+DESK
+      ok "Added Fedora GNOME app launcher → DeepSeek Harness"
+
+      [ -d "$dir/src" ] && restart_agent "$dir"
+      cat <<DONE
+
+────────────────────────────────────────────────────────────────────────
+ 🚀 DeepSeek Harness + WhatsApp Full Power READY on Fedora Linux!
+────────────────────────────────────────────────────────────────────────
+ • WhatsApp (single task) :  /dsh <koi bhi coding / shell / PC task>
+ • WhatsApp (ALL messages):  /dsh auto on
+ • Fedora Desktop Web UI  :  /dsh web open   (ya Activities me "DeepSeek Harness")
+ • DeepSeek API Key (opt) :  /dsh key sk-... (ya Web UI me Account Sign-In, ya Groq/Local automatic!)
+────────────────────────────────────────────────────────────────────────
+DONE
+      ;;
+
+    web|open)
+      local node_bin
+      node_bin=$(ensure_dsh_node)
+      [ -x "$DSH_INSTALL_DIR/node_modules/.bin/dsh" ] || cmd_harness install
+      say "Launching official DeepSeek Harness Web UI on http://127.0.0.1:3080"
+      exec "$node_bin" "$DSH_INSTALL_DIR/node_modules/.bin/dsh" web --port "${DSH_WEB_PORT:-3080}"
+      ;;
+
+    key)
+      local k="${1:-}"
+      [ -n "$k" ] || die "usage: observer.sh harness key <sk-...>"
+      cmd_keys deepseek "$k"
+      mkdir -p "$DSH_HOME_DIR"
+      printf 'DEEPSEEK_API_KEY: "%s"\n' "$k" > "$DSH_HOME_DIR/.credentials.yaml"
+      chmod 600 "$DSH_HOME_DIR/.credentials.yaml"
+      ok "Saved key to $DSH_HOME_DIR/.credentials.yaml (0600)"
+      [ -d "$dir/src" ] && restart_agent "$dir"
+      ;;
+
+    auto)
+      local mode="${1:-on}"
+      [ -f "$dir/.env" ] || die "No .env found at $dir/.env"
+      local val="true"; [ "$mode" = "off" ] && val="false"
+      grep -q '^DSH_AUTO_ROUTE=' "$dir/.env" \
+        && sed -i "s/^DSH_AUTO_ROUTE=.*/DSH_AUTO_ROUTE=${val}/" "$dir/.env" \
+        || printf '\nDSH_AUTO_ROUTE=%s\n' "$val" >> "$dir/.env"
+      ok "Set DSH_AUTO_ROUTE=${val} in $dir/.env"
+      restart_agent "$dir"
+      ;;
+
+    status|*)
+      say "DeepSeek Harness Status"
+      info "install dir : $DSH_INSTALL_DIR"
+      if [ -x "$DSH_INSTALL_DIR/node_modules/.bin/dsh" ]; then
+        ok "dsh binary  : installed ($DSH_INSTALL_DIR/node_modules/.bin/dsh)"
+      elif have dsh; then
+        ok "dsh binary  : $(command -v dsh)"
+      else
+        warn "dsh binary  : not installed yet — run: bash observer.sh harness setup"
+      fi
+      info "DSH_HOME    : $DSH_HOME_DIR"
+      info "credentials : $( [ -f "$DSH_HOME_DIR/.credentials.yaml" ] && echo 'present (0600)' || echo 'not set yet (optional)' )"
+      ;;
+  esac
+}
+
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
     install|setup)        cmd_install "$@" ;;
     update|upgrade)       cmd_update "$@" ;;
+    harness|dsh|deepseek) cmd_harness "$@" ;;
     keys|key|api-key|api-keys) cmd_keys "$@" ;;
     models|model|local)   cmd_models "$@" ;;
     test|selftest|verify) cmd_test "$@" ;;

@@ -212,7 +212,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     await react(chatJid, key, '⏳');
     if (!config.dryRun) { try { await state.sock.sendPresenceUpdate('composing', chatJid); } catch { /* cosmetic */ } }
     try {
-      const reply = await agent.handle(content.text, { waStatus: status });
+      const reply = await agent.handle(content.text, { waStatus: status, mediaMeta: content.mediaMeta });
       if (reply != null) await transportSend(chatJid, reply, rawMsg);
       store.bump('replied');
       await react(chatJid, key, '✅');
@@ -259,9 +259,21 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
         ? transportSend(chatJid, { sticker }, rawMsg)
         : transportSend(chatJid, '🎨 Sticker needs the free `sharp` package on the PC: `npm install sharp` inside whatsapp-agent, then send the photo again.', rawMsg);
     }
+    const mediaMeta = savedAs ? {
+      buffer,
+      savedPath: path.join(config.downloadsDir, savedAs),
+      savedAs,
+      mimeType: content.media?.mimetype || '',
+      mediaKind: content.kind,
+    } : null;
+
     if (caption.startsWith('/')) {
       await transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}`, rawMsg);
-      return processOwnerMessage({ chatJid, content: { kind: 'text', text: caption }, rawMsg });
+      return processOwnerMessage({ chatJid, content: { kind: 'text', text: caption, mediaMeta }, rawMsg });
+    }
+    if (caption && agent.isHarnessAuto?.()) {
+      await transportSend(chatJid, `💾 Saved as ${savedAs}${sizeNote}`, rawMsg);
+      return processOwnerMessage({ chatJid, content: { kind: 'text', text: caption, mediaMeta }, rawMsg });
     }
     if (content.kind === 'image' && buffer) {
       // Marked screenshot -> click where user marked (red pen)

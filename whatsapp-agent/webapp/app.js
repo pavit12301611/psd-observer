@@ -202,6 +202,22 @@
       ['Open to-dos', s.openTodos ?? 0],
     ];
     list.innerHTML = rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v ?? '—'))}</dd>`).join('');
+
+    const hList = $('#harness-list');
+    if (hList && s.harness) {
+      const h = s.harness;
+      const hRows = [
+        ['Installed', h.installed ? `Yes (${h.version || 'ready'})` : 'Pending (/dsh install)'],
+        ['SDK Daemon', h.sdkRunning ? 'Warm & active' : 'Idle (auto-starts)'],
+        ['Primary Mode', h.autoRoute ? 'ON (all WhatsApp msgs)' : 'Off (/dsh <task>)'],
+        ['Permission', h.permissionMode || 'danger-full-access'],
+        ['Model', h.selectedModel || 'auto'],
+        ['Web UI', h.web?.running ? `Running (port ${h.web.port})` : 'Stopped'],
+      ];
+      hList.innerHTML = hRows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v ?? '—'))}</dd>`).join('');
+      const autoBtn = $('#dsh-toggle-auto');
+      if (autoBtn) autoBtn.textContent = h.autoRoute ? '⚡ Turn Auto Mode OFF' : '⚡ Turn Auto Mode ON';
+    }
     if (s.pairingCode) {
       const card = $('#qr-card');
       card.hidden = false;
@@ -263,6 +279,8 @@
   }
 
   const CHIPS = [
+    ['🚀 DSH Status', '/dsh status'],
+    ['🌐 DSH Web UI', '/dsh web'],
     ['📸 Screenshot', '/screenshot'],
     ['🧠 Screen pe kya hai?', '/look screen pe kya hai'],
     ['🚀 Apps dikhao', '/apps'],
@@ -409,7 +427,7 @@
   // Every slash command already works through /api/chat; this is just another
   // view of it, so the owner never has to leave the screen to run /brief,
   // /usage, /watch … while looking at the PC.
-  const CONSOLE_CHIPS = ['/help', '/brief', '/usage', '/watch list', '/undo list', '/screenshot', '/status'];
+  const CONSOLE_CHIPS = ['/dsh status', '/dsh web', '/help', '/brief', '/usage', '/watch list', '/undo list', '/screenshot', '/status'];
 
   function cmdLine(kind, text, { images = [], documentName = '', documentPath = '' } = {}) {
     const box = $('#cmd-out');
@@ -584,6 +602,43 @@
       switchTab('chat');
       sendText(`/send ${p}`);
     });
+    if ($('#dsh-open-web')) $('#dsh-open-web').addEventListener('click', async () => {
+      const btn = $('#dsh-open-web');
+      btn.disabled = true;
+      btn.textContent = '⏳ Starting DSH Web UI…';
+      try {
+        const out = await api('/api/harness/web', { method: 'POST', body: { action: 'start' } });
+        const ws = out.web || {};
+        const parsed = new URL(ws.localUrl || 'http://127.0.0.1:3080/');
+        const tok = parsed.searchParams.get('token') || '';
+        let targetHref = ws.localUrl;
+        if (location.hostname.endsWith('.e2b.app') && ws.remotePort) {
+          targetHref = `${location.protocol}//${location.host.replace(/^\d+-/, `${ws.remotePort}-`)}/?token=${encodeURIComponent(tok)}`;
+        } else if (!['127.0.0.1', 'localhost'].includes(location.hostname) && ws.remotePort) {
+          targetHref = `${location.protocol}//${location.hostname}:${ws.remotePort}/?token=${encodeURIComponent(tok)}`;
+        }
+        window.open(targetHref, '_blank', 'noopener');
+        await refreshStatus();
+      } catch (err) {
+        alert(`Could not launch DeepSeek Harness Web UI: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🌐 Open Official DSH Web UI';
+      }
+    });
+    if ($('#dsh-toggle-auto')) $('#dsh-toggle-auto').addEventListener('click', async () => {
+      const s = await api('/api/status').catch(() => ({}));
+      const next = s.harness?.autoRoute ? 'off' : 'on';
+      switchTab('chat');
+      await sendText(`/dsh auto ${next}`);
+      await refreshStatus();
+    });
+    if ($('#dsh-install-btn')) $('#dsh-install-btn').addEventListener('click', async () => {
+      switchTab('chat');
+      await sendText('/dsh install');
+      await refreshStatus();
+    });
+
     $('#logout').addEventListener('click', () => {
       localStorage.removeItem(TOKEN_KEY);
       token = '';

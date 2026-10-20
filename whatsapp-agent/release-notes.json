@@ -1,4 +1,14 @@
 {
+  "2.9.0": {
+    "title": "DeepSeek Harness on Fedora Linux + Full WhatsApp Power 🚀",
+    "bullets": [
+      "Official `@deepseek-ai/dsh` Linux integration — bina official Desktop .rpm ke Fedora pe poora Web UI (`http://127.0.0.1:3080`), GNOME Desktop launcher, Phone/Tailscale Web UI (`:3081`), aur persistent `sdk` daemon ek saath!",
+      "`/dsh <task>` — poora DeepSeek Harness power WhatsApp pe: real Linux `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `subagent`, `skill`, `cron`, `lsp`, photo/PDF attachment vision + live trajectory progress + `/stop`!",
+      "`/dsh auto on` — ek command se aapka har WhatsApp message seedha full-power DeepSeek Harness primary brain pe chalta hai",
+      "Built-in `mcp-observer` MCP server — browser `dsh web` aur WhatsApp dono sessions ke paas live WhatsApp message/file/screenshot send, Fedora desktop OCR/screenshot, app/window control, aur shared memory tools!",
+      "Zero-sudo auto-setup: `/dsh install` ya `bash observer.sh harness setup` khud portable Node 22 LTS + `@deepseek-ai/dsh` + existing Groq / OpenRouter / Local GGUF / DeepSeek brains sync kar deta hai"
+    ]
+  },
   "2.8.2": {
     "title": "screenshot auto-delete — bhej diya, ab PC pe nahi pada",
     "bullets": [
