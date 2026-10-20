@@ -12,6 +12,11 @@
 > llama.cpp and wires the agent to it — no key, no cloud, works offline. Model
 > picks + exact `hf download` commands: [`whatsapp-agent/LOCAL-MODELS.md`](whatsapp-agent/LOCAL-MODELS.md).
 >
+> **2.4 = free cloud keys (optional):** `bash observer.sh keys groq gsk_...` — Groq free tier
+> (1,000 requests/day, tool calling, free voice notes, vision via Qwen3.8-27B) or
+> OpenRouter (Gemma 4 31B free) as a second brain. Limits + model table:
+> [`whatsapp-agent/AI-KEYS.md`](whatsapp-agent/AI-KEYS.md). Local stays the default.
+>
 > **2.1 fixes `/agent`:** it now actually performs the task (verified steps, real
 > tool calls) and says "step N pe ruk gaya" instead of pretending success — plus
 > **workload routing** (`/brains`): tiny jobs go to a small local model, heavy jobs

@@ -37,6 +37,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /brains — kaun sa model kab use hota hai (live health + power budget)
 • /model — brains ka setup/status (local + cloud)
 • 100% local chahiye? ./scripts/observer.sh models recommend — Hugging Face GGUF, koi cloud nahi
+• Cloud free brain (Groq/OpenRouter): ./scripts/observer.sh keys groq gsk_... — AI-KEYS.md
 
 *Apps & windows*
 • /apps · /open <app> · /close <app> · /windows · /focus <title>

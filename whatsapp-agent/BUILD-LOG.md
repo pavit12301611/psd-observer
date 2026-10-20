@@ -124,6 +124,41 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.4 — free cloud keys (Groq + OpenRouter), vision, `keys` command
+
+Owner: "how to add groq api in this code and if openrouter is also good for this work".
+
+**Jo mila (asli bug):** Groq/OpenRouter ka support 2.0 se code me tha
+(`GROQ_API_KEY`, `OPENROUTER_API_KEY`, router catalogue, `/model`), **lekin
+defaults purane the.** Groq ne **16 Aug 2026** ko Llama 3.1 8B aur 3.3 70B free
+tier se hata diya (enterprise-only), aur code unhi IDs pe tha — matlab nayi free
+key daalne pe har call 404/`model_decommissioned` hoti.
+
+**Fix + naye features:**
+
+| Cheez | Kahan |
+|---|---|
+| Groq defaults: `openai/gpt-oss-120b` (big), `openai/gpt-oss-20b` (small), `qwen/qwen3.8-27b` (vision) | `src/config.js`, `.env.example` |
+| OpenRouter default: `google/gemma-4-31b-it:free` (free, vision, tools, 262K) | `src/config.js`, `src/router.js` |
+| Groq/OpenRouter **vision** (OpenAI `image_url` data URL) | `src/ai.js` (`visionCall`) |
+| `GROQ_VISION_MODEL` / `OPENROUTER_VISION_MODEL`, `*_BASE_URL` overrides | `src/config.js` |
+| `observer.sh keys` — add/test/remove keys, masked, verifies + restarts | `scripts/observer.sh` |
+| Guide: limits, models, kaunsa lena chahiye | `AI-KEYS.md` |
+| Tests: defaults, chat, vision parts, failover, tool loop | `test/cloud.test.js` (12) |
+
+**Kyun Groq primary:** 1,000 requests/day per model, ~500 tok/sec, tool
+calling, free Whisper voice notes, aur ek hi free vision model.
+**OpenRouter:** 50/day (1,000 after one-time $10), 20+ free models — backup ke
+liye best, primary nahi.
+
+Verify:
+
+```bash
+./scripts/observer.sh keys            # kya set hai (masked)
+./scripts/observer.sh keys --test     # 200 = key sahi
+npm test                              # 90 pass
+```
+
 ---
 
 ## 0. Ek nazar me (timeline)
@@ -143,6 +178,7 @@ Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 | 11 | *2.1* | **`/agent` fix** (verified steps, no fake "done") + **workload routing** (`/brains`) | 69 | 61 |
 | 12 | *2.2* | **100% local**: Hugging Face GGUF + llama.cpp provider, `local-models.sh` (download/serve/wire/systemd) | 78 | 61 |
 | 13 | *2.3* | **Ek hi script**: `observer.sh` — install/update/models/doctor/service/start/relink/remote/fix; purane scripts wrappers | 78 | 61 |
+| 14 | *2.4* | **Free cloud keys**: Groq gpt-oss defaults (Llama free tier se gaya), OpenRouter Gemma 4, cloud vision, `observer.sh keys` | 90 | 61 |
 
 Verify karna ho (sab curl, git zero):
 
@@ -150,7 +186,7 @@ Verify karna ho (sab curl, git zero):
 cd ~/observer-agent
 ./scripts/observer.sh update --check      # local vs remote version
 ./scripts/observer.sh doctor              # kya theek hai, kya nahi
-npm test                                  # 78 pass
+npm test                                  # 89 pass
 npm run check                             # saari files ka syntax
 ```
 

@@ -4,6 +4,7 @@
 #   bash observer.sh install     first-time install (curl-only, no git needed)
 #   bash observer.sh update      update the code, keep .env / WhatsApp login / data
 #   bash observer.sh models …    local Hugging Face models (llama.cpp) — 100% offline
+#   bash observer.sh keys …      add Groq / OpenRouter / Gemini free API keys
 #   bash observer.sh doctor      what is broken and the exact fix
 #   bash observer.sh service …   systemd: install / restart / status / logs
 #   bash observer.sh start       run in the foreground
@@ -263,7 +264,7 @@ cmd_update() {
   say "Backing up the current code → $backup"
   ( cd "$dest" && tar -czf "$backup" \
       src webapp test scripts systemd package.json package-lock.json \
-      README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh \
+      README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md .env.example start.sh \
       docker-compose.yml Containerfile 2>/dev/null ) \
     || warn "backup was partial (some files don't exist yet) — continuing"
 
@@ -276,7 +277,7 @@ cmd_update() {
     rm -rf "$dest/$item"
     mv "$dest/$item.new" "$dest/$item"
   done
-  for file in package.json package-lock.json README.md QUICKSTART.md LOCAL-MODELS.md \
+  for file in package.json package-lock.json README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md \
               .env.example start.sh docker-compose.yml Containerfile; do
     [ -f "$src/$file" ] && cp -a "$src/$file" "$dest/$file"
   done
@@ -733,6 +734,159 @@ cmd_models() {
 #  DOCTOR
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  API KEYS — Groq / OpenRouter / Gemini (all optional, all free-tier)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+key_var() {
+  case "$1" in
+    groq)       echo GROQ_API_KEY ;;
+    openrouter) echo OPENROUTER_API_KEY ;;
+    gemini)     echo GEMINI_API_KEY ;;
+    *) return 1 ;;
+  esac
+}
+
+key_slug() {
+  case "$(printf '%s' "${1:-}" | tr 'A-Z' 'a-z')" in
+    groq|groq.com|api.groq.com)                 echo groq ;;
+    openrouter|or|openrouter.ai|open-router)    echo openrouter ;;
+    gemini|google|google-ai|aistudio|ai-studio) echo gemini ;;
+    *) return 1 ;;
+  esac
+}
+
+key_label() {
+  case "$1" in
+    groq) echo 'fast free tier · 1,000 req/day · also free voice notes' ;;
+    openrouter) echo 'wide free model menu · 50 req/day, 1,000 after a $10 top-up' ;;
+    gemini) echo 'free tier · vision + long context' ;;
+  esac
+}
+
+key_url() {
+  case "$1" in
+    groq) echo 'https://console.groq.com/keys' ;;
+    openrouter) echo 'https://openrouter.ai/keys' ;;
+    gemini) echo 'https://aistudio.google.com/apikey' ;;
+  esac
+}
+
+key_mask() {
+  local k="${1:-}"
+  [ -n "$k" ] || { printf '(not set)'; return 0; }
+  [ ${#k} -gt 10 ] || { printf '****'; return 0; }
+  printf '%s…%s' "${k:0:4}" "${k: -4}"
+}
+
+env_read() {  # env_read FILE KEY
+  [ -f "$1" ] || return 0
+  sed -n "s/^$2=//p" "$1" | tail -1
+}
+
+key_check() {  # key_check provider key → warns, never blocks saving
+  local provider="$1" key="$2" code=""
+  local groq_url="${GROQ_CHECK_URL:-https://api.groq.com/openai/v1/models}"
+  local or_url="${OPENROUTER_CHECK_URL:-https://openrouter.ai/api/v1/key}"
+  local gem_url="${GEMINI_CHECK_URL:-https://generativelanguage.googleapis.com/v1beta/models}"
+  case "$provider" in
+    groq)       code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+                       -H "Authorization: Bearer ${key}" "$groq_url" 2>/dev/null || true) ;;
+    openrouter) code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+                       -H "Authorization: Bearer ${key}" "$or_url" 2>/dev/null || true) ;;
+    gemini)     code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+                       "${gem_url}?key=${key}" 2>/dev/null || true) ;;
+  esac
+  [ -n "$code" ] || code=000
+  case "$code" in
+    200)     ok "$provider key verified" ;;
+    401|403) bad "$provider rejected this key (HTTP $code) — copy it again from $(key_url "$provider")"; return 1 ;;
+    000|'')  warn "could not reach $provider to verify (offline?) — key saved anyway" ;;
+    *)       warn "$provider answered HTTP $code — key saved; check the console if it still fails" ;;
+  esac
+  return 0
+}
+
+keys_list() {  # keys_list ENV [only-provider]
+  local env="$1" only="${2:-}" provider var val
+  say "API keys"
+  for provider in groq openrouter gemini; do
+    [ -z "$only" ] || [ "$only" = "$provider" ] || continue
+    var=$(key_var "$provider")
+    val=$(env_read "$env" "$var")
+    printf '   %-11s : %s\n' "$provider" "$(key_mask "$val")"
+    printf '   %-11s   %s\n' "" "$(key_label "$provider")"
+  done
+  info "file : $env$( [ -f "$env" ] || printf ' (not created yet)' )"
+  if [ -z "$(env_read "$env" GROQ_API_KEY)" ]; then
+    hint "Groq also transcribes voice notes for free — one key, two features"
+  fi
+  cat <<EOF
+
+   Add / replace : bash observer.sh keys groq gsk_xxxxxxxx
+                   bash observer.sh keys openrouter sk-or-v1-xxxx
+                   bash observer.sh keys gemini AIza...
+   Test saved    : bash observer.sh keys --test
+   Remove        : bash observer.sh keys --remove groq
+   Get a key     : Groq        $(key_url groq)
+                   OpenRouter  $(key_url openrouter)
+                   Gemini      $(key_url gemini)
+   Which one?    AI-KEYS.md (limits, models, vision, voice)
+EOF
+}
+
+keys_test() {  # keys_test ENV
+  local env="$1" provider var val found=0
+  say "Testing saved keys"
+  for provider in groq openrouter gemini; do
+    var=$(key_var "$provider"); val=$(env_read "$env" "$var")
+    if [ -z "$val" ]; then
+      info "$provider: not set"
+      continue
+    fi
+    found=1
+    key_check "$provider" "$val" || true
+  done
+  [ "$found" -eq 1 ] || info "no cloud keys saved — everything can run local instead"
+}
+
+cmd_keys() {
+  local dir; dir=$(find_install "") || die "no install found — bash observer.sh install"
+  local env="$dir/.env"
+
+  case "${1:-}" in
+    ""|list|status) keys_list "$env"; return 0 ;;
+    --test|test)    keys_test "$env"; return 0 ;;
+    --remove|remove|rm)
+      local victim; victim=$(key_slug "${2:-}") || die "usage: observer.sh keys --remove groq|openrouter|gemini"
+      [ -f "$env" ] || die "no .env yet at $env"
+      env_set "$env" "$(key_var "$victim")" ""
+      ok "$(key_var "$victim") cleared in $env"
+      restart_agent "$dir"
+      return 0 ;;
+    -*) die "keys: unknown option $1 — try: bash observer.sh keys" ;;
+  esac
+
+  local provider; provider=$(key_slug "$1") || die "keys: provider must be groq, openrouter or gemini"
+  local key="${2:-}"
+  if [ -z "$key" ]; then
+    keys_list "$env" "$provider"
+    return 0
+  fi
+
+  say "Saving $provider key"
+  if [ ! -f "$env" ]; then
+    if [ -f "$dir/.env.example" ]; then cp "$dir/.env.example" "$env"; else touch "$env"; fi
+    info "created $env from .env.example"
+  fi
+  env_set "$env" "$(key_var "$provider")" "$key"
+  ok "$(key_var "$provider") written to $env (masked: $(key_mask "$key"))"
+  key_check "$provider" "$key" || true
+  restart_agent "$dir"
+  info "WhatsApp pe /model bhejo — key dikhegi"
+  info "Agar service nahi hai: cd \"$dir\" && ./start.sh"
+}
+
 cmd_doctor() {
   local dir; dir=$(find_install "") || dir="$DEFAULT_DIR"
   local problems=0 warnings=0
@@ -909,6 +1063,10 @@ ${B}Setup${R}
   install --model auto        install + let it pick a model for this machine
   update [--dir PATH] [--check]
                               update the code (keeps .env, WhatsApp login, data)
+  keys                        which API keys are set (masked) + where to get them
+  keys groq <gsk_...>         add/replace a free Groq key (also: openrouter, gemini)
+  keys --test                 test every saved key
+  keys --remove groq          remove a key
   version                     local vs remote version
 
 ${B}100% local AI (Hugging Face GGUF, llama.cpp)${R}
@@ -934,6 +1092,7 @@ ${B}Run / repair${R}
 
 ${B}Examples${R}
   bash observer.sh install --service --power --phone
+  bash observer.sh keys groq gsk_xxxxxxxx        # free cloud brain (optional)
   bash observer.sh models recommend && bash observer.sh models setup best
   bash observer.sh update --check
 
@@ -948,6 +1107,7 @@ main() {
   case "$cmd" in
     install|setup)        cmd_install "$@" ;;
     update|upgrade)       cmd_update "$@" ;;
+    keys|key|api-key|api-keys) cmd_keys "$@" ;;
     models|model|local)   cmd_models "$@" ;;
     doctor|diag|check)    cmd_doctor "$@" ;;
     service|systemd)      cmd_service "$@" ;;

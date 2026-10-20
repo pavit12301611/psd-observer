@@ -88,6 +88,25 @@ Poora guide + exact `hf download` commands: [`LOCAL-MODELS.md`](LOCAL-MODELS.md)
 
 ---
 
+## 1c. Free cloud brain chahiye? (Groq / OpenRouter — optional)
+
+Local model nahi chal raha, ya phone se turant jawab chahiye? Ek free key kaafi hai:
+
+```bash
+./scripts/observer.sh keys groq gsk_xxxxxxxx        # console.groq.com/keys — 1,000 req/day
+./scripts/observer.sh keys openrouter sk-or-v1-xxx  # openrouter.ai/keys — 50/day free
+./scripts/observer.sh keys --test                   # key sahi hai?
+```
+
+- **Groq** = sabse fast + free voice notes + vision (`qwen/qwen3.8-27b`)
+- **OpenRouter** = sabse zyada free models, backup ke liye badhiya
+- Local phir bhi sabse private/unlimited — keys optional hain, `AI_PROVIDER=local`
+  se cloud poori tarah band.
+
+Limits, models aur kaunsa lena chahiye: [`AI-KEYS.md`](AI-KEYS.md)
+
+---
+
 ## 1c. Update karna (git ke bina) — baad me, jab code purana ho jaye
 
 > 2.1 me `/agent` fix hua hai (ab actually kaam karta hai, jhooth nahi bolta) aur

@@ -97,12 +97,27 @@ export function loadConfig({ dryRun = false } = {}) {
     ollamaUrl: (e.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
     ollamaModel: e.OLLAMA_MODEL || 'llama3.2',
     ollamaVisionModel: e.OLLAMA_VISION_MODEL || '',
+    // ── Cloud free tiers (optional, but nice: fast + vision) ───────────────
+    // Groq killed Llama 3.1 8B / 3.3 70B on the free tier on 16 Aug 2026 —
+    // they are enterprise-only now. The free catalogue is gpt-oss + Qwen3.8:
+    //   small : openai/gpt-oss-20b     (30 rpm · 1k/day · 8k TPM)
+    //   big   : openai/gpt-oss-120b    (30 rpm · 1k/day · 8k TPM)
+    //   vision: qwen/qwen3.8-27b       (only vision model on the free tier)
+    // Override any of them from .env (GROQ_MODEL, GROQ_MODEL_SMALL,
+    // GROQ_VISION_MODEL). Set GROQ_VISION_MODEL= (empty) to switch it off.
     groqApiKey: e.GROQ_API_KEY || '',
-    groqModel: e.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    groqModel: e.GROQ_MODEL || 'openai/gpt-oss-120b',
+    groqModelSmall: e.GROQ_MODEL_SMALL || 'openai/gpt-oss-20b',
+    groqVisionModel: e.GROQ_VISION_MODEL === undefined ? 'qwen/qwen3.8-27b' : e.GROQ_VISION_MODEL,
+    groqBaseUrl: (e.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
     geminiApiKey: e.GEMINI_API_KEY || '',
     geminiModel: e.GEMINI_MODEL || 'gemini-2.0-flash',
+    // OpenRouter free models. Gemma 4 31B is free, vision-capable and speaks
+    // tool calls (262K ctx); `openrouter/free` (their auto-router) also works.
     openrouterApiKey: e.OPENROUTER_API_KEY || '',
-    openrouterModel: e.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+    openrouterModel: e.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
+    openrouterVisionModel: e.OPENROUTER_VISION_MODEL || '',
+    openrouterBaseUrl: (e.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
 
     // ── workload routing (router.js) ───────────────────────────────────────
     // Optional extra sizes per provider. Empty = the main model covers them.
@@ -129,7 +144,6 @@ export function loadConfig({ dryRun = false } = {}) {
     localModelVision: e.LOCAL_MODEL_VISION || '',
     localApiKey: e.LOCAL_API_KEY || 'local',
     ollamaModelHeavy: e.OLLAMA_MODEL_HEAVY || '',
-    groqModelSmall: e.GROQ_MODEL_SMALL || 'llama-3.1-8b-instant',
     geminiModelHeavy: e.GEMINI_MODEL_HEAVY || '',
     // local (default) = free/private first · cloud = fastest cloud first ·
     // balanced = local for light work, cloud for heavy work.

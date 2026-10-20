@@ -1,4 +1,4 @@
-# 👁️ Observer Agent 2.3 — your PC, in your pocket
+# 👁️ Observer Agent 2.4 — your PC, in your pocket
 
 A personal agent that runs on **your own Fedora/Linux computer for ₹0** and is
 driven from **WhatsApp** *and* from an **installable phone app** — no Observer
@@ -7,7 +7,7 @@ app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 - 🧰 **One script, everything** — [`scripts/observer.sh`](scripts/observer.sh): `install`, `update`, `models`, `doctor`, `service`, `start`, `relink`, `remote`, `fix`. Plain `curl`, no git, nothing else to remember.
 - 💬 **Native WhatsApp** (linked device, [Baileys](https://github.com/WhiskeySockets/Baileys)) — agent number `+91 88595 55795`, listens **only** to you (`+91 95289 23866`), everyone else gets complete silence.
 - 📱 **Phone app (PWA)** — open `http://<PC-IP>:8787/`, enter the PIN, "Add to Home screen". Chat, quick controls, files, QR linking — full-screen, works offline as a shell.
-- 🧠 **Free AI with real tools** — run it **100% local** with a Hugging Face GGUF on llama.cpp (`./scripts/observer.sh models setup best`, no key, offline) or use Ollama / free-tier Groq/Gemini/OpenRouter. Plain language becomes multi-step actions on the PC, routed by workload.
+- 🧠 **Free AI with real tools** — run it **100% local** with a Hugging Face GGUF on llama.cpp (`./scripts/observer.sh models setup best`, no key, offline) or add a **free Groq / OpenRouter / Gemini key** (`./scripts/observer.sh keys groq gsk_...`) for a fast cloud brain + free voice notes + vision. Plain language becomes multi-step actions on the PC, routed by workload.
 - ⚡ **Offline intents** — even with **no AI at all**, "chrome kholo", "screenshot bhej do", "wifi off karo", "thesis.pdf dhundo" work instantly.
 - 🖥️ **Full PC control** — open *any* installed app, files, screenshots, OCR, typing/clicking, Wi-Fi/Bluetooth, volume/brightness/music, download links, zip, webcam, screen recording, services, processes, power.
 - 🎙️ **Voice notes & documents** — voice notes are transcribed (free), photos are OCR'd, PDFs/DOCX are read and summarised — then acted on like text.
@@ -273,8 +273,11 @@ ollama pull llama3.2          # ~2 GB, tool-calling capable
 ollama pull llava             # optional: describe photos
 ```
 
-- `/model` shows what is live. `AI_PROVIDER=auto` tries Ollama → Groq →
-  Gemini → OpenRouter (keys optional, free tiers).
+- `/model` shows what is live. `AI_PROVIDER=auto` tries local → Groq →
+  OpenRouter → Gemini (keys optional, free tiers).
+- **Cloud key in one line:** `./scripts/observer.sh keys groq gsk_...` —
+  writes `.env`, verifies the key, restarts the service. Limits, models and
+  which provider to pick: **[`AI-KEYS.md`](AI-KEYS.md).**
 - Without any brain, all built-in commands and Hinglish intents still work;
   only free-form conversation is limited.
 - `OLLAMA_VISION_MODEL=llava` describes photos. Without it, tesseract OCR still
@@ -332,6 +335,34 @@ unlinked the device — then `AUTO_RELINK=true` archives the dead login
 **Note:** the unit sets `NoNewPrivileges=true`, so `sudo` inside `/run` will
 not work. That is deliberate. If you need package installs from WhatsApp,
 enable shell **and** remove that line from the unit (your PC, your call).
+
+---
+
+## 7y. Free cloud brains — Groq + OpenRouter (optional)
+
+The agent is complete without any key, but a free key adds speed, vision and
+free voice-note transcription. Both providers below cost ₹0:
+
+```bash
+./scripts/observer.sh keys groq gsk_xxxxxxxx        # console.groq.com/keys
+./scripts/observer.sh keys openrouter sk-or-v1-xxx  # openrouter.ai/keys
+./scripts/observer.sh keys --test                   # verify what is saved
+```
+
+| | Groq | OpenRouter |
+|---|---|---|
+| Free quota | **1,000 req/day** per model (30 rpm) | **50/day** (1,000 after a one-time $10) |
+| Default models | `openai/gpt-oss-120b` · `openai/gpt-oss-20b` | `google/gemma-4-31b-it:free` |
+| Vision | `qwen/qwen3.8-27b` | Gemma 4 31B |
+| Voice notes | ✅ free Whisper | ❌ |
+| Best role | primary cloud brain | backup / specific models |
+
+> Llama 3.1 8B and 3.3 70B left Groq's free tier on **16 Aug 2026** — the
+> agent's defaults are `gpt-oss` now, so old `GROQ_MODEL=llama-3.3-70b`
+> values must be replaced.
+
+Full guide: **[`AI-KEYS.md`](AI-KEYS.md)** (get keys, limits, model table,
+`.env` lines, vision, troubleshooting).
 
 ---
 
@@ -480,9 +511,9 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 ## 10. Tests
 
 ```bash
-npm test     # 36 offline tests: owner gate, intents, actions, permissions,
+npm test     # 90 offline tests: owner gate, intents, actions, permissions,
              # confirmations, AI tool loop, HTTP API, PWA icons, black-frame
-             # detection, portal parsing, doctor
+             # detection, portal parsing, doctor, local llama.cpp, cloud failover
 npm run demo # dry-run: phone app + commands, no WhatsApp connection
 ```
 

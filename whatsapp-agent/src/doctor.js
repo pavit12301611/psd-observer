@@ -213,7 +213,7 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
       icon: '⚠️',
       title: 'AI brain',
       detail: 'No local model server, no Ollama and no free API key — built-in commands and Hinglish intents still work, but free-form chat and multi-step tasks do not.',
-      fix: './scripts/observer.sh models recommend   (downloads a Hugging Face GGUF + wires it up, fully offline after that)',
+      fix: './scripts/observer.sh models recommend   (downloads a Hugging Face GGUF + wires it up, fully offline after that)   ·   ya free cloud key: ./scripts/observer.sh keys groq <gsk_...>   (AI-KEYS.md)',
     });
   }
 

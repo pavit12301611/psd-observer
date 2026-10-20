@@ -77,8 +77,9 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 |---|---|
 | `whatsapp-agent/src/actions.js` | **One registry of 61 PC actions** with permission levels + destructive confirmations. Used by commands, offline intents and the AI. |
 | `whatsapp-agent/src/nlp.js` | Offline intent parser — “chrome kholo”, “wifi off karo”, “thesis.pdf dhundo” work with **no AI installed**. |
-| `whatsapp-agent/scripts/observer.sh` | **The one script**: `install` / `update` / `models` / `doctor` / `service` / `start` / `relink` / `remote` / `fix` / `version`. Plain curl, no git. |
+| `whatsapp-agent/scripts/observer.sh` | **The one script**: `install` / `update` / `keys` / `models` / `doctor` / `service` / `start` / `relink` / `remote` / `fix` / `version`. Plain curl, no git. |
 | `whatsapp-agent/scripts/local-models.sh` | Compatibility wrapper → `observer.sh models` (Hugging Face GGUF download + `llama-server` + `.env` wiring + systemd). |
+| `whatsapp-agent/AI-KEYS.md` | Free cloud keys (Groq / OpenRouter / Gemini): limits, model IDs, `.env` lines, vision + voice, which one to pick. |
 | `whatsapp-agent/LOCAL-MODELS.md` | Local model guide: hardware tiers, HF links, `hf download` commands, quants. |
 | `whatsapp-agent/src/router.js` | **Workload routing**: sizes each task (tiny→heavy), picks the cheapest capable free model, cooldowns failing brains, hourly power budget. |
 | `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step, routed + escalating. |

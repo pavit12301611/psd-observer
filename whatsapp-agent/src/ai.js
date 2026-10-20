@@ -44,6 +44,18 @@ function systemPrompt(config, store) {
 
 // ── one call to one specific model ───────────────────────────────────────────
 
+// Groq and OpenRouter both speak the OpenAI REST shape; only base URL + key
+// differ. Base URLs are configurable so a proxy (or a test fixture) can be used.
+function cloudEndpoint(model, config) {
+  if (model.provider === 'groq') {
+    return { url: config.groqBaseUrl || 'https://api.groq.com/openai/v1', key: config.groqApiKey };
+  }
+  if (model.provider === 'openrouter') {
+    return { url: config.openrouterBaseUrl || 'https://openrouter.ai/api/v1', key: config.openrouterApiKey };
+  }
+  return null;
+}
+
 async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
   if (model.provider === 'ollama') {
     const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
@@ -83,9 +95,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
     if (!text) throw new Error('empty Gemini response');
     return { text, provider: model.label, model: model.model };
   }
-  const endpoint = model.provider === 'groq'
-    ? { url: 'https://api.groq.com/openai/v1', key: config.groqApiKey }
-    : { url: 'https://openrouter.ai/api/v1', key: config.openrouterApiKey };
+  const endpoint = cloudEndpoint(model, config);
   const data = await postJson(`${endpoint.url}/chat/completions`, {
     model: model.model,
     messages,
@@ -184,12 +194,31 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
     );
     return data.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('').trim() || null;
   }
-  return null; // groq/openrouter vision models are not enabled by default
+  const cloud = cloudEndpoint(model, config);
+  if (cloud) {
+    // qwen/qwen3.8-27b (Groq) and google/gemma-4-31b-it:free (OpenRouter) both
+    // take OpenAI-style image parts. Data URLs avoid any public exposure.
+    const data = await postJson(`${cloud.url}/chat/completions`, {
+      model: model.model,
+      temperature: 0.2,
+      stream: false,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
+        ],
+      }],
+    }, { authorization: `Bearer ${cloud.key}` });
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  }
+  return null;
 }
 
 /**
  * Describe a photo the owner sent. Local vision model first (private), then
- * Gemini if a key is set. Returns null when nothing can see images.
+ * Gemini, then Groq's qwen3.8-27b, then an OpenRouter vision model — whichever
+ * is configured. Returns null when nothing can see images.
  */
 export async function describeImage(config, imageBase64, caption = '', log = console) {
   const router = routerFor(config, log);
@@ -285,9 +314,13 @@ export async function aiStatus(config) {
   }
 
   if (!localOnly) {
-    lines.push(config.groqApiKey ? '✅ Groq free-tier key set' : '— Groq key not set (optional)');
-    lines.push(config.geminiApiKey ? '✅ Gemini free-tier key set' : '— Gemini key not set (optional)');
-    lines.push(config.openrouterApiKey ? '✅ OpenRouter key set' : '— OpenRouter key not set (optional)');
+    lines.push(config.groqApiKey
+      ? `✅ Groq key set — ${config.groqModel} · small ${config.groqModelSmall}${config.groqVisionModel ? ` · vision ${config.groqVisionModel}` : ''}`
+      : '— Groq key not set (optional: fast free tier + free voice transcription)');
+    lines.push(config.geminiApiKey ? '✅ Gemini key set' : '— Gemini key not set (optional)');
+    lines.push(config.openrouterApiKey
+      ? `✅ OpenRouter key set — ${config.openrouterModel}${config.openrouterVisionModel ? ` · vision ${config.openrouterVisionModel}` : ''}`
+      : '— OpenRouter key not set (optional: widest free model menu)');
   }
   if (config.ollamaVisionModel && !localOnly) lines.push(`👁️ Ollama vision model: ${config.ollamaVisionModel}`);
 

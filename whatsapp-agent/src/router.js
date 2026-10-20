@@ -24,6 +24,12 @@ export const RANK_TIER = { 1: 'tiny', 2: 'light', 3: 'standard', 4: 'heavy' };
 
 const clampRank = (n) => Math.max(1, Math.min(4, Math.round(Number(n) || 0)));
 
+// Cloud model IDs that can read images. We cannot probe a provider's
+// capabilities without spending a request, so a conservative name check +
+// explicit *_VISION_MODEL overrides keep routing honest.
+const VISION_MODEL_RE = /(vision|\bvl\b|-vl|llava|pixtral|omni|gemma-4|gemma4|qwen3\.[5-9]|llama-4|gpt-4o)/i;
+const looksVisionModel = (id) => VISION_MODEL_RE.test(String(id ?? ''));
+
 const words = (text) => String(text ?? '').trim().split(/\s+/).filter(Boolean);
 
 // Verbs that mean "actually do something on the PC", not "chat".
@@ -265,17 +271,27 @@ export function buildCatalog(config = {}) {
   }
 
   // ── Groq free tier: very fast, generous but rate-limited ─────────────────
+  // Free catalogue since Aug 2026: gpt-oss-20b (small), gpt-oss-120b (big),
+  // qwen3.8-27b (the only vision model). Llama 3.1/3.3 are enterprise-only.
   if (config.groqApiKey) {
+    const small = config.groqModelSmall || 'openai/gpt-oss-20b';
+    const big = config.groqModel || 'openai/gpt-oss-120b';
+    const vision = config.groqVisionModel === undefined ? 'qwen/qwen3.8-27b' : (config.groqVisionModel || '');
+    const sees = (id) => Boolean(vision) && vision === id;
     add({
-      provider: 'groq', model: config.groqModelSmall || 'llama-3.1-8b-instant',
-      label: `Groq (free) · ${config.groqModelSmall || 'llama-3.1-8b-instant'}`,
-      minTier: 1, maxTier: 2, speed: 6, tools: true, cost: 1, quality: 4,
+      provider: 'groq', model: small, label: `Groq (free) · ${small}`,
+      minTier: 1, maxTier: 2, speed: 6, tools: true, vision: sees(small), cost: 1, quality: 4,
     });
     add({
-      provider: 'groq', model: config.groqModel || 'llama-3.3-70b-versatile',
-      label: `Groq (free) · ${config.groqModel || 'llama-3.3-70b-versatile'}`,
-      minTier: 3, maxTier: 4, speed: 5, tools: true, cost: 1, quality: inferQuality(config.groqModel || 'llama-3.3-70b-versatile', 8),
+      provider: 'groq', model: big, label: `Groq (free) · ${big}`,
+      minTier: 3, maxTier: 4, speed: 5, tools: true, vision: sees(big), cost: 1, quality: inferQuality(big, 9),
     });
+    if (vision && vision !== small && vision !== big) {
+      add({
+        provider: 'groq', model: vision, label: `Groq vision · ${vision}`,
+        minTier: 2, maxTier: 3, speed: 5, tools: true, vision: true, cost: 1, quality: inferQuality(vision, 9),
+      });
+    }
   }
 
   // ── Gemini free tier: good long context + vision ─────────────────────────
@@ -294,13 +310,21 @@ export function buildCatalog(config = {}) {
     }
   }
 
-  // ── OpenRouter free models: handy fallback, sometimes busy ───────────────
+  // ── OpenRouter free models: wide menu, handy fallback, sometimes busy ────
   if (config.openrouterApiKey) {
+    const main = config.openrouterModel || 'google/gemma-4-31b-it:free';
+    const vision = config.openrouterVisionModel || '';
+    const sees = vision ? vision === main : looksVisionModel(main);
     add({
-      provider: 'openrouter', model: config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free',
-      label: `OpenRouter (free) · ${config.openrouterModel || 'meta-llama/llama-3.3-70b-instruct:free'}`,
-      minTier: 3, maxTier: 4, speed: 3, tools: true, cost: 1, quality: inferQuality(config.openrouterModel || 'llama-3.3-70b', 8),
+      provider: 'openrouter', model: main, label: `OpenRouter (free) · ${main}`,
+      minTier: 3, maxTier: 4, speed: 3, tools: true, vision: sees, cost: 1, quality: inferQuality(main, 8),
     });
+    if (vision && vision !== main) {
+      add({
+        provider: 'openrouter', model: vision, label: `OpenRouter vision · ${vision}`,
+        minTier: 2, maxTier: 3, speed: 3, tools: true, vision: true, cost: 1, quality: inferQuality(vision, 8),
+      });
+    }
   }
 
   return models;

@@ -144,8 +144,8 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
 
   function openAiAdapter(model, selectedTools) {
     const base = {
-      groq: { url: 'https://api.groq.com/openai/v1', key: config.groqApiKey },
-      openrouter: { url: 'https://openrouter.ai/api/v1', key: config.openrouterApiKey },
+      groq: { url: config.groqBaseUrl || 'https://api.groq.com/openai/v1', key: config.groqApiKey },
+      openrouter: { url: config.openrouterBaseUrl || 'https://openrouter.ai/api/v1', key: config.openrouterApiKey },
       // Local llama.cpp / LM Studio / vLLM: no account, no quota, no network.
       local: { url: model.baseUrl, key: model.apiKey || config.localApiKey || 'local' },
     }[model.provider];
