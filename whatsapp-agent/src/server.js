@@ -32,7 +32,7 @@ import * as files from './files.js';
 import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.5.2';
+const VERSION = '2.5.3';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -96,7 +96,10 @@ function safeEqual(a, b) {
 export function createBridgeServer({ config, store, whatsapp, mailbox, actions, runOwner, log = console }) {
   const authed = (req, url) => {
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-    return req.headers['x-bridge-token'] === config.bridgeToken || bearer === config.bridgeToken || url.searchParams.get('t') === config.bridgeToken;
+    // Constant-time: a plain === leaks the token a byte at a time to anything
+    // that can time requests on the LAN.
+    return [req.headers['x-bridge-token'], bearer, url.searchParams.get('t')]
+      .some((candidate) => candidate != null && safeEqual(candidate, config.bridgeToken));
   };
 
   const loginAttempts = new Map(); // ip → {count, resetAt}

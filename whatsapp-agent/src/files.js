@@ -19,6 +19,22 @@ const MAX_READ = 200 * 1024;
 const MAX_SEND = 64 * 1024 * 1024; // WhatsApp document limit
 
 const BLOCKED = ['.ssh', '.gnupg', 'auth_info', path.join('.local', 'share', 'keyrings'), path.join('.config', 'evolution')];
+
+/**
+ * Is this path inside a protected folder? Used for reads *and* writes — an
+ * appending write to ~/.ssh/authorized_keys or ~/.bashrc is just as dangerous
+ * as reading a key, so the check cannot live only in the mustExist branch.
+ */
+function isBlocked(real, roots) {
+  for (const root of roots) {
+    const rel = path.relative(root, real);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    const segments = rel.split(path.sep);
+    if (segments.includes('auth_info')) return true;
+    if (BLOCKED.some((b) => rel === b || rel.startsWith(b + path.sep))) return true;
+  }
+  return false;
+}
 const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__', '.local', 'venv', '.venv', 'target', 'dist', 'build']);
 
 export function humanSize(bytes) {
@@ -94,8 +110,7 @@ export function resolvePath(input, { extraRoots = [], mustExist = false } = {}) 
     let real;
     try { real = fs.realpathSync(absolute); } catch { return { ok: false, reason: `"${input}" doesn't exist.` }; }
     if (!inside(real, roots)) return { ok: false, reason: `"${input}" is outside the allowed folders (your home${extraRoots.length ? ' + configured roots' : ''}).` };
-    const rel = path.relative(roots[0], real);
-    if (BLOCKED.some((b) => rel === b || rel.startsWith(b + path.sep) || rel.split(path.sep).includes('auth_info'))) {
+    if (isBlocked(real, roots)) {
       return { ok: false, reason: 'That folder is blocked on purpose (passwords / WhatsApp login live there).' };
     }
     return { ok: true, path: real };
@@ -107,6 +122,11 @@ export function resolvePath(input, { extraRoots = [], mustExist = false } = {}) 
   let parentReal;
   try { parentReal = fs.realpathSync(parent); } catch { return { ok: false, reason: 'that path is not usable' }; }
   if (!inside(parentReal, roots)) return { ok: false, reason: `"${input}" is outside the allowed folders (your home${extraRoots.length ? ' + configured roots' : ''}).` };
+  // New files/folders get the same protection: writing ~/.ssh/authorized_keys,
+  // ~/.bashrc or the WhatsApp creds is a real attack path, not a read-only one.
+  if (isBlocked(absolute, roots) || isBlocked(parentReal, roots)) {
+    return { ok: false, reason: 'That folder is blocked on purpose (passwords / WhatsApp login live there).' };
+  }
   return { ok: true, path: absolute };
 }
 

@@ -174,7 +174,10 @@ test('files: home-only, secrets blocked, read/write/list/search/send', async () 
 
     assert.equal(files.resolvePath('/etc/passwd', { mustExist: true }).ok, false);
     assert.equal(files.resolvePath('~/../../etc/passwd', { mustExist: true }).ok, false);
-    assert.equal(files.resolvePath(path.join(os.homedir(), '.ssh', 'id_ed25519'), { mustExist: false }).ok, true); // resolves, blocked only when existing
+    // Protected folders are off-limits for NEW files too — writing
+    // ~/.ssh/authorized_keys is as dangerous as reading a private key.
+    assert.equal(files.resolvePath(path.join(os.homedir(), '.ssh', 'id_ed25519'), { mustExist: false }).ok, false);
+    assert.equal(files.resolvePath(path.join(os.homedir(), '.ssh', 'authorized_keys'), { mustExist: false }).ok, false);
     fs.mkdirSync(path.join(dir, '.ssh'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.ssh', 'id_rsa'), 'secret');
     // only the real home .ssh is blocked by relative path; ensure no crash on odd paths
