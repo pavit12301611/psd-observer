@@ -33,6 +33,9 @@ DEFAULT_DIR="${DEFAULT_DIR:-$HOME/observer-agent}"
 SERVICE="observer-whatsapp-agent"
 MODEL_SERVICE="observer-model"
 SELF_URL="${RAW}/whatsapp-agent/scripts/observer.sh"
+# Where this file lives — if it sits inside an install (<dir>/scripts/), that
+# install wins over anything else we might discover.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 # ── pretty output ────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -106,6 +109,11 @@ find_install() {
   if [ -n "$target" ]; then
     ( cd "$target" 2>/dev/null && pwd ) || return 1
     return 0
+  fi
+  if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/../package.json" ] \
+     && [ -d "$SELF_DIR/../src" ] \
+     && grep -q 'observer-whatsapp-agent' "$SELF_DIR/../package.json" 2>/dev/null; then
+    ( cd "$SELF_DIR/.." && pwd ); return 0
   fi
   if [ -f "./package.json" ] && [ -d "./src" ] && grep -q 'observer-whatsapp-agent' ./package.json 2>/dev/null; then
     pwd; return 0
