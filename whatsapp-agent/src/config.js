@@ -104,6 +104,35 @@ export function loadConfig({ dryRun = false } = {}) {
     openrouterApiKey: e.OPENROUTER_API_KEY || '',
     openrouterModel: e.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
 
+    // ── workload routing (router.js) ───────────────────────────────────────
+    // Optional extra sizes per provider. Empty = the main model covers them.
+    // Local small model for one-liners (fast + light on the CPU):
+    //   OLLAMA_MODEL_SMALL=llama3.2:1b
+    //   OLLAMA_MODEL_HEAVY=qwen2.5:14b
+    ollamaModelSmall: e.OLLAMA_MODEL_SMALL || '',
+    ollamaModelHeavy: e.OLLAMA_MODEL_HEAVY || '',
+    groqModelSmall: e.GROQ_MODEL_SMALL || 'llama-3.1-8b-instant',
+    geminiModelHeavy: e.GEMINI_MODEL_HEAVY || '',
+    // local (default) = free/private first · cloud = fastest cloud first ·
+    // balanced = local for light work, cloud for heavy work.
+    routerPrefer: (e.ROUTER_PREFER || 'local').toLowerCase(),
+    // A failing brain is skipped for this long, doubling on each repeat
+    // failure (cap = MODEL_COOLDOWN_MAX_MS) so WhatsApp never waits for it.
+    modelCooldownMs: int(e.MODEL_COOLDOWN_MS, 120_000),
+    modelCooldownMaxMs: int(e.MODEL_COOLDOWN_MAX_MS, 1_800_000),
+    // Power budget: how many "heavy" (big-model) calls are allowed per hour.
+    maxHeavyPerHour: int(e.MAX_HEAVY_PER_HOUR, 12),
+    heavyWindowMs: int(e.HEAVY_WINDOW_MS, 3_600_000),
+    aiTimeoutMs: int(e.AI_TIMEOUT_MS, 60_000),
+
+    // Automation safety: older builds clicked hard-coded screen coordinates
+    // when OCR missed a button. Off by default — blind clicking can hit
+    // anything. Turn on only if you know your screen layout.
+    allowBlindClicks: bool(e.ALLOW_BLIND_CLICKS, false),
+    // Show "🧠 standard · llama3.2 · 3 steps" under AI replies. Off by default
+    // for normal chat; /agent always shows it (so "done" is provable).
+    showRoutingFooter: bool(e.SHOW_ROUTING_FOOTER, false),
+
     forwardToObserver: bool(e.FORWARD_TO_OBSERVER, false),
     observerWaitMs: int(e.OBSERVER_WAIT_MS, 90_000),
 
@@ -186,6 +215,12 @@ export function loadConfig({ dryRun = false } = {}) {
   }
   if (config.allowShell && !config.shellPin) problems.push('ALLOW_SHELL=true but SHELL_PIN is empty. Set a PIN or turn ALLOW_SHELL off.');
   if (!['safe', 'standard', 'full'].includes(config.accessLevel)) problems.push(`ACCESS_LEVEL must be safe, standard or full (got "${config.accessLevel}").`);
+  if (!['auto', 'local', 'ollama', 'groq', 'gemini', 'openrouter', 'none'].includes(config.aiProvider)) {
+    problems.push(`AI_PROVIDER must be auto, local, ollama, groq, gemini, openrouter or none (got "${config.aiProvider}").`);
+  }
+  if (!['local', 'cloud', 'balanced'].includes(config.routerPrefer)) {
+    problems.push(`ROUTER_PREFER must be local, cloud or balanced (got "${config.routerPrefer}").`);
+  }
   if (problems.length) {
     throw new Error(`Configuration problem(s):\n  - ${problems.join('\n  - ')}`);
   }

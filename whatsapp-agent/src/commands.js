@@ -21,6 +21,7 @@ import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
+import { routerFor, looksLikeWebTask } from './router.js';
 import { parseIntent } from './nlp.js';
 import { runDoctor } from './doctor.js';
 
@@ -32,8 +33,9 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • “chrome kholo” · “screenshot bhej do” · “awaaz kam karo”
 • “wifi off karo” · “screen pe kya hai” · “thesis.pdf dhundo”
 • “download <link>” · “10 second screen record karo” · “type karo hello”
-• /agent <task> — multi-step task handled by the free AI
-• /model — see which free brain is connected
+• /agent <task> — samajhta hai aur PC pe *karke* dikhata hai (verified, no fake "done")
+• /brains — kaun sa free model kab use hota hai (live health + power budget)
+• /model — free brains ka setup/status
 
 *Apps & windows*
 • /apps · /open <app> · /close <app> · /windows · /focus <title>
@@ -54,7 +56,8 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>
 • /cron add every 10m <text> · /cron add roz 9 baje <text> · /cron list|del
 • /voicereply <text> — free offline voice note (only on this command)
-• /auto <task> — one-command UI autopilot: open agent | tap battle | tap agent | type hello | key enter | screenshot
+• /auto <task> — UI autopilot (verified): open chrome | tap Search | type hello | key enter | screenshot
+• /arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
@@ -71,6 +74,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
   const tz = config.timezone;
   const actions = createActions({ config, store, log });
   const agentLoop = createAgentLoop({ config, store, actions, log });
+  const router = routerFor(config, log);
 
   /** Execute an action and shape it into a WhatsApp reply object. */
   function toReply(result) {
@@ -519,6 +523,176 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return out;
   }
 
+  // ── AI routing helpers (which brain, and prove it) ───────────────────────
+
+  const shortModel = (label) => String(label ?? '').split(' · ').slice(-1)[0] || 'AI';
+
+  /** "🧠 standard · llama3.2 · 3 steps · 1.4s" — proof of what ran. */
+  function routeLine(meta, { force = false } = {}) {
+    if (!meta?.model) return '';
+    if (!force && !config.showRoutingFooter) return '';
+    const bits = [`🧠 ${meta.tier ?? '?'}`, shortModel(meta.model)];
+    if (meta.toolCalls) bits.push(`${meta.toolCalls} tools`);
+    if (meta.steps) bits.push(`${meta.steps} steps`);
+    if (meta.ms) bits.push(meta.ms < 1000 ? `${Math.round(meta.ms)}ms` : `${(meta.ms / 1000).toFixed(1)}s`);
+    return `\n\n_${bits.join(' · ')}_`;
+  }
+
+  function withRoute(reply, meta, { force = false } = {}) {
+    const line = routeLine(meta, { force });
+    if (!line) return reply;
+    if (typeof reply === 'string') return reply + line;
+    if (reply && typeof reply === 'object') return { ...reply, text: `${reply.text ?? ''}${line}`.trim() };
+    return reply;
+  }
+
+  function planPreview(text, plan) {
+    return [
+      `🗺️ *Plan preview* — "${String(text).slice(0, 90)}"`,
+      `Work size: *${plan.tier}* — ${plan.complexity.reasons.join(', ') || 'simple ask'}`,
+      `Steps allowed: ${plan.maxSteps} · tools offered: ${plan.toolLimit}`,
+      `Needs: ${[plan.needsTools ? 'PC tools' : 'chat only', plan.needsVision ? 'vision' : null].filter(Boolean).join(' + ')}`,
+      '',
+      '*Brain order (first healthy wins):*',
+      ...(plan.candidates.length
+        ? plan.candidates.slice(0, 4).map((m, i) => `${i + 1}. ${m.label}`)
+        : ['❌ none available — see /brains']),
+      ...(plan.notes.length ? ['', `_Note: ${plan.notes.join(' · ')}_`] : []),
+      '',
+      '_Bhejo bina `--plan` ke — tab actually chalega._',
+    ].join('\n');
+  }
+
+  function noBrainReply() {
+    const catalog = String(config.aiProvider) === 'none' ? [] : router.catalog;
+    if (!catalog.length) {
+      return [
+        '🤖 *Koi free AI brain configured nahi hai* — isliye /agent kuch nahi kar sakta, aur jhooth bhi nahi bolega.',
+        '',
+        '*Free me chalu karo (ek hi baar):*',
+        '`sudo dnf install ollama && sudo systemctl enable --now ollama && ollama pull llama3.2`',
+        'ya WhatsApp-agent/.env me free key: GROQ_API_KEY / GEMINI_API_KEY',
+        '',
+        'Tab tak ye sab bina AI chalte hain:',
+        '/open chrome · /screenshot · /look · /ls · /send · /wifi · /pc type hello · /auto …',
+      ].join('\n');
+    }
+    return [
+      '⚠️ *Kaam nahi ho paaya — kuch bhi nahi kiya.*',
+      '',
+      'Sab configured brains fail / cooldown me hain. Dekho:',
+      '• /brains — kaun live hai, kaun cooling me',
+      '• /doctor — PC side problem',
+      '• /brains why <task> — kaunsa model chuna jaata',
+    ].join('\n');
+  }
+
+  // ── /agent: understand the task, DO it, verify, then report honestly ─────
+
+  const AGENT_USAGE = [
+    '🤖 *Usage:* `/agent <task>`',
+    '',
+    'Ye task ko samajh ke PC pe *actually karta hai* — apps, files, screen, typing, downloads — ',
+    'har step verify karta hai, aur jo hua bas wahi batata hai (fake "done" nahi).',
+    '',
+    '*Examples:*',
+    '• /agent download folder saaf karo aur screenshot bhejo',
+    '• /agent ~/notes.txt padh ke summary bhejo',
+    '• /agent chrome kholo aur github pe psd-observer search karo',
+    '• /agent chatgpt pe rust vs go pooch        ← browser task',
+    '• /agent --web youtube pe lofi play karo   ← force browser',
+    '• /agent --plan <task>                     ← pehle plan dekho',
+    '• /agent --fast <task>                     ← chhota model, power bachao',
+    '',
+    '_Sirf chat chahiye to seedha message bhejo — /agent ki zaroorat nahi._',
+  ].join('\n');
+
+  function parseAgentFlags(raw) {
+    let text = String(raw ?? '').trim();
+    const flags = { web: false, plan: false, deep: false, fast: false };
+    for (let i = 0; i < 6; i++) {
+      const m = text.match(/^--(web|browser|online|plan|deep|heavy|fast|quick)\s+/i);
+      if (!m) break;
+      const key = m[1].toLowerCase();
+      if (key === 'browser' || key === 'online') flags.web = true;
+      else if (key === 'heavy' || key === 'deep') flags.deep = true;
+      else if (key === 'quick') flags.fast = true;
+      else flags[key] = true;
+      text = text.slice(m[0].length).trim();
+    }
+    return { text, flags };
+  }
+
+  function forceTierFrom(flags) {
+    if (flags.deep) return 'heavy';
+    if (flags.fast) return 'light';
+    return undefined;
+  }
+
+  async function runWebTask(text, label = 'Agent') {
+    const steps = autopilot.buildWebSteps(text);
+    if (!steps.length) return null;
+    log.info?.(`[agent] browser task: ${steps.map((s) => s.op).join(' → ')}`);
+    const result = await autopilot.executeSteps(steps, { config, log, label });
+    if (!result || typeof result === 'string') return result;
+    return {
+      ...result,
+      text: `${result.text}\n\n_🌐 browser · xdg-open + OCR (no AI guesswork)_`,
+    };
+  }
+
+  async function runArenaPrompt(prompt) {
+    if (!prompt) return '🌐 Usage: /arena <prompt> — arena.ai/agent kholke prompt poochta hai';
+    return autopilot.executeSteps([
+      { op: 'open', target: 'https://arena.ai/agent' },
+      { op: 'type', text: prompt, submit: true },
+      { op: 'wait', ms: 8_000 },
+      { op: 'look', question: prompt },
+      { op: 'screenshot' },
+    ], { config, log, label: 'Arena' });
+  }
+
+  async function runAgentTask(raw, ctx) {
+    if (!raw || !String(raw).trim()) return AGENT_USAGE;
+    const { text, flags } = parseAgentFlags(raw);
+    if (!text) return AGENT_USAGE;
+
+    const plan = agentLoop.buildPlan(text, { needsTools: true, forceTier: forceTierFrom(flags) });
+    if (flags.plan) return planPreview(text, plan);
+
+    // A task that clearly belongs on a website → real browser automation
+    // (verified open, no typing into the wrong window).
+    const webTask = flags.web || looksLikeWebTask(text);
+    if (webTask) {
+      const result = await runWebTask(text);
+      if (result) return result;
+      if (flags.web) {
+        return '🌐 Koi site samajh nahi aayi. Example: `/agent --web chatgpt pe rust vs go pooch`\n' +
+          'Taaki main jaanta hoon: chatgpt, gemini, claude, google, youtube, github, wikipedia…';
+      }
+    }
+
+    if (!agentLoop.enabled) return noBrainReply();
+
+    const reply = await agentLoop.run(text, ctx, { forceTier: forceTierFrom(flags), nudge: true });
+    if (reply != null) return withRoute(reply, agentLoop.lastRun, { force: true });
+
+    const meta = agentLoop.lastRun ?? {};
+    if (!router.catalog.length) return noBrainReply();
+    return [
+      '⚠️ *Kaam nahi ho paaya — kuch bhi nahi kiya.*',
+      `_Reason: ${meta.reason || 'brain ne koi usable jawab nahi diya'}_`,
+      '',
+      `Work size: ${meta.tier ?? plan.tier} · tried: ${plan.candidates.slice(0, 2).map((m) => shortModel(m.label)).join(' → ') || 'none'}`,
+      '',
+      'Ye try karo:',
+      '• /brains — live health + power budget',
+      '• /brains why ' + text.slice(0, 40) + ' — routing dekho',
+      '• /doctor — PC side problem',
+      '• Direct chhote commands: /screenshot · /open chrome · /ls · /pc type hello',
+    ].join('\n');
+  }
+
   // ── router ───────────────────────────────────────────────────────────────
 
   async function handleCommand(cmd, args, ctx) {
@@ -715,18 +889,21 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'rm': case 'delete': return args ? act('delete_path', { path: args }) : '🗑️ Usage: /rm <path>  (asks for confirmation)';
 
       // ── agent + confirmations ───────────────────────────────────────────
-      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open agent | tap battle | tap agent | type how to use ai | key enter | screenshot\nAlso natural: /auto open agent and click battle then select agent and ask how to use ai';
-      case 'agent': {
-        // Arena Agent Mode shortcut: /agent <prompt> directly opens arena.ai/agent then types.
-        if (!args) return '🤖 Usage: /agent <prompt> — e.g. /agent how to use ai\nI will: open arena.ai/agent → type your prompt → enter → screenshot';
-        const prompt = String(args).trim();
-        if (prompt.includes('|') || /^(open|tap|click|type|key|wait|screenshot|ss)\b/i.test(prompt)) {
-          return autopilot.runAutopilot(prompt, { config, log });
+      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open chrome | tap Search | type hello | key enter | screenshot\nNatural: /auto open chrome and search for today weather then screenshot\nHar step verify hota hai — jo fail hua wahi batata hai.';
+      case 'agent': return runAgentTask(args, ctx);
+      case 'arena': return runArenaPrompt(args);
+      case 'brains': case 'models': case 'router': {
+        if (args && /^(why|explain|route)\b/i.test(args)) {
+          return router.explainText(args.replace(/^(why|explain|route)\s+/i, '').trim() || 'hello');
         }
-        const task = `open agent | type ${prompt} | key enter | wait 6 | screenshot`;
-        return autopilot.runAutopilot(task, { config, log });
+        return router.statusText();
       }
-      case 'do': return args ? (await agentLoop.run(args, ctx)) ?? '🤖 No free AI brain is reachable for multi-step tasks. Use the direct commands (/open, /pc, /ls, /wifi…) or install Ollama (/model).' : '🤖 Usage: /do <task in plain language>';
+      case 'do': {
+        if (!args) return '🤖 Usage: /do <task in plain language> — same as /agent but quieter about routing.';
+        const reply = await agentLoop.run(args, ctx, { nudge: true });
+        if (reply != null) return withRoute(reply, agentLoop.lastRun);
+        return agentLoop.enabled ? noBrainReply() : '🤖 No free AI brain reachable. Direct commands still work: /open, /pc, /ls, /wifi… (/brains to fix)';
+      }
       case 'yes': case 'haan': return toReply(await actions.runPending(ctx));
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';

@@ -11,6 +11,7 @@ import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
 import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
+import { routerFor } from './router.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -58,6 +59,12 @@ console.info(`   Owner (only listener): +${config.ownerNumber}`);
 console.info(`   Agent WhatsApp number: +${config.agentNumber}`);
 console.info(`   Mode: ${dryRun ? 'DRY-RUN (no WhatsApp connection)' : config.usePairingCode ? 'link by pairing code' : 'link by QR scan'}`);
 console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${config.ollamaUrl}) · tools ${config.agentTools ? 'on' : 'off'}`);
+{
+  const catalog = routerFor(config, console).catalog;
+  const localCount = catalog.filter((m) => m.local).length;
+  console.info(`   Brains: ${catalog.length || 'none'} (${localCount} local) · routing prefers ${config.routerPrefer} · heavy ${config.maxHeavyPerHour || '∞'}/hour`);
+  if (!catalog.length) console.info('   No AI brain yet: install Ollama (free) or set GROQ_API_KEY / GEMINI_API_KEY — direct commands still work.');
+}
 console.info(`   Access level: ${config.accessLevel} · full PC control (Observer app optional)`);
 console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
 console.info(`   Cron jobs: ${store.listCronJobs().length} recurring · TTS: ${config.ttsEngine}`);

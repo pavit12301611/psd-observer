@@ -27,10 +27,10 @@ Everything is free; no paid API, no Observer app.
 ### 🅰️ Pehli baar install — ek script (recommended)
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
 curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
   -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/5f4643a1-psd-observer"
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 ```
 
@@ -47,28 +47,32 @@ Sirf download karna hai (install baad me): `--no-install`.
 Tum git use nahi karte, isliye ye sirf record ke liye hai. Agar kabhi git chahiye:
 
 ```bash
-git clone -b arena/20378d42-psd-observer https://github.com/pavit12301611/psd-observer.git
+git clone -b arena/5f4643a1-psd-observer https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ```
 
-> ⚠️ 2.0 code sirf `arena/20378d42-psd-observer` branch pe hai, `main` pe nahi.
+> ⚠️ 2.1 code sirf `arena/5f4643a1-psd-observer` branch pe hai, `main` pe nahi.
 
 ### 🅲 Na script, na curl-fallback — seedha tar/zip manually
 
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf agent.tar.gz
 mv psd-observer-arena-20378d42-psd-observer/whatsapp-agent ~/observer-agent
 cd ~/observer-agent
 ```
 
-(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip`)
+(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip`)
 
 ---
 
 ## 1c. Update karna (git ke bina) — baad me, jab code purana ho jaye
+
+> 2.1 me `/agent` fix hua hai (ab actually kaam karta hai, jhooth nahi bolta) aur
+> AI ab workload ke hisaab se model chunta hai. Update ke baad WhatsApp pe
+> `/brains` bhejo — live routing dikh jayega.
 
 Git ki zaroorat nahi. Ye script GitHub se seedha **tarball** download karta hai
 (plain `curl`), purana code backup karke naya copy karta hai, `npm install`
@@ -78,7 +82,7 @@ chalata hai aur service restart karta hai.
 
 ```bash
 curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
 bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
 ```
 
@@ -104,7 +108,7 @@ karna padega), `data/` (PIN, token, notes, reminders, todos, downloads),
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/20378d42-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5f4643a1-psd-observer"
 tar -xzf agent.tar.gz
 cd psd-observer-arena-20378d42-psd-observer/whatsapp-agent
 # naye code ko purani install ke upar copy karo (secrets ko chhod ke)
@@ -117,7 +121,7 @@ systemctl --user restart observer-whatsapp-agent
 
 Version check: `./scripts/update-from-github.sh --check` (remote version dikhata hai).
 Browser se bhi download kar sakte ho:
-`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/20378d42-psd-observer.zip`
+`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5f4643a1-psd-observer.zip`
 
 ---
 

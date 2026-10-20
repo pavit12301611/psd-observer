@@ -1,26 +1,34 @@
-// agentloop.js — real tool-calling agent, free.
+// agentloop.js — real tool-calling agent, free, routed by workload.
 //
 // Plain WhatsApp text ("mera download folder saaf karo, phir screenshot bhej")
-// goes to the free AI with the whole action registry as tools. The model picks
-// actions, this loop runs them on the PC, feeds the results back, and repeats
-// (up to MAX steps) until it can answer. Destructive actions still stop at the
-// owner confirmation gate inside actions.js.
+// goes to a free AI with the action registry as tools. The model picks
+// actions, this loop runs them on the PC, feeds results back, and repeats
+// until it can answer. Destructive actions still stop at the owner
+// confirmation gate inside actions.js.
 //
-// Works with whatever free brain is available:
-//   • Ollama (/api/chat tools)      — offline, private, recommended
-//   • Groq / OpenRouter (OpenAI-style tools, free tiers)
-//   • Gemini (functionDeclarations, free tier)
-// No brain reachable → returns null, and commands.js falls back to the offline
-// intent parser + built-in tools. The agent never needs a paid API.
+// What changed in 2.1:
+//   • The model is chosen per request by router.js (tiny task → small/fast
+//     model, heavy task → the biggest free model available). No more "always
+//     the same 70B model for a one-liner".
+//   • Step and tool budgets follow the task size, so small jobs don't get a
+//     10-step allowance.
+//   • If a model fails, returns nothing, or gives up, the next (bigger) brain
+//     is tried automatically. A dead Ollama no longer blocks WhatsApp.
+//   • A repeated identical tool call is detected instead of looping until the
+//     step limit.
+//   • The loop reports what actually happened (model, tier, tool count) via
+//     `lastRun`, so /agent can prove it did work instead of guessing.
 
-const TIMEOUT_MS = 90_000;
+import { routerFor } from './router.js';
 
-async function postJson(url, body, headers = {}) {
+const DEFAULT_TIMEOUT_MS = 90_000;
+
+async function postJson(url, body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(Math.max(5_000, timeoutMs)),
   });
   if (!res.ok) {
     const detail = (await res.text().catch(() => '')).slice(0, 300);
@@ -40,49 +48,63 @@ function parseArgs(raw) {
   }
 }
 
-export function createAgentLoop({ config, store, actions, log = console }) {
-  const maxSteps = Math.max(1, Math.min(Number(config.maxAgentSteps ?? 6) || 6, 12));
-  const tools = actions.toolSchemas();
-  const enabled = config.agentTools !== false && config.aiProvider !== 'none' && tools.length > 0;
+// A model that did not call a single tool must not be believed when it says
+// "ho gaya". This is the exact bug owners reported with /agent.
+const SUCCESS_CLAIM = /\b(ho\s*gaya|ho\s*gya|kar\s*diya|kar\s*di|khol\s*diya|khul\s*gaya|bhej\s*diya|bana\s*diya|save\s*kar\s*diya|done|opened|launched|completed|finished|sent|saved|✅)/i;
+
+const clip = (text, max = 2500) => {
+  const value = String(text ?? '');
+  return (value.length > max ? `${value.slice(0, max)}…` : value) || '(done)';
+};
+
+export function createAgentLoop({ config = {}, store, actions, log = console }) {
+  const router = routerFor(config, log);
+  const allTools = actions.toolSchemas();
+  const enabled = config.agentTools !== false && config.aiProvider !== 'none' && allTools.length > 0;
+  const timeoutMs = Math.max(5_000, Number(config.aiTimeoutMs ?? DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
+
   // Local models have a small context. Sending all 57 tool schemas to a 2k-4k
   // context model hides half of them, so each request gets the relevant ones.
   const ALWAYS = new Set([
     'open_app', 'screenshot', 'look_at_screen', 'system_status', 'send_file',
     'search_files', 'read_file', 'write_file', 'download_url', 'notify',
-    'volume', 'media', 'run_shell', 'power',
+    'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
   ]);
 
-  function toolsFor(text) {
+  function toolsFor(text, { limit } = {}) {
     const query = String(text ?? '').toLowerCase();
     const words = query.split(/[^a-z0-9_]+/).filter((w) => w.length > 2);
-    const scored = tools.map((tool) => {
-      const haystack = `${tool.name} ${tool.description}`.toLowerCase();
+    const scored = allTools.map((tool) => {
+      const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
       let score = words.reduce((total, word) => total + (haystack.includes(word) ? 2 : 0), 0);
       if (ALWAYS.has(tool.name)) score += 6;
       return { tool, score };
     });
     scored.sort((a, b) => b.score - a.score || a.tool.name.localeCompare(b.tool.name));
-    const limit = Math.max(8, Math.min(Number(config.agentToolLimit ?? 20) || 20, tools.length));
-    return scored.slice(0, limit).map((entry) => entry.tool);
+    const configured = Math.max(8, Math.min(Number(config.agentToolLimit ?? 20) || 20, allTools.length));
+    const wanted = Math.max(8, Math.min(Number(limit ?? configured) || configured, allTools.length));
+    return scored.slice(0, wanted).map((entry) => entry.tool);
   }
 
-  function systemPrompt() {
-    const facts = Object.values(store.data.facts ?? {}).slice(-20).map((f) => `- ${f}`).join('\n');
-    const todos = store.data.todos.filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
+  function systemPrompt(plan) {
+    const facts = Object.values(store?.data?.facts ?? {}).slice(-20).map((f) => `- ${f}`).join('\n');
+    const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
     return [
       'You are the owner\'s personal assistant, running 100% free on their own Fedora computer (Observer WhatsApp Agent).',
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
-      `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
+      `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
       'You can actually DO things on the owner\'s computer: open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
       'Rules:',
       '1. When the owner asks you to DO something, call the tool instead of explaining how to do it.',
       '2. You may call several tools in a row; check each result before deciding the next step.',
       '3. Destructive actions (delete, kill, restart, shutdown, close app, shell) are automatically held for the owner\'s confirmation — just call them, do not ask for permission yourself.',
-      '4. If a tool fails, say exactly what failed in one line and, if there is an obvious fix, do it.',
+      '4. If a tool fails, say exactly what failed in one line and, if there is an obvious fix, do it. Never repeat the exact same failing call.',
       '5. Reply in the owner\'s language: Hinglish for Hinglish, Hindi for Hindi, English for English. WhatsApp-short, no Markdown tables or # headers, *bold* is fine.',
       '6. Never invent results. If you could not do something, say so.',
-      '7. Never claim you opened/launched/closed an app unless the open_app/close_app tool just returned success. If it failed, report the tool error verbatim - do not say \"open ho gaya\".',
-      `Access level: ${actions.level()}. Shell: ${config.allowShell ? 'enabled (PIN protected)' : 'disabled'}.`,
+      '7. Never claim you opened/launched/closed an app unless the open_app/close_app tool just returned success. If it failed, report the tool error verbatim — do not say "open ho gaya".',
+      '8. Do not take a screenshot at the end unless the owner asked for one or it is the proof they need.',
+      `This request was sized as *${plan.tier}* (${plan.complexity?.reasons?.join(', ') || 'simple ask'}); you have ${plan.maxSteps} steps. Be efficient: the fewest tool calls that finish the job.`,
+      `Access level: ${actions.level?.() ?? 'full'}. Shell: ${config.allowShell ? 'enabled (PIN protected)' : 'disabled'}.`,
       facts ? `Things the owner asked you to remember:\n${facts}` : '',
       todos ? `Open to-dos:\n${todos}` : '',
     ].filter(Boolean).join('\n');
@@ -92,17 +114,17 @@ export function createAgentLoop({ config, store, actions, log = console }) {
   // Each returns { text, toolCalls:[{id,name,args}], assistant } and knows how to
   // append its own assistant/tool messages to the conversation.
 
-  function ollamaAdapter(selectedTools) {
+  function ollamaAdapter(model, selectedTools) {
     return {
-      name: `Ollama · ${config.ollamaModel}`,
+      name: model.label,
       async step(messages) {
         const data = await postJson(`${config.ollamaUrl}/api/chat`, {
-          model: config.ollamaModel,
+          model: model.model,
           messages,
           tools: selectedTools,
           stream: false,
           options: { temperature: 0.3, num_ctx: Number(config.ollamaNumCtx ?? 8192) || 8192 },
-        });
+        }, {}, timeoutMs);
         const msg = data.message ?? {};
         return {
           text: (msg.content ?? '').trim(),
@@ -120,18 +142,23 @@ export function createAgentLoop({ config, store, actions, log = console }) {
     };
   }
 
-  function openAiAdapter({ url, key, model, label }, selectedTools) {
+  function openAiAdapter(model, selectedTools) {
+    const base = {
+      groq: { url: 'https://api.groq.com/openai/v1', key: config.groqApiKey },
+      openrouter: { url: 'https://openrouter.ai/api/v1', key: config.openrouterApiKey },
+    }[model.provider];
+    if (!base) throw new Error(`unknown OpenAI-compatible provider ${model.provider}`);
     const openAiTools = selectedTools.map((t) => ({ type: 'function', function: t }));
     return {
-      name: `${label} · ${model}`,
+      name: model.label,
       async step(messages) {
-        const data = await postJson(`${url}/chat/completions`, {
-          model,
+        const data = await postJson(`${base.url}/chat/completions`, {
+          model: model.model,
           messages,
           tools: openAiTools,
           tool_choice: 'auto',
           temperature: 0.3,
-        }, { authorization: `Bearer ${key}` });
+        }, { authorization: `Bearer ${base.key}` }, timeoutMs);
         const msg = data.choices?.[0]?.message ?? {};
         return {
           text: (msg.content ?? '').trim(),
@@ -149,25 +176,26 @@ export function createAgentLoop({ config, store, actions, log = console }) {
     };
   }
 
-  function geminiAdapter(selectedTools) {
+  function geminiAdapter(model, selectedTools, runPlan) {
     const declarations = selectedTools.map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
     }));
-    // Gemini wants its own contents array; convert once and keep growing it.
     return {
-      name: `Gemini · ${config.geminiModel}`,
+      name: model.label,
       usesContents: true,
       async step(_messages, contents) {
         const data = await postJson(
-          `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${model.model}:generateContent?key=${config.geminiApiKey}`,
           {
             contents,
             tools: [{ functionDeclarations: declarations }],
-            systemInstruction: { parts: [{ text: systemPrompt() }] },
+            systemInstruction: { parts: [{ text: systemPrompt(runPlan) }] },
             generationConfig: { temperature: 0.3 },
           },
+          {},
+          timeoutMs,
         );
         const parts = data.candidates?.[0]?.content?.parts ?? [];
         const calls = parts.filter((p) => p.functionCall).map((p, i) => ({
@@ -178,10 +206,7 @@ export function createAgentLoop({ config, store, actions, log = console }) {
         const text = parts.filter((p) => p.text).map((p) => p.text).join('').trim();
         return { text, toolCalls: calls, assistant: { role: 'model', parts } };
       },
-      appendTool(_messages, call, content) {
-        // handled by the loop for Gemini (see appendGeminiTool)
-        return null;
-      },
+      appendTool() { return null; }, // handled by the loop for Gemini
       contentsStart(text) {
         return [{ role: 'user', parts: [{ text }] }];
       },
@@ -194,80 +219,231 @@ export function createAgentLoop({ config, store, actions, log = console }) {
     };
   }
 
-  function providers(selectedTools) {
-    const want = config.aiProvider;
-    const all = [
-      { id: 'ollama', make: () => ollamaAdapter(selectedTools) },
-      ...(config.groqApiKey ? [{ id: 'groq', make: () => openAiAdapter({ url: 'https://api.groq.com/openai/v1', key: config.groqApiKey, model: config.groqModel, label: 'Groq (free tier)' }, selectedTools) }] : []),
-      ...(config.geminiApiKey ? [{ id: 'gemini', make: () => geminiAdapter(selectedTools) }] : []),
-      ...(config.openrouterApiKey ? [{ id: 'openrouter', make: () => openAiAdapter({ url: 'https://openrouter.ai/api/v1', key: config.openrouterApiKey, model: config.openrouterModel, label: 'OpenRouter (free model)' }, selectedTools) }] : []),
-    ];
-    return want && want !== 'auto' ? all.filter((p) => p.id === want) : all;
+  function makeAdapter(model, selectedTools, runPlan) {
+    if (model.provider === 'ollama') return ollamaAdapter(model, selectedTools);
+    if (model.provider === 'gemini') return geminiAdapter(model, selectedTools, runPlan);
+    return openAiAdapter(model, selectedTools);
   }
 
-  /**
-   * Run the loop. Returns a reply (string or {text,image,document,video}), or
-   * null when no provider worked (caller falls back to plain chat).
-   */
-  async function run(text, ctx = {}) {
-    if (!enabled) return null;
-    const selectedTools = toolsFor(text);
-    for (const providerEntry of providers(selectedTools)) {
-      let provider;
-      try { provider = providerEntry.make(); } catch { continue; }
-      try {
-        const base = [{ role: 'system', content: systemPrompt() }, { role: 'user', content: String(text) }];
-        let messages = provider.usesContents ? null : base;
-        let contents = provider.usesContents ? provider.contentsStart(String(text)) : null;
-        let attachments = [];
+  // ── one run with one model ───────────────────────────────────────────────
 
-        for (let step = 0; step < maxSteps; step++) {
-          const result = provider.usesContents ? await provider.step(messages, contents) : await provider.step(messages);
+  async function runWithModel(model, text, ctx, plan, opts = {}) {
+    const selectedTools = toolsFor(text, { limit: plan.toolLimit });
+    const adapter = makeAdapter(model, selectedTools, plan);
 
-          if (result.toolCalls?.length) {
-            if (provider.usesContents) {
-              contents = provider.appendAssistant(contents, result.assistant);
-            } else {
-              messages = [...messages, result.assistant];
-            }
-            let confirmation = null;
-            for (const call of result.toolCalls) {
-              const outcome = await actions.execute(call.name, call.args, { ...ctx, source: 'ai' });
-              const clipped = String(outcome.text ?? '').slice(0, 2500) || '(done)';
-              if (provider.usesContents) contents = provider.appendToolResult(contents, call, clipped);
-              else messages = provider.appendTool(messages, call, clipped);
+    let messages = adapter.usesContents ? null : [
+      { role: 'system', content: systemPrompt(plan) },
+      { role: 'user', content: String(text) },
+    ];
+    let contents = adapter.usesContents ? adapter.contentsStart(String(text)) : null;
 
-              if (outcome.image || outcome.document || outcome.video) {
-                attachments.push({ image: outcome.image, document: outcome.document, video: outcome.video, text: outcome.text });
-              }
-              if (outcome.needsConfirmation) confirmation = outcome;
-              if (outcome.ok === false && !outcome.needsConfirmation) {
-                log.info?.(`[agent] tool ${call.name} failed: ${String(outcome.text).slice(0, 160)}`);
-              }
-            }
-            if (confirmation) return confirmation.text;
+    const attachments = [];
+    const callCounts = new Map();
+    let toolCalls = 0;
+    let didWork = false;
+    let nudged = false;
+    let stepsUsed = 0;
+    let lastText = '';
+    const maxSteps = Math.max(1, Math.min(Number(opts.maxSteps ?? plan.maxSteps) || 1, 12));
+    const pack = (reply) => ({ reply, toolCalls, stepsUsed });
+
+    for (let step = 0; step < maxSteps; step++) {
+      stepsUsed = step + 1;
+      const result = adapter.usesContents ? await adapter.step(messages, contents) : await adapter.step(messages);
+      lastText = result.text || lastText;
+
+      if (result.toolCalls?.length) {
+        if (adapter.usesContents) contents = adapter.appendAssistant(contents, result.assistant);
+        else messages = [...messages, result.assistant];
+
+        let confirmation = null;
+        for (const call of result.toolCalls) {
+          const signature = `${call.name}:${JSON.stringify(call.args ?? {})}`;
+          const times = (callCounts.get(signature) ?? 0) + 1;
+          callCounts.set(signature, times);
+
+          if (times > 2) {
+            // Small models love to repeat the same call. Feed the previous
+            // outcome back and move on instead of burning every step.
+            const note = 'You already called this exact tool with these arguments. Its result is above — use it, do not repeat.';
+            if (adapter.usesContents) contents = adapter.appendToolResult(contents, call, note);
+            else messages = adapter.appendTool(messages, call, note);
             continue;
           }
 
-          const answer = result.text || '✅ Done.';
-          if (attachments.length) {
-            const first = attachments[0];
-            return { text: answer, image: first.image, document: first.document, video: first.video };
+          toolCalls += 1;
+          const outcome = await actions.execute(call.name, call.args, { ...ctx, source: 'ai' });
+          const textOut = clip(outcome.text);
+          if (adapter.usesContents) contents = adapter.appendToolResult(contents, call, textOut);
+          else messages = adapter.appendTool(messages, call, textOut);
+
+          if (outcome.ok !== false) didWork = true;
+          if (outcome.image || outcome.document || outcome.video) {
+            attachments.push({ image: outcome.image, document: outcome.document, video: outcome.video, text: outcome.text });
           }
-          return answer;
+          if (outcome.needsConfirmation) confirmation = outcome;
+          if (outcome.ok === false && !outcome.needsConfirmation) {
+            log.info?.(`[agent] tool ${call.name} failed: ${String(outcome.text).slice(0, 160)}`);
+          }
         }
-        if (attachments.length) {
-          const first = attachments[0];
-          return { text: '✅ Done — here is the result.', image: first.image, document: first.document, video: first.video };
+        if (confirmation) return pack({ text: confirmation.text });
+        continue;
+      }
+
+      // Guard against "kuch kiye bina hi done bol diya": one corrective turn.
+      if (opts.nudge && !nudged && toolCalls === 0 && plan.complexity?.needsTools) {
+        nudged = true;
+        const nudge = 'You did not call any tool. If the owner asked you to DO something on the computer, call the right tool now instead of saying it is done. If this is only a question, answer it normally.';
+        if (adapter.usesContents) contents = [...contents, { role: 'user', parts: [{ text: nudge }] }];
+        else messages = [...messages, { role: 'user', content: nudge }];
+        continue;
+      }
+
+      const answer = (result.text ?? '').trim();
+      if (!answer && !didWork) return pack(null); // empty answer + no work → escalate
+      const finalText = answer || '✅ Done.';
+      if (attachments.length) {
+        const images = attachments.filter((a) => a.image).map((a) => a.image);
+        const first = attachments[0];
+        return pack({
+          text: finalText,
+          image: images[0] ?? first.image,
+          extraImages: images.slice(1),
+          document: first.document,
+          video: first.video,
+        });
+      }
+      return pack(finalText);
+    }
+
+    // Ran out of steps.
+    if (attachments.length) {
+      const images = attachments.filter((a) => a.image).map((a) => a.image);
+      return pack({
+        text: lastText || '✅ Steps complete.',
+        image: images[0] ?? attachments[0].image,
+        extraImages: images.slice(1),
+      });
+    }
+    if (didWork) return pack(lastText || '✅ Done.');
+    return pack(null); // no progress → let a bigger model try
+  }
+
+  // ── public run ───────────────────────────────────────────────────────────
+
+  let lastRun = null;
+
+  /**
+   * Run the tool loop. Returns a reply (string or {text,image,…}), or null
+   * when no brain could do the job (caller falls back to plain chat/offline).
+   */
+  async function run(text, ctx = {}, opts = {}) {
+    if (!enabled) {
+      lastRun = { ok: false, reason: 'agent tools disabled', model: null, tier: null };
+      return null;
+    }
+    const plan = router.plan({
+      text,
+      needsTools: opts.needsTools ?? true,
+      minTier: opts.minTier,
+      forceTier: opts.forceTier,
+      maxSteps: opts.maxSteps,
+      toolLimit: opts.toolLimit,
+    });
+
+    const started = Date.now();
+    const attempts = plan.candidates.slice(0, Math.max(1, Math.min(Number(opts.maxTries ?? 3), 4)));
+    if (!attempts.length) {
+      lastRun = { ok: false, reason: plan.notes.join(' · ') || 'no brain available', tier: plan.tier, model: null, plan };
+      return null;
+    }
+
+    const effectivePlan = opts.nudge ? { ...plan, maxSteps: Math.max(plan.maxSteps, 3) } : plan;
+
+    for (const model of attempts) {
+      const attemptStart = Date.now();
+      try {
+        const attempt = await runWithModel(model, text, ctx, effectivePlan, opts);
+        const ms = Date.now() - attemptStart;
+        if (!attempt || attempt.reply == null) {
+          router.record(model.id, { ok: false, ms, tier: plan.rank, error: 'no usable reply' });
+          continue;
         }
-        return '🤖 I did several steps but couldn\'t finish. Try saying it more specifically (e.g. "/open chrome" or "/pc screenshot").';
+        router.record(model.id, { ok: true, ms, tier: plan.rank });
+
+        // Actionable task + zero tool calls + a success claim = fabricated.
+        const claimedText = typeof attempt.reply === 'string' ? attempt.reply : attempt.reply?.text ?? '';
+        if (
+          opts.nudge
+          && attempt.toolCalls === 0
+          && plan.complexity?.needsTools
+          && claimedText.length < 240 // long answers are explanations, not claims
+          && SUCCESS_CLAIM.test(claimedText)
+        ) {
+          lastRun = {
+            ok: false,
+            model: model.label,
+            tier: plan.tier,
+            reason: 'model claimed success without calling any tool',
+            toolCalls: 0,
+            steps: attempt.stepsUsed,
+          };
+          log.warn?.(`[agent] ${model.label} claimed success with 0 tool calls — refusing to trust it`);
+          return [
+            '⚠️ *Kuch nahi hua.*',
+            'Model ne bina koi tool chalaye "ho gaya" bol diya — main use sach nahi maanta.',
+            '',
+            `Uska jawab: "${String(claimedText).replace(/\s+/g, ' ').slice(0, 200)}"`,
+            '',
+            'Dobara bhejo, ya direct command: /open chrome · /screenshot · /ls · /pc type hello',
+            'Routing dekhni ho to /brains.',
+          ].join('\n');
+        }
+
+        const meta = {
+          ok: true,
+          model: model.label,
+          modelId: model.id,
+          tier: plan.tier,
+          rank: plan.rank,
+          reasons: plan.complexity.reasons,
+          steps: attempt.stepsUsed,
+          stepBudget: effectivePlan.maxSteps,
+          toolLimit: plan.toolLimit,
+          toolCalls: attempt.toolCalls,
+          ms,
+          totalMs: Date.now() - started,
+        };
+        router.noteDecision({ text, tier: plan.tier, model: model.id, reason: meta.reasons.join(', ') });
+        lastRun = meta;
+        // Callers that want the metadata use lastRun; the reply itself stays
+        // a plain WhatsApp-friendly value.
+        return attempt.reply;
       } catch (err) {
-        log.warn?.(`[agent] ${provider.name} failed: ${err.message}`);
-        // try the next free provider
+        const ms = Date.now() - attemptStart;
+        router.record(model.id, { ok: false, ms, tier: plan.rank, error: err.message });
+        log.warn?.(`[agent] ${model.label} failed: ${err.message}`);
       }
     }
+
+    lastRun = {
+      ok: false,
+      model: attempts.map((m) => m.model).join(' → '),
+      tier: plan.tier,
+      reason: 'all brains failed',
+      plan,
+      ms: Date.now() - started,
+    };
     return null;
   }
 
-  return { run, enabled, toolCount: tools.length, toolsFor };
+  return {
+    run,
+    enabled,
+    toolCount: allTools.length,
+    toolsFor,
+    router,
+    get lastRun() { return lastRun; },
+    buildPlan: (text, opts = {}) => router.plan({ text, ...opts }),
+  };
 }

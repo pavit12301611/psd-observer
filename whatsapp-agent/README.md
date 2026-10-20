@@ -30,10 +30,10 @@ Everything that was built, every command, and every error with its fix:
 (no `git clone`, no `git pull`). One script downloads the branch and installs it:
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
 curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
   -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/5f4643a1-psd-observer"
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 ```
 
@@ -221,7 +221,13 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 
 ### Chat, notes, lookups
 ```
-/agent <task>             multi-step task with the free AI
+/agent <task>             does the task on the PC: tools, verified steps, honest report
+/agent --plan <task>      show how it would be done (no side effects)
+/agent --web <task>       force the browser path (e.g. "chatgpt pe rust vs go pooch")
+/agent --fast <task>      force the small/fast model (save power) · --deep = biggest
+/brains                   which free model serves what + live health + power budget
+/brains why <task>        show the exact routing decision for a task
+/do <task>                same as /agent, quieter about routing
 /ask <question>           force AI chat        /model   AI status
 /remind in 10m <text> · /reminders · /timer
 /todo add <text> · /todo · /todo done <id>
@@ -229,6 +235,8 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 /weather <city> · /wiki · /define · /news · /currency · /unit · /calc
 /url <link> · /summarize · /improve · /qr · /password · /shorten
 /files · /downloads · /get <name>
+/auto <task>              verified UI automation: open chrome | tap Search | type hi | key enter
+/arena <prompt>           arena.ai/agent: type the prompt, read the answer, screenshot proof
 /observer <task>          optional: hand to an open Observer tab
 /access                   what this agent may do
 /yes · /no                answer a confirmation
@@ -312,12 +320,49 @@ enable shell **and** remove that line from the unit (your PC, your call).
 
 ---
 
+## 7a. Workload routing — the right brain for the job (2.1)
+
+Every message is sized before a model is picked, so nothing burns a 70B model
+on "hi" and nothing hands a 10-step job to a 1B model:
+
+| Work size | Example | Brain used |
+|---|---|---|
+| **tiny** | "hi", "chrome kholo", "volume 40" | small/fast model — local Ollama first, ~instant |
+| **light** | "weather batao", "notes padho" | small→mid local, cloud 8B if local is busy |
+| **standard** | "download folder saaf karo, phir screenshot bhej" | a competent model: local 14B+ **or** free 70B |
+| **heavy** | "write a script that scrapes X then emails a CSV" | best available, capped by the power budget |
+
+- **Local first** (`ROUTER_PREFER=local`): free and private. Cloud free tiers are
+  only used when the local model is too small for the job or is down.
+- **Failures cool down**: a brain that times out is skipped for 2 min, doubling
+  on repeats (max 30 min) — one dead provider never slows WhatsApp again.
+- **Power budget**: at most `MAX_HEAVY_PER_HOUR` (12) heavy calls an hour; after
+  that, work is downgraded to standard instead of waking a huge model.
+- **Multimodal**: photos go to a vision model (local `OLLAMA_VISION_MODEL`
+  first, then Gemini), and screenshots are only sent to vision when the task
+  actually needs to *read* an image.
+- `/brains` shows the live catalog, health, recent decisions and budget.
+
+### What changed in 2.1 (the `/agent` fix)
+
+`/agent` used to open arena.ai, type your text, wait 6 seconds and always reply
+"done" + a screenshot — even when the browser never opened. It now:
+
+1. **Understands the task** and runs it with real PC tools (apps, files, screen,
+   typing, downloads …), or drives a real browser when the task belongs on a site.
+2. **Verifies every step**: a browser must produce a new window before anything
+   is typed; typing is refused if the focused window is not the one just opened;
+   buttons are found with OCR/vision (no blind coordinate clicking).
+3. **Never lies**: a failed run says `step N pe ruk gaya` with the real reason,
+   and attaches a screenshot of the failure — not a fake success.
+4. **Proves its work**: `/agent` replies end with `🧠 standard · llama3.2 · 3 steps`.
+
 ## 7b. Updating (no git needed)
 
 ```bash
 # already installed:
 curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
 bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
 
 # first install without git:

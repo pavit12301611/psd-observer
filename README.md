@@ -7,7 +7,11 @@
 > and actually *does things* — open any app, files, screenshots, OCR, typing,
 > Wi-Fi/Bluetooth, downloads, recording, reminders, free local AI, and more.
 >
-> **2.0 adds:** an installable **phone app** at `http://<PC-IP>:8787/` (works
+> **2.1 fixes `/agent`:** it now actually performs the task (verified steps, real
+> tool calls) and says "step N pe ruk gaya" instead of pretending success — plus
+> **workload routing** (`/brains`): tiny jobs go to a small local model, heavy jobs
+> to the best free model, failing brains cool down, and heavy calls have an hourly
+> budget. **2.0 added:** an installable **phone app** at `http://<PC-IP>:8787/` (works
 > with **no Observer app at all**, and from **anywhere** over free Tailscale), **Hinglish offline intents** ("chrome kholo",
 > "wifi off karo") that work with zero AI, **free AI tool-calling** for
 > multi-step tasks, **voice-note transcription**, **PDF/DOCX reading**, and an

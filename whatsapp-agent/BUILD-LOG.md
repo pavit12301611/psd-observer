@@ -19,6 +19,52 @@
 
 ---
 
+## 2.1 — `/agent` fix + workload routing (is branch pe)
+
+**Problem jo owner ne report kiya:** `/agent <task>` bina kuch kiye screenshot
+bhej deta tha aur bolta tha "ho gaya" — website bhi nahi khulti thi. Saath hi AI
+har message pe wahi model use karta tha (chhote kaam ke liye bada model, bade
+kaam ke liye chhota) — power waste aur kam power, dono.
+
+**Root cause (exact):** `commands.js` ka `/agent` hard-coded step list banata tha:
+
+```js
+const task = `open agent | type ${prompt} | key enter | wait 6 | screenshot`;
+return autopilot.runAutopilot(task, ...);
+```
+
+aur `autopilot.runAutopilot()` har haal me `🤖 Autopilot done (N steps)` +
+screenshot return karta tha — chahe `xdg-open` fail ho, chahe browser na khule,
+chahe typing kisi random window me chali jaye. Koi verification nahi thi, aur
+`/agent` khud kuch karta hi nahi tha (kaam kisi doosri website ko de raha tha).
+
+**Fix:**
+
+| File | Change |
+|---|---|
+| `src/router.js` (naya) | task ko tiny/light/standard/heavy me size karta hai; model catalog (local + free cloud) quality/speed/cost ke saath; cooldown + hourly heavy budget; `/brains` text |
+| `src/agentloop.js` | router se model order; tier ke hisaab se steps/tools; fail hone pe agla (bada) brain; same tool call repeat detect; `lastRun` me model/tier/steps |
+| `src/ai.js` | chat/complete bhi router se; photos vision-capable model ko (local pehle, phir Gemini) |
+| `src/autopilot.js` | `open` ab naya window aane ka wait karta hai (wmctrl; Wayland pe screen-diff), `type` galat window me nahi karta, tap sirf OCR/vision (blind coordinates off), har step ok/fail, fail pe "step N pe ruk gaya" |
+| `src/commands.js` | `/agent` = real task, `--plan/--web/--fast/--deep`; naya `/brains`; `/arena` purana shortcut alag se; `/do` same engine |
+| `src/imaging.js` | `imageSignature` / `imageSimilarity` / `screenChanged` — "screen badla ya nahi" |
+| `src/apps.js` | `windowTitles()` — automation ko verify karne ke liye |
+| `src/pccontrol.js` | URL open: xdg-open → gio → firefox/chromium/chrome/brave chain, saaf error |
+| `src/config.js` + `.env.example` | model sizes, `ROUTER_PREFER`, cooldowns, `MAX_HEAVY_PER_HOUR`, `AI_TIMEOUT_MS`, `ALLOW_BLIND_CLICKS=false` |
+| `src/server.js` | `GET /api/brains` + `/api/status` me brains list |
+
+**Verification (offline tests, 69 pass):**
+
+- `/agent` with no brain → "kuch bhi nahi kiya", **no screenshot**
+- failed `open` → `step 1/1 pe ruk gaya`, **not** "done"
+- model ne bina tool call ke "ho gaya" bola → loop nudge karke asli tool call karwata hai
+- nudge ke baad bhi bina tool "ho gaya" → reply: "Kuch nahi hua… main use sach nahi maanta" (fabricated success kabhi accept nahi)
+- tiny task → local fast model; standard → capable model; local 14B ho to local
+- failing brain → cooldown; heavy budget → standard pe downgrade
+- `screenshot bhej do` → vision model **nahi** maangta
+
+---
+
 ## 0. Ek nazar me (timeline)
 
 | # | Commit | Kya hua | Tests | Tools |
@@ -33,6 +79,7 @@
 | 8 | `88767c8` | **Portal D-Bus interface naam ka bug** — screenshot ka black/error root cause | 39 | 60 |
 | 9 | `4314fd8` | **Screenshot banti thi par chat me nahi aati** — signal + file watch | 41 | 60 |
 | 10 | `bff22b0` | **500-character typing limit hata diya** + `/pc paste` | 44 | 61 |
+| 11 | *2.1* | **`/agent` fix** (verified steps, no fake "done") + **workload routing** (`/brains`) | 69 | 61 |
 
 Verify karna ho (sab curl, git zero):
 

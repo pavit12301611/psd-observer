@@ -342,6 +342,21 @@ export async function listWindows() {
     '\n\nFocus one: /focus <part of title> · close: /close window <part of title>';
 }
 
+/**
+ * Just the window titles, as an array — or null when the desktop cannot list
+ * windows (no wmctrl, or GNOME Wayland). Automation uses this to *verify* that
+ * a browser really opened before typing into it, so it never fails loudly.
+ */
+export async function windowTitles() {
+  if (!findBin('wmctrl')) return null;
+  try {
+    const { stdout } = await execFileAsync('wmctrl', ['-l'], { timeout: RUN_TIMEOUT, env: displayEnv() });
+    return parseWmctrl(stdout).filter((w) => w.title && w.title !== 'N/A').map((w) => w.title);
+  } catch {
+    return null;
+  }
+}
+
 export async function windowAction(action, title) {
   const query = String(title ?? '').trim();
   if (!query) throw new Error('usage: /focus <part of a window title>');

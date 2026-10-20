@@ -8,10 +8,10 @@ Docker, and Fedora's SELinux/firewalld specifics called out where they matter.
 `git pull`.** (Owner ka workflow git ke bina chalta hai.)
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
 curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
   -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/5f4643a1-psd-observer"
 
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 #   --service  autostart (systemd --user + linger)
@@ -96,10 +96,10 @@ story — the agent only talks HTTP to `127.0.0.1:11434`.
 First-time install, nothing but `curl`/`tar` needed (no `git`, no `zip` tool):
 
 ```bash
-URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+URL="https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
 curl -fL -o /tmp/observer-setup.sh "$URL" || curl -fL -o /tmp/observer-setup.sh \
   -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/20378d42-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/install-fresh.sh?ref=arena/5f4643a1-psd-observer"
 bash /tmp/observer-setup.sh --service --ollama --power --phone
 ```
 
@@ -113,7 +113,7 @@ No `git pull` needed — the installer/repo works as a plain download:
 
 ```bash
 curl -fL -o /tmp/agent-update.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/update-from-github.sh"
 bash /tmp/agent-update.sh --dir ~/psd-observer/whatsapp-agent
 ```
 

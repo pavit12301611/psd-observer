@@ -650,8 +650,30 @@ export async function openTarget(target) {
   if (!trimmed) throw new Error('usage: /pc open <app or https://link> — apps: ' + Object.keys(APP_ALIASES).join(', '));
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);
   if (/^https?:\/\//i.test(trimmed)) {
-    await launchDetached(findBin('xdg-open') ?? 'xdg-open', [trimmed]);
-    return `🌐 Opened ${trimmed} in the PC's browser.`;
+    // Order matters: xdg-open is the polite way, but it is missing on minimal
+    // installs, and some desktops return 0 without actually opening anything.
+    const openers = [];
+    const xdg = findBin('xdg-open');
+    if (xdg) openers.push([xdg, [trimmed], 'xdg-open']);
+    const gio = findBin('gio');
+    if (gio) openers.push([gio, ['open', trimmed], 'gio open']);
+    for (const browser of ['firefox', 'chromium', 'chromium-browser', 'google-chrome', 'brave-browser']) {
+      const bin = findBin(browser);
+      if (bin) openers.push([bin, [trimmed], browser]);
+    }
+    if (!openers.length) {
+      throw new Error('No browser opener found. Install one: sudo dnf install firefox xdg-utils  (then check: xdg-open https://example.com)');
+    }
+    const errors = [];
+    for (const [bin, args, label] of openers) {
+      try {
+        await launchDetached(bin, args);
+        return `🌐 Opened ${trimmed} in the PC's browser (${label}).`;
+      } catch (err) {
+        errors.push(`${label}: ${err.code === 'ENOENT' ? 'not installed' : err.message}`);
+      }
+    }
+    throw new Error(`Could not open a browser for ${trimmed}.\n${errors.join('\n')}\nFix: sudo dnf install firefox xdg-utils`);
   }
   const candidates = APP_ALIASES[trimmed.toLowerCase()];
   if (!candidates) throw new Error(`I only open allowlisted apps (or http links): ${Object.keys(APP_ALIASES).join(', ')}. For anything else use /observer or the gated /run.`);

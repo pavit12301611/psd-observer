@@ -1,31 +1,44 @@
-// autopilot.js — one-command browser/desktop automation.
-//  "open agent, click battle, pick agent from dropdown, type, enter, ss"
+// autopilot.js — one-command browser/desktop automation that VERIFIES itself.
 //
-// Usage:
-//   /auto open agent | tap battle | tap agent | type how to use ai | key enter | screenshot
-//   /auto open agent and click battle then select agent and ask how to use ai
+// The old version opened a URL and typed immediately, then always answered
+// "done" + a screenshot. If the browser never opened, the text went to
+// whatever window was focused and the owner still got a screenshot saying
+// everything worked. That is fixed here:
 //
-// The explicit pipe syntax is the reliable path (no AI guessing). The natural
-// language path is best-effort and falls back to the same steps.
+//   • open   → waits for a real new window (wmctrl) before anything else,
+//              and falls back to a screen-change check on Wayland.
+//   • type   → refuses to type unless the focused window is a browser/app we
+//              just opened (never types into a random window).
+//   • tap    → OCR/vision only; no blind coordinate clicking unless the owner
+//              explicitly turns it on (ALLOW_BLIND_CLICKS=true).
+//   • report → every step has ok/fail, and a failed run says "stopped at step
+//              N" with the real reason instead of claiming success.
 //
-// Pipeline per step:
-//   open <app>  -> apps.launchApp (or URL via pc.openTarget)
-//   tap <label> -> finder.locateOnScreen + pc.click  (OCR, falls back to vision model)
-//   click x y   -> pc.click
-//   type <text> -> pc.pasteText (fast, keeps unicode)
-//   key <combo> -> pc.keyCombo  (e.g. enter, ctrl+l)
-//   wait <ms>   -> sleep
-//   screenshot / ss -> pc.captureScreenshot
-//   look [q]    -> ocr.lookAtScreen
+// Steps:
+//   open <app|url>  tap <label>  click <x> <y>  focus <title>
+//   type <text>     key <combo>  wait <ms>      screenshot
+//   look [question]
+//
+//   /auto open agent | tap battle | tap agent | type hi | key enter | screenshot
+//   /auto open chrome and search for today's weather then screenshot
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as apps from './apps.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import * as ocr from './ocr.js';
+import { imageSignature, screenChanged, imageStats } from './imaging.js';
 
+const execFileAsync = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+
+const BROWSER_HINTS = /firefox|chrome|chromium|brave|edge|opera|vivaldi|epiphany|webkit|librewolf|waterfox|mozilla|arc\b/i;
 
 const WEB_URLS = {
+  google: 'https://www.google.com',
+  youtube: 'https://www.youtube.com',
   gemini: 'https://gemini.google.com',
   bard: 'https://gemini.google.com',
   chatgpt: 'https://chatgpt.com',
@@ -39,301 +52,551 @@ const WEB_URLS = {
   agent: 'https://arena.ai/agent',
   'agent mode': 'https://arena.ai/agent',
   'arena agent': 'https://arena.ai/agent',
+  gmail: 'https://mail.google.com',
+  github: 'https://github.com',
+  wikipedia: 'https://wikipedia.org',
+  stackoverflow: 'https://stackoverflow.com',
+  'stack overflow': 'https://stackoverflow.com',
+  whatsapp: 'https://web.whatsapp.com',
+  'whatsapp web': 'https://web.whatsapp.com',
+  maps: 'https://maps.google.com',
+  'google maps': 'https://maps.google.com',
+  netflix: 'https://www.netflix.com',
+  instagram: 'https://www.instagram.com',
+  twitter: 'https://x.com',
+  x: 'https://x.com',
+  linkedin: 'https://www.linkedin.com',
+  amazon: 'https://www.amazon.in',
+  flipkart: 'https://www.flipkart.com',
 };
-
-function clean(s) { return String(s ?? '').replace(/\s+/g, ' ').trim(); }
-
-function resolveWebUrl(appName) {
-  const low = normalizeApp(appName);
-  if (WEB_URLS[low]) return WEB_URLS[low];
-  for (const [k, url] of Object.entries(WEB_URLS)) {
-    if (low.includes(k) || k.includes(low)) return url;
-  }
-  return null;
-}
 
 function normalizeApp(s) {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-export function parseAutoSteps(raw) {
-  const t = String(raw ?? '').trim();
-  if (!t) return [];
-  // Explicit pipe syntax:  open agent | tap battle | tap agent | type how to use ai | key enter | screenshot
-  // Only treat as explicit if it actually contains a separator — otherwise natural phrases like
-  // "open agent and click battle..." would be mis-split into a single open.
-  if (t.includes('|') || t.includes(';') || t.includes('\n')) {
-    const parts = t.split(/[|;]+/).map(s => s.trim()).filter(Boolean);
-    // also handle newline
-    const expanded = [];
-    for (const p of parts) expanded.push(...p.split(/\n/).map(s => s.trim()).filter(Boolean));
-    return expanded.map(parseSingleStep).filter(Boolean);
-  }
-  // Natural language fallback
-  return parseNaturalLanguage(t);
-}
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-function parseSingleStep(part) {
-  const p = clean(part);
-  if (!p) return null;
-  let m;
-  if ((m = p.match(/^(?:open|launch)\s+(.+)$/i))) return { op: 'open', target: clean(m[1]) };
-  if ((m = p.match(/^(?:tap|click)\s+(.+)$/i))) return { op: 'tap', label: clean(m[1]) };
-  if ((m = p.match(/^tap\s+on\s+(.+)$/i))) return { op: 'tap', label: clean(m[1]) };
-  if ((m = p.match(/^click\s+(-?\d+)\s+(-?\d+)$/i))) return { op: 'click', x: Number(m[1]), y: Number(m[2]) };
-  if ((m = p.match(/^(?:type|paste)\s+(.+)$/i))) return { op: 'type', text: m[1] };
-  if ((m = p.match(/^(?:key|press)\s+(.+)$/i))) return { op: 'key', combo: clean(m[1]) };
-  if ((m = p.match(/^(?:wait|sleep)\s+(\d+)\s*(?:ms|s|sec)?$/i))) {
-    let ms = Number(m[1]);
-    // if user wrote "wait 5" assume seconds if <= 30, else ms
-    if (/s|sec/i.test(p)) ms *= 1000;
-    else if (ms <= 30) ms *= 1000;
-    return { op: 'wait', ms };
-  }
-  if (/^(?:screenshot|ss|screen)$/i.test(p)) return { op: 'screenshot' };
-  if ((m = p.match(/^look(?:\s+(.+))?$/i))) return { op: 'look', question: m[1] ? clean(m[1]) : '' };
-  // bare label like "battle" in pipe mode -> treat as tap
-  if (/^[\w\- ]{2,40}$/.test(p) && !/\s/.test(p) || p.split(/\s+/).length <= 3) {
-    // heuristic: single word in pipe sequence is likely a tap target if not matched above
-    // but to avoid misclassifying, only if previous steps suggest tapping
-    // we treat unknown short phrase as tap (caller can be explicit with "tap battle")
-    // For safety, return null here and let caller decide — we will handle via tap inference
-    // Instead, treat bare phrase as tap
-    return { op: 'tap', label: p };
+/** "arena" → arena.ai/agent etc. Exact or whole-word matches only. */
+export function resolveWebUrl(appName) {
+  const low = normalizeApp(appName);
+  if (!low) return null;
+  if (WEB_URLS[low]) return WEB_URLS[low];
+  for (const [key, url] of Object.entries(WEB_URLS)) {
+    if (key.length < 4) continue; // "x" / "gpt" alone are too ambiguous
+    if (new RegExp(`\\b${escapeRe(key)}\\b`).test(low)) return url;
   }
   return null;
 }
 
-function parseNaturalLanguage(task) {
-  const steps = [];
+function urlHint(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    const label = host.split('.')[0];
+    return label.length >= 3 ? label : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── step parsing ─────────────────────────────────────────────────────────────
+
+export function parseSingleStep(part) {
+  const p = clean(part);
+  if (!p) return null;
+  let m;
+  if ((m = p.match(/^(?:open|launch|start|kholo|khol)\s+(.+)$/i))) return { op: 'open', target: clean(m[1]) };
+  if ((m = p.match(/^(?:tap|click|select|choose|press\s+button)\s+on\s+(.+)$/i))) return { op: 'tap', label: clean(m[1]) };
+  if ((m = p.match(/^click\s+(-?\d+)[\s,]+(-?\d+)$/i))) return { op: 'click', x: Number(m[1]), y: Number(m[2]) };
+  if ((m = p.match(/^(?:tap|click|select|choose)\s+(.+)$/i))) return { op: 'tap', label: clean(m[1]) };
+  if ((m = p.match(/^focus(?:\s+(?:on|window))?\s+(.+)$/i))) return { op: 'focus', title: clean(m[1]) };
+  if ((m = p.match(/^(?:type|paste|likho|likh)\s+([\s\S]+)$/i))) return { op: 'type', text: m[1] };
+  if ((m = p.match(/^(?:ask|poocho|pucho|pooch)\s+([\s\S]+)$/i))) return { op: 'type', text: m[1], submit: true };
+  if ((m = p.match(/^(?:search(?:\s+for)?|google|dhundo)\s+([\s\S]+)$/i))) return { op: 'type', text: clean(m[1]), submit: true };
+  if ((m = p.match(/^(?:key|press)\s+(.+)$/i))) return { op: 'key', combo: clean(m[1]) };
+  if ((m = p.match(/^(?:wait|sleep)\s+(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|seconds|min|m)?$/i))) {
+    let value = Number(m[1]);
+    const unit = (m[2] || '').toLowerCase();
+    if (unit === 'ms') { /* as-is */ } else if (unit === 's' || unit.startsWith('sec')) value *= 1000;
+    else if (unit === 'min' || unit === 'm') value *= 60_000;
+    else if (value <= 30) value *= 1000; // bare "wait 5" = 5 seconds
+    return { op: 'wait', ms: Math.min(Math.max(Math.round(value), 200), 120_000) };
+  }
+  if (/^(?:screenshot|ss|screen|shot)$/i.test(p)) return { op: 'screenshot' };
+  if ((m = p.match(/^look(?:\s+(.+))?$/i))) return { op: 'look', question: m[1] ? clean(m[1]) : '' };
+  // A short bare phrase in a pipe sequence is a tap target ("battle").
+  if (p.split(/\s+/).length <= 3 && /^[\w\-. ]{2,40}$/.test(p)) return { op: 'tap', label: p };
+  return null;
+}
+
+export function parseAutoSteps(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return [];
+  if (t.includes('|') || t.includes(';') || t.includes('\n')) {
+    const parts = t.split(/[|;]+/).map((s) => s.trim()).filter(Boolean);
+    const expanded = [];
+    for (const p of parts) expanded.push(...p.split(/\n/).map((s) => s.trim()).filter(Boolean));
+    return expanded.map(parseSingleStep).filter(Boolean);
+  }
+  return parseNaturalLanguage(t);
+}
+
+/**
+ * Natural language → steps. Splits on the separators people actually use
+ * (then / and / phir / commas), so it works for any app, not just one site.
+ */
+export function parseNaturalLanguage(task) {
   const t = clean(task);
-  const low = t.toLowerCase();
+  if (!t) return [];
+  const chunks = t
+    .split(/\s*(?:,|;|\band\s+then\b|\bthen\b|\band\b|\baur\b|\bphir\b|\buske\s+baad\b)\s*/i)
+    .map(clean)
+    .filter(Boolean);
 
-  // 1) open/launch — take the first 1-2 words after "open" until a verb
-  let m = t.match(/open\s+([a-z0-9_\- ]{1,40})/i);
-  if (m) {
-    let cand = clean(m[1]);
-    const verbs = new Set(['go','and','then','click','clicking','tap','tapping','select','selecting','type','typing','ask','asking','by','to','on','in','for','with']);
-    const parts = cand.split(/\s+/);
-    const appParts = [];
-    for (const w of parts) {
-      if (verbs.has(w.toLowerCase())) break;
-      appParts.push(w);
-      if (appParts.length >= 2) break;
+  const steps = [];
+  for (const chunk of chunks) {
+    let step = parseSingleStep(chunk);
+    if (!step) {
+      // "search for cats", "google cats" → type into whatever search box is up
+      const m = chunk.match(/^(?:search(?:\s+for)?|google|dhundo)\s+([\s\S]+)$/i);
+      if (m) step = { op: 'type', text: clean(m[1]), submit: true };
     }
-    let app = appParts.join(' ').trim().replace(/^(the\s+)?app\s+/i, '').trim();
-    // Brave PWA installs are named like "Arena" but user says "agent" — keep as-is, launchApp will fuzzy-match
-    if (app) steps.push({ op: 'open', target: app });
-  } else if ((m = t.match(/^(?:launch|open)\s+(.+)$/i))) {
-    steps.push({ op: 'open', target: clean(m[1]) });
+    if (!step) continue;
+    if (step.op === 'open') step.target = resolveWebUrl(step.target) || step.target;
+    steps.push(step);
+    // Submit right after the text it belongs to, so a later "then screenshot"
+    // does not end up after the enter key.
+    if (step.op === 'type' && step.submit) steps.push({ op: 'key', combo: 'enter' });
   }
 
-  // 2) battle -> tap battle
-  if (/\bbattle\b/i.test(low)) steps.push({ op: 'tap', label: 'battle' });
+  // No doubled enter keys (user wrote "then press enter" as well).
+  const deduped = steps.filter((s, i) => !(s.op === 'key' && /^enter$/i.test(s.combo ?? '') && steps[i - 1]?.op === 'key'));
+  // The screenshot is the proof — always last.
+  const shots = deduped.filter((s) => s.op === 'screenshot');
+  const rest = deduped.filter((s) => s.op !== 'screenshot');
+  if (shots.length || !rest.length) rest.push({ op: 'screenshot' });
+  return rest;
+}
 
-  // 3) selecting agent from dropdown -> tap agent
-  // The phrase "selecting agent from drop down" -> tap agent
-  if (/(?:select|choose).*agent.*drop/i.test(low) || /drop\s*down.*agent/i.test(low)) {
-    steps.push({ op: 'tap', label: 'agent' });
-  } else if (/\bagent mode\b/i.test(low)) {
-    // agent mode might be separate tap
-    if (!steps.some(s => s.label && s.label.toLowerCase() === 'agent')) steps.push({ op: 'tap', label: 'agent' });
+/**
+ * Pull the actual question/query out of a sentence.
+ *   "chatgpt pe rust vs go pooch"              → "rust vs go"
+ *   "google pe aaj ka weather search karo"     → "aaj ka weather"
+ *   "open chrome and search for psd-observer"  → "psd-observer"
+ * Works by dropping known site names / command verbs / filler words, so it
+ * copes with both English and Hinglish word order.
+ */
+export function extractPrompt(text) {
+  const SITES = /\b(chatgpt|gemini|claude|google|youtube|arena|perplexity|copilot|github|wikipedia|stackoverflow|stack\s*overflow|gmail|netflix|instagram|twitter|linkedin|amazon|flipkart|whatsapp\s*web|chrome|firefox|chromium|brave|browser)\b/gi;
+  const LEAD_VERBS = /^(?:(?:open|kholo|khol|launch|start|visit|jao|go|search(?:\s+for)?|google|ask|type|likho|likh|play|chalao|dhundo|poocho|pucho|pooch)\s+)+/i;
+  const TRAIL_VERBS = /\s*(?:\b(?:poocho|pucho|pooch|likho|likh|dhundo|search(?:\s+for)?|google|play|chalao|karo|kar\s*do|bhejo|bhej\s*do)\b\s*)+$/i;
+
+  let out = String(text ?? '')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(SITES, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // trailing Hinglish/English command verbs ("… search karo")
+  for (let i = 0; i < 3; i++) out = out.replace(TRAIL_VERBS, ' ').trim();
+  // leading verbs + "and then" glue (trim each round: removal leaves spaces)
+  for (let i = 0; i < 4; i++) {
+    out = out.replace(LEAD_VERBS, ' ').replace(/^(?:and|then|aur|phir|for|that|please|plz|se|ki|ka)\s+/i, ' ').trim();
+  }
+  // particles anywhere are noise for a search query
+  out = out
+    .replace(/\b(?:aur|and|then|phir|uske|baad|pe|par|me|mein)\b/gi, ' ')
+    .replace(/\b(?:screenshot|ss|bhejo|bhej)\b/gi, ' ')
+    .replace(/[|,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return out.replace(/^[\s"'`-]+|[\s"'`.!?]+$/g, '').trim();
+}
+
+/** Sites where a search URL is smarter (and far more reliable) than typing. */
+function searchUrlFor(url, query) {
+  if (!query) return null;
+  let host;
+  try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
+  const q = encodeURIComponent(query);
+  const table = {
+    'google.com': `https://www.google.com/search?q=${q}`,
+    'youtube.com': `https://www.youtube.com/results?search_query=${q}`,
+    'wikipedia.org': `https://en.wikipedia.org/w/index.php?search=${q}`,
+    'github.com': `https://github.com/search?q=${q}`,
+    'stackoverflow.com': `https://stackoverflow.com/search?q=${q}`,
+  };
+  return table[host] ?? null;
+}
+
+/**
+ * Build the browser steps for `/agent <task>` when the task needs a real site.
+ * Example: "chatgpt pe rust vs go pooch" → open chatgpt → type → enter → wait
+ * → look (answer the question from the page) → screenshot as proof.
+ */
+export function buildWebSteps(task) {
+  const text = clean(task);
+  // An explicit link or domain wins over the known-site table.
+  const explicit = text.match(/https?:\/\/\S+/i)?.[0]
+    ?? text.match(/\b((?:[a-z0-9-]+\.)+(?:com|in|org|net|io|ai|dev|co)(?:\/\S*)?)\b/i)?.[1];
+  const url = explicit
+    ? (/^https?:/i.test(explicit) ? explicit : `https://${explicit}`)
+    : resolveWebUrl(text);
+  if (!url) return [];
+  const prompt = extractPrompt(text);
+
+  // A site with a real search URL → no fragile UI typing at all.
+  const direct = searchUrlFor(url, prompt);
+  if (direct) {
+    return [
+      { op: 'open', target: direct },
+      { op: 'wait', ms: 1_500 },
+      { op: 'look', question: prompt || 'summarise the results on this page' },
+      { op: 'screenshot' },
+    ];
   }
 
-  // 4) type / ask
-  let typed = null;
-  if ((m = t.match(/type\s+(.+?)(?:\s+then\s+enter|\s+and\s+enter|\s+enter|$)/i))) typed = clean(m[1]);
-  else if ((m = t.match(/(?:ask|how to use.+|type how.+|say\s+)(.+?)(?:\s+then\s+enter|\s+and\s+press|\s*enter|$)/i))) typed = clean(m[1]);
-  if (typed) {
-    typed = typed.replace(/^["']|["']$/g, '').trim();
-    if (typed) {
-      steps.push({ op: 'type', text: typed });
-      // asking implies submit — auto-add enter unless user already said enter and we will dedup below
-      if (!/\benter\b/i.test(low)) steps.push({ op: 'key', combo: 'enter' });
-    }
-  }
-
-  // 5) enter (if not already added via type->enter)
-  if (/\benter\b/i.test(low) && !steps.some(s => s.op === 'key')) steps.push({ op: 'key', combo: 'enter' });
-
-  // 6) always finish with screenshot
+  const steps = [{ op: 'open', target: url }];
+  if (prompt.length >= 2) steps.push({ op: 'type', text: prompt, submit: true });
+  steps.push({ op: 'key', combo: 'enter' });
+  steps.push({ op: 'wait', ms: 8_000 });
+  steps.push({ op: 'look', question: prompt.length >= 2 ? prompt : 'what did the page answer?' });
   steps.push({ op: 'screenshot' });
   return steps;
 }
 
-export async function runAutopilot(rawTask, { config, log } = {}) {
-  const steps = parseAutoSteps(rawTask);
-  if (!steps.length) throw new Error('usage: /auto open <app> | tap <label> | type <text> | key enter | screenshot\nExample: /auto open agent | tap battle | tap agent | type how to use ai | key enter | screenshot');
+function describeStep(step) {
+  if (step.op === 'open') return `open "${step.target}"`;
+  if (step.op === 'tap') return `tap "${step.label}"`;
+  if (step.op === 'click') return `click ${step.x} ${step.y}`;
+  if (step.op === 'focus') return `focus "${step.title}"`;
+  if (step.op === 'type') return `type "${String(step.text).slice(0, 40)}${String(step.text).length > 40 ? '…' : ''}"`;
+  if (step.op === 'key') return `key ${step.combo}`;
+  if (step.op === 'wait') return `wait ${step.ms}ms`;
+  if (step.op === 'screenshot') return 'screenshot';
+  if (step.op === 'look') return `look "${step.question ?? ''}"`;
+  return JSON.stringify(step);
+}
 
-  const outLines = [];
+// ── verification helpers ─────────────────────────────────────────────────────
+
+async function activeWindowTitle() {
+  const xdotool = pc.findBin('xdotool');
+  if (!xdotool) return null;
+  try {
+    const { stdout } = await execFileAsync(xdotool, ['getactivewindow', 'getwindowname'], {
+      timeout: 2_000,
+      env: pc.displayEnv(),
+    });
+    return String(stdout ?? '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function shot(config, capMs = 6_000) {
+  // Verification screenshots get a short cap: on Wayland each capture can pop
+  // a permission dialog, and a slow dialog must not stall the whole task.
+  const image = await pc.captureScreenshot({ portalTimeoutMs: Math.min(config?.portalTimeoutMs ?? 60_000, capMs) });
+  return { image, signature: imageSignature(image), stats: imageStats(image) };
+}
+
+/**
+ * Wait until a NEW window that looks like the one we wanted exists.
+ * Returns { ok, known, title, waitedMs } — `known:false` means the desktop
+ * cannot list windows, so the caller should verify another way.
+ */
+export async function waitForWindow({ beforeTitles = [], url = '', target = '', timeoutMs = 20_000 } = {}) {
+  const hint = urlHint(url) || normalizeApp(target);
+  const started = Date.now();
+  let sawList = false;
+  while (Date.now() - started < timeoutMs) {
+    await sleep(600);
+    const titles = await apps.windowTitles();
+    // null = no wmctrl; empty = wmctrl exists but this desktop blocks listing
+    // (GNOME Wayland). Both mean "we cannot verify by title".
+    if (titles == null || titles.length === 0) {
+      return { ok: false, known: false, title: null, waitedMs: Date.now() - started };
+    }
+    sawList = true;
+    const before = new Set(beforeTitles);
+    const fresh = titles.filter((t) => !before.has(t));
+    const bySite = hint && fresh.find((t) => t.toLowerCase().includes(hint));
+    const byBrowser = fresh.find((t) => BROWSER_HINTS.test(t));
+    const onlyOne = fresh.length === 1 ? fresh[0] : null;
+    const match = bySite || byBrowser || onlyOne;
+    if (match) return { ok: true, known: true, title: match, waitedMs: Date.now() - started };
+  }
+  return { ok: false, known: sawList, title: null, waitedMs: Date.now() - started };
+}
+
+/** Last resort on Wayland (no wmctrl): did the screen actually change? */
+async function waitForScreenChange({ before, config, timeoutMs = 12_000 }) {
+  if (!before) return { ok: false, known: false };
+  const started = Date.now();
+  let probes = 0;
+  while (Date.now() - started < timeoutMs && probes < 3) {
+    await sleep(probes === 0 ? 2_500 : 3_000);
+    probes += 1;
+    try {
+      const now = await shot(config);
+      const diff = screenChanged(before.signature, now.signature);
+      if (diff.known && diff.changed) return { ok: true, known: true, image: now.image, similarity: diff.similarity };
+    } catch { /* screenshot failed — stop trying */ break; }
+  }
+  return { ok: false, known: false };
+}
+
+// ── the executor ─────────────────────────────────────────────────────────────
+
+/**
+ * Run a step list. Never throws for a normal step failure: it returns
+ * { ok, text, image, steps } so the caller can tell the truth.
+ */
+export async function executeSteps(steps, { config = {}, log = console, label = 'Autopilot' } = {}) {
+  const results = [];
   let lastImage = null;
-  let waitAfterOpen = 4500;
+  let verifiedTitle = null;
+  let typingMode = null; // 'browser' | 'app' | null
+  const startedAll = Date.now();
+
+  const record = (index, step, ok, detail, extra = {}) => {
+    results.push({ index: index + 1, op: step.op, ok, detail, ...extra });
+    return results[results.length - 1];
+  };
 
   for (let i = 0; i < steps.length; i++) {
-    const st = steps[i];
-    outLines.push(`Step ${i + 1}/${steps.length}: ${describeStep(st)}`);
+    const step = steps[i];
+    const stepStart = Date.now();
     try {
-      if (st.op === 'open') {
-        const target = String(st.target ?? '').trim();
-        if (!target) throw new Error('open needs an app name');
-        const url = resolveWebUrl(target);
+      if (step.op === 'open') {
+        const target = String(step.target ?? '').trim();
+        if (!target) throw new Error('open needs an app name or URL');
+        const isUrl = /^https?:\/\//i.test(target);
+        const url = isUrl ? target : resolveWebUrl(target);
+        const titlesBefore = await apps.windowTitles();
+        const canListWindows = Array.isArray(titlesBefore) && titlesBefore.length > 0;
+        const screenBefore = canListWindows ? null : await shot(config).catch(() => null);
+
+        let opened;
         if (url) {
-          log?.info?.(`[auto] opening URL ${url} for "${target}"`);
-          try {
-            await pc.openTarget(url);
-            outLines[outLines.length - 1] += ` → opened ${url}`;
-          } catch (e) {
-            // Fallback: try desktop app if URL open fails
-            log?.info?.(`[auto] URL open failed (${e.message}), trying desktop app "${target}"`);
-            const r = await apps.launchApp(target);
-            outLines[outLines.length - 1] += ` → ${r.text} (fallback)`;
-          }
+          log?.info?.(`[auto] opening ${url} for "${target}"`);
+          await pc.openTarget(url);
+          opened = { via: 'browser', url };
+          typingMode = 'browser';
         } else {
-          try {
-            const r = await apps.launchApp(target);
-            outLines[outLines.length - 1] += ` → ${r.text}`;
-          } catch (e) {
-            // If desktop app not found but it's a known web app alias (agent/arena), try URL
-            const fbUrl = target.toLowerCase().includes('agent') ? WEB_URLS['agent'] : null;
-            if (fbUrl && /couldn't find an app|could not find|not found/i.test(String(e.message))) {
-              log?.info?.(`[auto] app "${target}" not found, falling back to URL ${fbUrl}`);
-              await pc.openTarget(fbUrl);
-              outLines[outLines.length - 1] += ` → opened ${fbUrl} (desktop miss, URL fallback)`;
+          const launched = await apps.launchApp(target);
+          opened = { via: 'app', text: launched.text ?? String(launched) };
+          typingMode = 'app';
+          if (launched?.app) verifiedTitle = launched.app;
+        }
+
+        // Verify BEFORE going on: this is what the old version skipped.
+        let verify = { ok: true, known: true, title: null, waitedMs: 0 };
+        if (url) {
+          verify = await waitForWindow({ beforeTitles: titlesBefore ?? [], url, target, timeoutMs: 20_000 });
+          if (!verify.ok && !verify.known) {
+            const changed = await waitForScreenChange({ before: screenBefore, config, timeoutMs: 10_000 });
+            if (changed.ok) {
+              verify = { ok: true, known: false, title: null, note: 'screen changed (window list not available)' };
+            } else if (!screenBefore) {
+              // Wayland + no window list + no screenshot permission: we cannot
+              // prove it either way. Say so instead of inventing a result.
+              verify = { ok: true, known: false, unverified: true, title: null, note: 'opened, but this desktop blocks verification' };
             } else {
-              throw e;
+              verify = { ok: false, known: true, title: null };
             }
           }
         }
-        await sleep(waitAfterOpen);
-      } else if (st.op === 'tap') {
-        const label = String(st.label ?? '').trim();
-        if (!label) throw new Error('tap needs a label');
-        log?.info?.(`[auto] locate "${label}"`);
-        // Try OCR/vision first, then coordinate fallback for known Arena buttons
-        let hit = null;
-        let usedFallback = false;
-        // Try case variants for Arena (Battle/Agent are capital B/A in dark UI)
-        const variants = [label, label.charAt(0).toUpperCase()+label.slice(1).toLowerCase(), label.toUpperCase(), label.toLowerCase()];
-        const tried = new Set();
-        for (const v of variants) {
-          if (tried.has(v)) continue;
-          tried.add(v);
-          try {
-            hit = await finder.locateOnScreen(config, v, log);
-            if (hit) break;
-          } catch {}
+        if (!verify.ok) {
+          throw new Error(
+            `browser khola par page load nahi hua (${Math.round(20_000 / 1000)}s wait). ` +
+            `Default browser check karo: xdg-open ${url || target} — ya fix: sudo dnf install firefox xdg-utils`,
+          );
         }
-        if (hit) {
-          await pc.click(hit.x, hit.y);
-          outLines[outLines.length - 1] += ` → clicked "${hit.matched}" @ ${hit.x},${hit.y} (${hit.source}${hit.confidence ? ` ${hit.confidence}%` : ''})`;
-        } else {
-          // Coordinate fallback — measured from Arena screenshot (1920x1080, Brave PWA)
-          // Battle ▾ is below "Ask anything..." box, Agent is first item in its dropdown
-          const low = label.toLowerCase();
-          const FALLBACK = {
-            'battle': { rx: 0.422, ry: 0.492 },
-            'agent':  { rx: 0.422, ry: 0.545 },
-            'auto':   { rx: 0.470, ry: 0.492 },
-          };
-          const fb = FALLBACK[low];
-          if (fb) {
-            // Need screen size — capture a throwaway screenshot to learn dimensions
-            let size = null;
-            try {
-              const tmp = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs });
-              const sz = finder.pngSize(tmp);
-              if (sz) size = sz;
-              // keep this screenshot as well if we haven't yet
-              if (!lastImage) lastImage = tmp;
-            } catch {}
-            const W = size?.width ?? 1920;
-            const H = size?.height ?? 1080;
-            const x = Math.round(W * fb.rx);
-            const y = Math.round(H * fb.ry);
-            log?.info?.(`[auto] tap "${label}" OCR miss — fallback click @ ${x},${y} (${Math.round(fb.rx*100)}%,${Math.round(fb.ry*100)}% of ${W}x${H})`);
+        verifiedTitle = verify.title ?? null;
+        if (verifiedTitle) {
+          try { await apps.windowAction('focus', verifiedTitle); } catch (err) { log?.info?.(`[auto] focus failed: ${err.message}`); }
+        }
+        record(i, step, true, `${opened.via === 'browser' ? `opened ${url}` : opened.text}` +
+          `${verifiedTitle ? ` · window "${String(verifiedTitle).slice(0, 60)}"` : verify.note ? ` · ${verify.note}` : ''}`,
+          { ms: Date.now() - stepStart, verified: !verify.unverified, unverified: Boolean(verify.unverified) });
+        await sleep(url ? 900 : 1_200);
+
+      } else if (step.op === 'focus') {
+        const title = String(step.title ?? '').trim();
+        if (!title) throw new Error('focus needs a window title');
+        await apps.windowAction('focus', title);
+        verifiedTitle = title;
+        record(i, step, true, `focused "${title}"`, { ms: Date.now() - stepStart });
+
+      } else if (step.op === 'tap') {
+        const label = String(step.label ?? '').trim();
+        if (!label) throw new Error('tap needs a label');
+        const variants = [...new Set([label, label[0].toUpperCase() + label.slice(1).toLowerCase(), label.toUpperCase(), label.toLowerCase()])];
+        let hit = null;
+        for (const variant of variants) {
+          try { hit = await finder.locateOnScreen(config, variant, log); } catch { /* try next */ }
+          if (hit) break;
+        }
+        if (!hit && config.allowBlindClicks) {
+          const BLIND = {
+            battle: { rx: 0.422, ry: 0.492 },
+            agent: { rx: 0.422, ry: 0.545 },
+            auto: { rx: 0.470, ry: 0.492 },
+          }[label.toLowerCase()];
+          if (BLIND) {
+            let size = { width: 1920, height: 1080 };
+            try { size = finder.pngSize(await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs })) ?? size; } catch { /* defaults */ }
+            const x = Math.round(size.width * BLIND.rx);
+            const y = Math.round(size.height * BLIND.ry);
             await pc.click(x, y);
-            outLines[outLines.length - 1] += ` → fallback click @ ${x},${y} (OCR miss, used coords)`;
-            usedFallback = true;
-          } else {
-            throw new Error(`I couldn't find "${label}" on the screen. Try /pc screenshot + /ocr to see exact label, or use: click X Y`);
+            record(i, step, true, `blind click @ ${x},${y} (ALLOW_BLIND_CLICKS=true — UNVERIFIED)`, {
+              ms: Date.now() - stepStart,
+              verified: false,
+              unverified: true,
+            });
+            await sleep(1_200);
+            continue;
           }
         }
-        await sleep(usedFallback ? 1500 : 1200);
-      } else if (st.op === 'click') {
-        await pc.click(Number(st.x), Number(st.y));
-        outLines[outLines.length - 1] += ` → clicked ${st.x},${st.y}`;
-        await sleep(800);
-      } else if (st.op === 'type') {
-        const text = String(st.text ?? '');
+        if (!hit) {
+          let extra = '';
+          try {
+            const text = await ocr.ocrScreen(config);
+            lastImage = text.image;
+            extra = `\nScreen pe ye text mila: ${String(text.text).replace(/\s+/g, ' ').slice(0, 200) || '(koi text nahi)'}`;
+          } catch { /* no OCR available */ }
+          throw new Error(
+            `"${label}" screen pe nahi mila (OCR + vision dono fail). ` +
+            `Pehle /screenshot + /ocr se exact label dekh lo, ya coords se: click X Y.${extra}`,
+          );
+        }
+        await pc.click(hit.x, hit.y);
+        record(i, step, true, `clicked "${hit.matched ?? label}" @ ${hit.x},${hit.y} (${hit.source}${hit.confidence ? ` ${hit.confidence}%` : ''})`, { ms: Date.now() - stepStart });
+        await sleep(1_000);
+
+      } else if (step.op === 'click') {
+        await pc.click(Number(step.x), Number(step.y));
+        record(i, step, true, `clicked ${step.x},${step.y}`, { ms: Date.now() - stepStart });
+        await sleep(600);
+
+      } else if (step.op === 'type') {
+        const text = String(step.text ?? '');
         if (!text) throw new Error('type needs text');
-        // paste is faster + keeps formatting, but on some Wayland setups wl-copy/xclip hangs — fallback to ydotool typing
+        // Safety gate: never paste into a window we did not just open.
+        const active = await activeWindowTitle();
+        if (active) {
+          const looksRight = typingMode === 'app'
+            || BROWSER_HINTS.test(active)
+            || (verifiedTitle && active.toLowerCase().includes(String(verifiedTitle).slice(0, 24).toLowerCase()));
+          if (!looksRight) {
+            let recovered = false;
+            if (verifiedTitle) {
+              try {
+                await apps.windowAction('focus', verifiedTitle);
+                await sleep(600);
+                const again = await activeWindowTitle();
+                recovered = Boolean(again && BROWSER_HINTS.test(again));
+              } catch { /* nothing to focus */ }
+            }
+            if (!recovered) {
+              throw new Error(
+                `typing skip ki — active window "${active}" hai, browser nahi. ` +
+                'Galat jagah type karne se better hai rukna. Pehle browser kholo, phir dobara bhejo.',
+              );
+            }
+          }
+        }
         try {
           await pc.pasteText(text);
-          outLines[outLines.length - 1] += ` → pasted ${text.length} chars (clipboard)`;
-        } catch (e) {
-          log?.info?.(`[auto] pasteText failed (${e.message}), falling back to typeText`);
+          record(i, step, true, `pasted ${text.length} chars (clipboard)`, { ms: Date.now() - stepStart });
+        } catch (err) {
+          log?.info?.(`[auto] pasteText failed (${err.message}) — typing instead`);
           await pc.typeText(text);
-          outLines[outLines.length - 1] += ` → typed ${text.length} chars (fallback)`;
+          record(i, step, true, `typed ${text.length} chars`, { ms: Date.now() - stepStart });
         }
-        await sleep(700);
-      } else if (st.op === 'key') {
-        await pc.keyCombo(String(st.combo ?? 'enter'));
-        outLines[outLines.length - 1] += ` → key ${st.combo}`;
-        // If next step is screenshot, wait for AI/page to respond (Arena/ChatGPT etc ~5s)
-        const nextIsScreenshot = steps[i+1]?.op === 'screenshot';
-        await sleep(nextIsScreenshot ? 6000 : 900);
-      } else if (st.op === 'wait') {
-        const ms = Math.min(Math.max(Number(st.ms) || 1000, 200), 20000);
+        await sleep(600);
+        if (step.submit && !(steps[i + 1]?.op === 'key')) {
+          await pc.keyCombo('enter');
+          record(i, step, true, 'pressed enter (submit)', { ms: Date.now() - stepStart });
+          await sleep(600);
+        }
+
+      } else if (step.op === 'key') {
+        await pc.keyCombo(String(step.combo ?? 'enter'));
+        record(i, step, true, `key ${step.combo ?? 'enter'}`, { ms: Date.now() - stepStart });
+        await sleep(900);
+
+      } else if (step.op === 'wait') {
+        const ms = Math.min(Math.max(Number(step.ms) || 1_000, 200), 120_000);
         await sleep(ms);
-        outLines[outLines.length - 1] += ` → waited ${ms}ms`;
-      } else if (st.op === 'screenshot') {
-        const img = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs });
-        lastImage = img;
-        outLines[outLines.length - 1] += ` → captured ${img.length} bytes`;
-        await sleep(400);
-      } else if (st.op === 'look') {
-        const res = await ocr.lookAtScreen(config, st.question ?? '', log);
-        const txt = typeof res === 'string' ? res : String(res?.text ?? res ?? '');
-        outLines[outLines.length - 1] += ` → look: ${txt.slice(0, 120)}`;
+        record(i, step, true, `waited ${ms}ms`, { ms: Date.now() - stepStart });
+
+      } else if (step.op === 'screenshot') {
+        const image = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs });
+        lastImage = image;
+        record(i, step, true, `captured ${Math.round(image.length / 1024)} KB`, { ms: Date.now() - stepStart });
+        await sleep(200);
+
+      } else if (step.op === 'look') {
+        const res = await ocr.lookAtScreen(config, step.question ?? '', log);
+        const text = typeof res === 'string' ? res : String(res?.text ?? '');
         if (res?.image) lastImage = res.image;
+        record(i, step, true, text.slice(0, 40).replace(/\s+/g, ' '), { ms: Date.now() - stepStart, answer: text });
+
+      } else {
+        throw new Error(`unknown step "${step.op}"`);
       }
     } catch (err) {
-      const msg = String(err?.message ?? err).slice(0, 500);
-      outLines.push(`❌ Failed at step ${i + 1}: ${msg}`);
-      // capture failure screenshot for debugging
+      const message = String(err?.message ?? err).slice(0, 600);
+      record(i, step, false, message, { ms: Date.now() - stepStart });
+      // Capture what the screen looks like at the failure (best effort).
       try {
-        const failImg = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs }).catch(() => null);
-        if (failImg) lastImage = failImg;
-      } catch {}
-      const text = `🤖 Autopilot stopped at step ${i + 1}/${steps.length}\n\n${outLines.join('\n')}\n\nTip: /auto uses OCR (tesseract) to find button text. If "battle" not found, try exact label from /screenshot + /ocr, or use coordinates: tap battle → click 800 400.`;
-      return lastImage ? { text, image: lastImage } : text;
+        const image = await pc.captureScreenshot({ portalTimeoutMs: Math.min(config?.portalTimeoutMs ?? 60_000, 20_000) });
+        if (image) lastImage = image;
+      } catch { /* screenshot unavailable */ }
+      return finish({ ok: false, failedAt: i + 1, results, image: lastImage, steps, label, startedAll });
     }
   }
 
-  // Final polish: if last step was not screenshot, take one
-  if (!lastImage && steps[steps.length - 1]?.op !== 'screenshot') {
-    try { lastImage = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs }); } catch {}
+  return finish({ ok: true, results, image: lastImage, steps, label, startedAll });
+}
+
+function finish({ ok, failedAt, results, image, steps, label, startedAll }) {
+  const seconds = Math.max(1, Math.round((Date.now() - startedAll) / 1000));
+  const answer = [...results].reverse().find((r) => r.answer)?.answer;
+  const lines = results.map((r) => `${r.ok ? '✅' : '❌'} ${r.index}. ${describeStep(steps[r.index - 1])} → ${r.detail}`);
+  let text;
+  const unverified = results.filter((r) => r.unverified).length;
+  if (ok) {
+    text = `🤖 *${label}* — ${results.length} steps, ${seconds}s\n${lines.join('\n')}`;
+    if (unverified) {
+      text += `\n\nℹ️ ${unverified} step(s) verify nahi ho paye (Wayland window list block karta hai) — neeche screenshot dekho.`;
+    }
+    if (answer) text += `\n\n💬 *Jawab:*\n${String(answer).slice(0, 1200)}`;
+  } else {
+    const failed = results.find((r) => !r.ok);
+    text = [
+      `⚠️ *${label}* — step ${failedAt}/${steps.length} pe *ruk gaya* (${seconds}s)`,
+      '',
+      ...lines,
+      '',
+      'Aage kuch nahi kiya — galat window me typing/clicking se bachne ke liye ruk gaya.',
+      'Fix: /doctor chalao, ya /screenshot + /ocr se screen dekh ke exact label/coords do.',
+    ].join('\n');
   }
-
-  let finalText = `🤖 Autopilot done (${steps.length} steps)\n\n${outLines.join('\n')}`;
-  // Try to add OCR summary if we have time
-  try {
-    const look = await ocr.lookAtScreen(config, 'summarize what is on the screen in one short paragraph', log).catch(() => null);
-    const summary = typeof look === 'string' ? look : look?.text;
-    if (summary && summary.length > 20) finalText += `\n\n📝 Screen says:\n${String(summary).slice(0, 1200)}`;
-  } catch {}
-
-  return lastImage ? { text: finalText, image: lastImage } : finalText;
+  return { ok, text, image, steps: results, failedAt: failedAt ?? null, answer: answer ?? null };
 }
 
-function describeStep(st) {
-  if (st.op === 'open') return `open "${st.target}"`;
-  if (st.op === 'tap') return `tap "${st.label}"`;
-  if (st.op === 'click') return `click ${st.x} ${st.y}`;
-  if (st.op === 'type') return `type "${String(st.text).slice(0, 40)}${String(st.text).length > 40 ? '…' : ''}"`;
-  if (st.op === 'key') return `key ${st.combo}`;
-  if (st.op === 'wait') return `wait ${st.ms}ms`;
-  if (st.op === 'screenshot') return `screenshot`;
-  if (st.op === 'look') return `look "${st.question ?? ''}"`;
-  return JSON.stringify(st);
+/** Legacy entry point used by /auto and the `autopilot` tool. */
+export async function runAutopilot(rawTask, { config, log } = {}) {
+  const steps = parseAutoSteps(rawTask);
+  if (!steps.length) {
+    throw new Error(
+      'usage: /auto open <app> | tap <label> | type <text> | key enter | screenshot\n' +
+      'Example: /auto open agent | tap battle | tap agent | type hello | key enter | screenshot',
+    );
+  }
+  return executeSteps(steps, { config, log, label: 'Autopilot' });
 }
+
+export { describeStep, activeWindowTitle };

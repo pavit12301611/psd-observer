@@ -11,6 +11,7 @@
 //   POST /api/login             dashboard PIN → token
 //   POST /api/chat              talk to the agent from the app
 //   GET  /api/status            live status for the app
+//   GET  /api/brains            which free model serves what (workload routing)
 //   GET  /api/files             received + shared files
 //   POST /api/action            run a single action directly
 //   POST /api/send              send a message to the owner on WhatsApp
@@ -28,9 +29,10 @@ import { ROOT } from './config.js';
 import { cachedIcon } from './webapp.js';
 import * as apps from './apps.js';
 import * as files from './files.js';
+import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -239,6 +241,15 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
       }
 
       switch (route) {
+        case 'GET /api/brains': {
+          const router = routerFor(config, console);
+          return json(res, 200, {
+            ...router.snapshot(),
+            tierBudgets: { tiny: 2, light: 3, standard: 5, heavy: 8 },
+            model: config.ollamaModel,
+          });
+        }
+
         case 'GET /api/status':
           return json(res, 200, {
             version: VERSION,
@@ -253,6 +264,10 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
             access: actions?.accessReport?.() ?? { level: config.accessLevel },
             agentTools: Boolean(config.agentTools),
             model: config.ollamaModel,
+            brains: routerFor(config, console).catalog.map((m) => ({
+              id: m.id, label: m.label, local: m.local, vision: m.vision,
+              tiers: [m.minTier, m.maxTier], quality: m.quality,
+            })),
             stats: store.data.stats,
             reminders: store.data.reminders.length,
             cronJobs: (store.data.cronJobs ?? []).length,

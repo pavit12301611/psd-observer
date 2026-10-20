@@ -1,8 +1,8 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "Observer WhatsApp Agent 2.0 - free native WhatsApp + installable phone app with full PC control (Fedora/Linux). No Twilio, no Observer app, no per-message cost.",
+  "description": "Observer WhatsApp Agent 2.1 - free native WhatsApp + phone app + full PC control, with workload-routed multi-model AI and verified /agent automation (Fedora/Linux).",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -16,7 +16,7 @@
     "service:status": "systemctl --user status observer-whatsapp-agent",
     "service:logs": "journalctl --user -u observer-whatsapp-agent -f",
     "relink": "bash scripts/relink-whatsapp.sh",
-    "test": "node --test test/agent.test.js test/power.test.js",
+    "test": "node --test test/agent.test.js test/power.test.js test/router.test.js",
     "check": "for f in src/*.js; do node --check \"$f\" || exit 1; done",
     "app": "node --env-file-if-exists=.env src/index.js"
   },

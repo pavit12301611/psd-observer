@@ -77,7 +77,8 @@ Owner phone  +91 95289 23866 ──WhatsApp──▶ Agent phone +91 88595 55795
 |---|---|
 | `whatsapp-agent/src/actions.js` | **One registry of 61 PC actions** with permission levels + destructive confirmations. Used by commands, offline intents and the AI. |
 | `whatsapp-agent/src/nlp.js` | Offline intent parser — “chrome kholo”, “wifi off karo”, “thesis.pdf dhundo” work with **no AI installed**. |
-| `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step. |
+| `whatsapp-agent/src/router.js` | **Workload routing**: sizes each task (tiny→heavy), picks the cheapest capable free model, cooldowns failing brains, hourly power budget. |
+| `whatsapp-agent/src/agentloop.js` | Free AI **tool-calling loop** (Ollama / Groq / Gemini / OpenRouter), multi-step, routed + escalating. |
 | `whatsapp-agent/src/apps.js` | Discovers `.desktop` apps, launches **any** installed app, window control. |
 | `whatsapp-agent/src/files.js` | Home-folder file tools: list/read/write/search/zip/download/send, secret paths blocked. |
 | `whatsapp-agent/src/systemx.js` | Wi-Fi (nmcli), Bluetooth, systemd services, process kill, webcam, screen recording. |

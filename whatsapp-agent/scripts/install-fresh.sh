@@ -2,7 +2,7 @@
 # install-fresh.sh — FIRST-TIME install with no git at all.
 #
 #   curl -fL -o /tmp/observer-setup.sh \
-#     "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/20378d42-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
+#     "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5f4643a1-psd-observer/whatsapp-agent/scripts/install-fresh.sh"
 #   bash /tmp/observer-setup.sh --service --ollama --power --phone
 #
 # What it does, in order:
@@ -22,7 +22,7 @@
 set -euo pipefail
 
 REPO="${REPO:-pavit12301611/psd-observer}"
-BRANCH="${BRANCH:-arena/dee1a8b3-psd-observer}"
+BRANCH="${BRANCH:-arena/5f4643a1-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 
 DEST="$HOME/observer-agent"
