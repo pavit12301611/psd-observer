@@ -187,6 +187,8 @@ everything else. Login attempts are rate-limited.
 /ocr                      raw text on screen
 /pc locate <label>        find a button on screen (OCR)
 /pc tap <label>           find + click it
+/use <task>               *hands*: look → click/type/scroll → look again (agentic)
+/use --steps 12 <task>    same, bigger step budget (max 20)
 /pc type <text>           type into focused window
 /pc key ctrl+l            press keys
 /pc click 640 400         click coordinates
@@ -239,6 +241,7 @@ Files are restricted to your home folder (plus `FILES_EXTRA_ROOTS`); `.ssh`,
 /agent <task>             does the task on the PC: tools, verified steps, honest report
 /agent --plan <task>      show how it would be done (no side effects)
 /agent --web <task>       force the browser path (e.g. "chatgpt pe rust vs go pooch")
+/agent --use <task>       force screen control (same as /use: click/type/scroll loop)
 /agent --fast <task>      force the small/fast model (save power) · --deep = biggest
 /brains                   which free model serves what + live health + power budget
 /brains why <task>        show the exact routing decision for a task
@@ -437,6 +440,51 @@ on "hi" and nothing hands a 10-step job to a 1B model:
 3. **Never lies**: a failed run says `step N pe ruk gaya` with the real reason,
    and attaches a screenshot of the failure — not a fake success.
 4. **Proves its work**: `/agent` replies end with `🧠 standard · llama3.2 · 3 steps`.
+
+### What changed in 2.6 — hands (computer use)
+
+`/use` (and the `computer_use` tool the AI brain calls by itself) gives the agent
+a real feedback loop instead of one-shot commands:
+
+```
+screenshot → OCR (local, free) → vision model picks ONE action →
+click / type / scroll / drag → settle → screenshot again → …
+```
+
+Design taken from Simular's **Agent-S** (the computer-use research agent):
+
+- **One action per step**, never a burst of blind clicks. The model sees the
+  result of its last action before choosing the next one.
+- **Text is grounded to exact pixels.** OCR gives every on-screen word an id;
+  the model answers `{"action":"click","word":42}` and we click that word's
+  box. Coordinates (0-1000) are only used for icons/images.
+- **Stuck detection.** The same action three times with no screen change ends
+  the run with `same action 3 baar, screen nahi badli — stuck` instead of
+  burning the step budget.
+- **Budgets everywhere**: 8 steps / 240 s by default (`HANDS_MAX_STEPS`,
+  `HANDS_MAX_SECONDS`), screenshots downscaled to 1280 px so free-tier image
+  limits are respected.
+- **Honest replies**: every line is an action that actually ran, with the real
+  tool result; a failed run says so and attaches the screenshot.
+
+Safety: the action allowlist is `click / double_click / right_click / type /
+key / scroll / drag / move / wait / open / focus / done / fail` — there is no
+shell, and the model is instructed never to type passwords/OTPs or click
+destructive buttons. Typing still goes through the same window check as `/auto`
+(a non-browser window is never typed into blindly).
+
+Privacy: screenshots go to the vision model. With a local vision model
+(`OLLAMA_VISION_MODEL` / `LOCAL_API_URL_VISION`) that is 100% on-PC. Otherwise
+the free cloud tier sees the screenshot — set `ALLOW_CLOUD_SCREEN=false` to
+forbid that.
+
+Example:
+
+```
+/use YouTube kholo aur lofi music chalao
+/use Settings me Bluetooth on karo
+/agent instagram kholo aur pehli story dekho   ← the brain calls computer_use itself
+```
 
 ### What changed in 2.5.4 (the `/arena` fix)
 

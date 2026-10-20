@@ -242,6 +242,34 @@ export async function describeImage(config, imageBase64, caption = '', log = con
 }
 
 /**
+ * One vision call for computer use ("hands"): screenshot + instructions, any
+ * vision-capable brain from the router. Local vision models are preferred by
+ * ROUTER_PREFER; set ALLOW_CLOUD_SCREEN=false to keep screenshots on the PC.
+ * Returns { text, model, local } or null when nothing can see images.
+ */
+export async function screenStep(config, prompt, imageBase64, log = console, { mime = 'image/png' } = {}) {
+  const router = routerFor(config, log);
+  const allowCloud = config?.allowCloudScreen !== false;
+  // Tier 2 = the fast vision models (Gemini Flash / Groq qwen-vision). A
+  // computer-use loop needs many quick looks, not one slow smart one.
+  const plan = router.plan({ text: 'look at the screen and control the desktop', needsVision: true, needsTools: false, forceTier: 2 });
+  for (const model of plan.candidates.filter((m) => m.vision)) {
+    if (!allowCloud && !model.local) continue;
+    const started = Date.now();
+    try {
+      const text = await visionCall(model, config, prompt, imageBase64, mime);
+      if (!text) throw new Error('empty vision response');
+      router.record(model.id, { ok: true, ms: Date.now() - started, tier: plan.rank });
+      return { text, model: model.label, local: Boolean(model.local) };
+    } catch (err) {
+      router.record(model.id, { ok: false, ms: Date.now() - started, tier: plan.rank, error: err.message });
+      log.warn?.(`[ai] screen ${model.label} failed: ${err.message}`);
+    }
+  }
+  return null;
+}
+
+/**
  * Ask a LOCAL vision model where a UI element is in an image.
  * Returns the raw model reply (expected: {"x":0-1000,"y":0-1000} or
  * {"found":false}) or null when no vision model is available. Local-only on

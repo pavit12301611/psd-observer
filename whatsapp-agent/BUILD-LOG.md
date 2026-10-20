@@ -124,6 +124,92 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.6.0 — *hands*: computer ko insaan ki tarah chalana
+
+Owner ne `main` pe `Agent-S-main.zip` daala (commit `8154afe`, Simular ka
+open-source computer-use agent — Agent-S/S2/S3) aur bola: "is WhatsApp model ke
+paas *actual hands* aa jaane chahiye". Zip padha, architecture samajhi, aur uska
+asar hamare Node agent me utaara.
+
+### Zip me kya tha (aur kya use kiya)
+
+| File | Idea jo adopt ki |
+|---|---|
+| `gui_agents/s3/agents/worker.py` | ek turn = ek action; har step pe screenshot dobara |
+| `gui_agents/s3/agents/grounding.py` | **do tarah ki grounding**: text target word-id se exact, warna model ke relative coordinates (0-1000) |
+| `gui_agents/s3/memory/procedural_memory.py` | strict output format + "jo fail hua dobara mat karo" + done/fail action |
+| `gui_agents/s1/aci/LinuxOSACI.py` | Linux pe actions = mouse/keyboard events, koi API nahi |
+| `gui_agents/s3/bbon/*` | best-of-N — *nahi* liya: free tier pe 8 steps × N rollouts mehnga hai |
+
+Aisa hi nahi kiya: Agent-S Python + `pyautogui` + UI-TARS grounding model maangta
+hai. Uska grounding model free tier pe nahi hai, aur `pyautogui` Wayland pe
+kaam nahi karta. Hamare paas pehle se `pccontrol` (xdotool/ydotool/wtype) hai —
+bas uske upar loop chahiye tha.
+
+### Naya module: `src/hands.js`
+
+```
+screenshot → OCR (local, free) → vision model se EK action (JSON) →
+click / type / scroll / drag → 900ms settle → dobara screenshot → …
+```
+
+- **Word-id grounding**: har OCR word ka id prompt me jaata hai (`12 | Send | 870,940`),
+  model `{"action":"click","word":12}` bolta hai → hum us word ke exact box ke
+  centre pe click karte hain. Icons ke liye `target` + `x,y` (0-1000).
+- **Ek action, ek step** — burst clicking nahi. Agli baar screenshot dekh ke hi
+  agla faisla.
+- **Stuck detection**: wahi action 3 baar + screen nahi badli → run rukta hai
+  (`same action 3 baar, screen nahi badli — stuck`), budget jalane ke bajaye.
+- **Bina kaam kiye "done" nahi maanta**: pehle step pe hi `done` aaya to ek baar
+  poochta hai ("abhi kuch kiya hi nahi") — phir bhi wahi bole to answer me saaf
+  likhta hai `koi action nahi kiya — screen pehle se hi aisi thi`.
+- **Budgets**: 8 steps / 240s default (`HANDS_MAX_STEPS`, `HANDS_MAX_SECONDS`);
+  screenshot 1280px pe downscale (sharp) — Groq/Gemini free-tier image limits ke andar.
+- **Honest output**: har line asli tool result hai; fail pe `❌ reason` + screenshot,
+  kabhi fake "ho gaya" nahi. Reply me model + vision calls + cloud/local note.
+
+### Safety (jaan bujh ke tight)
+
+Action allowlist: `click, double_click, right_click, type, key, scroll, drag,
+move, wait, open, focus, done, fail`. Shell **nahi**. Model ko rules me saaf
+likha hai: password/OTP/card kabhi type nahi, Delete/Uninstall/Logout bina kahe
+nahi. `type` pehle clipboard-paste se jaata hai (unicode/newlines safe), warna
+per-char typing.
+
+### Privacy
+
+Screenshot vision model ko jaata hai. Local vision (`OLLAMA_VISION_MODEL` /
+`LOCAL_API_URL_VISION`) ho to sab PC pe. Nahi ho to free cloud tier (Gemini/Groq)
+dekhta hai — `ALLOW_CLOUD_SCREEN=false` se band, phir hands sirf local vision pe
+chalega. Reply me har baar likha hota hai ki screen kahan gayi.
+
+### Kahan se chalta hai
+
+```bash
+/use YouTube kholo aur lofi music chalao     # direct
+/use --steps 12 Settings me Bluetooth on karo
+/agent instagram kholo aur pehli story dekho # brain khud computer_use tool call karta hai
+/agent --use settings me bluetooth on karo    # heuristic skip, seedha screen control
+```
+
+`computer_use` registry me `standard` level ka tool hai, aur `agentloop` usko
+har request me available rakhta hai (`ALWAYS` list) — kyunki visual kaam sirf
+wahi tool kar sakta hai.
+
+### Naye tests (20)
+
+`test/hands.test.js`: coordinate normalisation (0-1 vs 0-1000 vs pixels), JSON
+nikalna prose/fences se, har action ka parse + clamp, bad/dangerous reply reject
+(`run_shell`), word-id grounding, prompt me word table, loop ke 6 cases (happy
+path, invalid reply retry, model fail, stuck, step budget, screenshot fail),
+`computer_use` tool schema, `/use` ka usage + safe-mode refusal, aur local vision endpoint (LOCAL_API_URL_VISION akela bhi kaam kare).
+
+```bash
+npm test    # 118 pass
+```
+
+---
+
 ## 2.5.4 — "page khul gaya phir bhi *page load nahi hua*"
 
 Owner ne screenshot bheja: `/agent arena.ai/agent pe hello likho` → 22s me
@@ -402,6 +488,7 @@ npm test                              # 90 pass
 | 17 | *2.5.2* | **`/open` fuzzy-match bug**: bakwaas phrase se asli app khul jati thi (`app` → Observer App) | 90 | 61 |
 | 18 | *2.5.3* | **Security review**: write-path block-list bypass, TTS shell injection, non-constant-time token | 93 | 61 |
 | 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
+| 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
 
 Verify karna ho (sab curl, git zero):
 
@@ -979,12 +1066,12 @@ Jo yahan verify nahi ho saka (sandbox me GUI/Ollama nahi hai) — asli Fedora pe
 
 ---
 
-## 7. Registry — 61 actions ka breakdown
+## 7. Registry — 62 actions ka breakdown
 
 | Level | Count | Actions |
 |---|---|---|
 | `safe` | 33 | `list_apps, list_windows, screenshot, volume, brightness, media, notify, lock_screen, clipboard_get, clipboard_set, network_info, doctor, system_status, disk_space, battery, processes, service_status, list_dir, read_file, search_files, weather, wikipedia, news, read_webpage, calculate, add_reminder, list_reminders, add_todo, list_todos, complete_todo, add_note, list_notes, remember_fact` |
-| `standard` | 26 | `open_app, close_app, focus_window, look_at_screen, ocr_screen, wifi, bluetooth, kill_process, service_restart, write_file, delete_path, move_path, copy_path, make_dir, zip_paths, unzip_path, download_url, send_file, webcam_photo, record_screen, type_text, paste_text, press_keys, click, move_mouse, scroll` |
+| `standard` | 27 | `open_app, close_app, focus_window, look_at_screen, ocr_screen, computer_use, wifi, bluetooth, kill_process, service_restart, write_file, delete_path, move_path, copy_path, make_dir, zip_paths, unzip_path, download_url, send_file, webcam_photo, record_screen, type_text, paste_text, press_keys, click, move_mouse, scroll` |
 | `full` | 2 | `power` (shutdown/reboot/suspend), `run_shell` (PIN + opt-in) |
 
 Destructive (confirmation maangte hain): `delete_path`, `kill_process`,

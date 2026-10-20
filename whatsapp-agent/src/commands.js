@@ -17,6 +17,7 @@ import * as cron from './cron.js';
 import * as tts from './tts.js';
 import * as autopilot from './autopilot.js';
 import { describeSite } from './sites.js';
+import * as hands from './hands.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
@@ -61,6 +62,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /voicereply <text> — free offline voice note (only on this command)
 • /auto <task> — UI autopilot (verified): open chrome | tap Search | type hello | key enter | screenshot
 • /arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)
+• /use <task> — *haath*: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
@@ -604,6 +606,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     '• /agent chrome kholo aur github pe psd-observer search karo',
     '• /agent chatgpt pe rust vs go pooch        ← browser task',
     '• /agent --web youtube pe lofi play karo   ← force browser',
+    '• /agent --use settings me bluetooth on karo ← force screen control (/use)',
     '• /agent --plan <task>                     ← pehle plan dekho',
     '• /agent --fast <task>                     ← chhota model, power bachao',
     '',
@@ -612,14 +615,15 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
 
   function parseAgentFlags(raw) {
     let text = String(raw ?? '').trim();
-    const flags = { web: false, plan: false, deep: false, fast: false };
+    const flags = { web: false, plan: false, deep: false, fast: false, use: false };
     for (let i = 0; i < 6; i++) {
-      const m = text.match(/^--(web|browser|online|plan|deep|heavy|fast|quick)\s+/i);
+      const m = text.match(/^--(web|browser|online|plan|deep|heavy|fast|quick|use|hands|screen)\s+/i);
       if (!m) break;
       const key = m[1].toLowerCase();
       if (key === 'browser' || key === 'online') flags.web = true;
       else if (key === 'heavy' || key === 'deep') flags.deep = true;
       else if (key === 'quick') flags.fast = true;
+      else if (key === 'hands' || key === 'screen') flags.use = true;
       else flags[key] = true;
       text = text.slice(m[0].length).trim();
     }
@@ -647,6 +651,37 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     };
   }
 
+  const USE_USAGE = [
+    '🖐️ *Usage:* `/use <task>`',
+    '',
+    'Main screen dekhta hoon, phir *asli* mouse/keyboard se ek-ek step karta hoon — ',
+    'aur har step ke baad dobara screen dekhta hoon (jaise insaan karta hai).',
+    '',
+    '*Examples:*',
+    '• /use YouTube kholo aur lofi music chalao',
+    '• /use Settings me Wi-Fi on karo',
+    '• /use browser me github.com/pavit12301611/psd-observer kholo aur star karo',
+    '• /use --steps 12 download page me se latest release download karo',
+    '',
+    '_Sirf ek command ka kaam ho to /open, /pc type, /pc key fast hain. /use tab jab UI me ghoomna pade._',
+  ].join('\n');
+
+  async function runUseTask(raw) {
+    let text = String(raw ?? '').trim();
+    let maxSteps;
+    const m = text.match(/^--steps\s+(\d{1,2})\s+/i);
+    if (m) {
+      maxSteps = Number(m[1]);
+      text = text.slice(m[0].length).trim();
+    }
+    if (!text) return USE_USAGE;
+    if ((actions.level?.() ?? 'full') === 'safe') {
+      return '🔒 /use ke liye ACCESS_LEVEL=standard ya full chahiye — safe mode sirf padhta hai.';
+    }
+    const result = await hands.runHands(text, { config, log, maxSteps });
+    return result?.image ? { text: result.text, image: result.image } : result.text;
+  }
+
   async function runArenaPrompt(prompt) {
     if (!prompt) return '🌐 Usage: /arena <prompt> — arena.ai/agent kholke prompt poochta hai';
     return autopilot.executeSteps([
@@ -662,6 +697,9 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     if (!raw || !String(raw).trim()) return AGENT_USAGE;
     const { text, flags } = parseAgentFlags(raw);
     if (!text) return AGENT_USAGE;
+
+    // --use: skip every heuristic and hand it to the screen-control loop.
+    if (flags.use) return runUseTask(text);
 
     const plan = agentLoop.buildPlan(text, { needsTools: true, forceTier: forceTierFrom(flags) });
     if (flags.plan) return planPreview(text, plan);
@@ -897,6 +935,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       // ── agent + confirmations ───────────────────────────────────────────
       case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open chrome | tap Search | type hello | key enter | screenshot\nNatural: /auto open chrome and search for today weather then screenshot\nHar step verify hota hai — jo fail hua wahi batata hai.';
       case 'agent': return runAgentTask(args, ctx);
+      case 'use': case 'hands': return runUseTask(args);
       case 'arena': return runArenaPrompt(args);
       case 'brains': case 'models': case 'router': {
         if (args && /^(why|explain|route)\b/i.test(args)) {

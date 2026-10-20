@@ -25,6 +25,7 @@ import * as ocr from './ocr.js';
 import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
+import * as hands from './hands.js';
 import { runDoctor } from './doctor.js';
 
 const execFileAsync = promisify(execFile);
@@ -112,6 +113,22 @@ export function createActions({ config, store, log = console }) {
       description: 'Take a screenshot, OCR it and answer a question about what is on the screen right now. Use for "what is on my screen", "read this error", "summarise this page".',
       params: { question: { type: 'string', description: 'What to answer about the screen (optional)' } },
       run: async ({ question }) => ocr.lookAtScreen(config, question ?? '', log),
+    },
+    {
+      name: 'computer_use', level: 'standard', label: 'Control the screen',
+      description:
+        'Do a visual task on the PC like a human: look at the screenshot, then click / type / scroll, '
+        + 'and look again after every step (up to 8 steps). Use for anything that needs the GUI — playing a '
+        + 'video, using a website, changing a setting, driving an app that has no CLI. Prefer a direct tool '
+        + '(open_app, download_url, write_file, …) when one can do it exactly.',
+      params: {
+        task: { type: 'string', description: 'What to accomplish, in plain language (Hinglish fine)', required: true },
+        max_steps: { type: 'integer', description: 'Step budget (default 8, max 20)' },
+      },
+      run: async ({ task, max_steps }) => {
+        const result = await hands.runHands(task, { config, log, maxSteps: max_steps });
+        return { text: result.text, image: result.image };
+      },
     },
     {
       name: 'ocr_screen', level: 'standard', label: 'OCR screen',

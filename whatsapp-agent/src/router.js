@@ -237,14 +237,17 @@ export function buildCatalog(config = {}) {
         quality: inferQuality(config.localModelHeavy, 6),
       });
     }
-    if (config.localApiUrlVision && config.localModelVision) {
-      add({
-        provider: 'local', model: config.localModelVision, baseUrl: config.localApiUrlVision, apiKey: config.localApiKey,
-        label: `Local vision · ${config.localModelVision}`, local: true,
-        minTier: 1, maxTier: 4, speed: 2, vision: true, tools: false,
-        quality: inferQuality(config.localModelVision, 5), note: 'sees images',
-      });
-    }
+  }
+  // A vision endpoint is independent: LOCAL_API_URL_VISION + LOCAL_MODEL_VISION
+  // is enough on its own (that is the "hands stay on this PC" setup, and it
+  // must not require a separate text server).
+  if (config.localApiUrlVision && config.localModelVision) {
+    add({
+      provider: 'local', model: config.localModelVision, baseUrl: config.localApiUrlVision, apiKey: config.localApiKey,
+      label: `Local vision · ${config.localModelVision}`, local: true,
+      minTier: 1, maxTier: 4, speed: 2, vision: true, tools: false,
+      quality: inferQuality(config.localModelVision, 5), note: 'sees images',
+    });
   }
 
   // ── Ollama (this PC): free, private, no quota ────────────────────────────

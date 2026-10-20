@@ -878,6 +878,37 @@ export async function moveMouse(x, y) {
   throw new Error(`${real.tool} mousemove failed: ${(real.err.stderr || real.err.message || '').toString().trim().split('\n').at(-1)?.slice(0, 160)}`);
 }
 
+/**
+ * Press, move, release — a real drag (sliders, selecting text, moving windows).
+ * xdotool is the only input tool with separate button-down/up, so on a pure
+ * ydotool/wtype setup this reports exactly that instead of faking a click.
+ */
+export async function dragMouse(x1, y1, x2, y2) {
+  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  const coords = [x1, y1, x2, y2].map(Number);
+  if (!coords.every(Number.isFinite)) throw new Error('usage: /pc drag <x1> <y1> <x2> <y2>');
+  const [left, top, right, bottom] = coords;
+  if (!findBin('xdotool')) {
+    throw new Error('drag ke liye xdotool chahiye (ydotool me button hold nahi hota): sudo dnf install xdotool');
+  }
+  const xd = findBin('xdotool');
+  await run(xd, ['mousemove', String(left), String(top)]);
+  await run(xd, ['mousedown', '1']);
+  try {
+    // Several small steps so apps see a real drag, not a teleport.
+    const steps = 12;
+    for (let i = 1; i <= steps; i++) {
+      const x = Math.round(left + ((right - left) * i) / steps);
+      const y = Math.round(top + ((bottom - top) * i) / steps);
+      await run(xd, ['mousemove', String(x), String(y)]);
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  } finally {
+    await run(xd, ['mouseup', '1']);
+  }
+  return `🖱️ Dragged ${left},${top} → ${right},${bottom} via xdotool.`;
+}
+
 /** Scroll the wheel: positive = down. */
 export async function scrollMouse(direction = 'down', amount = 3) {
   if (!hasGraphicalSession()) throw new Error(NO_SESSION);

@@ -161,6 +161,19 @@ export function loadConfig({ dryRun = false } = {}) {
     // when OCR missed a button. Off by default — blind clicking can hit
     // anything. Turn on only if you know your screen layout.
     allowBlindClicks: bool(e.ALLOW_BLIND_CLICKS, false),
+    // ── "hands" (src/hands.js): look-at-screen → click/type loop ───────────
+    // One screenshot per step, one vision call per step. 8 steps is enough for
+    // "YouTube kholo aur lofi chalao" without burning the whole free tier.
+    handsMaxSteps: int(e.HANDS_MAX_STEPS, 8),
+    handsMaxSeconds: int(e.HANDS_MAX_SECONDS, 240),
+    handsStepDelayMs: int(e.HANDS_STEP_DELAY_MS, 900),
+    // Screenshots are downscaled to this width before leaving the PC, so a
+    // 4K screen still fits Groq's 4MB image limit.
+    handsImageWidth: int(e.HANDS_IMAGE_WIDTH, 1280),
+    // Local vision is preferred; when there is none, cloud vision is allowed.
+    // ALLOW_CLOUD_SCREEN=false keeps every screenshot on the PC (and hands
+    // only works if OLLAMA_VISION_MODEL / LOCAL_API_URL_VISION is set).
+    allowCloudScreen: bool(e.ALLOW_CLOUD_SCREEN, true),
     // Show "🧠 standard · llama3.2 · 3 steps" under AI replies. Off by default
     // for normal chat; /agent always shows it (so "done" is provable).
     showRoutingFooter: bool(e.SHOW_ROUTING_FOOTER, false),
