@@ -26,6 +26,7 @@ import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
 import * as hands from './hands.js';
+import { StoppedError, isStoppedError } from './cancel.js';
 import { runDoctor } from './doctor.js';
 
 const execFileAsync = promisify(execFile);
@@ -125,8 +126,9 @@ export function createActions({ config, store, log = console }) {
         task: { type: 'string', description: 'What to accomplish, in plain language (Hinglish fine)', required: true },
         max_steps: { type: 'integer', description: 'Step budget (default 8, max 20)' },
       },
-      run: async ({ task, max_steps }) => {
-        const result = await hands.runHands(task, { config, log, maxSteps: max_steps });
+      run: async ({ task, max_steps }, ctx) => {
+        const result = await hands.runHands(task, { config, log, maxSteps: max_steps, signal: ctx?.signal });
+        if (result.stopped) throw new StoppedError('Hands');
         return { text: result.text, image: result.image };
       },
     },
@@ -412,7 +414,7 @@ export function createActions({ config, store, log = console }) {
         url: { type: 'string', description: 'The link', required: true },
         path: { type: 'string', description: 'Save to this path (optional, default ~/Downloads)' },
       },
-      run: async ({ url, path: p }) => files.downloadUrl(url, p, { extraRoots }),
+      run: async ({ url, path: p }, ctx) => files.downloadUrl(url, p, { extraRoots, signal: ctx?.signal }),
     },
     {
       name: 'send_file', level: 'standard', label: 'Send file',
@@ -432,7 +434,7 @@ export function createActions({ config, store, log = console }) {
       name: 'record_screen', level: 'standard', label: 'Record screen',
       description: 'Record the screen for N seconds and send the video.',
       params: { seconds: { type: 'number', description: 'Duration in seconds (2-120, default 10)' } },
-      run: async ({ seconds }) => systemx.recordScreen(seconds),
+      run: async ({ seconds }, ctx) => systemx.recordScreen(seconds, { signal: ctx?.signal }),
     },
 
     // ── input ───────────────────────────────────────────────────────────────
@@ -598,7 +600,7 @@ export function createActions({ config, store, log = console }) {
       name: 'autopilot', level: 'standard', label: 'Autopilot',
       description: 'One-command UI automation: open an app, click buttons by visible label (OCR), type, press enter, wait, screenshot. Use for "open agent and click battle then agent and ask how to use ai". Pipe syntax is most reliable: "open agent | tap battle | tap agent | type how to use ai | key enter | screenshot". Also accepts natural language.',
       params: { task: { type: 'string', description: 'Task: pipe steps or natural language, e.g. "open agent | tap battle | tap agent | type hello | key enter | screenshot"', required: true } },
-      run: async ({ task }) => autopilot.runAutopilot(task, { config, log }),
+      run: async ({ task }, ctx) => autopilot.runAutopilot(task, { config, log, signal: ctx?.signal }),
     },
     {
       name: 'remember_fact', level: 'safe', label: 'Remember fact',
@@ -619,7 +621,7 @@ export function createActions({ config, store, log = console }) {
       description: 'Run a shell command on the PC and return its output. Requires ALLOW_SHELL=true and the owner\'s SHELL_PIN. Use for anything not covered by other tools (package installs, git, ffmpeg, scripts).',
       params: { command: { type: 'string', description: 'The shell command', required: true } },
       confirmText: ({ command }) => `Run shell command:\n${short(command, 300)}`,
-      run: async ({ command }) => {
+      run: async ({ command }, ctx) => {
         const cmd = String(command ?? '').trim();
         if (!cmd) throw new Error('empty command');
         const timeout = config.shellTimeoutMs ?? 20_000;
@@ -629,10 +631,13 @@ export function createActions({ config, store, log = console }) {
             maxBuffer: 4 * 1024 * 1024,
             cwd: os.homedir(),
             env: pc.displayEnv(),
+            // /stop kills the child process tree (SIGTERM from Node).
+            ...(ctx?.signal ? { signal: ctx.signal } : {}),
           });
           const out = `${stdout}${stderr ? `\n[stderr]\n${stderr}` : ''}`.trim().slice(0, MAX_OUT);
           return `💻 \`${cmd}\`\n\`\`\`\n${out || '(no output)'}\n\`\`\``;
         } catch (err) {
+          if (ctx?.signal?.aborted || err.name === 'AbortError') throw new StoppedError('Shell');
           const out = `${err.stdout ?? ''}${err.stderr ? `\n${err.stderr}` : ''}`.trim().slice(0, MAX_OUT);
           if (err.killed) throw new Error(`Command timed out after ${timeout / 1000}s.`);
           return `💻 \`${cmd}\`\n\`\`\`\n${out || err.message}\n\`\`\``;
@@ -714,6 +719,10 @@ export function createActions({ config, store, log = console }) {
       if (typeof result === 'string') return { ok: true, text: result };
       return { ok: true, ...result };
     } catch (err) {
+      // A /stop is not a failure: any rejection while the signal is aborted
+      // (curl killed, ffmpeg killed, fetch aborted) travels up so the command
+      // reply is suppressed and only /stop answers.
+      if (isStoppedError(err) || ctx?.signal?.aborted) throw new StoppedError(name);
       log.warn?.(`[actions] ${name} failed: ${err.message}`);
       return { ok: false, text: `⚠️ ${err.message}` };
     }

@@ -124,6 +124,92 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.7.0 — *stop button*, screen ko aankhein, aur update ki khabar
+
+Teen cheezein maangi gayi thi:
+
+1. **Update hone pe WhatsApp message** — kya update hua + kitna time laga.
+2. **`/stop`** — chalta hua kaam *beech me* rukna chahiye, stacked kaam bhi.
+3. **Tez + asli screen reading** — OCR nahi, seedha vision (Gemini ya jo bhi
+   connected API model ho).
+
+### 1. `/stop` — har cheez ke andar ek hi cancel signal
+
+Naya `src/cancel.js`:
+
+```
+StoppedError (code: ESTOPPED)  ─┐
+sleepWith(ms, signal)          ─┼─ ek hi signal poore tree me
+createTaskRegistry()           ─┘   begin/run/stop/stopAll/active/size
+```
+
+- `commands.js` ka `handle()` **sabse pehle** stop-word dekhta hai — dedupe aur
+  "ek kaam chal raha hai" busy-check se bhi pehle. Isliye jab koi command chal
+  raha ho tab bhi `/stop` andar aa jaata hai.
+- `whatsapp.js` me ek batch ke andar pehle `/stop` waale messages process hote
+  hain, baaki queue me rehte hain. Pehle sequential await ki wajah se stop
+  line ke peeche atak jaata tha.
+- Signal `runHands`, `runArenaPrompt`, `agentLoop.run`, `autopilot`, `downloadUrl`,
+  `recordScreen`, `run_shell` — sab tak jaata hai. `curl`/`ffmpeg`/`wf-recorder`
+  child process abort pe mar jaate hain, adhoori download file delete hoti hai.
+- Ruka hua command `null` return karta hai → sirf `/stop` ka reply jaata hai,
+  cancelled kaam ka "⚠️ failed" message nahi.
+- Reply me har task ka label, step count aur seconds: `⏹ *Roka gaya* — 2 task(s)`.
+
+Stop words: `/stop`, `/cancel`, `/abort`, `/ruko`.
+
+### 2. Screen ab OCR nahi — asli vision
+
+Pehle: screenshot → tesseract OCR → word ids → model ko text.
+Ab (`HANDS_USE_OCR=false` default): screenshot → **1024px JPEG q70** →
+vision model khud screen dekhta hai.
+
+- `ai.screenStep()` provider order: **Gemini → Groq (`qwen/qwen3.8-27b`) →
+  OpenRouter (`gemma-4-31b-it:free`) → local llama.cpp → Ollama**.
+  `SCREEN_PROVIDER` se force kar sakte ho.
+- `ALLOW_CLOUD_SCREEN=false` → sirf local/Ollama vision (screenshot PC se bahar
+  nahi jaata).
+- OCR ab **lazy**: sirf tab chalta hai jab text target ko exact pixels pe snap
+  karna ho. Normal coordinate path pe tesseract bilkul nahi chalta.
+- Speed: OCR step hata, image 1024px JPEG (kam tokens, chhota upload),
+  settle 550ms, `HANDS_MAX_TOKENS=512` (pura JSON jawab aata hai).
+
+### 3. Update hone pe message
+
+`src/updates.js` + `observer.sh`:
+
+- `observer.sh update` restart se pehle `data/last-update.json` likhta hai:
+  `{"from":"2.6.0","to":"2.7.0","at":...,"seconds":87,"via":"observer.sh"}`.
+- Jab WhatsApp connect hota hai, `announceUpdate()` version/brain-set badla
+  dekhta hai aur bhejta hai:
+
+```
+🔄 *Observer updated* · 2.6.0 → 2.7.0 · 1m 42s
+• /stop — chalta hua kaam turant rukta hai…
+• Screen ab OCR nahi — screenshot seedha vision model…
+```
+
+- Pehli install pe chup rehta hai (2.7.0 se pehle ka koi message spam nahi).
+- Bhejne me fail hua to version yaad nahi rakhta — agle connect pe dobara try.
+
+### Files
+
+| File | Kya |
+|---|---|
+| `src/cancel.js` | *naya* — StoppedError, sleepWith, task registry |
+| `src/updates.js` | *naya* — update marker, message, announce |
+| `release-notes.json` | *naya* — har version ke bullets (message inhi se banta hai) |
+| `src/commands.js` | `/stop` dispatch, signals, `/status` running line |
+| `src/whatsapp.js` | batch me `/stop` pehle, onConnected hook |
+| `src/actions.js` | har tool me `ctx.signal`, stop = error nahi |
+| `src/hands.js`, `src/ai.js` | vision-first, `screenStep()` provider order |
+| `test/control.test.js` | *naya* — 23 tests (stop, registry, hands abort, updates) |
+
+Tests: **141 pass** (118 + 23 naye).
+
+---
+
+
 ## 2.6.0 — *hands*: computer ko insaan ki tarah chalana
 
 Owner ne `main` pe `Agent-S-main.zip` daala (commit `8154afe`, Simular ka
@@ -489,6 +575,7 @@ npm test                              # 90 pass
 | 18 | *2.5.3* | **Security review**: write-path block-list bypass, TTS shell injection, non-constant-time token | 93 | 61 |
 | 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
 | 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
+| 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 141 | 62 |
 
 Verify karna ho (sab curl, git zero):
 

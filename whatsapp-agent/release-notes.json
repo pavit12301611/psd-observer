@@ -1,0 +1,36 @@
+{
+  "2.7.0": {
+    "title": "stop button, screen vision, update messages",
+    "bullets": [
+      "/stop — chalta hua kaam turant rukta hai (stacked kaam bhi), partial steps batata hai",
+      "Screen ab OCR nahi — screenshot seedha vision model (Gemini/Groq/local) ko jaata hai",
+      "Faster loop: OCR step hataya, screenshot 1024px JPEG q70 (chhota upload), settle 550ms",
+      "Update hote hi WhatsApp pe message: kya naya + kitna time laga",
+      "Naya /stop, /use speed, aur 'Computer use' vision-first grounding"
+    ]
+  },
+  "2.6.0": {
+    "title": "hands — real computer use",
+    "bullets": [
+      "/use: screenshot → ek action → dobara screenshot (insaan ki tarah)",
+      "computer_use tool — AI khud screen pe click/type kar sakta hai",
+      "Stuck detection, 8-step budget, cloud-screen privacy toggle"
+    ]
+  },
+  "2.5.4": {
+    "title": "page load false failure fix",
+    "bullets": [
+      "Page khulne ke baad bhi 'page load nahi hua' aana band",
+      "Chat sites pe seedha type + Enter (click nahi)",
+      "Prompt se domain naam nahi kata jaata"
+    ]
+  },
+  "2.5.3": {
+    "title": "security review",
+    "bullets": [
+      "~/.ssh aur ~/.gnupg me write band (read-only block ab write pe bhi)",
+      "TTS me shell injection fix (text2wave bina shell)",
+      "Bridge token ka comparison constant-time"
+    ]
+  }
+}

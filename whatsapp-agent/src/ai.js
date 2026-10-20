@@ -17,12 +17,17 @@ import { routerFor } from './router.js';
 
 const TIMEOUT_MS = 60_000;
 
-async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS) {
+async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal = null) {
+  const timeout = AbortSignal.timeout(Math.max(5_000, timeoutMs));
+  // /stop aborts the caller's signal; the timeout still applies on top.
+  const combined = signal && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([timeout, signal])
+    : signal ?? timeout;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(Math.max(5_000, timeoutMs)),
+    signal: combined,
   });
   if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
   return res.json();
@@ -157,13 +162,16 @@ export async function complete(config, prompt, log = console) {
 
 // ── multimodal: images ───────────────────────────────────────────────────────
 
-async function visionCall(model, config, prompt, imageBase64, mime = 'image/png') {
+async function visionCall(model, config, prompt, imageBase64, mime = 'image/png', opts = {}) {
+  const maxTokens = Number(opts.maxTokens) > 0 ? Math.trunc(opts.maxTokens) : null;
+  const signal = opts.signal ?? null;
   if (model.provider === 'ollama') {
     const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
       model: model.model,
       stream: false,
       messages: [{ role: 'user', content: prompt, images: [imageBase64] }],
-    });
+      ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
+    }, {}, TIMEOUT_MS, signal);
     return data.message?.content?.trim() || null;
   }
   if (model.provider === 'local') {
@@ -172,6 +180,7 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
       model: model.model,
       temperature: 0.2,
       stream: false,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
       messages: [{
         role: 'user',
         content: [
@@ -179,7 +188,7 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
           { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
         ],
       }],
-    }, { authorization: `Bearer ${model.apiKey || 'local'}` });
+    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, TIMEOUT_MS, signal);
     return data.choices?.[0]?.message?.content?.trim() || null;
   }
   if (model.provider === 'gemini') {
@@ -190,7 +199,10 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
           role: 'user',
           parts: [{ text: prompt }, { inlineData: { mimeType: mime, data: imageBase64 } }],
         }],
+        // Screen control wants one short JSON action, not an essay.
+        ...(maxTokens ? { generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens } } : {}),
       },
+      {}, TIMEOUT_MS, signal,
     );
     return data.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('').trim() || null;
   }
@@ -202,6 +214,7 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
       model: model.model,
       temperature: 0.2,
       stream: false,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
       messages: [{
         role: 'user',
         content: [
@@ -209,7 +222,7 @@ async function visionCall(model, config, prompt, imageBase64, mime = 'image/png'
           { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
         ],
       }],
-    }, { authorization: `Bearer ${cloud.key}` });
+    }, { authorization: `Bearer ${cloud.key}` }, TIMEOUT_MS, signal);
     return data.choices?.[0]?.message?.content?.trim() || null;
   }
   return null;
@@ -247,24 +260,50 @@ export async function describeImage(config, imageBase64, caption = '', log = con
  * ROUTER_PREFER; set ALLOW_CLOUD_SCREEN=false to keep screenshots on the PC.
  * Returns { text, model, local } or null when nothing can see images.
  */
-export async function screenStep(config, prompt, imageBase64, log = console, { mime = 'image/png' } = {}) {
+const SCREEN_PROVIDER_ORDER = { gemini: 0, groq: 1, openrouter: 2, local: 3, ollama: 4 };
+
+export async function screenStep(config, prompt, imageBase64, log = console, { mime = 'image/png', signal = null, maxTokens = null } = {}) {
   const router = routerFor(config, log);
   const allowCloud = config?.allowCloudScreen !== false;
+  const forced = String(config?.screenProvider ?? 'auto').toLowerCase();
   // Tier 2 = the fast vision models (Gemini Flash / Groq qwen-vision). A
   // computer-use loop needs many quick looks, not one slow smart one.
   const plan = router.plan({ text: 'look at the screen and control the desktop', needsVision: true, needsTools: false, forceTier: 2 });
-  for (const model of plan.candidates.filter((m) => m.vision)) {
-    if (!allowCloud && !model.local) continue;
+  // Screen control rewards latency and grounding over raw size: Gemini Flash
+  // first (fast + strong at UI), then Groq's qwen-vision, then OpenRouter,
+  // then a local model (private, slower), then Ollama.
+  const candidates = plan.candidates
+    .filter((m) => m.vision && (allowCloud || m.local))
+    .sort((a, b) => {
+      if (forced !== 'auto' && forced) {
+        const af = a.provider === forced ? 0 : 1;
+        const bf = b.provider === forced ? 0 : 1;
+        if (af !== bf) return af - bf;
+      }
+      const ap = SCREEN_PROVIDER_ORDER[a.provider] ?? 9;
+      const bp = SCREEN_PROVIDER_ORDER[b.provider] ?? 9;
+      if (ap !== bp) return ap - bp;
+      return (b.speed ?? 0) - (a.speed ?? 0);
+    });
+  const tried = [];
+  for (const model of candidates) {
     const started = Date.now();
     try {
-      const text = await visionCall(model, config, prompt, imageBase64, mime);
+      const text = await visionCall(model, config, prompt, imageBase64, mime, { signal, maxTokens });
       if (!text) throw new Error('empty vision response');
       router.record(model.id, { ok: true, ms: Date.now() - started, tier: plan.rank });
       return { text, model: model.label, local: Boolean(model.local) };
     } catch (err) {
+      if (signal?.aborted) throw err; // /stop: do not burn the next provider
+      tried.push(model.label);
       router.record(model.id, { ok: false, ms: Date.now() - started, tier: plan.rank, error: err.message });
       log.warn?.(`[ai] screen ${model.label} failed: ${err.message}`);
     }
+  }
+  if (!candidates.length) {
+    log.warn?.(allowCloud
+      ? '[ai] screen: no vision model configured — set GEMINI_API_KEY / GROQ_API_KEY or OLLAMA_VISION_MODEL'
+      : '[ai] screen: ALLOW_CLOUD_SCREEN=false and no local vision model — set OLLAMA_VISION_MODEL');
   }
   return null;
 }

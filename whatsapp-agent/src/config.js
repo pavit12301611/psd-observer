@@ -111,7 +111,7 @@ export function loadConfig({ dryRun = false } = {}) {
     groqVisionModel: e.GROQ_VISION_MODEL === undefined ? 'qwen/qwen3.8-27b' : e.GROQ_VISION_MODEL,
     groqBaseUrl: (e.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
     geminiApiKey: e.GEMINI_API_KEY || '',
-    geminiModel: e.GEMINI_MODEL || 'gemini-2.0-flash',
+    geminiModel: e.GEMINI_MODEL || 'gemini-3.8-flash',
     // OpenRouter free models. Gemma 4 31B is free, vision-capable and speaks
     // tool calls (262K ctx); `openrouter/free` (their auto-router) also works.
     openrouterApiKey: e.OPENROUTER_API_KEY || '',
@@ -166,10 +166,21 @@ export function loadConfig({ dryRun = false } = {}) {
     // "YouTube kholo aur lofi chalao" without burning the whole free tier.
     handsMaxSteps: int(e.HANDS_MAX_STEPS, 8),
     handsMaxSeconds: int(e.HANDS_MAX_SECONDS, 240),
-    handsStepDelayMs: int(e.HANDS_STEP_DELAY_MS, 900),
-    // Screenshots are downscaled to this width before leaving the PC, so a
-    // 4K screen still fits Groq's 4MB image limit.
-    handsImageWidth: int(e.HANDS_IMAGE_WIDTH, 1280),
+    handsStepDelayMs: int(e.HANDS_STEP_DELAY_MS, 550),
+    // Screenshots are downscaled to this width (JPEG) before leaving the PC:
+    // smaller = fewer vision tokens = faster steps, and a 4K screen still fits
+    // Groq's 4MB image limit.
+    handsImageWidth: int(e.HANDS_IMAGE_WIDTH, 1024),
+    handsJpegQuality: int(e.HANDS_JPEG_QUALITY, 70),
+    // Screen control is vision-first: the model reads the screenshot itself.
+    // Set true to also OCR every frame and hand the model a word table (more
+    // exact for dense text UI, but ~1-2s slower per step).
+    handsUseOcr: bool(e.HANDS_USE_OCR, false),
+    handsMaxTokens: int(e.HANDS_MAX_TOKENS, 512),
+    // Which vision provider the screen loop prefers: auto | gemini | groq |
+    // openrouter | local | ollama. auto = Gemini Flash → Groq → OpenRouter →
+    // local → Ollama.
+    screenProvider: (e.SCREEN_PROVIDER || 'auto').toLowerCase(),
     // Local vision is preferred; when there is none, cloud vision is allowed.
     // ALLOW_CLOUD_SCREEN=false keeps every screenshot on the PC (and hands
     // only works if OLLAMA_VISION_MODEL / LOCAL_API_URL_VISION is set).

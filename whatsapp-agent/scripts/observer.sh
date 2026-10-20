@@ -254,6 +254,7 @@ cmd_update() {
   fi
 
   local old; old=$(local_version "$dest")
+  local started_epoch; started_epoch=$(date +%s)
   local tmp; tmp=$(mktemp -d); trap "rm -rf '$tmp'" EXIT
   download_tarball "$tmp" || exit 1
   local src; src=$(find_extracted_agent "$tmp")
@@ -296,16 +297,25 @@ cmd_update() {
   say "Installing dependencies"
   ( cd "$dest" && npm install --no-audit --no-fund ) || warn "npm install failed — run it yourself: cd $dest && npm install"
 
+  # Leave a receipt the new process can read at startup: data/ survives
+  # updates, so the "updated!" WhatsApp message knows the real duration.
+  local elapsed=$(( $(date +%s) - started_epoch ))
+  mkdir -p "$dest/data"
+  printf '{"from":"%s","to":"%s","at":"%s","seconds":%s,"via":"observer.sh"}\n' \
+    "${old:-}" "${new:-}" "$(date -Is)" "$elapsed" > "$dest/data/last-update.json" 2>/dev/null \
+    || warn "could not write data/last-update.json (update still fine)"
+
   restart_agent "$dest"
 
   cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────
- Updated: ${old:-?} → ${new:-?}
+ Updated: ${old:-?} → ${new:-?}   (took $(( $(date +%s) - started_epoch ))s)
  Kept   : .env · auth_info/ (WhatsApp login, no new QR) · data/
  Backup : ${backup}
 ────────────────────────────────────────────────────────────────────────
- WhatsApp pe /doctor bhejo — sab check ho jayega.
+ WhatsApp pe ek "updated" message aayega (kya naya + kitna time laga).
+ Phir /doctor bhejo — sab check ho jayega.
 EOF
 }
 

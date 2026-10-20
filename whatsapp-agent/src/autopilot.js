@@ -30,6 +30,7 @@ import * as finder from './elementfinder.js';
 import * as ocr from './ocr.js';
 import { imageSignature, screenChanged, imageStats } from './imaging.js';
 import { siteFor, readyMsFor, isComposerLabel } from './sites.js';
+import { throwIfStopped, sleepWith, isStoppedError } from './cancel.js';
 
 const execFileAsync = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -394,7 +395,7 @@ export function openVerdict({ windowResult, screen, browserBefore, browserNow })
  * Returns { ok, known, title, waitedMs } — `known:false` means the desktop
  * cannot list windows, so the caller should verify another way.
  */
-export async function waitForWindow({ beforeTitles = [], url = '', target = '', timeoutMs = 20_000 } = {}) {
+export async function waitForWindow({ beforeTitles = [], url = '', target = '', timeoutMs = 20_000, signal } = {}) {
   const site = siteFor(url);
   const hint = urlHint(url) || normalizeApp(target);
   // Chat sites title their tab with the product name ("Arena", "ChatGPT").
@@ -402,7 +403,8 @@ export async function waitForWindow({ beforeTitles = [], url = '', target = '', 
   const started = Date.now();
   let sawList = false;
   while (Date.now() - started < timeoutMs) {
-    await sleep(600);
+    if (signal?.aborted) return { ok: false, known: false, stopped: true, title: null, waitedMs: Date.now() - started };
+    try { await sleepWith(600, signal, 'Autopilot'); } catch { return { ok: false, known: false, stopped: true, title: null, waitedMs: Date.now() - started }; }
     const titles = await apps.windowTitles();
     // null = no wmctrl; empty = wmctrl exists but this desktop blocks listing
     // (GNOME Wayland). Both mean "we cannot verify by title".
@@ -423,7 +425,7 @@ export async function waitForWindow({ beforeTitles = [], url = '', target = '', 
 }
 
 /** Last resort on Wayland (no wmctrl): did the screen actually change? */
-async function waitForScreenChange({ before, config, timeoutMs = 12_000 }) {
+async function waitForScreenChange({ before, config, timeoutMs = 12_000, signal }) {
   // known:false → we genuinely cannot tell (no baseline, or every capture
   // failed). known:true + ok:false → we looked and the screen really did not
   // change, which is evidence the page never appeared.
@@ -432,7 +434,8 @@ async function waitForScreenChange({ before, config, timeoutMs = 12_000 }) {
   let probes = 0;
   let saw = false;
   while (Date.now() - started < timeoutMs && probes < 3) {
-    await sleep(probes === 0 ? 2_500 : 3_000);
+    if (signal?.aborted) return { ok: false, known: false, stopped: true };
+    try { await sleepWith(probes === 0 ? 2_500 : 3_000, signal, 'Autopilot'); } catch { return { ok: false, known: false, stopped: true }; }
     probes += 1;
     try {
       const now = await shot(config);
@@ -451,7 +454,7 @@ async function waitForScreenChange({ before, config, timeoutMs = 12_000 }) {
  * Run a step list. Never throws for a normal step failure: it returns
  * { ok, text, image, steps } so the caller can tell the truth.
  */
-export async function executeSteps(steps, { config = {}, log = console, label = 'Autopilot' } = {}) {
+export async function executeSteps(steps, { config = {}, log = console, label = 'Autopilot', signal } = {}) {
   const results = [];
   let lastImage = null;
   let verifiedTitle = null;
@@ -465,6 +468,9 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
   };
 
   for (let i = 0; i < steps.length; i++) {
+    if (signal?.aborted) {
+      return finish({ ok: false, stopped: true, failedAt: i + 1, results, image: lastImage, steps, label, startedAll });
+    }
     const step = steps[i];
     const stepStart = Date.now();
     try {
@@ -496,7 +502,7 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
           const site = siteFor(url);
           const openWaitMs = site?.autofocus ? 8_000 : 12_000;
           const browserBefore = await browserRunning();
-          verify = await waitForWindow({ beforeTitles: titlesBefore ?? [], url, target, timeoutMs: openWaitMs });
+          verify = await waitForWindow({ beforeTitles: titlesBefore ?? [], url, target, timeoutMs: openWaitMs, signal });
 
           if (!verify.ok) {
             // "Could not verify" is NOT "did not open". Chat sites open the new
@@ -505,11 +511,14 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
             // gains nothing, ever. Only hard evidence of failure fails now.
             verify = openVerdict({
               windowResult: verify,
-              screen: await waitForScreenChange({ before: screenBefore, config, timeoutMs: 10_000 }),
+              screen: await waitForScreenChange({ before: screenBefore, config, timeoutMs: 10_000, signal }),
               browserBefore,
               browserNow: await browserRunning(),
             });
           }
+        }
+        if (verify.stopped) {
+          return finish({ ok: false, stopped: true, failedAt: i + 1, results, image: lastImage, steps, label, startedAll });
         }
         if (!verify.ok) {
           if (verify.unchanged) {
@@ -693,6 +702,9 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
         throw new Error(`unknown step "${step.op}"`);
       }
     } catch (err) {
+      if (isStoppedError(err) || signal?.aborted) {
+        return finish({ ok: false, stopped: true, failedAt: i + 1, results, image: lastImage, steps, label, startedAll });
+      }
       const message = String(err?.message ?? err).slice(0, 600);
       record(i, step, false, message, { ms: Date.now() - stepStart });
       // Capture what the screen looks like at the failure (best effort).
@@ -707,12 +719,22 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
   return finish({ ok: true, results, image: lastImage, steps, label, startedAll });
 }
 
-function finish({ ok, failedAt, results, image, steps, label, startedAll }) {
+function finish({ ok, stopped, failedAt, results, image, steps, label, startedAll }) {
   const seconds = Math.max(1, Math.round((Date.now() - startedAll) / 1000));
   const answer = [...results].reverse().find((r) => r.answer)?.answer;
   const lines = results.map((r) => `${r.ok ? '✅' : '❌'} ${r.index}. ${describeStep(steps[r.index - 1])} → ${r.detail}`);
   let text;
   const unverified = results.filter((r) => r.unverified).length;
+  if (stopped) {
+    text = [
+      `⏹ *${label}* — /stop se roka gaya (${results.length} step${results.length === 1 ? '' : 's'}, ${seconds}s)`,
+      '',
+      ...lines,
+      '',
+      '_Aage kuch nahi kiya. Naya kaam karne ke liye dobara bhejo._',
+    ].join('\n');
+    return { ok: false, stopped: true, text, image, steps: results, failedAt: failedAt ?? null, answer: null };
+  }
   if (ok) {
     text = `🤖 *${label}* — ${results.length} steps, ${seconds}s\n${lines.join('\n')}`;
     if (unverified) {
@@ -735,7 +757,7 @@ function finish({ ok, failedAt, results, image, steps, label, startedAll }) {
 }
 
 /** Legacy entry point used by /auto and the `autopilot` tool. */
-export async function runAutopilot(rawTask, { config, log } = {}) {
+export async function runAutopilot(rawTask, { config, log, signal } = {}) {
   const steps = parseAutoSteps(rawTask);
   if (!steps.length) {
     throw new Error(
@@ -743,7 +765,7 @@ export async function runAutopilot(rawTask, { config, log } = {}) {
       'Example: /auto open agent | tap battle | tap agent | type hello | key enter | screenshot',
     );
   }
-  return executeSteps(steps, { config, log, label: 'Autopilot' });
+  return executeSteps(steps, { config, log, label: 'Autopilot', signal });
 }
 
 export { describeStep, activeWindowTitle };

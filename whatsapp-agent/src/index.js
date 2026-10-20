@@ -9,6 +9,7 @@ import { Mailbox } from './mailbox.js';
 import { createAgent } from './commands.js';
 import { createWhatsApp } from './whatsapp.js';
 import { createBridgeServer } from './server.js';
+import { announceUpdate, brainSummary } from './updates.js';
 import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
 import { routerFor } from './router.js';
@@ -41,7 +42,18 @@ const agent = createAgent({
   observerOnline: () => mailbox.observerOnline(),
 });
 
-const whatsapp = createWhatsApp({ config, store, agent, log: console });
+const whatsapp = createWhatsApp({
+  config, store, agent, log: console,
+  // Runs on every successful WhatsApp connect; announceUpdate() is idempotent
+  // (it compares against store.lastVersion), so reconnects stay quiet.
+  onConnected: () => announceUpdate({
+    config,
+    store,
+    log: console,
+    send: (text) => whatsapp.sendToOwner(text),
+    brains: brainSummary(routerFor(config, console).catalog),
+  }),
+});
 const bridge = createBridgeServer({
   config,
   store,

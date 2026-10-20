@@ -300,8 +300,8 @@ export function buildCatalog(config = {}) {
   // ── Gemini free tier: good long context + vision ─────────────────────────
   if (config.geminiApiKey) {
     add({
-      provider: 'gemini', model: config.geminiModel || 'gemini-2.0-flash',
-      label: `Gemini (free) · ${config.geminiModel || 'gemini-2.0-flash'}`,
+      provider: 'gemini', model: config.geminiModel || 'gemini-3.8-flash',
+      label: `Gemini (free) · ${config.geminiModel || 'gemini-3.8-flash'}`,
       minTier: 2, maxTier: 3, speed: 5, tools: true, vision: true, cost: 1, quality: 7,
     });
     if (config.geminiModelHeavy && config.geminiModelHeavy !== config.geminiModel) {

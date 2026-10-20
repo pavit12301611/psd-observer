@@ -18,6 +18,7 @@ import * as tts from './tts.js';
 import * as autopilot from './autopilot.js';
 import { describeSite } from './sites.js';
 import * as hands from './hands.js';
+import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
@@ -48,6 +49,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
 • /pc type <text> · /pc paste <long text> · /pc key ctrl+l · /pc click [x y] [double]
 • /pc mousemove <x> <y> · /pc scroll [up|down] [steps] · /pc lock
+• /stop — chal raha kaam turant roko (browser/app khula rahega; stacked kaam bhi)
 • /webcam · /record [seconds] · /notify <text> · /pc locate <button>
 *Network*
 • /wifi [status|on|off|list] · /wifi connect <SSID> [password]
@@ -63,6 +65,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /auto <task> — UI autopilot (verified): open chrome | tap Search | type hello | key enter | screenshot
 • /arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)
 • /use <task> — *haath*: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)
+• /stop — jo chal raha hai wahi rukta hai (partial steps batata hai) · naya: update ka message khud aata hai
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
@@ -75,8 +78,14 @@ _Built-in commands work with no AI at all. Local Ollama makes conversation + mul
 
 const num = (s) => Number.parseInt(String(s ?? ''), 10);
 
-export function createAgent({ config, store, log = console, forwardToObserver = async () => null, observerOnline = () => false }) {
+export function createAgent({
+  config, store, log = console, forwardToObserver = async () => null, observerOnline = () => false,
+  taskRegistry = globalTasks,
+}) {
   const tz = config.timezone;
+  // The signal of whatever command is running right now. Commands are
+  // serialized (isProcessing), so one slot is enough; /stop does not use it.
+  let activeSignal = null;
   const actions = createActions({ config, store, log });
   const agentLoop = createAgentLoop({ config, store, actions, log });
   const router = routerFor(config, log);
@@ -97,7 +106,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return Object.keys(out).length ? out : '✅ Done.';
   }
   const act = async (name, args = {}, ctx = {}) => {
-    const result = await actions.execute(name, args, ctx);
+    const result = await actions.execute(name, args, { signal: activeSignal, ...ctx });
     // Text-only results stay strings (friendlier for WhatsApp + existing code);
     // media results keep their reply object.
     if (result && typeof result === 'object' && !result.image && !result.extraImages
@@ -636,11 +645,11 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     return undefined;
   }
 
-  async function runWebTask(text, label = 'Agent') {
+  async function runWebTask(text, label = 'Agent', signal = null) {
     const steps = autopilot.buildWebSteps(text);
     if (!steps.length) return null;
     log.info?.(`[agent] browser task: ${steps.map((s) => s.op).join(' → ')}`);
-    const result = await autopilot.executeSteps(steps, { config, log, label });
+    const result = await autopilot.executeSteps(steps, { config, log, label, signal });
     if (!result || typeof result === 'string') return result;
     const target = steps.find((s) => s.op === 'open')?.target;
     const siteLine = target ? describeSite(target) : null;
@@ -666,7 +675,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     '_Sirf ek command ka kaam ho to /open, /pc type, /pc key fast hain. /use tab jab UI me ghoomna pade._',
   ].join('\n');
 
-  async function runUseTask(raw) {
+  async function runUseTask(raw, signal = null) {
     let text = String(raw ?? '').trim();
     let maxSteps;
     const m = text.match(/^--steps\s+(\d{1,2})\s+/i);
@@ -678,11 +687,14 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     if ((actions.level?.() ?? 'full') === 'safe') {
       return '🔒 /use ke liye ACCESS_LEVEL=standard ya full chahiye — safe mode sirf padhta hai.';
     }
-    const result = await hands.runHands(text, { config, log, maxSteps });
-    return result?.image ? { text: result.text, image: result.image } : result.text;
+    const result = await hands.runHands(text, { config, log, maxSteps, signal });
+    if (!result) return '⚠️ Hands: koi jawab nahi mila.';
+    // Keep `stopped` on the object so handle() can suppress the duplicate reply
+    // (the /stop command already told the owner what happened).
+    return { text: result.text, image: result.image ?? undefined, stopped: Boolean(result.stopped) };
   }
 
-  async function runArenaPrompt(prompt) {
+  async function runArenaPrompt(prompt, signal = null) {
     if (!prompt) return '🌐 Usage: /arena <prompt> — arena.ai/agent kholke prompt poochta hai';
     return autopilot.executeSteps([
       { op: 'open', target: 'https://arena.ai/agent' },
@@ -690,7 +702,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       { op: 'wait', ms: 8_000 },
       { op: 'look', question: prompt },
       { op: 'screenshot' },
-    ], { config, log, label: 'Arena' });
+    ], { config, log, label: 'Arena', signal });
   }
 
   async function runAgentTask(raw, ctx) {
@@ -699,7 +711,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     if (!text) return AGENT_USAGE;
 
     // --use: skip every heuristic and hand it to the screen-control loop.
-    if (flags.use) return runUseTask(text);
+    if (flags.use) return runUseTask(text, ctx.signal);
 
     const plan = agentLoop.buildPlan(text, { needsTools: true, forceTier: forceTierFrom(flags) });
     if (flags.plan) return planPreview(text, plan);
@@ -708,7 +720,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     // (verified open, no typing into the wrong window).
     const webTask = flags.web || looksLikeWebTask(text);
     if (webTask) {
-      const result = await runWebTask(text);
+      const result = await runWebTask(text, 'Agent', ctx.signal);
       if (result) return result;
       if (flags.web) {
         return '🌐 Koi site samajh nahi aayi. Example: `/agent --web chatgpt pe rust vs go pooch`\n' +
@@ -718,7 +730,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
 
     if (!agentLoop.enabled) return noBrainReply();
 
-    const reply = await agentLoop.run(text, ctx, { forceTier: forceTierFrom(flags), nudge: true });
+    const reply = await agentLoop.run(text, ctx, { forceTier: forceTierFrom(flags), nudge: true, signal: ctx.signal });
     if (reply != null) return withRoute(reply, agentLoop.lastRun, { force: true });
 
     const meta = agentLoop.lastRun ?? {};
@@ -739,8 +751,48 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
 
   // ── router ───────────────────────────────────────────────────────────────
 
+  // ── /stop ────────────────────────────────────────────────────────────────
+  // Deliberately outside the command dispatcher: it has to work while another
+  // command is mid-flight, so it never waits for the queue or the busy flag.
+  function labelFor(clean) {
+    const m = String(clean).match(/^\/([a-zA-Z]+)/);
+    const name = m ? m[1].toLowerCase() : '';
+    return ({
+      use: 'Hands', hands: 'Hands', arena: 'Arena', agent: 'Agent', do: 'Agent',
+      auto: 'Autopilot', autopilot: 'Autopilot', download: 'Download',
+      run: 'Shell', record: 'Screen recording', summarize: 'Summary', url: 'Page read',
+    })[name] ?? (name ? `/${name}` : 'AI');
+  }
+
+  function stopReply(stopped) {
+    if (!stopped.length) {
+      return '⏹ Abhi koi task nahi chal raha — rokne ko kuch nahi hai.\n_Naya kaam shuru karne ke liye bas message bhejo._';
+    }
+    const lines = stopped.map((t) => {
+      const what = t.detail ? ` — ${t.detail}` : '';
+      return `• *${t.label}*${what} · ${tools.humanDuration(t.elapsedMs)}`;
+    });
+    return [
+      `⏹ *Roka gaya* — ${stopped.length} task${stopped.length === 1 ? '' : 's'}`,
+      '',
+      ...lines,
+      '',
+      '_Jo step tak hua wahi hua — aage kuch nahi chalega, aur naya browser/app band nahi hoga._',
+    ].join('\n');
+  }
+
+  function stopCommand() {
+    return stopReply(taskRegistry.stopAll('stop'));
+  }
+
+  /** A stack like "/arena hi\n/stop" must stop, not wait 30s and then stop. */
+  function stopInStack(lines) {
+    return lines.some((line) => isStopCommand(line));
+  }
+
   async function handleCommand(cmd, args, ctx) {
     switch (cmd) {
+      case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
       case 'help': case 'commands': case 'menu': case 'start': return HELP;
       case 'ping': return `🏓 Pong! Agent is alive (uptime ${tools.humanDuration(Date.now() - store.data.stats.startedAt)}).`;
       case 'me': case 'id': case 'whoami':
@@ -756,6 +808,7 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
           `Data: ${store.data.todos.filter((t) => !t.done).length} open to-dos · ${store.data.notes.length} notes · ${store.data.reminders.length} reminders · ${(store.data.cronJobs ?? []).length} cron jobs · ${(store.data.learned ?? []).length} learned`,
           `Observer bridge: ${observerOnline() ? 'tab connected 🖥️' : 'not needed (agent is standalone)'}`,
           `Access: *${actions.level()}* · ${actions.accessReport().actions} tools · shell ${config.allowShell ? 'ON (PIN)' : 'off'}`,
+          `Running now: ${taskRegistry.active().length ? `${taskRegistry.active().map((t) => t.label).join(', ')} (rokne ke liye /stop)` : 'kuch nahi'}`,
           `PC control: tier-1 on (screenshot/volume/…) · input+power ${config.allowPcControl ? `ON ⌨️${config.controlPin ? ' (PIN)' : ''}` : 'off (ALLOW_PC_CONTROL)'}`,
           `Cost so far: ₹0 (native WhatsApp, local tools)`,
         ].join('\n');
@@ -933,10 +986,10 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       case 'rm': case 'delete': return args ? act('delete_path', { path: args }) : '🗑️ Usage: /rm <path>  (asks for confirmation)';
 
       // ── agent + confirmations ───────────────────────────────────────────
-      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log }) : '🤖 Usage: /auto open chrome | tap Search | type hello | key enter | screenshot\nNatural: /auto open chrome and search for today weather then screenshot\nHar step verify hota hai — jo fail hua wahi batata hai.';
+      case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log, signal: ctx.signal }) : '🤖 Usage: /auto open chrome | tap Search | type hello | key enter | screenshot\nNatural: /auto open chrome and search for today weather then screenshot\nHar step verify hota hai — jo fail hua wahi batata hai.';
       case 'agent': return runAgentTask(args, ctx);
-      case 'use': case 'hands': return runUseTask(args);
-      case 'arena': return runArenaPrompt(args);
+      case 'use': case 'hands': return runUseTask(args, ctx.signal);
+      case 'arena': return runArenaPrompt(args, ctx.signal);
       case 'brains': case 'models': case 'router': {
         if (args && /^(why|explain|route)\b/i.test(args)) {
           return router.explainText(args.replace(/^(why|explain|route)\s+/i, '').trim() || 'hello');
@@ -1010,14 +1063,20 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
   async function handle(text, ctx = {}) {
     const clean = String(text ?? '').trim();
     if (!clean) return '🤖 I got an empty message. Try /help';
+    // /stop is checked before everything else — before the dedup window and
+    // before the busy flag — because it must cut in while work is running.
+    if (isStopCommand(clean)) return stopCommand();
     // dedup: same exact text within 4s → ignore second copy (double tap / network retry)
     if (clean === lastHandledText && Date.now() - lastHandledTs < 4000) {
       return '⏳ Same command abhi process hua tha (4s ke andar) — duplicate ignore kiya, double kaam nahi karunga.';
     }
     if (isProcessing) {
       // queue-like behaviour: tell owner we're busy, don't run in parallel (no double work)
-      return '⏳ Ek kaam abhi chal raha hai, thoda ruko — khatam hote hi next bhej do. (Parallel double-work blocked)';
+      return '⏳ Ek kaam abhi chal raha hai — rokna ho to *\/stop* bhejo, ya khatam hone ka wait karo. (Parallel double-work blocked)';
     }
+    const label = labelFor(clean);
+    const task = taskRegistry.begin(label, { detail: clean.replace(/^\//, '').slice(0, 60) });
+    activeSignal = task.signal;
     try {
       isProcessing = true;
       // A message starting with the shell PIN unlocks shell for this message
@@ -1034,6 +1093,10 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       //    Executed sequentially, results joined, no parallel double-work.
       const lines = working.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       const isStack = lines.length > 1 && lines.every(l => l.startsWith('/'));
+      if (isStack && stopInStack(lines)) {
+        // "/arena hi" + "/stop" in one bubble: stop wins, nothing else runs.
+        return `${stopCommand()}\n\n_(Stack me /stop tha — baaki lines nahi chalayi.)_`;
+      }
       if (isStack) {
         const results = [];
         for (const line of lines) {
@@ -1051,6 +1114,11 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       if (cmdMatch) {
         const res = await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
         lastHandledText = clean; lastHandledTs = Date.now();
+        // A stopped run is reported by /stop itself; do not send a second wall of text.
+        if (res && typeof res === 'object' && res.stopped) {
+          log.info?.(`[commands] ${label} stopped by /stop`);
+          return null;
+        }
         return res;
       }
 
@@ -1084,12 +1152,18 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
       const aiRes = await askAI(working);
       return aiRes;
     } catch (err) {
+      if (isStoppedError(err) || task.signal.aborted) {
+        log.info?.(`[commands] ${label} stopped by /stop`);
+        return null; // /stop already replied
+      }
       log.error?.(`[commands] failed on "${clean.slice(0, 60)}": ${err.message}`);
       return `⚠️ That didn't work: ${err.message}\nNothing was charged (everything here is free). Try /help`;
     } finally {
       // dedup marker — any successful handle sets it, duplicate 4s window handles double-work
       if (clean) { lastHandledText = clean; lastHandledTs = Date.now(); }
       isProcessing = false;
+      activeSignal = null;
+      task.end();
     }
   }
 

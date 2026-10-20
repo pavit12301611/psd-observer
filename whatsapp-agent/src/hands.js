@@ -20,6 +20,7 @@ import * as ai from './ai.js';
 import * as apps from './apps.js';
 import { findTextTarget, pngSize, ocrScreenshot } from './elementfinder.js';
 import { imageSignature, screenChanged } from './imaging.js';
+import { StoppedError, throwIfStopped, sleepWith } from './cancel.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -244,7 +245,7 @@ const MAX_WORDS = 140;
  * aim at, and what already happened. Kept deliberately short — free vision
  * models get worse as prompts grow.
  */
-export function buildHandsPrompt({ task, step, maxSteps, size, words = [], history = [], lastResult = '', lastChange = null }) {
+export function buildHandsPrompt({ task, step, maxSteps, size, words = [], history = [], lastResult = '', lastChange = null, visionFirst = true }) {
   const relevant = words
     .filter((w) => String(w.text ?? '').trim().length >= 2)
     .slice(0, MAX_WORDS);
@@ -266,9 +267,17 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
     '',
     'RULES',
     '1. Reply with ONE JSON object and nothing else. No markdown, no explanation outside the JSON.',
-    '2. Prefer a text target id from the TEXT LIST — it is pixel-exact: {"action":"click","word":42}.',
-    '3. For icons or images that are not text: {"action":"click","target":"blue Send arrow","x":870,"y":940}.',
-    '4. x and y are 0-1000 relative to the screen (0=left/top, 1000=right/bottom).',
+    ...(visionFirst ? [
+      '2. Look at the screenshot yourself (no text extraction happens). Click exactly where you see the thing:',
+      '   {"action":"click","target":"Search box","x":500,"y":120} — target is your one-line description, x/y is where it is.',
+      '3. If the element has visible text you can read, the target text alone is enough: {"action":"click","target":"Sign in"}.',
+      '   It is snapped to the exact pixels of that word when possible, so prefer it for text buttons.',
+      '4. x and y are 0-1000 relative to the screen (0=left/top, 500=middle, 1000=right/bottom). Estimate carefully from the image.',
+    ] : [
+      '2. Prefer a text target id from the TEXT LIST — it is pixel-exact: {"action":"click","word":42}.',
+      '3. For icons or images that are not text: {"action":"click","target":"blue Send arrow","x":870,"y":940}.',
+      '4. x and y are 0-1000 relative to the screen (0=left/top, 1000=right/bottom).',
+    ]),
     '5. Use the keyboard when it is shorter and safer: {"action":"key","keys":"ctrl+l"} for the address bar, {"action":"key","keys":"enter"} to submit.',
     '6. To type into the field that is already focused: {"action":"type","text":"...","submit":true}. Click the field first if it is not focused.',
     '7. Never repeat an action that just failed or changed nothing — choose another way (scroll, keyboard, a different word).',
@@ -291,18 +300,24 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
  * Screenshot + size + OCR words + a cheap signature (for change detection).
  * OCR is local and free; when tesseract is missing we simply lose the word list.
  */
-export async function observeScreen(config, log = console) {
+export async function observeScreen(config, log = console, { useOcr = false, signal } = {}) {
+  throwIfStopped(signal);
   // A loop takes up to 8 screenshots: one stuck portal dialog must not eat the
-  // whole run, so each capture gets at most 30s (PORTAL_TIMEOUT_MS still wins
+  // whole run, so each capture gets at most 25s (PORTAL_TIMEOUT_MS still wins
   // when it is smaller).
-  const cap = Math.min(Number(config?.portalTimeoutMs ?? 60_000) || 60_000, 30_000);
+  const cap = Math.min(Number(config?.portalTimeoutMs ?? 60_000) || 60_000, 25_000);
   const image = await pc.captureScreenshot({ portalTimeoutMs: cap });
   const size = pngSize(image) ?? { width: 0, height: 0 };
   let words = [];
-  try {
-    words = await ocrScreenshot(image);
-  } catch (err) {
-    if (err.code !== 'ENOENT') log?.info?.(`[hands] OCR skipped: ${err.message}`);
+  // Vision-first (default): the model reads the screenshot itself. tesseract is
+  // slow and only earns its keep when we need to snap a named target to exact
+  // pixels — that happens lazily in resolveTarget(), not here.
+  if (useOcr) {
+    try {
+      words = await ocrScreenshot(image);
+    } catch (err) {
+      if (err.code !== 'ENOENT') log?.info?.(`[hands] OCR skipped: ${err.message}`);
+    }
   }
   // Re-number so the ids in the prompt match this array exactly: a stale id
   // must never end up clicking a random word.
@@ -310,13 +325,29 @@ export async function observeScreen(config, log = console) {
   return { image, size, words, signature: imageSignature(image) };
 }
 
+/** OCR words for a screenshot we already have (no second capture). */
+export async function wordsForShot(shot, log = console) {
+  if (shot?.words?.length) return shot.words;
+  if (shot?._ocrWords) return shot._ocrWords;
+  if (!shot?.image) return [];
+  try {
+    shot._ocrWords = (await ocrScreenshot(shot.image)).map((w, i) => ({ ...w, id: i }));
+  } catch (err) {
+    if (err.code !== 'ENOENT') log?.info?.(`[hands] OCR skipped: ${err.message}`);
+    shot._ocrWords = [];
+  }
+  return shot._ocrWords;
+}
+
 /** Shrink screenshots for free-tier image limits (best effort; original on failure). */
-export async function shrinkForModel(image, maxWidth = 1280) {
+export async function shrinkForModel(image, maxWidth = 1024, quality = 70) {
   try {
     const sharp = (await import('sharp')).default;
     const meta = await sharp(image).metadata();
     if (!meta.width || meta.width <= maxWidth) return { image, mime: 'image/png' };
-    const out = await sharp(image).resize({ width: maxWidth }).jpeg({ quality: 72 }).toBuffer();
+    // Smaller + JPEG = fewer vision tokens, faster upload, faster answer. At
+    // 1024px a 1440p screen keeps every label readable.
+    const out = await sharp(image).resize({ width: maxWidth }).jpeg({ quality }).toBuffer();
     return { image: out, mime: 'image/jpeg' };
   } catch {
     return { image, mime: 'image/png' };
@@ -337,7 +368,10 @@ function parseVisionPointLoose(text) {
  * word id → OCR box (exact) · x,y → scaled · target → OCR phrase → local vision.
  */
 export async function resolveTarget(action, ctx) {
-  const { words = [], size, config, log } = ctx;
+  const { size, config, log } = ctx;
+  let words = ctx.words ?? [];
+
+  // 1. A word id from a prompt WITH a text list is already pixel-exact.
   if (action.word != null) {
     const word = words.find((w) => w.id === action.word);
     if (!word) return { error: `word id ${action.word} screen pe nahi mila` };
@@ -347,19 +381,32 @@ export async function resolveTarget(action, ctx) {
       how: `OCR "${word.text}"`,
     };
   }
-  if (action.x != null && action.y != null) {
-    const point = scalePoint({ x: action.x, y: action.y }, size);
-    if (!point) return { error: 'x/y screen ke bahar hain' };
-    return { ...point, how: 'model coordinates' };
-  }
+
+  // 2. Vision-first: a named target is the most reliable thing a vision model
+  //    gives us, so snap it to real text pixels if we can (one lazy OCR pass,
+  //    only for this click). Coordinates alone are the fallback.
   if (action.target) {
-    const hit = findTextTarget(words, action.target);
+    if (!words.length && ctx.ensureWords) {
+      try { words = await ctx.ensureWords(); } catch { words = []; }
+    }
+    const hit = words.length ? findTextTarget(words, action.target) : null;
     if (hit) return { x: hit.x, y: hit.y, how: `OCR "${hit.matched}"` };
+    if (action.x != null && action.y != null) {
+      const point = scalePoint({ x: action.x, y: action.y }, size);
+      if (point) return { ...point, how: `vision (${action.target})` };
+    }
     const raw = await ai.locateInImage(config, ctx.imageBase64, action.target, log);
     const rel = raw ? parseVisionPointLoose(raw) : null;
     const point = rel ? scalePoint(rel, size) : null;
     if (point) return { ...point, how: 'local vision' };
     return { error: `"${action.target}" screen pe nahi mila (OCR + local vision dono fail)` };
+  }
+
+  // 3. Pure coordinates.
+  if (action.x != null && action.y != null) {
+    const point = scalePoint({ x: action.x, y: action.y }, size);
+    if (!point) return { error: 'x/y screen ke bahar hain' };
+    return { ...point, how: 'model coordinates' };
   }
   return { error: 'click ke liye word, x/y ya target chahiye' };
 }
@@ -432,15 +479,19 @@ export async function executeHandsAction(action, ctx) {
 const DEFAULT_MAX_STEPS = 8;
 const DEFAULT_MAX_SECONDS = 240;
 
-export function formatHandsReply({ label = 'Hands', ok, reason, steps, seconds, answer, model, cloud, usage }) {
+export function formatHandsReply({ label = 'Hands', ok, stopped, reason, steps, seconds, answer, model, cloud, usage }) {
   const lines = steps.map((s) => `${s.ok === false ? '❌' : '✅'} ${s.step}. ${s.summary}${s.detail ? ` → ${s.detail}` : ''}`);
-  const head = ok
-    ? `🖐️ *${label}* — ${steps.length} step${steps.length === 1 ? '' : 's'} · ${seconds}s`
-    : !steps.length
-      ? `⚠️ *${label}* — shuru hi nahi ho paaya (${seconds}s)`
-      : `⚠️ *${label}* — step ${steps.length}/${usage.maxSteps} pe ruk gaya (${seconds}s)`;
+  const head = stopped
+    ? `⏹ *${label}* — /stop se roka gaya (${steps.length} step${steps.length === 1 ? '' : 's'}, ${seconds}s)`
+    : ok
+      ? `🖐️ *${label}* — ${steps.length} step${steps.length === 1 ? '' : 's'} · ${seconds}s`
+      : !steps.length
+        ? `⚠️ *${label}* — shuru hi nahi ho paaya (${seconds}s)`
+        : `⚠️ *${label}* — step ${steps.length}/${usage.maxSteps} pe ruk gaya (${seconds}s)`;
   const body = lines.length ? [head, '', ...lines] : [head];
-  if (ok) {
+  if (stopped) {
+    body.push('', '_Aage kuch nahi kiya. Naya kaam karne ke liye dobara bhejo._');
+  } else if (ok) {
     body.push('', answer ? `✅ ${answer}` : '✅ Ho gaya.');
   } else {
     body.push('', `❌ ${reason || 'kaam poora nahi hua'}`);
@@ -456,14 +507,17 @@ export function formatHandsReply({ label = 'Hands', ok, reason, steps, seconds, 
  * Drive the desktop until the task is done, the model gives up, or the budget
  * runs out. `deps` exists so tests can run this without a real desktop.
  */
-export async function runHands(task, { config = {}, log = console, maxSteps, onStep, deps = {} } = {}) {
+export async function runHands(task, { config = {}, log = console, maxSteps, onStep, deps = {}, signal } = {}) {
   const startedAll = Date.now();
   const budgetSteps = Math.min(Math.max(Number(maxSteps ?? config.handsMaxSteps ?? DEFAULT_MAX_STEPS) || DEFAULT_MAX_STEPS, 1), 20);
   const budgetMs = Math.max(20, Number(config.handsMaxSeconds ?? DEFAULT_MAX_SECONDS) || DEFAULT_MAX_SECONDS) * 1000;
-  const stepDelay = Math.max(200, Number(config.handsStepDelayMs ?? 900) || 900);
+  const stepDelay = Math.max(150, Number(config.handsStepDelayMs ?? 550) || 550);
 
-  const observe = deps.observe ?? ((cfg, lg) => observeScreen(cfg, lg));
-  const think = deps.think ?? ((prompt, imageBase64, mime) => ai.screenStep(config, prompt, imageBase64, log, { mime }));
+  const observe = deps.observe ?? ((cfg, lg, opts) => observeScreen(cfg, lg, opts));
+  const visionFirst = config.handsUseOcr !== true;
+  const think = deps.think ?? ((prompt, imageBase64, mime) => ai.screenStep(config, prompt, imageBase64, log, {
+    mime, signal, maxTokens: config.handsMaxTokens ?? 512,
+  }));
   const act = deps.act ?? ((action, ctx) => executeHandsAction(action, ctx));
 
   const steps = [];
@@ -481,8 +535,10 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
   const finish = (ok, extra = {}) => {
     const seconds = Math.max(1, Math.round((Date.now() - startedAll) / 1000));
     const usage = { maxSteps: budgetSteps, visionCalls };
+    const stopped = Boolean(extra.stopped);
     return {
       ok,
+      stopped,
       steps,
       image: lastImage,
       answer: extra.answer ?? null,
@@ -491,21 +547,24 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
       cloud,
       seconds,
       text: formatHandsReply({
-        ok, steps, seconds, answer: extra.answer, reason: extra.reason,
+        ok, stopped, steps, seconds, answer: extra.answer, reason: extra.reason,
         model: usedModel, cloud, usage,
       }),
     };
   };
 
+  try {
   for (let step = 1; step <= budgetSteps; step++) {
+    throwIfStopped(signal, 'Hands');
     if (Date.now() - startedAll > budgetMs) {
       return finish(false, { reason: `time budget khatam (${Math.round(budgetMs / 1000)}s) — task chhota karke bhejo` });
     }
 
     let shot;
     try {
-      shot = await observe(config, log);
+      shot = await observe(config, log, { useOcr: !visionFirst, signal });
     } catch (err) {
+      if (err?.code === 'ESTOPPED' || signal?.aborted) return finish(false, { stopped: true, reason: '/stop' });
       return finish(false, { reason: `screenshot nahi mila: ${String(err.message).split('\n')[0]}` });
     }
     if (!shot?.image) return finish(false, { reason: 'screenshot empty aaya' });
@@ -520,10 +579,10 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
       }
     }
 
-    const { image: modelImage, mime } = await shrinkForModel(shot.image, config.handsImageWidth ?? 1280);
+    const { image: modelImage, mime } = await shrinkForModel(shot.image, config.handsImageWidth ?? 1024, config.handsJpegQuality ?? 70);
     const prompt = buildHandsPrompt({
       task, step, maxSteps: budgetSteps, size: shot.size, words: shot.words,
-      history, lastResult, lastChange,
+      history, lastResult, lastChange, visionFirst,
     });
 
     let parsed = null;
@@ -533,9 +592,12 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
         : `${prompt}\n\nYour previous reply was rejected: ${parsed?.error ?? 'unparseable'}.\nReply again with exactly ONE valid JSON object from the RULES.`;
       let res;
       try {
+        throwIfStopped(signal, 'Hands');
         res = await think(askPrompt, modelImage.toString('base64'), mime);
         visionCalls += 1;
       } catch (err) {
+        if (err?.code === 'ESTOPPED' || signal?.aborted) return finish(false, { stopped: true, reason: '/stop' });
+        if (err?.name === 'AbortError' && signal?.aborted) return finish(false, { stopped: true, reason: '/stop' });
         return finish(false, { reason: `vision model fail: ${err.message}` });
       }
       if (!res?.text) {
@@ -581,11 +643,16 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
     let ok = true;
     try {
       const result = await act(action, {
-        config, log, size: shot.size, words: shot.words, imageBase64: modelImage.toString('base64'),
+        config, log, size: shot.size, words: shot.words,
+        imageBase64: modelImage.toString('base64'),
+        // Lazy OCR on the ORIGINAL screenshot: only when a named target needs
+        // snapping to exact pixels. Never on the normal coordinate path.
+        ensureWords: () => wordsForShot(shot, log),
       });
       detail = result?.detail ?? '';
       if (result?.done) return finish(true, { answer: result.answer ?? '' });
     } catch (err) {
+      if (err?.code === 'ESTOPPED' || signal?.aborted) return finish(false, { stopped: true, reason: '/stop' });
       ok = false;
       detail = `❌ ${String(err.message).split('\n')[0].slice(0, 220)}`;
     }
@@ -601,7 +668,11 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
       return finish(false, { reason: `same action "${summarizeAction(action)}" 3 baar, screen nahi badli — stuck` });
     }
     lastShot = shot;
-    await sleep(stepDelay);
+    await sleepWith(stepDelay, signal, 'Hands');
+  }
+  } catch (err) {
+    if (err?.code === 'ESTOPPED' || signal?.aborted) return finish(false, { stopped: true, reason: '/stop' });
+    throw err;
   }
 
   return finish(false, { reason: `${budgetSteps} steps me task poora nahi hua` });

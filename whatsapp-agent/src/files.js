@@ -286,7 +286,7 @@ export async function unzipPath(file, { extraRoots = [], dest } = {}) {
 }
 
 /** Download a URL straight to the PC (no browser needed). */
-export async function downloadUrl(url, dest, { extraRoots = [] } = {}) {
+export async function downloadUrl(url, dest, { extraRoots = [], signal } = {}) {
   const clean = String(url ?? '').trim();
   if (!/^https?:\/\/\S+$/i.test(clean)) throw new Error('usage: /download <https://link> [path]');
   const curl = findBin('curl');
@@ -302,7 +302,17 @@ export async function downloadUrl(url, dest, { extraRoots = [] } = {}) {
   }
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   if (!curl) throw new Error('Downloading needs curl: sudo dnf install curl');
-  await execFileAsync(curl, ['-L', '--fail', '--max-time', '900', '-o', outPath, clean], { timeout: 920_000, maxBuffer: 1024 * 1024 });
+  await execFileAsync(curl, ['-L', '--fail', '--max-time', '900', '-o', outPath, clean], {
+    timeout: 920_000,
+    maxBuffer: 1024 * 1024,
+    // /stop kills curl; the partial file is removed so nobody gets a broken download.
+    ...(signal ? { signal } : {}),
+  }).catch((err) => {
+    if (signal?.aborted || err.name === 'AbortError') {
+      try { fs.rmSync(outPath, { force: true }); } catch { /* noop */ }
+    }
+    throw err;
+  });
   const size = fs.statSync(outPath).size;
   return `⬇️ Downloaded *${path.basename(outPath)}* (${humanSize(size)}) → ${outPath.replace(os.homedir(), '~')}\nSend it here: /send ${outPath.replace(os.homedir(), '~')}`;
 }

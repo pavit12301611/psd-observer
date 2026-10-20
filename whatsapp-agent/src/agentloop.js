@@ -20,15 +20,20 @@
 //     `lastRun`, so /agent can prove it did work instead of guessing.
 
 import { routerFor } from './router.js';
+import { throwIfStopped, isStoppedError } from './cancel.js';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
-async function postJson(url, body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+async function postJson(url, body, headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, outerSignal = null) {
+  const timeout = AbortSignal.timeout(Math.max(5_000, timeoutMs));
+  const signal = outerSignal && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([timeout, outerSignal])
+    : outerSignal ?? timeout;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(Math.max(5_000, timeoutMs)),
+    signal,
   });
   if (!res.ok) {
     const detail = (await res.text().catch(() => '')).slice(0, 300);
@@ -118,7 +123,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
   // Each returns { text, toolCalls:[{id,name,args}], assistant } and knows how to
   // append its own assistant/tool messages to the conversation.
 
-  function ollamaAdapter(model, selectedTools) {
+  function ollamaAdapter(model, selectedTools, signal) {
     return {
       name: model.label,
       async step(messages) {
@@ -128,7 +133,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
           tools: selectedTools,
           stream: false,
           options: { temperature: 0.3, num_ctx: Number(config.ollamaNumCtx ?? 8192) || 8192 },
-        }, {}, timeoutMs);
+        }, {}, timeoutMs, signal);
         const msg = data.message ?? {};
         return {
           text: (msg.content ?? '').trim(),
@@ -146,7 +151,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     };
   }
 
-  function openAiAdapter(model, selectedTools) {
+  function openAiAdapter(model, selectedTools, signal) {
     const base = {
       groq: { url: config.groqBaseUrl || 'https://api.groq.com/openai/v1', key: config.groqApiKey },
       openrouter: { url: config.openrouterBaseUrl || 'https://openrouter.ai/api/v1', key: config.openrouterApiKey },
@@ -164,7 +169,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
           tools: openAiTools,
           tool_choice: 'auto',
           temperature: 0.3,
-        }, { authorization: `Bearer ${base.key}` }, timeoutMs);
+        }, { authorization: `Bearer ${base.key}` }, timeoutMs, signal);
         const msg = data.choices?.[0]?.message ?? {};
         return {
           text: (msg.content ?? '').trim(),
@@ -182,7 +187,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     };
   }
 
-  function geminiAdapter(model, selectedTools, runPlan) {
+  function geminiAdapter(model, selectedTools, runPlan, signal) {
     const declarations = selectedTools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -202,6 +207,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
           },
           {},
           timeoutMs,
+          signal,
         );
         const parts = data.candidates?.[0]?.content?.parts ?? [];
         const calls = parts.filter((p) => p.functionCall).map((p, i) => ({
@@ -225,17 +231,17 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     };
   }
 
-  function makeAdapter(model, selectedTools, runPlan) {
-    if (model.provider === 'ollama') return ollamaAdapter(model, selectedTools);
-    if (model.provider === 'gemini') return geminiAdapter(model, selectedTools, runPlan);
-    return openAiAdapter(model, selectedTools);
+  function makeAdapter(model, selectedTools, runPlan, signal) {
+    if (model.provider === 'ollama') return ollamaAdapter(model, selectedTools, signal);
+    if (model.provider === 'gemini') return geminiAdapter(model, selectedTools, runPlan, signal);
+    return openAiAdapter(model, selectedTools, signal);
   }
 
   // ── one run with one model ───────────────────────────────────────────────
 
   async function runWithModel(model, text, ctx, plan, opts = {}) {
     const selectedTools = toolsFor(text, { limit: plan.toolLimit });
-    const adapter = makeAdapter(model, selectedTools, plan);
+    const adapter = makeAdapter(model, selectedTools, plan, opts.signal);
 
     let messages = adapter.usesContents ? null : [
       { role: 'system', content: systemPrompt(plan) },
@@ -254,8 +260,15 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     const pack = (reply) => ({ reply, toolCalls, stepsUsed });
 
     for (let step = 0; step < maxSteps; step++) {
+      throwIfStopped(opts.signal, 'Agent');
       stepsUsed = step + 1;
-      const result = adapter.usesContents ? await adapter.step(messages, contents) : await adapter.step(messages);
+      let result;
+      try {
+        result = adapter.usesContents ? await adapter.step(messages, contents) : await adapter.step(messages);
+      } catch (err) {
+        if (isStoppedError(err) || opts.signal?.aborted) throw err;
+        throw err;
+      }
       lastText = result.text || lastText;
 
       if (result.toolCalls?.length) {
@@ -264,6 +277,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
 
         let confirmation = null;
         for (const call of result.toolCalls) {
+          throwIfStopped(opts.signal, 'Agent');
           const signature = `${call.name}:${JSON.stringify(call.args ?? {})}`;
           const times = (callCounts.get(signature) ?? 0) + 1;
           callCounts.set(signature, times);
@@ -369,6 +383,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     for (const model of attempts) {
       const attemptStart = Date.now();
       try {
+        throwIfStopped(opts.signal, 'Agent');
         const attempt = await runWithModel(model, text, ctx, effectivePlan, opts);
         const ms = Date.now() - attemptStart;
         if (!attempt || attempt.reply == null) {
@@ -426,6 +441,10 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
         // a plain WhatsApp-friendly value.
         return attempt.reply;
       } catch (err) {
+        if (isStoppedError(err) || opts.signal?.aborted) {
+          lastRun = { ok: false, stopped: true, model: model.label, tier: plan.tier, reason: 'stopped by /stop' };
+          throw err;
+        }
         const ms = Date.now() - attemptStart;
         router.record(model.id, { ok: false, ms, tier: plan.rank, error: err.message });
         log.warn?.(`[agent] ${model.label} failed: ${err.message}`);
