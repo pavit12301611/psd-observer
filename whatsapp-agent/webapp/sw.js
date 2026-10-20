@@ -1,6 +1,6 @@
 // Service worker: lets the phone install this as an app and open it offline
 // (the shell loads instantly; API calls still need the PC).
-const CACHE = 'observer-agent-v2';
+const CACHE = 'observer-agent-v3';
 const ASSETS = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {

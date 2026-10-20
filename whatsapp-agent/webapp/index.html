@@ -89,9 +89,10 @@
       </div>
       <div class="screen-wrap">
         <img id="screen-img" alt="PC screen" draggable="false">
-        <div id="screen-status" class="muted small center">Screen load ho rahi hai…</div>
+        <div id="screen-status" class="muted small center">Tap on Refresh — screenshot sirf tab jab tum maango.</div>
       </div>
-      <p class="muted small center">Screen pe tap karo — wahin click ho jayega. Har 2.5s pe naya frame.</p>
+      <p class="muted small center">Screen pe tap = wahin click. Screenshot <b>sirf</b> tab aata hai jab tum Refresh dabao ya koi action karo — koi 1s/5s/10s wala auto loop nahi.</p>
+
       <div class="card">
         <form id="type-form" class="inline">
           <input id="type-text" placeholder="PC pe type karo…" autocomplete="off">
@@ -99,6 +100,21 @@
         </form>
         <div class="grid" id="key-grid"></div>
       </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h3>Commands</h3>
+          <button id="cmd-clear" class="ghost">Clear</button>
+        </div>
+        <p class="muted small">Sab commands yahin — /help, /brief, /usage, /watch, /use, /undo, /screenshot…</p>
+        <div id="cmd-out" class="cmd-out"><p class="muted small">Abhi kuch nahi chalaya.</p></div>
+        <div class="chips" id="cmd-chips"></div>
+        <form id="cmd-form" class="inline">
+          <input id="cmd-input" placeholder="/brief · /usage · /help · /use …" autocomplete="off">
+          <button class="primary" type="submit">Run</button>
+        </form>
+      </div>
+
       <p class="muted small">Same Wi-Fi pe kaam karta hai. Bahar se: <code>./scripts/observer.sh remote</code> (Tailscale) — phir wahi page kahin se bhi.</p>
     </section>
 

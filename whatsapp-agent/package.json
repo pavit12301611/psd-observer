@@ -1,6 +1,6 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "private": true,
   "description": "Observer WhatsApp Agent 2.6 - free native WhatsApp + phone app + full PC control, workload-routed multi-model AI (local GGUF via llama.cpp, Groq/OpenRouter/Gemini free tiers), verified /agent automation and one observer.sh script for install/update/keys (Fedora/Linux).",
   "type": "module",

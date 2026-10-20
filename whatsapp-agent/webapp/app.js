@@ -10,8 +10,9 @@
 
   let token = localStorage.getItem(TOKEN_KEY) || '';
   let statusTimer = null;
-  let screenTimer = null;
   let screenBusy = false;
+  let screenEtag = '';
+  let screenUrlLive = null;
   let installEvent = null;
 
   // ── tiny formatting helpers ───────────────────────────────────────────────
@@ -314,39 +315,48 @@
     $$('.bottom-nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     if (name === 'files') loadFiles();
     if (name === 'settings') refreshStatus();
-    if (name === 'screen') startScreen(); else stopScreen();
+    // Screen is never polled: one frame when the tab opens, then only when
+    // the owner asks (Refresh) or does something (tap/type/key).
+    if (name === 'screen') loadScreen({ force: true, note: 'Screenshot on demand — koi auto polling nahi.' });
   }
 
   // ── remote screen ─────────────────────────────────────────────────────────
   // The phone is just another client: /api/screen returns one JPEG, /api/tap
-  // clicks at a 0-1000 relative point. Nothing extra runs on the PC.
-  function screenUrl() {
-    return `/api/screen?w=1280&t=${encodeURIComponent(token)}&ts=${Date.now()}`;
-  }
-
-  async function loadScreen() {
+  // clicks at a 0-1000 relative point. There is deliberately NO timer here —
+  // a screenshot every 1s/5s/10s is exactly what the owner did not want (and
+  // on Wayland every capture may pop the portal prompt). One frame per action,
+  // one per Refresh, nothing in between.
+  async function loadScreen({ force = false, note = '' } = {}) {
     if (screenBusy) return;
     screenBusy = true;
     const img = $('#screen-img');
     const status = $('#screen-status');
     try {
-      img.src = screenUrl();
-      if (status) status.textContent = '';
+      const headers = {};
+      if (!force && screenEtag) headers['if-none-match'] = screenEtag;
+      const res = await fetch(`/api/screen?w=1280&t=${encodeURIComponent(token)}`, { headers });
+      if (res.status === 401) { showLogin('Session expired — PIN dobara daalo.'); return; }
+      if (res.status === 304) {
+        if (status) status.textContent = `Same screen · ${timeStr()} (naya frame nahi bheja)`;
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `Screen failed (${res.status})`);
+      }
+      screenEtag = res.headers.get('etag') || '';
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const previous = screenUrlLive;
+      img.src = url;
+      screenUrlLive = url;
+      if (previous) URL.revokeObjectURL(previous);
+      if (status) status.textContent = note || `${timeStr()} · tap karo wahin click hoga`;
     } catch (err) {
-      if (status) status.textContent = err.message || 'Screen nahi aayi';
+      if (err.message !== 'unauthorised' && status) status.textContent = err.message || 'Screen nahi aayi';
     } finally {
-      setTimeout(() => { screenBusy = false; }, 300);
+      screenBusy = false;
     }
-  }
-
-  function startScreen() {
-    if (screenTimer) return;
-    loadScreen();
-    screenTimer = setInterval(loadScreen, 2500);
-  }
-
-  function stopScreen() {
-    if (screenTimer) { clearInterval(screenTimer); screenTimer = null; }
   }
 
   async function tapAt(ev) {
@@ -359,7 +369,7 @@
     const wrap = img.parentElement;
     const dot = document.createElement('span');
     dot.className = 'ripple';
-    dot.style.left = `${ev.clientX - box.left + wrap.getBoundingClientRect().left - wrap.getBoundingClientRect().left}px`;
+    dot.style.left = `${ev.clientX - box.left}px`;
     dot.style.top = `${ev.clientY - box.top}px`;
     wrap.appendChild(dot);
     setTimeout(() => dot.remove(), 520);
@@ -368,7 +378,9 @@
     } catch (err) {
       $('#screen-status').textContent = err.message;
     }
-    setTimeout(loadScreen, 250);
+    // One frame after the click: the owner must SEE what changed, otherwise
+    // tapping blind. Still not a timer.
+    loadScreen({ note: `${timeStr()} · tap bheja (${rx}, ${ry})` });
   }
 
   const KEY_BUTTONS = [
@@ -387,9 +399,83 @@
       b.textContent = label;
       b.addEventListener('click', async () => {
         try { await api('/api/key', { method: 'POST', body: { key } }); } catch (err) { $('#screen-status').textContent = err.message; }
-        setTimeout(loadScreen, 200);
+        loadScreen({ note: `${timeStr()} · ${label} bheja` });
       });
       grid.appendChild(b);
+    }
+  }
+
+  // ── command console (Screen tab) ──────────────────────────────────────────
+  // Every slash command already works through /api/chat; this is just another
+  // view of it, so the owner never has to leave the screen to run /brief,
+  // /usage, /watch … while looking at the PC.
+  const CONSOLE_CHIPS = ['/help', '/brief', '/usage', '/watch list', '/undo list', '/screenshot', '/status'];
+
+  function cmdLine(kind, text, { images = [], documentName = '', documentPath = '' } = {}) {
+    const box = $('#cmd-out');
+    if (!box) return null;
+    if (box.dataset.placeholder !== 'gone') { box.innerHTML = ''; box.dataset.placeholder = 'gone'; }
+    const line = document.createElement('div');
+    line.className = `cmd-line ${kind}`;
+    line.innerHTML = waFormat(text || '');
+    for (const src of images) {
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = 'screenshot';
+      line.appendChild(img);
+    }
+    if (documentName) {
+      const doc = document.createElement('div');
+      doc.innerHTML = documentPath
+        ? `📄 <a href="/api/download?path=${encodeURIComponent(documentPath)}&t=${encodeURIComponent(token)}" download>${escapeHtml(documentName)}</a>`
+        : `📄 ${escapeHtml(documentName)}`;
+      line.appendChild(doc);
+    }
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = timeStr();
+    line.appendChild(time);
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+    return line;
+  }
+
+  async function runConsoleCommand(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return;
+    const input = $('#cmd-input');
+    if (input) input.value = '';
+    cmdLine('me', text);
+    const pending = cmdLine('bot', '⏳ chal raha hai…');
+    try {
+      const data = await api('/api/chat', { method: 'POST', body: { text } });
+      pending.remove();
+      cmdLine('bot', data.text || (data.ok ? '✅ Done.' : '⚠️ Kuch gadbad ho gayi.'), {
+        images: data.images || [],
+        documentName: data.documentName || '',
+        documentPath: data.documentPath || '',
+      });
+      // /screenshot, /look … change what is on the screen: show it here too.
+      if (/^\/?(screenshot|shot|screen|look|ocr|tap)\b/i.test(text) || (data.images && data.images.length)) {
+        loadScreen({ note: `${timeStr()} · ${text.split(' ')[0]} ke baad` });
+      }
+    } catch (err) {
+      pending.remove();
+      if (err.message !== 'unauthorised') cmdLine('bot err', `⚠️ ${err.message}`);
+    }
+  }
+
+  function renderConsoleChips() {
+    const box = $('#cmd-chips');
+    if (!box || box.dataset.ready) return;
+    box.dataset.ready = '1';
+    for (const cmd of CONSOLE_CHIPS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = cmd;
+      b.addEventListener('click', () => runConsoleCommand(cmd));
+      box.appendChild(b);
     }
   }
 
@@ -451,6 +537,16 @@
 
     $$('.bottom-nav button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     renderKeyPad();
+    renderConsoleChips();
+    if ($('#cmd-form')) $('#cmd-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      runConsoleCommand($('#cmd-input').value);
+    });
+    if ($('#cmd-clear')) $('#cmd-clear').addEventListener('click', () => {
+      const box = $('#cmd-out');
+      box.innerHTML = '<p class="muted small">Abhi kuch nahi chalaya.</p>';
+      delete box.dataset.placeholder;
+    });
     const screenImg = $('#screen-img');
     if (screenImg) {
       screenImg.addEventListener('click', tapAt);
@@ -465,7 +561,7 @@
         if (status) status.textContent = '';
       });
     }
-    if ($('#screen-refresh')) $('#screen-refresh').addEventListener('click', loadScreen);
+    if ($('#screen-refresh')) $('#screen-refresh').addEventListener('click', () => loadScreen({ force: true, note: `${timeStr()} · refresh` }));
     if ($('#type-form')) $('#type-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = $('#type-text');
@@ -477,7 +573,7 @@
       } catch (err) {
         $('#screen-status').textContent = err.message;
       }
-      setTimeout(loadScreen, 250);
+      loadScreen({ note: `${timeStr()} · type bheja` });
     });
     $('#files-refresh').addEventListener('click', loadFiles);
     $('#file-form').addEventListener('submit', (e) => {
@@ -497,9 +593,12 @@
       showLogin();
     });
 
+    // Coming back to the tab shows one fresh frame (the screen may have moved
+    // while the phone was locked) — still event-driven, never a timer.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) stopScreen();
-      else if ($('#tab-screen')?.classList.contains('active')) startScreen();
+      if (!document.hidden && $('#tab-screen')?.classList.contains('active')) {
+        loadScreen({ force: true, note: 'Wapas aaye — ek fresh frame.' });
+      }
     });
 
     // browser dictation (free, built into Chrome/Android; hidden if unsupported)

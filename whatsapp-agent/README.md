@@ -122,7 +122,7 @@ calls `download_url`, `write_file`/`move`, `send_file` in sequence.
 
 - **Chat** — same agent as WhatsApp, with quick chips and browser dictation (🎤).
 - **Panel** — one-tap screenshot, volume, mute, play/pause, brightness, lock, Wi-Fi, battery, status, apps, windows, recording, webcam, processes.
-- **Screen** — live screen (2.5s frames) + **tap to click**, type box and keys (Enter, Esc, Tab, Ctrl+L…). This is the remote-desktop view; it works over the same Wi-Fi, or from anywhere through Tailscale.
+- **Screen** — tap-to-click on the PC screen, type box, keys (Enter, Esc, Tab, Ctrl+L…) and a **command console** that runs every slash command without leaving the screen. Frames are **on demand** — one when you open the tab, one per Refresh or action, never a 1s/5s/10s loop (a tap costs zero extra screenshots). Works over the same Wi-Fi, or from anywhere through Tailscale.
 - **Files** — files received on the PC and your `data/shared/` folder, with a **Send** button that delivers to WhatsApp *and* a direct download link in the app; plus "send any path".
 - **Settings** — live status, access level, tool count, WhatsApp QR when linking, install button, logout.
 

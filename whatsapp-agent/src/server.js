@@ -35,7 +35,7 @@ import { pngSize } from './elementfinder.js';
 import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.8.0';
+const VERSION = '2.8.1';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -90,13 +90,33 @@ export function replyForApp(reply) {
   return out;
 }
 
+/** Strong ETag for one frame, so an unchanged screen costs no bandwidth. */
+export function screenTag(buffer) {
+  return `"${crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 20)}"`;
+}
+
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a ?? '')).digest();
   const hb = crypto.createHash('sha256').update(String(b ?? '')).digest();
   return crypto.timingSafeEqual(ha, hb);
 }
 
-export function createBridgeServer({ config, store, whatsapp, mailbox, actions, runOwner, log = console }) {
+export function createBridgeServer({
+  config, store, whatsapp, mailbox, actions, runOwner, log = console,
+  // Injectable so tests never touch a real desktop, and so the number of
+  // screenshots per request is explicit and measurable.
+  screen = null,
+}) {
+  const scr = screen ?? {
+    capture: (opts) => pc.captureScreenshot(opts),
+    click: (x, y) => pc.click(x, y),
+    key: (combo) => pc.keyCombo(combo),
+    type: (text) => pc.typeText(text),
+  };
+  // Size of the last frame the phone asked for. A tap then needs ZERO extra
+  // screenshots — important on Wayland, where every capture can pop the
+  // portal's "share your screen" prompt.
+  let lastFrameSize = null;
   const authed = (req, url) => {
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     // Constant-time: a plain === leaks the token a byte at a time to anything
@@ -331,14 +351,23 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
         // the phone is just another client of the same agent.
         case 'GET /api/screen': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
-          const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+          const shot = await scr.capture({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
           const size = pngSize(shot) ?? { width: 0, height: 0 };
+          if (size.width && size.height) lastFrameSize = size;
+          const tag = screenTag(shot);
+          // Unchanged screen → 304, no capture wasted on the phone's side and
+          // no image re-sent. The phone asks again only when it wants to.
+          if (req.headers['if-none-match'] === tag) {
+            res.writeHead(304, { etag: tag, 'cache-control': 'no-store', 'x-screen-width': size.width, 'x-screen-height': size.height });
+            return res.end();
+          }
           const wanted = Math.max(480, Math.min(1920, Number(url.searchParams.get('w')) || 1280));
           const { image, mime } = await hands.shrinkForModel(shot, wanted, 70);
           res.writeHead(200, {
             'content-type': mime,
             'content-length': image.length,
             'cache-control': 'no-store',
+            etag: tag,
             'x-screen-width': size.width,
             'x-screen-height': size.height,
           });
@@ -351,8 +380,15 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
           const rx = Number(body.x);
           const ry = Number(body.y);
           if (!Number.isFinite(rx) || !Number.isFinite(ry)) return json(res, 400, { detail: 'x and y are required (0-1000 relative, or pixels with relative:false)' });
-          const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
-          const size = pngSize(shot) ?? { width: 0, height: 0 };
+          // Prefer the size of the frame the phone is actually looking at: one
+          // screenshot per tap is exactly the "screenshot har second" cost the
+          // owner asked to avoid.
+          let size = lastFrameSize;
+          if (!size) {
+            const shot = await scr.capture({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+            size = pngSize(shot) ?? { width: 0, height: 0 };
+            if (size.width && size.height) lastFrameSize = size;
+          }
           // `relative:true` (the app sends this) means 0-1000 like the hands
           // loop; raw pixels are accepted too.
           const x = body.relative === false
@@ -364,7 +400,7 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
           if (!size.width || x < 0 || y < 0 || x >= size.width || y >= size.height) {
             return json(res, 400, { detail: `Tap outside the screen (${size.width}×${size.height})` });
           }
-          await pc.click(x, y);
+          await scr.click(x, y);
           log.info?.(`[bridge] tap ${x},${y} from the phone app`);
           return json(res, 200, { ok: true, x, y, width: size.width, height: size.height });
         }
@@ -374,7 +410,7 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
           const body = await readJsonBody(req);
           const key = String(body.key ?? '').trim();
           if (!key) return json(res, 400, { detail: 'key is required (e.g. "ctrl+l", "Return")' });
-          await pc.keyCombo(key);
+          await scr.key(key);
           return json(res, 200, { ok: true, key });
         }
 
@@ -383,7 +419,7 @@ export function createBridgeServer({ config, store, whatsapp, mailbox, actions, 
           const body = await readJsonBody(req);
           const text = String(body.text ?? '');
           if (!text) return json(res, 400, { detail: 'text is required' });
-          await pc.typeText(text.slice(0, 4000));
+          await scr.type(text.slice(0, 4000));
           return json(res, 200, { ok: true, chars: Math.min(text.length, 4000) });
         }
 

@@ -1,4 +1,13 @@
 {
+  "2.8.1": {
+    "title": "Screen tab: screenshot sirf jab tum maango + sab commands wahin",
+    "bullets": [
+      "Koi auto loop nahi — screenshot sirf Refresh pe, tab khulne pe, ya kisi action ke baad (1s/5s/10s wala polling hata diya)",
+      "Screen tab me naya Commands console — /help, /brief, /usage, /watch, /use, /undo sab wahin chalte hain",
+      "Tap pe extra screenshot nahi — frame ka size yaad rehta hai (Wayland portal prompt kam)",
+      "Screen nahi badla to 304 — wahi image dobara download nahi hoti"
+    ]
+  },
   "2.8.0": {
     "title": "undo, watch, usage, teach, brief, resume + phone se remote control",
     "bullets": [

@@ -124,6 +124,62 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.8.1 — screen: on-demand frames, aur sab commands wahin
+
+Owner ne seedha pakda: "na har 5–10 sec me screenshot, na har 1 sec — aur
+saare commands bhi chale."
+
+### Kya galat tha
+
+2.8.0 ka Screen tab har **2.5 s** me `/api/screen` maarta tha. Har request pe PC
+screenshot leta hai — Wayland pe har capture portal ka "share your screen"
+prompt bhi la sakta hai. 10 minute ka phone session = ~240 screenshots, bina
+kisi wajah ke.
+
+### Ab
+
+| Trigger | Screenshots |
+|---|---|
+| Tab kholna | 1 |
+| **Refresh** dabana | 1 |
+| Screen pe tap | **0** (frame ka size server yaad rakhta hai) |
+| Tap ke baad naya frame | 1 (dekhne ke liye) |
+| Type / key bhejna | 0 + 1 frame |
+| Kuch na karna | **0** — koi timer nahi |
+
+- `setInterval(loadScreen, 2500)` hata diya. `visibilitychange` pe sirf ek fresh
+  frame (phone wapas aaya to screen badal chuki hogi).
+- `GET /api/screen` ab **ETag** deta hai; same screen pe `304 Not Modified` —
+  image dobara download nahi hoti, page wahi frame rakhta hai.
+- `POST /api/tap` pehle apna screenshot leta tha size jaane ke liye. Ab last
+  frame ka size use karta hai → tap = zero extra capture.
+- Server me `screen` deps inject ho sakte hain, isliye test exactly count karta
+  hai ki ek tap me kitne screenshots hue (0).
+
+### Commands console (Screen tab)
+
+Screen dekhte-dekhte hi sab commands: `/help`, `/brief`, `/usage`, `/watch list`,
+`/undo`, `/use …` — `POST /api/chat` hi hai (same agent, same safety gates),
+bas output screen ke neeche dikhta hai. Screenshot wale commands (`/screenshot`,
+`/look`, `/tap`) ka result image console me aata hai aur screen bhi refresh hoti hai.
+
+Quick chips: `/help · /brief · /usage · /watch list · /undo list · /screenshot · /status`.
+
+### Files
+
+| File | Kya |
+|---|---|
+| `webapp/app.js` | polling hataya, ETag fetch, tap pe 0 capture, console + chips |
+| `webapp/index.html` | Screen tab me Commands card, naya text |
+| `webapp/styles.css` | `.cmd-out` / `.cmd-line` |
+| `src/server.js` | ETag + 304, `screen` deps inject, tap last-frame size se |
+| `test/features.test.js` | 3 naye tests: etag, "tap me 0 screenshot", PC-control off |
+
+Tests: **172 pass**.
+
+---
+
+
 ## 2.8.0 — bharosa + poora reach: undo, watch, usage, teach, brief, resume, remote screen
 
 Owner ne kaha: "sab daal de, bas 9 wala step kahin se bhi control hone chahiye."
@@ -673,6 +729,7 @@ npm test                              # 90 pass
 | 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
 | 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 142 | 62 |
 | 22 | *2.8.0* | **Trust + reach**: `/undo` (file ops wapas), `/watch` (screen condition → alert), `/usage` (quota + 80% warning), `/teach` (record → replay), `/brief` (din ki tasveer + 9am schedule), `/resume`, live progress, photo diagnosis, **phone app Screen tab** (live + tap-to-click, Wi-Fi ya Tailscale se kahin se bhi), `observer.sh autoupdate` | 169 | 62 |
+| 23 | *2.8.1* | **Screen on-demand**: koi 1s/5s/10s polling nahi (screenshot sirf Refresh/tab/action pe), tap pe 0 extra capture, ETag 304, aur Screen tab me **Commands console** (sab commands wahin) | 172 | 62 |
 
 Verify karna ho (sab curl, git zero):
 

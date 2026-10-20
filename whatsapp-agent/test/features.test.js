@@ -19,7 +19,7 @@ import { buildWatchPrompt } from '../src/watch.js';
 import { Store } from '../src/store.js';
 import { runDueJobs, parseCronSchedule } from '../src/cron.js';
 import { createAgent } from '../src/commands.js';
-import { createBridgeServer } from '../src/server.js';
+import { createBridgeServer, screenTag } from '../src/server.js';
 import { buildUpdateMessage } from '../src/updates.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -493,6 +493,115 @@ test('cron: a "/brief" job runs through the agent, a text job stays a reminder',
 
 // ── remote screen routes ────────────────────────────────────────────────────
 
+/** Smallest buffer that passes pngSize(): signature + IHDR width/height. */
+function fakePng(width, height) {
+  const buffer = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+  buffer.writeUInt32BE(width, 16);
+  buffer.writeUInt32BE(height, 20);
+  return buffer;
+}
+
+test('bridge: screenTag is stable per frame and changes with the pixels', () => {
+  const a = fakePng(100, 50);
+  const b = fakePng(100, 51);
+  assert.equal(screenTag(a), screenTag(Buffer.from(a)));
+  assert.notEqual(screenTag(a), screenTag(b));
+  assert.match(screenTag(a), /^"[0-9a-f]{20}"$/);
+});
+
+test('bridge: the screen is captured on request only, and taps reuse its size', async () => {
+  const dir = tempDir();
+  const config = makeConfig(dir, {
+    port: 0, host: '127.0.0.1', bridgeToken: 'tok-123', dashboardPin: '4321', allowPcControl: true,
+  });
+  const calls = { capture: 0, click: [], key: [], type: [] };
+  const screen = {
+    capture: async () => { calls.capture += 1; return fakePng(1000, 500); },
+    click: async (x, y) => { calls.click.push([x, y]); },
+    key: async (combo) => { calls.key.push(combo); },
+    type: async (text) => { calls.type.push(text); },
+  };
+  const whatsapp = { status: () => 'connected', state: {}, sendToOwner: async () => {} };
+  const mailbox = { observerOnline: () => false, listen: async () => [] };
+  const bridge = createBridgeServer({
+    config, store: makeStore(dir), whatsapp, mailbox, actions: null, log: silent, screen,
+  });
+  const server = await bridge.start();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const auth = { 'x-bridge-token': 'tok-123' };
+  try {
+    assert.equal(calls.capture, 0, 'nothing is captured just by starting the server');
+
+    const first = await fetch(`${base}/api/screen`, { headers: auth });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('x-screen-width'), '1000');
+    assert.equal(first.headers.get('x-screen-height'), '500');
+    const tag = first.headers.get('etag');
+    assert.ok(tag, 'frame carries an etag');
+    await first.arrayBuffer();
+    assert.equal(calls.capture, 1);
+
+    // Same frame again: 304, so the phone keeps the image it already has.
+    const again = await fetch(`${base}/api/screen`, { headers: { ...auth, 'if-none-match': tag } });
+    assert.equal(again.status, 304);
+    assert.equal(calls.capture, 2, 'still one capture per explicit request, never a loop');
+
+    // A tap must NOT take its own screenshot — it uses the frame's size.
+    const before = calls.capture;
+    const tap = await fetch(`${base}/api/tap`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ x: 500, y: 500, relative: true }),
+    });
+    assert.equal(tap.status, 200);
+    const tapped = await tap.json();
+    assert.deepEqual({ x: tapped.x, y: tapped.y }, { x: 500, y: 250 });
+    assert.deepEqual(calls.click, [[500, 250]]);
+    assert.equal(calls.capture, before, 'tap added zero screenshots');
+
+    const key = await fetch(`${base}/api/key`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ key: 'ctrl+l' }),
+    });
+    assert.equal(key.status, 200);
+    assert.deepEqual(calls.key, ['ctrl+l']);
+
+    const typed = await fetch(`${base}/api/type`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ text: 'hello' }),
+    });
+    assert.equal(typed.status, 200);
+    assert.deepEqual(calls.type, ['hello']);
+  } finally {
+    bridge.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('bridge: PC control off means no screen and no tap at all', async () => {
+  const dir = tempDir();
+  const config = makeConfig(dir, {
+    port: 0, host: '127.0.0.1', bridgeToken: 'tok-123', dashboardPin: '4321', allowPcControl: false,
+  });
+  const whatsapp = { status: () => 'connected', state: {}, sendToOwner: async () => {} };
+  const mailbox = { observerOnline: () => false, listen: async () => [] };
+  const bridge = createBridgeServer({
+    config, store: makeStore(dir), whatsapp, mailbox, actions: null, log: silent,
+    screen: { capture: async () => fakePng(10, 10), click: async () => {}, key: async () => {}, type: async () => {} },
+  });
+  const server = await bridge.start();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const auth = { 'x-bridge-token': 'tok-123' };
+    assert.equal((await fetch(`${base}/api/screen`, { headers: auth })).status, 403);
+    assert.equal((await fetch(`${base}/api/tap`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ x: 1, y: 1 }),
+    })).status, 403);
+  } finally {
+    bridge.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('bridge: remote screen + tap routes are token-protected', async () => {
   const dir = tempDir();
   const config = makeConfig(dir, {
@@ -513,7 +622,7 @@ test('bridge: remote screen + tap routes are token-protected', async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const unauth = await fetch(`${base}/api/screen`);
-    assert.equal(unauth.status, 401);
+    assert.equal(unauth.status, 401, 'no token, no screen');
 
     const status = await fetch(`${base}/api/status`, { headers: { 'x-bridge-token': 'tok-123' } });
     assert.equal(status.status, 200);
