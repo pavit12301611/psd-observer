@@ -146,7 +146,12 @@ export async function announceUpdate({
   brains = null,
 } = {}) {
   if (!store?.data || !version) return { sent: false, reason: 'no store/version' };
-  const previous = store.data.lastVersion ?? null;
+  const markerForThis = marker && (!marker.to || marker.to === version) ? marker : null;
+  // An install that predates this messenger has no store.lastVersion, but
+  // observer.sh left a marker for THIS version — so we still know what it
+  // moved from and can send the "updated" message the first time too.
+  const fromMarker = markerForThis?.from && markerForThis.from !== version ? markerForThis.from : null;
+  const previous = store.data.lastVersion ?? fromMarker;
   const brainIds = Array.isArray(brains?.ids) ? [...brains.ids].sort() : null;
   const prevBrains = Array.isArray(store.data.lastBrainIds) ? [...store.data.lastBrainIds].sort() : null;
 
@@ -162,7 +167,6 @@ export async function announceUpdate({
   const brainsChanged = Boolean(brainIds && prevBrains && brainIds.join() !== prevBrains.join());
   if (!versionChanged && !brainsChanged) return { sent: false, reason: 'unchanged' };
 
-  const markerForThis = marker && (!marker.to || marker.to === version) ? marker : null;
   const seconds = markerForThis ? Number(markerForThis.seconds) : NaN;
   const changes = versionChanged ? changesFor(version, notes) : [];
 

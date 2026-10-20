@@ -375,6 +375,30 @@ test('updates: first run is silent, a version change sends exactly once', async 
   }
 });
 
+test('updates: an install that predates the messenger still gets the message', async () => {
+  // 2.6.0 never wrote store.lastVersion, so the first 2.7.0 startup must not
+  // hide behind "first run" — the observer.sh marker tells us the old version.
+  const dir = tempDir();
+  try {
+    const store = new Store(path.join(dir, 'store.json'));
+    fs.writeFileSync(path.join(dir, 'last-update.json'), JSON.stringify({
+      from: '2.6.0', to: '2.7.0', seconds: 97, at: new Date().toISOString(), via: 'observer.sh',
+    }));
+    const sent = [];
+    const result = await announceUpdate({
+      config: { dataDir: dir }, store, log: silent, version: '2.7.0',
+      send: async (text) => { sent.push(text); },
+    });
+    assert.equal(result.sent, true);
+    assert.equal(result.reason, 'version');
+    assert.match(sent[0], /2\.6\.0 → 2\.7\.0 · 1m 37s/);
+    assert.equal(store.data.lastVersion, '2.7.0');
+    assert.equal(fs.existsSync(path.join(dir, 'last-update.json')), false, 'marker consumed');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('updates: a changed brain list is announced too (AI updated)', async () => {
   const dir = tempDir();
   try {

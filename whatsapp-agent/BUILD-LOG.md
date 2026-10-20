@@ -205,7 +205,7 @@ vision model khud screen dekhta hai.
 | `src/hands.js`, `src/ai.js` | vision-first, `screenStep()` provider order |
 | `test/control.test.js` | *naya* — 23 tests (stop, registry, hands abort, updates) |
 
-Tests: **141 pass** (118 + 23 naye).
+Tests: **142 pass** (118 + 24 naye).
 
 ---
 
@@ -575,7 +575,7 @@ npm test                              # 90 pass
 | 18 | *2.5.3* | **Security review**: write-path block-list bypass, TTS shell injection, non-constant-time token | 93 | 61 |
 | 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
 | 20 | *2.6.0* | **Hands** (Agent-S zip se): screenshot→OCR word-id→ek click/type→dobara screenshot; stuck detection, 8-step budget, cloud-screen toggle | 118 | 62 |
-| 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 141 | 62 |
+| 21 | *2.7.0* | **`/stop`** (stacked kaam bhi turant rukta hai, partial steps batata hai), **screen vision** (OCR nahi — screenshot seedha Gemini/Groq/local vision model ko, 1024px JPEG), **update message** WhatsApp pe (kya naya + kitna time laga) | 142 | 62 |
 
 Verify karna ho (sab curl, git zero):
 
