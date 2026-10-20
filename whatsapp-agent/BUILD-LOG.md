@@ -124,6 +124,90 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.5.4 — "page khul gaya phir bhi *page load nahi hua*"
+
+Owner ne screenshot bheja: `/agent arena.ai/agent pe hello likho` → 22s me
+step 1/5 fail:
+
+```
+❌ 1. open "https://arena.ai/agent" → browser khola par page load nahi hua (20s wait)
+```
+
+…jabki page khul gaya tha aur box cursor ke saath **already focused** tha.
+
+### Root cause: "verify nahi hua" ko "fail" samajh liya
+
+`open` step naya window **title** dhoondta tha (`wmctrl -l`). Do wajah se title
+kabhi aata hi nahi:
+
+1. **Wayland** — `wmctrl` X11-only hai, GNOME Wayland pe list khali aati hai.
+2. **Existing browser window** — naya page tab me khulta hai, naya window nahi.
+   Firefox tab ka title badal de to bhi `wmctrl` list me kuch naya nahi hota.
+
+Dono me 20s baad "page load nahi hua" throw hota tha, chahe screen pe page ho.
+Screen-change fallback sirf ek hi branch me chalta tha.
+
+### Fix 1 — teen-value verdict, `openVerdict()`
+
+Naya pure function (`src/autopilot.js`) jo sirf **saaf evidence** pe fail karta hai:
+
+| Observation | Result |
+|---|---|
+| naya window title mila | ✅ proved (`window "…"`) |
+| screen badal gayi | ✅ chala, par `unverified` (screenshot se confirm) |
+| browser pehle band tha, ab chal raha hai | ✅ chala (`unverified`) |
+| browser chal raha hai, title/screen verify possible nahi | ✅ chala (`unverified`) |
+| browser pehle se khula, screen readable thi aur *bilkul nahi badli* | ❌ fail (type karna khatarnaak) |
+| koi browser process hi nahi | ❌ fail |
+
+Isi verdict se `finish()` me line aati hai:
+`ℹ️ 1 step(s) apne aap verify nahi ho paye … browser focus karke aage badha`.
+
+Saath me: `browserRunning()` (`ps -A -o comm=`) aur `focusAnyBrowser()` — verify
+na ho to bhi browser window focus hoti hai, taaki typing composer me jaaye.
+`type` ka safety gate bhi ab "browser focus karke dobara check" karta hai,
+par **non-browser window me typing abhi bhi band** hai.
+
+### Fix 2 — site table: box pehle se focused hai (`src/sites.js`)
+
+Har chat site (Arena, LMArena, ChatGPT, Claude, Gemini, DeepSeek, Grok,
+Perplexity, Kimi, Poe, Copilot, Qwen…) ka profile: `autofocus: true`,
+`readyMs`. Matlab plan ab:
+
+```
+open → type (clipboard) → Enter → wait 8s → look → screenshot
+```
+
+- koi `tap`/`click` step nahi (purana flow blind-click karta tha; OCR galat
+  "Send" pakadta to text sidebar me chala jata),
+- composer pe aimed `tap` step aaye to **skip** hota hai (reason ke saath),
+- 8s wait (20s nahi) — page khula hai to type turant,
+- **ek hi Enter** — pehle `type submit:true` + alag `key enter` dono chalte the
+  (double submit ka risk).
+
+Non-chat sites ka purana behaviour waisa hi hai.
+
+### Fix 3 — `extractPrompt` domain kha raha tha
+
+`arena.ai/agent pe likho hi bro` → typed text `.ai/agent likho hi bro`.
+Domain `arena.ai` sirf aadha strip hota tha kyunki `arena` site-word pehle
+hataya jaata tha. Ab pehle poora domain (`arena.ai/agent`) jaata hai, aur
+cleanup fixpoint tak loop karta hai (trailing `bhejo`/`karo`/`aur` ek saath).
+
+```js
+extractPrompt('arena.ai/agent pe likho hi bro')      // 'hi bro'
+extractPrompt('claude.ai pe likho: explain k8s')     // 'explain k8s'
+extractPrompt('arena.ai/agent pe hello likho aur bhejo') // 'hello'
+```
+
+Verify:
+
+```bash
+npm test    # 98 pass (5 naye tests: sites, steps, domain, verdict x2)
+```
+
+---
+
 ## 2.5.3 — code review: teen asli security bugs
 
 Owner ne bola "5-10 minute code check kar". Poora `src/` (10,083 lines) padha,
@@ -317,6 +401,7 @@ npm test                              # 90 pass
 | 16 | *2.5.1* | **Test report fix**: failing test ka naam + log path; tests asli portal ko touch nahi karte (dead D-Bus) — 43s → 2.5s | 90 | 61 |
 | 17 | *2.5.2* | **`/open` fuzzy-match bug**: bakwaas phrase se asli app khul jati thi (`app` → Observer App) | 90 | 61 |
 | 18 | *2.5.3* | **Security review**: write-path block-list bypass, TTS shell injection, non-constant-time token | 93 | 61 |
+| 19 | *2.5.4* | **`/arena` false failure**: page khulne ke baad bhi "page load nahi hua" — verification ab 3-value (proved / unverified / failed), chat sites pe seedha type + Enter | 98 | 61 |
 
 Verify karna ho (sab curl, git zero):
 

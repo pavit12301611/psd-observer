@@ -29,12 +29,46 @@ import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import * as ocr from './ocr.js';
 import { imageSignature, screenChanged, imageStats } from './imaging.js';
+import { siteFor, readyMsFor, isComposerLabel } from './sites.js';
 
 const execFileAsync = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
 const BROWSER_HINTS = /firefox|chrome|chromium|brave|edge|opera|vivaldi|epiphany|webkit|librewolf|waterfox|mozilla|arc\b/i;
+const BROWSER_PROCS = /^(firefox|firefox-bin|chrome|chromium|chromium-browser|google-chrome|brave|brave-browser|vivaldi|opera|epiphany|webkit2gtk|librewolf|waterfox|zen|zen-browser|msedge)$/i;
+
+/**
+ * Is a desktop browser running at all? On Wayland, wmctrl often lists nothing
+ * (or only XWayland windows) and the portal screenshot may be unavailable — so
+ * "no window title" does not mean "the browser did not open". The process list
+ * is the one signal that still works there.
+ */
+export async function browserRunning() {
+  try {
+    const { stdout } = await execFileAsync('ps', ['-A', '-o', 'comm='], { timeout: 2_500 });
+    return String(stdout ?? '')
+      .split('\n')
+      .map((line) => line.trim().split('/').pop())
+      .some((name) => BROWSER_PROCS.test(name));
+  } catch {
+    return false;
+  }
+}
+
+/** Bring any open browser window to the front (best effort, never throws). */
+async function focusAnyBrowser(log = console) {
+  try {
+    const titles = await apps.windowTitles();
+    const hit = (titles ?? []).find((t) => BROWSER_HINTS.test(t));
+    if (!hit) return null;
+    await apps.windowAction('focus', hit);
+    return hit;
+  } catch (err) {
+    log?.info?.(`[auto] browser focus failed: ${err.message}`);
+    return null;
+  }
+}
 
 const WEB_URLS = {
   google: 'https://www.google.com',
@@ -186,29 +220,45 @@ export function parseNaturalLanguage(task) {
  * copes with both English and Hinglish word order.
  */
 export function extractPrompt(text) {
-  const SITES = /\b(chatgpt|gemini|claude|google|youtube|arena|perplexity|copilot|github|wikipedia|stackoverflow|stack\s*overflow|gmail|netflix|instagram|twitter|linkedin|amazon|flipkart|whatsapp\s*web|chrome|firefox|chromium|brave|browser)\b/gi;
-  const LEAD_VERBS = /^(?:(?:open|kholo|khol|launch|start|visit|jao|go|search(?:\s+for)?|google|ask|type|likho|likh|play|chalao|dhundo|poocho|pucho|pooch)\s+)+/i;
+  const SITE_WORDS = /\b(chatgpt|gemini|claude|google|youtube|arena|perplexity|copilot|github|wikipedia|stackoverflow|stack\s*overflow|gmail|netflix|instagram|twitter|linkedin|amazon|flipkart|whatsapp\s*web|chrome|firefox|chromium|brave|browser)\b/gi;
+  const LEAD_VERBS = /^(?:(?:open|kholo|khol|launch|start|visit|jao|go|search(?:\s+for)?|google|ask|type|likho|likh|play|chalao|dhundo|poocho|pucho|pooch|batao|bata)\s+)+/i;
   const TRAIL_VERBS = /\s*(?:\b(?:poocho|pucho|pooch|likho|likh|dhundo|search(?:\s+for)?|google|play|chalao|karo|kar\s*do|bhejo|bhej\s*do)\b\s*)+$/i;
+  // Glue that can sit between the site and the real question.
+  const LEAD_GLUE = /^(?:and|then|aur|phir|for|that|please|plz|to|se|ki|ka|ke|pe|par|me|mein)\s+/i;
+  const GLUE = /\b(?:aur|and|then|phir|uske|baad|pe|par|me|mein)\b/gi;
 
   let out = String(text ?? '')
     .replace(/https?:\/\/\S+/gi, ' ')
-    .replace(SITES, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  // trailing Hinglish/English command verbs ("… search karo")
-  for (let i = 0; i < 3; i++) out = out.replace(TRAIL_VERBS, ' ').trim();
-  // leading verbs + "and then" glue (trim each round: removal leaves spaces)
-  for (let i = 0; i < 4; i++) {
-    out = out.replace(LEAD_VERBS, ' ').replace(/^(?:and|then|aur|phir|for|that|please|plz|se|ki|ka)\s+/i, ' ').trim();
-  }
-  // particles anywhere are noise for a search query
-  out = out
-    .replace(/\b(?:aur|and|then|phir|uske|baad|pe|par|me|mein)\b/gi, ' ')
-    .replace(/\b(?:screenshot|ss|bhejo|bhej)\b/gi, ' ')
+    // A domain mention goes as a whole: stripping the bare site word first
+    // turned "arena.ai/agent pe likho hi bro" into ".ai/agent likho hi bro".
+    .replace(/\b(?:[a-z0-9-]+\.)+(?:com|in|org|net|io|ai|dev|co)(?:\/\S*)?/gi, ' ')
+    .replace(SITE_WORDS, ' ')
     .replace(/[|,;:]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return out.replace(/^[\s"'`-]+|[\s"'`.!?]+$/g, '').trim();
+
+  // One pass is not enough: "… hello likho aur bhejo" only loses "bhejo" first,
+  // and then "aur" exposes "likho" as the new trailing verb. Iterate to a fixpoint.
+  for (let i = 0; i < 5; i++) {
+    const before = out;
+    out = out
+      .replace(/^[\s"'`.:;,| -]+/, '')
+      .replace(TRAIL_VERBS, ' ')
+      .replace(LEAD_GLUE, ' ')
+      .replace(LEAD_VERBS, ' ')
+      .replace(GLUE, ' ')
+      .replace(/\b(?:screenshot|ss|bhejo|bhej)\b/gi, ' ')
+      .replace(/[|,;:]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (out === before) break;
+  }
+
+  // A leftover ".ai/agent" fragment when the domain was written without its name.
+  return out
+    .replace(/^[\s"'`-]+|[\s"'`.!?]+$/g, '')
+    .replace(/^\.\w+(?:\/\S*)?\s*/, '')
+    .trim();
 }
 
 /** Sites where a search URL is smarter (and far more reliable) than typing. */
@@ -254,7 +304,17 @@ export function buildWebSteps(task) {
     ];
   }
 
+  // Chat sites (Arena, ChatGPT, Claude …) open with the composer already
+  // focused: open → type → Enter. No click, no OCR guess at a "Send" button.
+  const site = siteFor(url);
   const steps = [{ op: 'open', target: url }];
+  if (site?.autofocus) {
+    if (prompt.length >= 2) steps.push({ op: 'type', text: prompt, submit: true });
+    steps.push({ op: 'wait', ms: 8_000 });
+    steps.push({ op: 'look', question: prompt.length >= 2 ? prompt : 'what did the page answer?' });
+    steps.push({ op: 'screenshot' });
+    return steps;
+  }
   if (prompt.length >= 2) steps.push({ op: 'type', text: prompt, submit: true });
   steps.push({ op: 'key', combo: 'enter' });
   steps.push({ op: 'wait', ms: 8_000 });
@@ -300,12 +360,45 @@ async function shot(config, capMs = 6_000) {
 }
 
 /**
+ * Decide what an `open` step proved. Pure on purpose: the desktop can be
+ * uninformative (Wayland gives no window titles), and a missing observation
+ * must never be reported as a failed page load.
+ *
+ * @returns {{ok:boolean, known:boolean, unverified?:boolean, unchanged?:boolean,
+ *            title:string|null, note?:string}}
+ */
+export function openVerdict({ windowResult, screen, browserBefore, browserNow }) {
+  if (windowResult?.ok) {
+    return { ok: true, known: true, title: windowResult.title ?? null, waitedMs: windowResult.waitedMs ?? 0 };
+  }
+  const browser = Boolean(browserNow);
+  if (screen?.ok) {
+    return { ok: true, known: false, unverified: true, title: null, note: 'screen badli — page khul gaya' };
+  }
+  if (browser && !browserBefore) {
+    return { ok: true, known: false, unverified: true, title: null, note: 'browser launch hua (window title nahi mila)' };
+  }
+  if (browser && !screen?.known) {
+    return { ok: true, known: false, unverified: true, title: null, note: 'browser chal raha hai, yahan title verify possible nahi' };
+  }
+  if (browser) {
+    // Screen was readable and did not change, and the browser was already
+    // open: typing now would land in whatever that window is showing.
+    return { ok: false, known: true, unchanged: true, title: null };
+  }
+  return { ok: false, known: true, title: null };
+}
+
+/**
  * Wait until a NEW window that looks like the one we wanted exists.
  * Returns { ok, known, title, waitedMs } — `known:false` means the desktop
  * cannot list windows, so the caller should verify another way.
  */
 export async function waitForWindow({ beforeTitles = [], url = '', target = '', timeoutMs = 20_000 } = {}) {
+  const site = siteFor(url);
   const hint = urlHint(url) || normalizeApp(target);
+  // Chat sites title their tab with the product name ("Arena", "ChatGPT").
+  const siteName = site ? normalizeApp(site.name) : null;
   const started = Date.now();
   let sawList = false;
   while (Date.now() - started < timeoutMs) {
@@ -320,9 +413,10 @@ export async function waitForWindow({ beforeTitles = [], url = '', target = '', 
     const before = new Set(beforeTitles);
     const fresh = titles.filter((t) => !before.has(t));
     const bySite = hint && fresh.find((t) => t.toLowerCase().includes(hint));
+    const byName = siteName && titles.find((t) => t.toLowerCase().includes(siteName));
     const byBrowser = fresh.find((t) => BROWSER_HINTS.test(t));
     const onlyOne = fresh.length === 1 ? fresh[0] : null;
-    const match = bySite || byBrowser || onlyOne;
+    const match = bySite || byName || byBrowser || onlyOne;
     if (match) return { ok: true, known: true, title: match, waitedMs: Date.now() - started };
   }
   return { ok: false, known: sawList, title: null, waitedMs: Date.now() - started };
@@ -330,19 +424,25 @@ export async function waitForWindow({ beforeTitles = [], url = '', target = '', 
 
 /** Last resort on Wayland (no wmctrl): did the screen actually change? */
 async function waitForScreenChange({ before, config, timeoutMs = 12_000 }) {
-  if (!before) return { ok: false, known: false };
+  // known:false → we genuinely cannot tell (no baseline, or every capture
+  // failed). known:true + ok:false → we looked and the screen really did not
+  // change, which is evidence the page never appeared.
+  if (!before) return { ok: false, known: false, changed: false };
   const started = Date.now();
   let probes = 0;
+  let saw = false;
   while (Date.now() - started < timeoutMs && probes < 3) {
     await sleep(probes === 0 ? 2_500 : 3_000);
     probes += 1;
     try {
       const now = await shot(config);
       const diff = screenChanged(before.signature, now.signature);
-      if (diff.known && diff.changed) return { ok: true, known: true, image: now.image, similarity: diff.similarity };
+      if (!diff.known) continue;
+      saw = true;
+      if (diff.changed) return { ok: true, known: true, changed: true, image: now.image, similarity: diff.similarity };
     } catch { /* screenshot failed — stop trying */ break; }
   }
-  return { ok: false, known: false };
+  return { ok: false, known: saw, changed: false };
 }
 
 // ── the executor ─────────────────────────────────────────────────────────────
@@ -356,6 +456,7 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
   let lastImage = null;
   let verifiedTitle = null;
   let typingMode = null; // 'browser' | 'app' | null
+  let currentSite = null; // site profile of the page we opened (sites.js)
   const startedAll = Date.now();
 
   const record = (index, step, ok, detail, extra = {}) => {
@@ -392,34 +493,56 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
         // Verify BEFORE going on: this is what the old version skipped.
         let verify = { ok: true, known: true, title: null, waitedMs: 0 };
         if (url) {
-          verify = await waitForWindow({ beforeTitles: titlesBefore ?? [], url, target, timeoutMs: 20_000 });
-          if (!verify.ok && !verify.known) {
-            const changed = await waitForScreenChange({ before: screenBefore, config, timeoutMs: 10_000 });
-            if (changed.ok) {
-              verify = { ok: true, known: false, title: null, note: 'screen changed (window list not available)' };
-            } else if (!screenBefore) {
-              // Wayland + no window list + no screenshot permission: we cannot
-              // prove it either way. Say so instead of inventing a result.
-              verify = { ok: true, known: false, unverified: true, title: null, note: 'opened, but this desktop blocks verification' };
-            } else {
-              verify = { ok: false, known: true, title: null };
-            }
+          const site = siteFor(url);
+          const openWaitMs = site?.autofocus ? 8_000 : 12_000;
+          const browserBefore = await browserRunning();
+          verify = await waitForWindow({ beforeTitles: titlesBefore ?? [], url, target, timeoutMs: openWaitMs });
+
+          if (!verify.ok) {
+            // "Could not verify" is NOT "did not open". Chat sites open the new
+            // page as a tab in the browser window that is already running, so
+            // the window list often gains no new title at all — on Wayland it
+            // gains nothing, ever. Only hard evidence of failure fails now.
+            verify = openVerdict({
+              windowResult: verify,
+              screen: await waitForScreenChange({ before: screenBefore, config, timeoutMs: 10_000 }),
+              browserBefore,
+              browserNow: await browserRunning(),
+            });
           }
         }
         if (!verify.ok) {
+          if (verify.unchanged) {
+            throw new Error(
+              'browser pehle se khula hai par page ka koi asar nahi dikha. ' +
+              `Ek baar khud check karo: xdg-open ${url || target}`,
+            );
+          }
           throw new Error(
-            `browser khola par page load nahi hua (${Math.round(20_000 / 1000)}s wait). ` +
+            `browser khola par page load nahi hua (${Math.round(12_000 / 1000)}s wait, koi browser window nahi mila). ` +
             `Default browser check karo: xdg-open ${url || target} — ya fix: sudo dnf install firefox xdg-utils`,
           );
+        }
+        if (verify.unverified && !verify.title) {
+          // We could not name the window, but the browser is what xdg-open just
+          // handed the URL to. Focus it so typing lands in the composer.
+          const focused = await focusAnyBrowser(log);
+          if (focused) verify = { ...verify, title: focused, note: `${verify.note ?? 'opened'}, browser focused` };
         }
         verifiedTitle = verify.title ?? null;
         if (verifiedTitle) {
           try { await apps.windowAction('focus', verifiedTitle); } catch (err) { log?.info?.(`[auto] focus failed: ${err.message}`); }
         }
+        const site = url ? siteFor(url) : null;
+        if (site) currentSite = site;
+        const siteNote = site?.autofocus ? 'composer auto-focused — click nahi chahiye' : null;
         record(i, step, true, `${opened.via === 'browser' ? `opened ${url}` : opened.text}` +
-          `${verifiedTitle ? ` · window "${String(verifiedTitle).slice(0, 60)}"` : verify.note ? ` · ${verify.note}` : ''}`,
+          `${verifiedTitle ? ` · window "${String(verifiedTitle).slice(0, 60)}"` : verify.note ? ` · ${verify.note}` : ''}` +
+          `${siteNote ? ` · ${siteNote}` : ''}`,
           { ms: Date.now() - stepStart, verified: !verify.unverified, unverified: Boolean(verify.unverified) });
-        await sleep(url ? 900 : 1_200);
+        // Chat sites need a moment before the (already focused) composer takes
+        // input; everything else keeps the short settle.
+        await sleep(url ? readyMsFor(url, 900) : 1_200);
 
       } else if (step.op === 'focus') {
         const title = String(step.title ?? '').trim();
@@ -431,6 +554,15 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
       } else if (step.op === 'tap') {
         const label = String(step.label ?? '').trim();
         if (!label) throw new Error('tap needs a label');
+        // Chat sites focus the composer themselves. Clicking it (or OCR's best
+        // guess at it) is how text ends up in a sidebar, so skip the step and
+        // say why instead of pretending we clicked something.
+        if (currentSite?.autofocus && isComposerLabel(label)) {
+          record(i, step, true, `skipped — ${currentSite.name} ka box pehle se focused hai, click ki zaroorat nahi`, {
+            ms: Date.now() - stepStart, skipped: true,
+          });
+          continue;
+        }
         const variants = [...new Set([label, label[0].toUpperCase() + label.slice(1).toLowerCase(), label.toUpperCase(), label.toLowerCase()])];
         let hit = null;
         for (const variant of variants) {
@@ -498,6 +630,17 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
                 recovered = Boolean(again && BROWSER_HINTS.test(again));
               } catch { /* nothing to focus */ }
             }
+            if (!recovered && typingMode === 'browser') {
+              // Same situation as the open step: the title check cannot name
+              // our window, but a browser is running. Focus it and re-check
+              // rather than refusing to type on a guess.
+              const focused = await focusAnyBrowser(log);
+              if (focused) {
+                await sleep(500);
+                const again = await activeWindowTitle();
+                recovered = Boolean(!again || BROWSER_HINTS.test(again));
+              }
+            }
             if (!recovered) {
               throw new Error(
                 `typing skip ki — active window "${active}" hai, browser nahi. ` +
@@ -517,7 +660,10 @@ export async function executeSteps(steps, { config = {}, log = console, label = 
         await sleep(600);
         if (step.submit && !(steps[i + 1]?.op === 'key')) {
           await pc.keyCombo('enter');
-          record(i, step, true, 'pressed enter (submit)', { ms: Date.now() - stepStart });
+          // Same step, one line in the reply: "typed … + Enter".
+          const last = results[results.length - 1];
+          if (last && last.index === i + 1) last.detail += ' + Enter';
+          else record(i, step, true, 'pressed enter (submit)', { ms: Date.now() - stepStart });
           await sleep(600);
         }
 
@@ -570,7 +716,8 @@ function finish({ ok, failedAt, results, image, steps, label, startedAll }) {
   if (ok) {
     text = `🤖 *${label}* — ${results.length} steps, ${seconds}s\n${lines.join('\n')}`;
     if (unverified) {
-      text += `\n\nℹ️ ${unverified} step(s) verify nahi ho paye (Wayland window list block karta hai) — neeche screenshot dekho.`;
+      text += `\n\nℹ️ ${unverified} step(s) apne aap verify nahi ho paye (Wayland par window titles nahi milte) — ` +
+        'browser focus karke aage badha, neeche screenshot se confirm kar lo.';
     }
     if (answer) text += `\n\n💬 *Jawab:*\n${String(answer).slice(0, 1200)}`;
   } else {

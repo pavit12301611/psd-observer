@@ -430,12 +430,27 @@ on "hi" and nothing hands a 10-step job to a 1B model:
 
 1. **Understands the task** and runs it with real PC tools (apps, files, screen,
    typing, downloads …), or drives a real browser when the task belongs on a site.
-2. **Verifies every step**: a browser must produce a new window before anything
-   is typed; typing is refused if the focused window is not the one just opened;
-   buttons are found with OCR/vision (no blind coordinate clicking).
+2. **Verifies every step**: the opened page is confirmed by a new window title,
+   a changed screen, or a live browser process; typing is refused if the focused
+   window is not a browser (or the app just opened); buttons are found with
+   OCR/vision (no blind coordinate clicking).
 3. **Never lies**: a failed run says `step N pe ruk gaya` with the real reason,
    and attaches a screenshot of the failure — not a fake success.
 4. **Proves its work**: `/agent` replies end with `🧠 standard · llama3.2 · 3 steps`.
+
+### What changed in 2.5.4 (the `/arena` fix)
+
+`/arena` (and every `/agent` site task) used to fail with `browser khola par
+page load nahi hua (20s wait)` even when the page was clearly open. It waited for
+a **new window title** — which never appears when the page opens as a tab in an
+already-running browser, and never appears at all on Wayland (`wmctrl` is X11-only).
+
+Now the open step has three outcomes: **proved** (window title), **opened but
+unverified** (screen changed / browser process is alive — it focuses the browser
+and carries on, and says so in the reply), and **failed** (no browser at all, or
+the screen was readable, unchanged, and the browser was already open). Chat
+sites are typed into directly — their composer is focused on load, so no click
+is needed and Enter is pressed exactly once.
 
 ## 7b. Updating (no git needed)
 

@@ -25,7 +25,9 @@ import {
   extractPrompt,
   resolveWebUrl,
   executeSteps,
+  openVerdict,
 } from '../src/autopilot.js';
+import { siteFor, autoFocusFor, isComposerLabel, describeSite } from '../src/sites.js';
 import { imageSignature, imageSimilarity, screenChanged } from '../src/imaging.js';
 import http from 'node:http';
 
@@ -230,6 +232,80 @@ test('autopilot: search sites use a search URL instead of fragile UI typing', ()
   assert.match(steps[0].target, /^https:\/\/www\.google\.com\/search\?q=/);
   assert.ok(!steps.some((s) => s.op === 'type'), 'no blind typing needed');
   assert.ok(steps.some((s) => s.op === 'look'));
+});
+
+test('sites: chat sites say the composer is already focused', () => {
+  assert.equal(autoFocusFor('https://arena.ai/agent'), true);
+  assert.equal(autoFocusFor('https://www.arena.ai/agent'), true);
+  assert.equal(autoFocusFor('https://chatgpt.com/'), true);
+  assert.equal(autoFocusFor('https://example.com'), false);
+  assert.equal(siteFor('arena.ai').name, 'Arena');
+  assert.match(describeSite('https://arena.ai/agent'), /already focused/i);
+  // A "Send" button is never the composer; a "Message" box is.
+  assert.equal(isComposerLabel('Message'), true);
+  assert.equal(isComposerLabel('Ask anything'), true);
+  assert.equal(isComposerLabel('Send'), false);
+  assert.equal(isComposerLabel('New chat'), false);
+});
+
+test('autopilot: chat site types straight into the focused box (no click, one Enter)', () => {
+  const steps = buildWebSteps('arena.ai/agent pe likho hi bro');
+  assert.equal(steps[0].op, 'open');
+  assert.equal(steps[0].target, 'https://arena.ai/agent');
+  assert.ok(!steps.some((s) => s.op === 'tap' || s.op === 'click'), 'no blind clicking');
+  const typed = steps.find((s) => s.op === 'type');
+  assert.equal(typed.text, 'hi bro');
+  assert.equal(typed.submit, true);
+  assert.equal(steps.filter((s) => s.op === 'key').length, 0, 'Enter is pressed once, by type.submit');
+  assert.ok(steps.some((s) => s.op === 'look'));
+});
+
+test('autopilot: a domain mention does not eat the start of the prompt', () => {
+  // Regression: "arena.ai/agent pe likho hi bro" used to type ".ai/agent likho hi bro".
+  assert.equal(extractPrompt('arena.ai/agent pe likho hi bro'), 'hi bro');
+  assert.equal(extractPrompt('claude.ai pe likho: explain kubernetes'), 'explain kubernetes');
+  assert.equal(extractPrompt('arena.ai/agent pe hello likho aur bhejo'), 'hello');
+  assert.equal(extractPrompt('gemini pe batao quantum computing kya hai'), 'quantum computing kya hai');
+});
+
+test('autopilot: an unverifiable open is not reported as a failed page load', () => {
+  const win = { ok: false, known: false };
+
+  // Wayland: no window titles, no usable screenshot, but the browser is alive
+  // and xdg-open just handed it the URL. That is not a failure.
+  const blocked = openVerdict({ windowResult: win, screen: { ok: false, known: false }, browserBefore: true, browserNow: true });
+  assert.equal(blocked.ok, true);
+  assert.equal(blocked.unverified, true);
+  assert.match(blocked.note, /verify possible nahi/i);
+
+  // Browser was not running before and is now → it launched.
+  const launched = openVerdict({ windowResult: win, screen: { ok: false, known: false }, browserBefore: false, browserNow: true });
+  assert.equal(launched.ok, true);
+  assert.equal(launched.unverified, true);
+
+  // The screen changed → the page is up.
+  const changed = openVerdict({ windowResult: win, screen: { ok: true, known: true }, browserBefore: true, browserNow: true });
+  assert.equal(changed.ok, true);
+  assert.equal(changed.unverified, true);
+
+  // A confirmed window still wins outright.
+  const titled = openVerdict({ windowResult: { ok: true, title: 'Arena — Firefox' }, screen: null, browserBefore: true, browserNow: true });
+  assert.deepEqual(titled, { ok: true, known: true, title: 'Arena — Firefox', waitedMs: 0 });
+});
+
+test('autopilot: real evidence of failure still fails the open step', () => {
+  const win = { ok: false, known: true };
+
+  // No browser process at all — nothing opened.
+  const dead = openVerdict({ windowResult: win, screen: { ok: false, known: true }, browserBefore: false, browserNow: false });
+  assert.equal(dead.ok, false);
+  assert.equal(dead.known, true);
+
+  // Browser already open, screen readable and unchanged: typing now would land
+  // in whatever that window shows, so the step must stop.
+  const unchanged = openVerdict({ windowResult: win, screen: { ok: false, known: true }, browserBefore: true, browserNow: true });
+  assert.equal(unchanged.ok, false);
+  assert.equal(unchanged.unchanged, true);
 });
 
 // ── verification never lies ─────────────────────────────────────────────────

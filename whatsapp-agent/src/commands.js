@@ -16,6 +16,7 @@ import * as learn from './learn.js';
 import * as cron from './cron.js';
 import * as tts from './tts.js';
 import * as autopilot from './autopilot.js';
+import { describeSite } from './sites.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
@@ -637,9 +638,12 @@ export function createAgent({ config, store, log = console, forwardToObserver = 
     log.info?.(`[agent] browser task: ${steps.map((s) => s.op).join(' → ')}`);
     const result = await autopilot.executeSteps(steps, { config, log, label });
     if (!result || typeof result === 'string') return result;
+    const target = steps.find((s) => s.op === 'open')?.target;
+    const siteLine = target ? describeSite(target) : null;
     return {
       ...result,
-      text: `${result.text}\n\n_🌐 browser · xdg-open + OCR (no AI guesswork)_`,
+      text: `${result.text}\n\n_🌐 browser · xdg-open + OCR (no AI guesswork)_` +
+        `${siteLine ? `\n_${siteLine}_` : ''}`,
     };
   }
 
