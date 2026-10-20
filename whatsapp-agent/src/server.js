@@ -32,7 +32,7 @@ import * as files from './files.js';
 import { routerFor } from './router.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.4.1';
+const VERSION = '2.5.0';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {

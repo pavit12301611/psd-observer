@@ -511,10 +511,14 @@ with `WHATSAPP_MODE=native` (see [`../FREE_WHATSAPP.md`](../FREE_WHATSAPP.md)).
 ## 10. Tests
 
 ```bash
-npm test     # 90 offline tests: owner gate, intents, actions, permissions,
-             # confirmations, AI tool loop, HTTP API, PWA icons, black-frame
-             # detection, portal parsing, doctor, local llama.cpp, cloud failover
-npm run demo # dry-run: phone app + commands, no WhatsApp connection
+./scripts/observer.sh test --live   # the one to run: env, keys, brains,
+                                    # routing preview, unit tests, real call
+npm test                            # 90 offline tests: owner gate, intents,
+                                    # actions, permissions, confirmations, AI
+                                    # tool loop, HTTP API, PWA icons, black-frame
+                                    # detection, portal parsing, doctor, local
+                                    # llama.cpp, Groq/OpenRouter failover
+npm run demo                        # dry-run: phone app, no WhatsApp connection
 ```
 
 Cost so far: **₹0**. No cloud accounts are required to run any of it.

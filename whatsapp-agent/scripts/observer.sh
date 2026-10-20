@@ -5,6 +5,7 @@
 #   bash observer.sh update      update the code, keep .env / WhatsApp login / data
 #   bash observer.sh models …    local Hugging Face models (llama.cpp) — 100% offline
 #   bash observer.sh keys …      add Groq / OpenRouter / Gemini free API keys
+#   bash observer.sh test        self-test: keys, brains, routing, unit tests
 #   bash observer.sh doctor      what is broken and the exact fix
 #   bash observer.sh service …   systemd: install / restart / status / logs
 #   bash observer.sh start       run in the foreground
@@ -912,6 +913,216 @@ cmd_keys() {
   info "Agar service nahi hai: cd \"$dir\" && ./start.sh"
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SELF-TEST — is everything actually working?
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# The routing preview + live ping need the real modules, so they run in Node
+# inside the install (same config/.env the agent uses). Output is tab-separated
+# so this shell script can label it.
+write_verify_js() {  # write_verify_js FILE
+  cat > "$1" <<'NODE'
+import { pathToFileURL } from 'node:url';
+
+const root = process.argv[2];
+const live = process.argv[3] === '1';
+const silent = { info() {}, warn() {}, error() {} };
+
+const load = (rel) => import(pathToFileURL(`${root}/${rel}`).href);
+
+let config;
+try {
+  const { loadConfig } = await load('src/config.js');
+  config = loadConfig();
+} catch (err) {
+  const msg = String(err?.message ?? err).split('\n').filter(Boolean).join(' / ');
+  console.log(`CONFIG_ERROR\t${msg}`);
+  process.exit(3);
+}
+
+const { buildCatalog, createModelRouter } = await load('src/router.js');
+const router = createModelRouter({ config, log: silent });
+
+const catalog = buildCatalog(config);
+const perProvider = catalog.reduce((acc, m) => {
+  acc[m.provider] = (acc[m.provider] ?? 0) + 1;
+  return acc;
+}, {});
+const brains = Object.entries(perProvider).map(([p, n]) => `${p}×${n}`).join(', ') || 'none';
+console.log(`BRAINS\t${brains}`);
+console.log(`MODE\t${config.aiProvider}`);
+const sees = catalog.filter((m) => m.vision).map((m) => `${m.provider}:${m.model}`);
+console.log(`VISION\t${sees.join(', ') || 'none'}`);
+
+const samples = [
+  ['tiny', 'hi', {}],
+  ['light', 'remind me kal 5 baje', {}],
+  ['standard', 'downloads folder me jo pdf hain unhe ek naye folder me daal do', {}],
+  ['heavy', 'write a python script that reads a csv and plots a chart, step by step', {}],
+  ['vision', 'photo dekho aur batao kya hai', { needsVision: true }],
+];
+
+for (const [tier, text, extra] of samples) {
+  const plan = router.plan({ text, ...extra });
+  const first = plan.candidates[0];
+  console.log(`ROUTE\t${tier}\t${first ? `${first.label}` : 'none configured'}\t${first ? first.provider : '-'}`);
+}
+
+if (live) {
+  const started = Date.now();
+  const answer = await completeOne(config);
+  if (!answer) {
+    console.log('LIVE_FAIL\tno brain answered');
+    process.exit(4);
+  }
+  const text = String(answer.text ?? '').replace(/\s+/g, ' ').slice(0, 70);
+  console.log(`LIVE\t${answer.provider}\t${answer.model}\t${Date.now() - started}ms\t${text}`);
+}
+
+async function completeOne(cfg) {
+  const { complete } = await load('src/ai.js');
+  try {
+    return await complete(cfg, 'Reply with exactly one word: OK', silent);
+  } catch {
+    return null;
+  }
+}
+NODE
+}
+
+cmd_test() {
+  local dir live=0 runtests=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --live)         live=1; shift ;;
+      --fast|--no-tests) runtests=0; shift ;;
+      -h|--help)      info "usage: observer.sh test [--live] [--fast]"; return 0 ;;
+      *) die "test: unknown option $1 (try --help)" ;;
+    esac
+  done
+  dir=$(find_install "") || die "no install found — bash observer.sh install"
+  local warnings=0
+
+  say "Self-test — $dir"
+
+  # ── 1. code + runtime ────────────────────────────────────────────────────
+  local v remote
+  v=$(local_version "$dir"); remote=$(remote_version || true)
+  ok "version ${v:-?}${remote:+ (remote ${remote})}"
+  if have node; then
+    local major; major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+    if [ "${major:-0}" -ge 20 ]; then ok "Node $(node -v)"; else
+      bad "Node $(node -v) — 20+ chahiye (sudo dnf module install nodejs:22)"; warnings=$((warnings+1))
+    fi
+  else
+    bad "Node not installed"; warnings=$((warnings+1))
+  fi
+  if [ -d "$dir/node_modules" ]; then ok "dependencies installed"; else
+    warn "node_modules missing"; hint "cd \"$dir\" && npm install"; warnings=$((warnings+1))
+  fi
+
+  # ── 2. .env + keys ───────────────────────────────────────────────────────
+  if [ -f "$dir/.env" ]; then
+    ok ".env present"
+    local provider var val keys=0
+    for provider in groq openrouter gemini; do
+      var=$(key_var "$provider"); val=$(env_read "$dir/.env" "$var")
+      if [ -n "$val" ]; then keys=$((keys+1)); info "key: ${provider} $(key_mask "$val")"; fi
+    done
+    [ "$keys" -eq 0 ] && info "no cloud keys — local + built-in only (that is a valid setup)"
+  else
+    warn "no .env"; hint "cp \"$dir/.env.example\" \"$dir/.env\"  (or: bash observer.sh install --force)"; warnings=$((warnings+1))
+  fi
+
+  # ── 3. brains: local server / Ollama ─────────────────────────────────────
+  local localurl
+  localurl=$(env_read "$dir/.env" LOCAL_API_URL)
+  if [ -n "$localurl" ] && curl -fsS --max-time 3 "${localurl%/}/models" >/dev/null 2>&1; then
+    ok "local model server up — $localurl"
+  elif [ -n "$localurl" ]; then
+    warn "local model server not answering — $localurl"
+    hint "bash observer.sh models serve <model>   ·   systemctl --user start ${MODEL_SERVICE}"
+    warnings=$((warnings+1))
+  else
+    info "no LOCAL_API_URL (local model not wired — cloud key or Ollama will be used)"
+  fi
+  local ollama_up=0
+  if curl -fsS --max-time 2 "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+    ok "Ollama up"; ollama_up=1
+  fi
+
+  # ── 4. service ───────────────────────────────────────────────────────────
+  if have systemctl && systemctl --user show-environment >/dev/null 2>&1; then
+    if systemctl --user is-active "$SERVICE" >/dev/null 2>&1; then
+      ok "service ${SERVICE} running"
+    elif [ -f "$HOME/.config/systemd/user/${SERVICE}.service" ]; then
+      warn "service installed but NOT running"; hint "bash observer.sh service restart"; warnings=$((warnings+1))
+    else
+      info "no systemd service — fine if you start it with ./start.sh"
+    fi
+  fi
+
+  # ── 5. unit tests ────────────────────────────────────────────────────────
+  if [ "$runtests" -eq 1 ]; then
+    local out; out=$(mktemp)
+    if ( cd "$dir" && npm test >"$out" 2>&1 ); then
+      ok "unit tests: $(grep -E '^# pass' "$out" | awk '{print $3}') pass"
+    else
+      bad "unit tests failed"
+      tail -15 "$out" | sed 's/^/      /'
+      warnings=$((warnings+1))
+    fi
+    rm -f "$out"
+  fi
+
+  # ── 6. routing preview (real router, real .env) ──────────────────────────
+  local tmp; tmp=$(mktemp -d); trap "rm -rf '$tmp'" EXIT
+  write_verify_js "$tmp/verify.mjs"
+  local rc=0
+  # exit 3 = bad config (shown below), 4 = routing fine but the live call failed
+  # (also shown below) — anything else is the preview itself breaking.
+  node "$tmp/verify.mjs" "$dir" "$live" > "$tmp/out" 2>&1 || rc=$?
+  if [ "$rc" -eq 3 ]; then
+    bad "config problem: $(sed -n 's/^CONFIG_ERROR	//p' "$tmp/out")"
+    warnings=$((warnings+1))
+  elif [ "$rc" -ne 0 ] && [ "$rc" -ne 4 ]; then
+    warn "routing preview could not run (exit $rc)"
+    tail -5 "$tmp/out" | sed 's/^/      /'
+    warnings=$((warnings+1))
+  fi
+
+  if [ -s "$tmp/out" ]; then
+    say "Brains + routing"
+    if [ "$ollama_up" -eq 0 ] && [ -z "$localurl" ]; then
+      info "(Ollama/local model se answer nahi aayega — router aage wale brain pe chala jayega)"
+    fi
+    local kind a b c d
+    while IFS=$'\t' read -r kind a b c d; do
+      case "$kind" in
+        BRAINS) info "configured: $a" ;;
+        MODE)   info "AI_PROVIDER=$a" ;;
+        VISION) info "vision: $a" ;;
+        ROUTE)  printf '   %-9s → %s\n' "$a" "${b:-none}" ;;
+        LIVE)   ok "live answer: $a · $c"; info "reply: \"$d\"" ;;
+        LIVE_FAIL) bad "live test: $a"; warnings=$((warnings+1)) ;;
+      esac
+    done < "$tmp/out"
+  fi
+
+  if [ "$live" -eq 0 ]; then
+    info "asli jawab bhi test karna hai: bash observer.sh test --live  (ek chhota API call)"
+  fi
+
+  # ── 7. verdict ───────────────────────────────────────────────────────────
+  if [ "$warnings" -eq 0 ]; then
+    ok "sab theek — WhatsApp pe /model, /brains, /doctor bhejo"
+  else
+    warn "$warnings cheez dekhni hai (upar wale hints follow karo)"
+    hint "poora fix-list: bash observer.sh doctor"
+  fi
+  return 0
+}
+
 cmd_doctor() {
   local dir; dir=$(find_install "") || dir="$DEFAULT_DIR"
   local problems=0 warnings=0
@@ -1110,6 +1321,7 @@ ${B}100% local AI (Hugging Face GGUF, llama.cpp)${R}
 ${B}Run / repair${R}
   start                       run in the foreground
   service install|restart|status|logs|enable|disable|uninstall
+  test [--live]               self-test: keys, brains, routing, unit tests
   doctor                      what is broken + the exact fix
   fix                         screenshots / keyboard / mouse (Fedora)
   relink                      fresh WhatsApp QR
@@ -1119,6 +1331,7 @@ ${B}Examples${R}
   bash observer.sh install --service --power --phone
   bash observer.sh keys groq gsk_xxxxxxxx        # free cloud brain (optional)
   bash observer.sh models recommend && bash observer.sh models setup best
+  bash observer.sh test --live                    # sab kuch verify
   bash observer.sh update --check
 
 No git anywhere: install/update download a branch tarball with plain curl.
@@ -1134,6 +1347,7 @@ main() {
     update|upgrade)       cmd_update "$@" ;;
     keys|key|api-key|api-keys) cmd_keys "$@" ;;
     models|model|local)   cmd_models "$@" ;;
+    test|selftest|verify) cmd_test "$@" ;;
     doctor|diag|check)    cmd_doctor "$@" ;;
     service|systemd)      cmd_service "$@" ;;
     start|run)            cmd_start "$@" ;;

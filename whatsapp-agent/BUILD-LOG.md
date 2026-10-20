@@ -124,6 +124,38 @@ baad `tmp` local scope se bahar chala jata tha, script exit pe
 `line 1: tmp: unbound variable` deta tha (aur temp folder delete nahi hota).
 Fix: `trap "rm -rf '$tmp'" EXIT` (value trap lagte waqt hi expand ho jati hai).
 
+## 2.5 — `observer.sh test` (ek command me poora verification)
+
+Owner ne poocha "ab batao kaise test karun". Do jagah dekhna padta tha (`npm
+test` terminal me, `/model` WhatsApp pe, `doctor` phir terminal me) — aur keys /
+routing ka asli test kahin nahi tha. Ab:
+
+```bash
+bash observer.sh test --live
+```
+
+| Check | Kaise |
+|---|---|
+| Version (local vs remote) | `package.json` + GitHub |
+| Node 20+, dependencies | `node -v`, `node_modules` |
+| `.env` + kaunsi keys set hain (masked) | `.env` scan |
+| Local model server / Ollama | `curl /v1/models`, `/api/tags` |
+| systemd service | `systemctl --user is-active` |
+| Unit tests | `npm test` (90) |
+| **Routing preview** | asli `router.plan()` — tiny/light/standard/heavy/vision |
+| **Asli API call** (`--live`) | `ai.complete()` — kaunsa brain, kaunsa model, kitne ms |
+
+Sab tab-separated Node script se aata hai jo install ke andar chalta hai, isliye
+wahi `.env` aur wahi config use hoti hai jo agent use karta hai. `--fast` unit
+tests skip karta hai; `--live` ek chhota real call karta hai.
+
+Bug jo testing me mila: `--live` fail hone pe script exit code 4 deta tha aur
+shell use "routing preview could not run" samajh ke **duplicate warning** deta
+tha. Fix: exit 3 = config error, exit 4 = live fail (dono ka apna message),
+baaki = asli crash.
+
+---
+
 ## 2.4 — free cloud keys (Groq + OpenRouter), vision, `keys` command
 
 Owner: "how to add groq api in this code and if openrouter is also good for this work".
@@ -185,6 +217,7 @@ npm test                              # 90 pass
 | 12 | *2.2* | **100% local**: Hugging Face GGUF + llama.cpp provider, `local-models.sh` (download/serve/wire/systemd) | 78 | 61 |
 | 13 | *2.3* | **Ek hi script**: `observer.sh` — install/update/models/doctor/service/start/relink/remote/fix; purane scripts wrappers | 78 | 61 |
 | 14 | *2.4* | **Free cloud keys**: Groq gpt-oss defaults (Llama free tier se gaya), OpenRouter Gemma 4, cloud vision, `observer.sh keys` | 90 | 61 |
+| 15 | *2.5* | **`observer.sh test`**: keys, brains, routing preview, asli API call (`--live`), unit tests — ek command | 90 | 61 |
 
 Verify karna ho (sab curl, git zero):
 

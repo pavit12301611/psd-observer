@@ -363,16 +363,29 @@ nahi rakhta (chunks me type karta hai).
 
 ---
 
-## 9. Setup verify (2 minute)
+## 9. Test karo (ek command, 2 minute)
 
 ```bash
-cd ~/psd-observer/whatsapp-agent
-npm test                      # 31/31 pass hona chahiye
-node --check src/index.js     # syntax
+cd ~/observer-agent
+./scripts/observer.sh test --live
+```
+
+Ye check karta hai: version, Node, dependencies, `.env`, kaunsi keys set hain,
+local model server / Ollama chalu hai ya nahi, systemd service, unit tests
+(90), aur **asli routing** — "hi" kis model pe jayega, heavy kaam kis pe, photo
+kis pe. `--live` ek chhota asli API call bhi karta hai aur batata hai kaunsa
+brain jawab de raha hai.
+
+Bina cloud call: `./scripts/observer.sh test` (`--fast` se unit tests skip).
+
+Manual check:
+
+```bash
+npm test                      # 90/90 pass
 curl -s localhost:8787/health # {"ok":true,...}
 ```
 
-WhatsApp pe: `/access` → `61 tools`, `/model` → `Ollama · llama3.2` (ya jo bhi).
+WhatsApp pe: `/access` → `61 tools`, `/model` → kaunse brain live hain.
 
 ---
 

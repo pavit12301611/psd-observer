@@ -187,7 +187,10 @@ aur unlimited hai.
 ## 5. Check karna ki chal raha hai
 
 ```bash
-# key saved + verified?
+# sab kuch ek saath (recommended)
+./scripts/observer.sh test --live     # keys + brains + routing + asli API call
+
+# sirf key
 ./scripts/observer.sh keys
 ./scripts/observer.sh keys --test
 
