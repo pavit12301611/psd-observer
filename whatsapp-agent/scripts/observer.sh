@@ -1431,6 +1431,7 @@ ${B}Setup${R}
   voice call-engine           experimental VoIP engine — asli WhatsApp call uthana
   voice link-voip             VoIP device QR link (ek baar) + WA_CALL_ANSWER on
   voice test|status           JARVIS voice test / poori voice status
+  voice doctor                "call kyun nahi utha" — poora forensic dump
   harness setup               install official DeepSeek Harness (@deepseek-ai/dsh) + Fedora app + WhatsApp MCP
   harness web                 launch official DeepSeek Harness Web UI on Fedora
   harness key <sk-...>        save DeepSeek API key in .env + ~/.dsh/.credentials.yaml
@@ -1723,13 +1724,23 @@ DONE
       fi
       [ -x "$wdir/build/bin/whisper-cli" ] || die "whisper-cli build ke baad bhi nahi mila"
       ok "whisper-cli: $wdir/build/bin/whisper-cli"
-      if [ ! -f "$wdir/models/ggml-base.bin" ]; then
-        info "Model ggml-base (~150 MB, Hinglish ok) download ho raha hai…"
-        curl -fL --retry 3 -o "$wdir/models/ggml-base.bin" \
+      # A download that dies midway leaves a truncated file that whisper-cli
+      # cannot load, while a mere existence check happily reports "OK".
+      # Download to .part, verify size (>=140 MB of the real 141 MiB), then
+      # move into place — and heal an already-truncated file the same way.
+      local model_file="$wdir/models/ggml-base.bin" model_size=0
+      [ -f "$model_file" ] && model_size=$(stat -c %s "$model_file" 2>/dev/null || echo 0)
+      if [ "$model_size" -lt 140000000 ]; then
+        [ "$model_size" -gt 0 ] && warn "Maujooda model AADHA hai (${model_size} bytes — download beech me toota tha). Poora dobara la raha hoon…"
+        info "Model ggml-base (~141 MB, Hinglish ok) download ho raha hai…"
+        curl -fL --retry 3 --retry-all-errors -C - -o "$model_file.part" \
           "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" \
-          || die "whisper model download fail"
+          || die "whisper model download fail (aadha hissa $model_file.part me hai — dobara chalane se wahin se resume hoga)"
+        local got=$(stat -c %s "$model_file.part" 2>/dev/null || echo 0)
+        [ "$got" -ge 140000000 ] || die "Model ab bhi chhota hai (${got} bytes) — net slow hai, dobara chalao (resume hoga)"
+        mv -f "$model_file.part" "$model_file"
       fi
-      ok "Model: ggml-base.bin (aur accurate chahiye to ggml-small.bin isi folder me daal do)"
+      ok "Model: ggml-base.bin ($(stat -c %s "$model_file") bytes ✓ — aur accurate chahiye to ggml-small.bin isi folder me daal do)"
       if [ -d "$dir/src" ]; then
         env_set "$envfile" "WHISPER_BIN" "$wdir/build/bin/whisper-cli"
         env_set "$envfile" "WHISPER_MODEL" "$wdir/models/ggml-base.bin"
@@ -1851,6 +1862,58 @@ DONE
         } catch (e) { console.error('SYNTH FAIL:', e.message); process.exit(1); }
       " ) || die "Voice test fail — upar error dekho (setup: bash observer.sh voice setup)"
       info "Suno: ffplay /tmp/jarvis-test.ogg · ya WhatsApp: /voicereply Good evening, Sir"
+      ;;
+
+    doctor)
+      # "Call kyun nahi utha?" — ek hi command me poora forensic dump:
+      # setup stages, live engine diary (bridge API), aur journal ki woh
+      # lines jo call ke safar ko batati hain. Output jaisa hai waisa
+      # kahin paste karke bhej do — wajah usi me hoti hai.
+      say "JARVIS Voice Doctor — call pickup forensics"
+      [ -d "$dir/src" ] || die "Agent install nahi mila ($dir)"
+      echo "── 1) Setup stages ─────────────────────────────────────────────"
+      if [ -x "$VOICE_DIR/piper/piper" ]; then ok "piper (bolna)   : installed"; else warn "piper (bolna)   : MISSING — bash observer.sh voice setup"; fi
+      local mfile="$VOICE_DIR/whisper.cpp/models/ggml-base.bin" msize=0
+      [ -f "$mfile" ] && msize=$(stat -c %s "$mfile" 2>/dev/null || echo 0)
+      if [ -x "$VOICE_DIR/whisper.cpp/build/bin/whisper-cli" ] && [ "$msize" -ge 140000000 ]; then
+        ok "whisper (sunna) : ready (model $msize bytes)"
+      elif [ -x "$VOICE_DIR/whisper.cpp/build/bin/whisper-cli" ]; then
+        warn "whisper model AADHA hai ($msize bytes, chahiye ~148M) — bash observer.sh voice whisper (khud theek kar dega)"
+      else
+        warn "whisper (sunna) : MISSING — bash observer.sh voice whisper (ya GROQ_API_KEY)"
+      fi
+      have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
+      if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
+      [ -f "$dir/auth_info_voip/creds.json" ] && ok "voip login      : linked (creds.json)" || warn "voip login      : NOT linked — bash observer.sh voice link-voip"
+      grep -q "^WA_CALL_ANSWER=true" "$envfile" 2>/dev/null && ok "WA_CALL_ANSWER  : true" || warn "WA_CALL_ANSWER  : false/off — bash observer.sh voice answer on"
+      systemctl --user is-active "$SERVICE" >/dev/null 2>&1 && ok "service         : active" || warn "service         : NOT active — systemctl --user start $SERVICE"
+      echo "── 2) Live engine diary (bridge /api/voice) ────────────────────"
+      local token="" port="8787"
+      [ -f "$dir/data/bridge-token.txt" ] && token=$(tr -d '[:space:]' < "$dir/data/bridge-token.txt")
+      local envport; envport=$(grep -E "^PORT=" "$envfile" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); [ -n "$envport" ] && port="$envport"
+      if [ -n "$token" ] && have curl && have node; then
+        curl -fsS -m 5 -H "x-bridge-token: $token" "http://127.0.0.1:${port}/api/voice" 2>/dev/null | node -e "
+          let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{
+            try {
+              const v=JSON.parse(d).wavoip;
+              if(!v){ console.log('   (bridge me wavoip status nahi — purana build? update karo)'); return; }
+              console.log('   stage: '+v.stage+' · connected: '+v.connected+' · linked: '+v.linked+' · inCall: '+v.inCall);
+              if(v.lastError) console.log('   lastError: '+v.lastError);
+              console.log('   stats: '+JSON.stringify(v.stats));
+              for(const e of (v.lastEvents||[])) console.log('   · '+new Date(e.at).toLocaleTimeString('en-IN')+' '+e.kind+(e.detail?' — '+e.detail:''));
+              if(!(v.lastEvents||[]).length) console.log('   (diary khaali hai — engine ne abhi tak koi call dekhi hi nahi)');
+            } catch { console.log('   (bridge jawab parse nahi hua — service chal rahi hai?)'); }
+          });" || warn "bridge se baat nahi hui (service/port/token check karo)"
+      else
+        warn "token/curl nahi mila — diary skip (journal neeche hai)"
+      fi
+      echo "── 3) Journal: aakhri call ka safar ────────────────────────────"
+      journalctl --user -u "$SERVICE" -n 600 --no-pager 2>/dev/null \
+        | grep -E "\[wavoip\]|\[baileys-caller\]|\[voip-wasm|OWNER is calling|call fallback|wa call|connect failed|VoIP device connected" \
+        | tail -45 || warn "journal nahi mila (systemd service?)"
+      echo "────────────────────────────────────────────────────────────────"
+      info "Padho: 'incoming WhatsApp call' aaya? → 'answering' → 'call connected'?"
+      info "Jahan chain tooti, wajah wahi hai. [voip-wasm] wali line sabse sachhi hoti hai."
       ;;
 
     status|*)

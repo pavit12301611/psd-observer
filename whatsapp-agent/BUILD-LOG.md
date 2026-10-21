@@ -1,5 +1,39 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.1 — Real-machine pickup debug: engine source padh ke do apne hi bug mare
+
+> User (poora setup ke baad): "call nhi utha rha hai". Is baar guess nahi —
+> `baileys-caller` ka **asli source** (tarball) padh ke adapter verify kiya.
+> API assumptions (answer/writeAudio/stream:/incoming-meta) sahi nikli.
+> Asli culprits **hamare** code me the:
+>
+> 1. **Error = death samajh liya**: library per-call failures (offer
+>    decrypt/accept) bhi client `'error'` event se deti hai. Hum har error
+>    pe `connected=false` + fresh client reconnect kar dete the — jo call
+>    setup ho rahi thi, usi ka client disconnect ho jata tha. Ab error
+>    sirf diary entry hai; connection sirf `connect()` fail/`stop()` pe
+>    badalta hai.
+> 2. **Fallback race**: library ka accept pipeline (offer decrypt queue +
+>    WASM relay-latency handshake, khud ka wait 20s) hamare 12s fallback
+>    se lamba chal sakta hai — messaging socket pehle reject kar deta to
+>    call sab devices pe mar jaati. Engine up ho to fallback floor ab
+>    **35s** hai.
+> 3. **Aadha whisper model "OK"**: download 83% pe toota; existence-check
+>    use sahi maan baitha. Ab `.part` + resume + ≥140MB size-verify +
+>    atomic move; purana toota file khud heal hota hai.
+>
+> Saath me forensics jo is round ko aakhri banana chahiye: engine ki
+> **breadcrumb diary** (`status().lastEvents` → `/api/voice`), WASM ke
+> accept/reject reasons journal me (`WA_VOIP_DEBUG=true` default,
+> keyword-filtered), fallback message me engine ki aakhri khabar, aur
+> **`observer.sh voice doctor`** — stages + diary + journal ek dump me.
+> Sandbox me asli engine install karke load/construct smoke bhi PASS.
+> Tests **214/214** (2 naye: error-survival, 35s floor). Jo sandbox me
+> aaj bhi prove nahi ho sakta: asli WhatsApp network pe WASM ka
+> `preprocess_offer` faisla — ab woh journal/doctor me padha ja sakta hai.
+
+---
+
 ## v3.1.0 — "Call kaat ke voice note kyun?" fix + scheduled calls + English-only
 
 > User report: real machine pe call **uthne ki bajaye cut hoke voice note**

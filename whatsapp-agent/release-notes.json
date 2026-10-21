@@ -1,4 +1,13 @@
 {
+  "3.1.1": {
+    "title": "Call pickup ke do chupe katil fix + `voice doctor` 🩺☎️",
+    "bullets": [
+      "Asli machine par call na uthne ki do wajah code me pakdi gayi: (1) engine ki chhoti *per-call error* par hum khud poora client disconnect/reconnect kar dete the — chalti hui call-setup khud hi mar jaati thi; (2) hamara fallback *12 second* par call kaat sakta tha, jabki engine ko accept karne me kabhi-kabhi *20 second* lagte hain. Dono fix — ab engine ko poora 35s ka mauka milta hai, error par connection nahi toot'ta",
+      "Naya forensic command: `bash scripts/observer.sh voice doctor` — setup stages + engine ki *live diary* + journal ki call-wali lines, ek hi dump me. Call kabhi na uthe to iska output hi kaafi hai wajah pakadne ke liye",
+      "Engine ab har kadam diary me likhta hai (connect → incoming → answering → connected → ended+reason) aur WASM ke apne accept/reject reasons journal me dikhte hain (`WA_VOIP_DEBUG`)",
+      "Whisper model ka aadha-download wala jhooth bhi band: ab size-verify + resume ke saath download hota hai — purana toota model khud heal ho jata hai (`voice doctor`/`voice whisper` chalao)"
+    ]
+  },
   "3.1.0": {
     "title": "Asli call pickup pakka + JARVIS khud call karega + English-only awaaz ☎️🇬🇧",
     "bullets": [

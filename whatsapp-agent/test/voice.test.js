@@ -535,3 +535,57 @@ test('commands: /callat schedules, lists and cancels JARVIS update-calls', async
   assert.equal(store.data.callSchedules.length, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ── 3.1.1: real-machine pickup failures (error-churn + fallback race) ────────
+
+test('wavoip: a per-call engine error does NOT tear the connection down', async () => {
+  const dir = tempDir();
+  class FakeClient extends EventEmitter {
+    constructor() { super(); FakeClient.instance = this; }
+    async connect() {}
+    disconnect() { FakeClient.disconnected = true; }
+  }
+  const wavoip = createWaVoip({
+    config: makeConfig(dir, { waCallAnswer: true }),
+    log: silent,
+    voice: { start: async () => ({}), say: async () => ({}), interrupt() {}, end() {} },
+    isOwnerJid: () => false,
+    sendToOwner: async () => {},
+    decodePcm: async () => Buffer.alloc(0),
+    loadEngine: async () => ({ mod: { VoipClient: FakeClient }, via: 'test' }),
+  });
+  await wavoip.start();
+  await sleep(30);
+  assert.equal(wavoip.status().connected, true);
+  // baileys-caller emits 'error' for call-level failures (offer decrypt,
+  // accept problems). Tearing the client down here killed live pickups.
+  FakeClient.instance.emit('error', new Error('offer decrypt failed'));
+  await sleep(20);
+  assert.equal(wavoip.status().connected, true, 'connection survives a call-level error');
+  assert.equal(wavoip.isHandlingCalls(), true, 'still taking calls');
+  assert.ok(!FakeClient.disconnected, 'client was not disconnected');
+  assert.ok(wavoip.status().lastEvents.some((e) => e.kind === 'engine-error'), 'error is in the diary');
+  assert.ok(wavoip.status().lastEvents.some((e) => e.kind === 'connect:ok'), 'connect is in the diary');
+  wavoip.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('whatsapp: while the engine is up, fallback waits out its ~20s accept pipeline', async () => {
+  const dir = tempDir();
+  const config = makeConfig(dir, { waCallAnswer: true }); // fallbackDelayMs stays tiny (10)
+  const store = new Store(config.storeFile);
+  const agent = createAgent({ config, store, log: silent });
+  const whatsapp = createWhatsApp({ config, store, agent, log: silent });
+  whatsapp.setVoipCoordinator({
+    isHandlingCalls: () => true, // engine connected…
+    recentlyAnswered: () => false, // …but still inside its accept pipeline
+    noteOwnerCall: () => {},
+    status: () => ({ stage: 'ready', enabled: true, connected: true, linked: true, lastError: null, lastEvents: [{ at: Date.now(), kind: 'answering', detail: 'pipeline' }] }),
+  });
+  const before = whatsapp.state.simulated.length;
+  await whatsapp.handleCallEvents([{ id: 'slow1', from: '919528923866@s.whatsapp.net', status: 'offer' }]);
+  await sleep(350);
+  assert.equal(whatsapp.state.simulated.length, before,
+    'no reject/voice-note yet — rejecting now would kill the call the engine is accepting');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

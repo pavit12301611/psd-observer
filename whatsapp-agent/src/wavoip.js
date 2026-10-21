@@ -241,8 +241,17 @@ export function createWaVoip({
     recentOwnerOffers: [], // {callId, from, callerPn, at}
     reconnectTimer: null,
     reconnectDelayMs: Math.max(1_000, Number(config.waVoipReconnectMs) || 30_000),
+    // Breadcrumb diary of the engine's last moves — surfaced via status()
+    // (/api/voice, `voice doctor`, fallback message) so "call kyun nahi
+    // utha" is answered by facts, not guesswork.
+    events: [], // {at, kind, detail}
     stats: { answered: 0, missed: 0, rejectedNotOwner: 0, outbound: 0, reconnects: 0 },
   };
+
+  function note(kind, detail = '') {
+    state.events.push({ at: Date.now(), kind, detail: String(detail ?? '').slice(0, 160) });
+    if (state.events.length > 16) state.events.splice(0, state.events.length - 16);
+  }
 
   const enabled = () => Boolean(config.waCallAnswer);
   const linked = () => fs.existsSync(path.join(config.voipAuthDir || '', 'creds.json'));
@@ -270,6 +279,7 @@ export function createWaVoip({
       inCall: Boolean(state.activeCall),
       authDir: config.voipAuthDir,
       lastError: state.lastError || null,
+      lastEvents: state.events.slice(-8),
       stats: { ...state.stats },
       hint: !enabled()
         ? 'WA_CALL_ANSWER=false — on karne ke liye: bash scripts/observer.sh voice call-engine'
@@ -402,6 +412,7 @@ export function createWaVoip({
 
     call.on?.('audio', (frame) => { if (!conversation.ended) segmenter.push(frame); });
     call.on?.('connected', async () => {
+      note('call-connected', call.callId || '');
       log.info?.('[wavoip] call connected — JARVIS is live');
       try {
         const started = await voice.start('whatsapp-call', sessionId);
@@ -426,6 +437,7 @@ export function createWaVoip({
       voice?.end?.(sessionId);
       if (state.activeCall === conversation) state.activeCall = null;
       const seconds = Math.round((Date.now() - conversation.startedAt) / 1000);
+      note('call-ended', `${reason} · ${seconds}s · ${conversation.turns} turn(s)`);
       log.info?.(`[wavoip] call ended (${reason}) after ${seconds}s, ${conversation.turns} turn(s)`);
       if (conversation.turns > 0 || conversation.log.length) {
         const lines = conversation.log.slice(-8).map((t) => `🎙️ _${t.heard.slice(0, 90)}_\n🤖 ${(t.text || t.spoken).slice(0, 220)}`);
@@ -443,8 +455,10 @@ export function createWaVoip({
 
   function handleIncoming(call, meta = {}) {
     const peerJid = meta.peerJid || call.peerJid || '';
+    note('incoming', `${peerJid || 'unknown'}${meta.isVideo ? ' (video)' : ''}${meta.isGroup || call.isGroup ? ' (group)' : ''}`);
     log.info?.(`[wavoip] incoming WhatsApp call from ${peerJid || 'unknown'} (video=${Boolean(meta.isVideo)}, group=${Boolean(meta.isGroup)})`);
     if (meta.isGroup || call.isGroup) {
+      note('rejected-group', peerJid);
       try { call.reject?.(); } catch { /* noop */ }
       return { acted: 'rejected-group' };
     }
@@ -463,6 +477,7 @@ export function createWaVoip({
     if (!verified) {
       // SECURITY: an unverified caller (including unknown LIDs) never gets an
       // auto-answered call into a PC that can run commands. Let it ring.
+      note('ignored-not-owner', peerJid || 'unknown');
       state.stats.rejectedNotOwner += 1;
       state.stats.missed += 1;
       log.warn?.('[wavoip] not answering: caller is not the verified owner');
@@ -470,11 +485,13 @@ export function createWaVoip({
       return { acted: 'ignored-not-owner' };
     }
     if (state.activeCall) {
+      note('rejected-busy', peerJid);
       try { call.reject?.(); } catch { /* noop */ }
       sendToOwner('📞 Sir, ek call pehle se chal rahi hai — dusri call reject kar di.').catch(() => {});
       return { acted: 'rejected-busy' };
     }
     state.stats.answered += 1;
+    note('answering', `${peerJid} — engine accept pipeline (~20s tak lag sakta hai)`);
     call.answer({ audioSource: STREAM_SOURCE, withMic: true });
     attachConversation(call);
     return { acted: 'answered' };
@@ -484,6 +501,7 @@ export function createWaVoip({
   async function callOwner(openingText = '') {
     if (!state.client || !state.connected) throw new Error(status().hint || 'VoIP engine ready nahi hai');
     if (state.activeCall) throw new Error('Ek call pehle se chal rahi hai, Sir.');
+    note('outbound', `calling owner ${config.ownerNumber}`);
     const call = await state.client.call(String(config.ownerNumber), { audioSource: STREAM_SOURCE, durationMs: 0 });
     state.stats.outbound += 1;
     attachConversation(call, { openingText });
@@ -516,35 +534,44 @@ export function createWaVoip({
   async function attemptConnect() {
     if (state.connecting || state.connected || state.stopped || !state.engineMod) return status();
     state.connecting = true;
+    note('connect:start');
     try {
       try { state.client?.disconnect?.(); } catch { /* stale client */ }
       fs.mkdirSync(config.voipAuthDir, { recursive: true });
+      // Surface the WASM's own accept/reject reasoning in the journal
+      // ([voip-wasm:…] lines, keyword-filtered by the library). Without
+      // this an inbound offer can be silently dropped by preprocess_offer
+      // (privacy/expiry) and nobody can tell why. WA_VOIP_DEBUG=false → off.
+      if (config.waVoipDebug !== false && !process.env.VOIP_WASM_LOG) process.env.VOIP_WASM_LOG = '1';
       const client = new state.engineMod.VoipClient({ authDir: config.voipAuthDir });
       state.client = client;
       client.on?.('incoming', (call, meta) => {
         try { handleIncoming(call, meta ?? {}); } catch (err) { log.error?.(`[wavoip] incoming handling failed: ${err.message}`); }
       });
-      const onDead = (err) => {
+      // IMPORTANT: the library emits 'error' for PER-CALL failures too
+      // (offer decryption, accept problems) — not just dead sockets. An
+      // earlier version treated every 'error' as connection death and
+      // tore the client down mid-answer, killing the very call being set
+      // up. Errors are diary entries now; only connect() failing (or
+      // stop()) changes connection state.
+      client.on?.('error', (err) => {
         if (state.stopped) return;
-        state.lastError = err?.message ?? (err ? String(err) : 'connection closed');
-        if (state.connected) log.warn?.(`[wavoip] engine connection lost: ${state.lastError}`);
-        state.connected = false;
-        scheduleReconnect();
-      };
-      client.on?.('error', onDead);
-      client.on?.('close', () => onDead());
-      client.on?.('disconnected', () => onDead());
-      client.on?.('disconnect', () => onDead());
+        state.lastError = err?.message ?? String(err);
+        note('engine-error', state.lastError);
+        log.warn?.(`[wavoip] engine error (call-level ho sakti hai, connection NAHI toda): ${state.lastError}`);
+      });
       log.info?.(`[wavoip] connecting VoIP linked device (auth: ${config.voipAuthDir})…`);
       await client.connect();
       if (state.stopped) return status();
       state.connected = true;
       state.lastError = '';
+      note('connect:ok', 'WASM VoIP stack ready');
       state.reconnectDelayMs = Math.max(1_000, Number(config.waVoipReconnectMs) || 30_000);
       log.info?.('[wavoip] ✅ VoIP device connected — WhatsApp calls ab JARVIS uthayega');
     } catch (err) {
       state.connected = false;
       state.lastError = err.message;
+      note('connect:fail', err.message);
       log.error?.(`[wavoip] connect failed: ${err.message} (fallback voice session active rahega)`);
       scheduleReconnect();
     } finally {

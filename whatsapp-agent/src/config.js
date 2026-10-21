@@ -296,6 +296,9 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     //   bash scripts/observer.sh voice call-engine
     // Until then, an incoming owner call falls back per WA_CALL_FALLBACK.
     waCallAnswer: bool(e.WA_CALL_ANSWER, false),
+    // WASM call-setup logs in the journal ([voip-wasm:…], keyword-filtered by
+    // the engine) — THIS is where a silently-dropped call explains itself.
+    waVoipDebug: bool(e.WA_VOIP_DEBUG, true),
     waCallFallback: (e.WA_CALL_FALLBACK || 'voice-session').toLowerCase(), // voice-session|ignore|reject
     waCallFallbackDelayMs: int(e.WA_CALL_FALLBACK_DELAY_MS, 12_000),
     waCallUnknown: (e.WA_CALL_UNKNOWN || 'ignore').toLowerCase(), // ignore|reject

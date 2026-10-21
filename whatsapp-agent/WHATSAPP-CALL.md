@@ -121,7 +121,7 @@ bol sakte ho: *"Jarvis, call me at 6 and give me the brief."*
 | Symptom | Fix |
 |---|---|
 | Call cut hote hi voice note aa gaya | Fallback chala — **usi message me exact wajah + fix likha hota hai** (engine install nahi / device link nahi / connect fail / ready par answer nahi). Wahi ek command chalao. Sabse common: purane installer pe peer-deps fail — `bash scripts/observer.sh voice call-engine` dobara |
-| Call bajti rehti hai, JARVIS nahi uthata | `/call` bhejo — stage batayega (engine? link? `WA_CALL_ANSWER`?). Engine gira ho to ab woh **khud reconnect** karta hai; owner call `@lid` me aaye to bhi cross-check se uth jati hai. `observer.sh voice status` |
+| Call bajti rehti hai, JARVIS nahi uthata | **`bash scripts/observer.sh voice doctor`** — ek hi dump me stage + engine ki live diary + journal ki call-lines. Diary dekhte hi samajh aa jayega chain kahan tooti: `connect:ok` hi nahi → engine/connect; `connect:ok` hai par `incoming` nahi → offer engine tak nahi pahuncha (agent number ki privacy setting? journal me `[voip-wasm]` reason); `answering` ke baad `call-ended` → journal me uska reason. Note: engine ko accept me kabhi-kabhi ~20s lagte hain — 5–6 ring tak ruko. owner call `@lid` me aaye to bhi cross-check se uth jati hai |
 | QR scan ke baad bhi "not linked" | `voice link-voip` dobara; agent phone pe Linked devices me naya device dikhna chahiye; phir `voice answer on` (restart) |
 | JARVIS sunta hai par jawab robotic hai | `voice setup` (Piper) nahi chala — espeak pe gir gaya hai. `/voice` dekho |
 | Awaaz samajh nahi aati / galat transcript | `voice whisper` se local base model; ya `GROQ_API_KEY`; shor kam rakho, waqfa deke bolo |

@@ -692,8 +692,11 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     // Name the EXACT failed stage so the owner can fix it in one step —
     // "call cut gaya" bina wajah ke kabhi nahi.
     const st = state.voipCoordinator?.status?.() ?? null;
+    const lastEngineEvent = Array.isArray(st?.lastEvents) && st.lastEvents.length
+      ? st.lastEvents[st.lastEvents.length - 1]
+      : null;
     const reason = engineReady
-      ? 'Engine ready tha par is call ko answer nahi kar paaya (busy/timeout ho sakta hai) — ek baar dobara call karke dekho; agent phone silent/DND pe rakho taaki wahi pehle na uthaye.'
+      ? `Engine ready tha par is call ko answer nahi kar paaya — ek baar dobara call karke dekho; agent phone silent/DND pe rakho taaki wahi pehle na uthaye.${lastEngineEvent ? `\n_(engine ki aakhri khabar: ${lastEngineEvent.kind}${lastEngineEvent.detail ? ` — ${String(lastEngineEvent.detail).slice(0, 100)}` : ''})_` : ''}`
       : st?.stage === 'engine-missing'
         ? 'Wajah: VoIP engine *install hi nahi hua*. Fix (ek baar): `bash scripts/observer.sh voice call-engine`'
         : st?.stage === 'not-linked'
@@ -725,7 +728,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           if (config.waCallUnknown === 'reject') await rejectCallSafe(callId, from);
           continue;
         }
-        log.info?.('📞 [wa] OWNER is calling JARVIS on WhatsApp');
+        log.info?.(`📞 [wa] OWNER is calling JARVIS on WhatsApp (from=${from}${event.callerPn || event.caller_pn ? `, callerPn=${event.callerPn ?? event.caller_pn}` : ''}, id=${callId})`);
         // Tell the VoIP engine "the owner is ringing RIGHT NOW" — it may only
         // see his anonymous @lid, while this socket just verified callerPn.
         // Also nudges an immediate reconnect if the engine dropped earlier.
@@ -736,13 +739,17 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           await sendToOwner('📞 Sir, WhatsApp calls abhi band hain (WA_CALL_FALLBACK=reject). Phone app ka 📞 Call tab use karo, ya /call on karke voice notes bhejo.');
           continue;
         }
-        // Give the real VoIP engine first chance to pick up.
+        // Give the real VoIP engine first chance to pick up. The engine's own
+        // pipeline (offer decryption queue + WASM relay-latency handshake)
+        // legitimately takes up to ~20s before acceptCall lands — rejecting
+        // from THIS socket earlier kills the ringing call on every device,
+        // so while the engine is up we wait at least 35s before stepping in.
         const offerAt = Date.now();
         const configured = Number(config.waCallFallbackDelayMs) || 12_000;
         const handling = Boolean(state.voipCoordinator?.isHandlingCalls?.());
         const engineWanted = Boolean(config.waCallAnswer);
         const delay = handling
-          ? Math.max(3_000, configured)
+          ? Math.max(35_000, configured)
           : engineWanted
             ? Math.min(6_000, configured) // reconnect-in-flight ko ek mauka
             : Math.min(2_500, configured);
