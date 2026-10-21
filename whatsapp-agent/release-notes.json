@@ -1,4 +1,14 @@
 {
+  "3.1.6": {
+    "title": "Accept ab LobbyAck ke baad — 404 NACK wala race khatam 📞",
+    "bullets": [
+      "3.1.5 ki test call ab tak ki sabse aage gayi: claim-first se lobby ka 404 khatam, call **active** hui, aur `<accept>` pehli baar wire par gaya! Lekin accept, server ke **LobbyAck se ~1 second pehle** race karke nikal gaya — server ne `Accept ACK: error code = 404` (NACK) diya aur phone ne call kaat di. WASM ke apne stats me saaf likha tha: `joinable_accept_before_lobby_ack: 1`",
+      "Engine patch **v4 (lobby-ack gate)**: engine ab teen jagah se lobby handshake track karta hai — bahar jaata `<lobby>`, WASM ka `LobbyAck` log, aur `<ack type=lobby>` stanza. Jiski lobby ack nahi hui, us call ka accept **rukta** hai; ack aate hi accept jata hai. Lobby-less calls par purana behaviour hi rehta hai, aur ack kabhi na aaye to deadline par last-resort accept bhi try hota hai",
+      "`voice doctor` ab v4 report karta hai (v3 dikhe to samjho accept abhi bhi race karega)",
+      "`bash observer.sh update` — patch v3 se v4 khud lag jayega. Phir ek test call: journal me `active, but lobby unacked — waiting for LobbyAck` ke baad `accepting now` dikhna chahiye, aur is baar Accept ACK 404 nahi aana chahiye",
+      "Honest status: chain ab accept tak proven hai; media (aawaz dono taraf) is test call se prove hoga. Voice-note fallback hamesha ki tarah guaranteed floor hai"
+    ]
+  },
   "3.1.5": {
     "title": "Claim pehle, offer baad me — rejoin-404 ka asli ilaaj 📞",
     "bullets": [

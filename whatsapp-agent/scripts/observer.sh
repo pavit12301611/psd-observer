@@ -1954,9 +1954,12 @@ DONE
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
-      if grep -q "observer-patch: claim-offer-first v3" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+      if grep -q "observer-patch: lobby-ack-gate v4" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+         || grep -q "observer-patch: lobby-ack-gate v4" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
+        ok "engine patch    : v4 applied (claim-first + LobbyAck gate — accept server-ack ke baad hi jata hai, bina iske pickup nahi hoti)"
+      elif grep -q "observer-patch: claim-offer-first v3" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: claim-offer-first v3" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
-        ok "engine patch    : v3 applied (claim-first + CallOfferReceived fix + join fallback — bina iske call pickup nahi hoti)"
+        warn "engine patch    : sirf v3 hai (accept LobbyAck se pehle race karke 404 NACK khayega) — bash observer.sh voice call-engine (v4 lag jayega)"
       elif grep -q "observer-patch: join-ongoing-call v2" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: join-ongoing-call v2" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
         warn "engine patch    : sirf v2 hai (call rejoin mode me phansegi + 0s me kat jayegi) — bash observer.sh voice call-engine (v3 lag jayega)"

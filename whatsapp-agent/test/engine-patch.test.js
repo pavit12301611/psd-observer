@@ -27,6 +27,8 @@ const WASM_ENGINE = [
 const INDEX = [
   "import { EventEmitter } from 'node:events';",
   'const WASM_EVENT_CALL_REJECTED = 92;',
+  'const ACCEPT_WAIT_MS = 20000;',
+  'const ACCEPT_POLL_MS = 250;',
   'export class VoipClient extends EventEmitter {',
   '    #engine = null;',
   '    #signaling = null;',
@@ -36,8 +38,21 @@ const INDEX = [
   '    #registerCall(call) {}',
   '    #endActiveCallOnPeerTerminate(node) {}',
   '    #handleIncomingOffer(node) {}',
-  '    wireCalls() {',
+  '    setupEngine() {',
+  '        const wasmLogEnabled = false;',
+  '        const wasmLogVerbose = false;',
   '        const CALL_LOG_RE = /offer|reject|reason|preprocess|pending|contact|accept|missed|expired|silence|terminat|relay|call.?state|not.?authoriz|privacy/i;',
+  '        const callbacks = {',
+  '                onSignalingXmpp: (peerJid, callId, xmlPayload) => this.#signaling.sendSignaling(peerJid, callId, xmlPayload),',
+  '                onLog: (level, message) => {',
+  '                    if (!wasmLogEnabled && !wasmLogVerbose)',
+  '                        return;',
+  '                    if (CALL_LOG_RE.test(message)) console.log(message);',
+  '                },',
+  '        };',
+  '        return callbacks;',
+  '    }',
+  '    wireCalls() {',
   '        this.#sock.ws.on("CB:call", (node) => {',
   '            this.#endActiveCallOnPeerTerminate(node);',
   '            const delivered = this.#signaling.processIncomingCall(node, this.#engine, this.#activeCall?.callId ?? "");',
@@ -45,11 +60,41 @@ const INDEX = [
   '                .then(() => this.#handleIncomingOffer(node))',
   '                .catch((err) => this.emit("error", err));',
   '        });',
-  '        return CALL_LOG_RE;',
   '    }',
   '    handleOffer(offer, call, callId, peerJid, isVideo, isGroup) {',
   '        call.peerJid = peerJid;',
   '        this.#registerCall(call);',
+  '        call._answer = () => {',
+  '            const deadline = Date.now() + ACCEPT_WAIT_MS;',
+  '            let logged = false;',
+  '            const waitThenAccept = () => {',
+  '                if (call.ended || call._accepted)',
+  '                    return;',
+  '                let info;',
+  '                try {',
+  '                    info = this.#engine.getCallInfo();',
+  '                }',
+  '                catch { }',
+  '                const active = typeof info === "string"',
+  '                    ? info.trim().length > 0 && !info.startsWith("getCallInfo threw")',
+  '                    : !!info;',
+  '                if (active) {',
+  '                    call._accepted = true;',
+  '                    console.log(`[baileys-caller] call ${call.callId} is active; accepting now`);',
+  '                    this.#engine.acceptCall(true, false);',
+  '                    return;',
+  '                }',
+  '                if (Date.now() > deadline) {',
+  '                    call._forceEnd("accept_timeout");',
+  '                    return;',
+  '                }',
+  '                if (!logged) logged = true;',
+  '                const t = setTimeout(waitThenAccept, ACCEPT_POLL_MS);',
+  '                if (t.unref)',
+  '                    t.unref();',
+  '            };',
+  '            waitThenAccept();',
+  '        };',
   '        if (this.listenerCount("incoming") === 0) {',
   '            return;',
   '        }',
@@ -99,6 +144,23 @@ const SIGNALING = [
   '        await this.#sendCallStanza(routeTo, null, signalingTag, effectivePeerJid, peerJid);',
   '        return routeTo;',
   '    };',
+  '    routeIncoming(usableNode, voip, callIdForRouting, b64) {',
+  '        switch (usableNode.tag) {',
+  '            case "offer":',
+  '                voip.handleSignalingOffer({ payload: b64 });',
+  '                break;',
+  '            case "ack":',
+  '                voip.handleSignalingAck({',
+  '                    payload: b64,',
+  '                    ackError: usableNode.attrs.error ?? "0",',
+  '                    msgType: usableNode.attrs.type ?? "",',
+  '                });',
+  '                break;',
+  '            default:',
+  '                voip.handleSignalingMessage({ payload: b64 });',
+  '                break;',
+  '        }',
+  '    }',
   '}',
   '',
 ].join('\n');
@@ -134,7 +196,15 @@ test('engine patch: all parts apply once on a fresh engine', async () => {
   assert.match(idx, /joining lobby call/, 'v2: event-93 join');
   assert.match(idx, /!call\._accepted && !_active93/, 'v3: join guard never touches live calls');
   assert.match(idx, /relay\|lobby\|buffered\|ongoing\|join\|ack\|/, 'v2: widened log filter');
+  assert.match(idx, /lobby-ack-gate v4 \(send\)/, 'v4: outbound lobby sniffed');
+  assert.match(idx, /_lobbySentCallId/, 'v4: lobby-sent flag');
+  assert.match(idx, /lobby-ack-gate v4 \(log\)/, 'v4: LobbyAck log sniffed');
+  assert.match(idx, /_lobbyWaitLogged/, 'v4: accept gate present');
+  assert.ok(idx.indexOf('_lobbyWaitLogged') < idx.indexOf('call._accepted = true;'),
+    'v4: gate really runs BEFORE the accept');
   assert.match(sig, /isCallRoomPeer/);
+  assert.match(sig, /lobby-ack-gate v4 \(stanza\)/, 'v4: lobby ack stanza sniffed');
+  assert.match(sig, /_lobbyAckCallId = String\(callIdForRouting/, 'v4: stanza feeds the gate');
   // patched wasm-engine imports and the wrapper is a safe no-op pre-init
   const mod = await import(path.join(dir, 'dist/wasm-engine.mjs'));
   const eng = new mod.WasmEngine();
@@ -157,6 +227,7 @@ test('engine patch: v1/v2 install upgrades — legacy claim removed, nothing dup
   assert.doesNotMatch(idx, /checkOngoingCalls\?\.\(\[callId\], \[peerJid\]\)/, 'legacy after-feed claim removed');
   assert.equal((idx.match(/checkOngoingCalls\?\.\(\[claimId\]/g) || []).length, 1, 'claim present exactly once');
   assert.match(idx, /this\.emit\("incoming"/, 'emit line intact');
+  assert.match(idx, /lobby-ack-gate v4/, 'v4 lands on upgraded installs too');
   const r2 = patchEngineDir(dir, quiet);
   assert.equal(r2.state, 'already');
 });

@@ -1,5 +1,12 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.6 — Accept ka race: LobbyAck se pehle accept = 404 NACK (patch v4 lobby-ack gate)
+
+3.1.5 ki test call (`00F4B696…`, do baar same pattern) sabse aage gayi: claim-first kaam kar gaya — lobby is baar nacked NAHI hui (`LobbyAck` aaya), call active hui, upstream ka deferred accept chala (`call is active; accepting now`), `Rejoining -> AcceptSent`, `<accept>` → `00F4…@call`. Phir phone ne 1s me terminate kar diya. Journal ke aakhir me sach: **`Accept ACK: error code = 404. Treating as an Accept NACK`** aur fieldstats `joinable_accept_before_lobby_ack: 1`, `time_since_accept_ms: 496`. Upstream ka accept-poll `getCallInfo()` ka koi-bhi-jawab milte hi accept kar deta hai — LobbyAck (~1s baad) ka wait hi nahi karta. Server ke hisab se hum room ke participant bane hi nahi the, isliye accept 404.
+
+Patch **v4**: teensniffer flags engine par — bahar jaata `<lobby>` (`onSignalingXmpp`), WASM log `LobbyAck from` (`onLog`, log-level gate se pehle taaki logs off hon tab bhi chale), aur signaling ka `<ack type=lobby>` case. Accept-poll ab tab tak rukta hai jab tak us call ki lobby ack na ho jaye; lobby-less calls purane raaste par; deadline (20s) par last-resort accept. Phone ka +1s terminate isiliye premature-accept ka reaction lagta hai (uske baad bhi phone 3× RelayLatency bhejta raha, asal hangup +45s par aaya).
+
+
 ## v3.1.5 — Claim pehle: offer se pehle claim, varna rejoin+404; upstream event-2 = CallOfferReceived
 
 3.1.4 ki asli test call (`0065B9DE…`) ka poora WASM transcript mila: `wa_call_join_ongoing_call` chala, state `None -> Rejoining` hui, dusri `<lobby>` gayi — phir `handle_lobby_ack: error code: 404` aur event **94 = `LobbyNacked`**. Sabse zaroori signal: `is_rejoin: 1`. Matlab claim (v1/v2 me offer FEED HONE KE BAAD) itni der se aaya ki WASM ne apni hi ringing call ko "ongoing/missed" mankar rejoin join kiya — live 1:1 call ke liye galat raasta.

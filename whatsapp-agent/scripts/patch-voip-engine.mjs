@@ -24,6 +24,11 @@
  *  4. Stanzas the WASM addresses to the call room (`<callId>@call`, e.g.
  *     `<lobby>`) must keep that address; the bridge rewrote them to the
  *     peer's bare JID (`<callId>@s.whatsapp.net`). (v1)
+ *  5. A lobby-entered call must not be accepted until the server acks the
+ *     lobby join. Upstream's deferred accept fires the moment `getCallInfo`
+ *     returns anything, which is ~1s BEFORE the LobbyAck; the server then
+ *     404-NACKs the accept (3.1.5 journal: `joinable_accept_before_lobby_ack:
+ *     1`, "Accept ACK: error code = 404") and the peer terminates. (v4)
  *
  * Every part is individually idempotent (needle check), so it is safe on
  * fresh installs, on older patched installs (only missing parts land; the
@@ -43,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 const M1 = 'observer-patch: check-ongoing-calls v1';
 const M2 = 'observer-patch: join-ongoing-call v2';
 const M3 = 'observer-patch: claim-offer-first v3';
+const M4 = 'observer-patch: lobby-ack-gate v4';
 
 // Remove the superseded v1/v2 after-feed claim block from index.mjs, whatever
 // comment wording the patcher version that wrote it used. The block sits
@@ -203,6 +209,81 @@ const PARTS = {
           'const CALL_LOG_RE = /offer|reject|reason|preprocess|pending|contact|accept|missed|expired|silence|terminat|relay|lobby|buffered|ongoing|join|ack|call.?state|not.?authoriz|privacy/i; /* ' + M2 + ': widened so doctor journals show the promotion chain */');
       },
     },
+    {
+      needle: 'lobby-ack-gate v4 (send)',
+      apply: (src) => {
+        const anchor = '                onSignalingXmpp: (peerJid, callId, xmlPayload) => this.#signaling.sendSignaling(peerJid, callId, xmlPayload),';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                onSignalingXmpp: (peerJid, callId, xmlPayload) => {
+                    /* ${M4} (send) — remember outbound <lobby> joins so the
+                       deferred accept can wait for the server's LobbyAck. */
+                    try {
+                        if (this.#engine && String(xmlPayload).includes("<lobby"))
+                            this.#engine._lobbySentCallId = String(callId ?? "");
+                    }
+                    catch { }
+                    return this.#signaling.sendSignaling(peerJid, callId, xmlPayload);
+                },`);
+      },
+    },
+    {
+      needle: 'lobby-ack-gate v4 (log)',
+      apply: (src) => {
+        const anchor = `                onLog: (level, message) => {
+                    if (!wasmLogEnabled && !wasmLogVerbose)
+                        return;`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                onLog: (level, message) => {
+                    /* ${M4} (log) — the WASM announces the completed lobby
+                       handshake ("LobbyAck from: ... call_id: ..."). Remember
+                       it (before the log-level gate, so it works with logs
+                       off) so the deferred accept never races the ack. */
+                    try {
+                        const s = String(message);
+                        if (this.#engine && s.includes("LobbyAck from")) {
+                            const m = s.match(/call_id:([0-9A-Fa-f]{32})/);
+                            this.#engine._lobbyAckCallId = m ? m[1].toUpperCase() : String(this.#activeCall?.callId ?? "");
+                        }
+                    }
+                    catch { }
+                    if (!wasmLogEnabled && !wasmLogVerbose)
+                        return;`);
+      },
+    },
+    {
+      needle: '_lobbyWaitLogged',
+      apply: (src) => {
+        const anchor = `                if (active) {
+                    call._accepted = true;`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                if (active) {
+                    /* ${M4} — never accept a lobby-entered call before the
+                       server acks our lobby join: the accept is 404-NACKed
+                       and the peer terminates (3.1.5 journal:
+                       joinable_accept_before_lobby_ack=1). Flags are fed by
+                       the (send)/(log)/(stanza) sniffers. Calls that never
+                       sent a lobby keep the original behaviour. */
+                    try {
+                        const cid = String(call.callId ?? "").toUpperCase();
+                        const lobbyPending = String(this.#engine?._lobbySentCallId ?? "").toUpperCase() === cid
+                            && String(this.#engine?._lobbyAckCallId ?? "").toUpperCase() !== cid;
+                        if (lobbyPending && Date.now() <= deadline) {
+                            if (!call._lobbyWaitLogged) {
+                                call._lobbyWaitLogged = true;
+                                console.log(\`[baileys-caller] call \${call.callId} active, but lobby unacked — waiting for LobbyAck before accepting\`);
+                            }
+                            const t = setTimeout(waitThenAccept, ACCEPT_POLL_MS);
+                            if (t.unref)
+                                t.unref();
+                            return;
+                        }
+                        if (lobbyPending)
+                            console.log(\`[baileys-caller] lobby ack never arrived for \${call.callId}; accepting anyway as a last resort\`);
+                    }
+                    catch { }
+                    call._accepted = true;`);
+      },
+    },
   ],
   'signaling.mjs': [
     {
@@ -229,6 +310,23 @@ const PARTS = {
                     ? this.#toBareJid(effectivePeerJid)
                     : this.#toCallDeviceJid(effectivePeerJid);`);
         return out;
+      },
+    },
+    {
+      needle: 'lobby-ack-gate v4 (stanza)',
+      apply: (src) => {
+        const anchor = `            case "ack":
+                voip.handleSignalingAck({`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `            case "ack":
+                /* ${M4} (stanza) — a successful <ack type="lobby"> is the
+                   server's LobbyAck; tell the accept gate (index.mjs). */
+                try {
+                    if (/lobby/i.test(String(usableNode.attrs.type ?? "")) && ["", "0"].includes(String(usableNode.attrs.error ?? "0")))
+                        voip._lobbyAckCallId = String(callIdForRouting ?? "");
+                }
+                catch { }
+                voip.handleSignalingAck({`);
       },
     },
   ],
