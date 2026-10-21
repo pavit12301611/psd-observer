@@ -15,6 +15,8 @@ import { startShotJanitor } from './screenshots.js';
 import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
 import { routerFor } from './router.js';
+import { createWaVoip } from './wavoip.js';
+import { startCallScheduleLoop } from './callscheduler.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -59,6 +61,20 @@ const whatsapp = createWhatsApp({
     brains: brainSummary(routerFor(config, console).catalog),
   }),
 });
+// Real WhatsApp call answering: the experimental VoIP engine's own linked
+// device (WA_CALL_ANSWER=true). Without it, owner calls reach JARVIS through
+// the voice-note fallback inside whatsapp.js. Either way, "call karke baat".
+const wavoip = createWaVoip({
+  config,
+  log: console,
+  voice: agent.voice,
+  isOwnerJid: (jid, extra) => whatsapp.isOwnerJid(jid, extra),
+  learnOwnerLid: (lid) => whatsapp.learnOwnerLid?.(lid),
+  sendToOwner: (reply) => whatsapp.sendToOwner(reply),
+});
+agent.attachWaVoip(wavoip);
+whatsapp.setVoipCoordinator(wavoip);
+
 const bridge = createBridgeServer({
   config,
   store,
@@ -66,10 +82,15 @@ const bridge = createBridgeServer({
   mailbox,
   actions: agent.actions,
   harness: agent.harness,
+  voice: agent.voice,
+  wavoip,
   runOwner: (text) => whatsapp.runOwner(text),
   log: console,
 });
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
+// /callat: at the set time JARVIS himself calls the owner with the update
+// (asli call na lage to voice note). Survives restarts via the store file.
+const callScheduleLoop = startCallScheduleLoop({ config, store, agent, wavoip, whatsapp, log: console });
 // Scheduled jobs that are commands ("/brief") run through the agent, exactly
 // like typing them — one code path, same safety gates.
 const stopCron = startCronLoop(
@@ -103,6 +124,7 @@ console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${conf
 console.info(`   Access level: ${config.accessLevel} · full PC control (Observer app optional)`);
 console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
 console.info(`   Cron jobs: ${store.listCronJobs().length} recurring · TTS: ${config.ttsEngine}`);
+console.info(`   📞 JARVIS voice call: ${config.voiceCall === false ? 'off (VOICE_CALL=false)' : 'on — phone-app Call tab + WhatsApp voice notes'} · asli WhatsApp call pickup: ${config.waCallAnswer ? 'EXPERIMENTAL engine ON' : `off → fallback "${config.waCallFallback}" (setup: bash scripts/observer.sh voice call-engine)`}`);
 const distroLine = distroPrettyName();
 if (distroLine) console.info(`   OS: ${distroLine}`);
 // Say up-front whether screen control can work at all in this session — this
@@ -145,6 +167,9 @@ if (config.dshAutoStartWeb && agent.harness) {
   const hs = agent.harness.status();
   console.info(`   🚀 DeepSeek Harness: ${hs.installed ? `installed (${hs.version}) · /dsh <task> · /dsh web` : 'auto-installs on first /dsh or /dsh install'}`);
 }
+// VoIP linked device first (non-blocking when WA_CALL_ANSWER=false), so
+// whatsapp.js's call coordinator knows whether a real pickup is coming.
+await wavoip.start().catch((err) => console.warn(`[wavoip] start failed: ${err.message}`));
 await whatsapp.start();
 
 process.on('SIGINT', shutdown);
@@ -152,9 +177,11 @@ process.on('SIGTERM', shutdown);
 async function shutdown() {
   console.info('\n[agent] shutting down…');
   stopReminders();
+  callScheduleLoop.stop();
   stopCron();
   stopWatch();
   stopShots();
+  try { wavoip.stop(); } catch { /* already down */ }
   whatsapp.stop();
   bridge.stop();
   await agent.harness?.close?.().catch(() => {});

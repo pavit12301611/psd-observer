@@ -88,7 +88,7 @@
   function saveChat(list) {
     // Screenshots are big; keep image data only for the last few messages so
     // localStorage (≈5 MB) never overflows and the app still opens instantly.
-    const slim = list.slice(-80).map((m, i, arr) => (arr.length - i > 4 ? { ...m, images: [] } : m));
+    const slim = list.slice(-80).map((m, i, arr) => (arr.length - i > 4 ? { ...m, images: [], audio: '' } : m));
     try { localStorage.setItem(CHAT_KEY, JSON.stringify(slim)); } catch {
       try { localStorage.setItem(CHAT_KEY, JSON.stringify(slim.map((m) => ({ ...m, images: [] })))); } catch { /* full */ }
     }
@@ -566,6 +566,403 @@
     }
   }
 
+  // ── JARVIS voice call ─────────────────────────────────────────────────────
+  // The loop JARVIS is famous for: you speak → the API model turns it into
+  // commands and executes them on the PC → JARVIS speaks the result → the mic
+  // reopens by itself. Speech-to-text prefers the browser (instant, free);
+  // browsers without it record WebM and the PC transcribes with Whisper.
+  // Speech back is the server's real JARVIS voice (Piper/Edge/XTTS), with a
+  // British browser voice as the instant fallback. Talk over him (or tap the
+  // orb) and he stops mid-sentence — barge-in, like a real call.
+  const Call = {
+    active: false, session: '', muted: false, speaking: false, busy: false,
+    rec: null, recWanted: false, stream: null, recorder: null, audioCtx: null,
+    player: null, events: null, startedAt: 0, timer: null, wakeLock: null,
+  };
+
+  const orb = () => $('#orb');
+  function setOrb(state, label) {
+    const el = orb();
+    if (el) el.className = `orb ${state}`;
+    if (label != null) $('#call-state').textContent = label;
+  }
+
+  function callCaption(who, text, { interim = false, images = [] } = {}) {
+    const box = $('#call-captions');
+    if (!box) return null;
+    box.querySelector('.cap.interim')?.remove();
+    const el = document.createElement('div');
+    el.className = `cap ${who}${interim ? ' interim' : ''}`;
+    el.innerHTML = `<b class="who">${who === 'owner' ? 'YOU' : 'JARVIS'}</b>${waFormat(text || '')}`;
+    for (const src of images) {
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = 'screenshot';
+      el.appendChild(img);
+    }
+    box.appendChild(el);
+    while (box.children.length > 40) box.firstChild.remove();
+    box.scrollTop = box.scrollHeight;
+    return el;
+  }
+
+  function pickBrowserVoice() {
+    const voices = window.speechSynthesis?.getVoices?.() || [];
+    const gb = voices.filter((v) => /^en[-_]GB/i.test(v.lang));
+    return gb.find((v) => /ryan|george|arthur|brian|male/i.test(v.name)) || gb[0]
+      || voices.find((v) => /^en[-_]/i.test(v.lang) && /male/i.test(v.name))
+      || voices.find((v) => /^en[-_]/i.test(v.lang)) || voices[0] || null;
+  }
+
+  function speakInBrowser(text) {
+    return new Promise((resolve) => {
+      if (!('speechSynthesis' in window) || !text) return resolve();
+      const utter = new SpeechSynthesisUtterance(text);
+      const voice = pickBrowserVoice();
+      if (voice) utter.voice = voice;
+      utter.lang = voice?.lang || 'en-GB';
+      utter.rate = 0.98;
+      utter.pitch = 0.82; // the butler register
+      utter.onend = resolve;
+      utter.onerror = resolve;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    });
+  }
+
+  async function playJarvis(audioDataUrl, spokenText) {
+    const useBrowser = $('#call-browser-voice')?.checked || !audioDataUrl;
+    Call.speaking = true;
+    setOrb('speaking', 'JARVIS bol raha hai… (rokne ke liye orb tap karo ya bolna shuru karo)');
+    try {
+      if (useBrowser) {
+        await speakInBrowser(spokenText);
+      } else {
+        await new Promise((resolve) => {
+          const audio = new Audio(audioDataUrl);
+          Call.player = audio;
+          audio.onended = resolve;
+          audio.onerror = resolve;
+          audio.play().catch(resolve);
+        });
+      }
+    } finally {
+      Call.speaking = false;
+      Call.player = null;
+      if (Call.active) setOrb('listening', 'Sun raha hoon, Sir… bolo.');
+    }
+  }
+
+  function stopPlayback() {
+    if (Call.player) { try { Call.player.pause(); } catch { /* done */ } Call.player = null; }
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (Call.speaking && Call.session) {
+      api('/api/call/interrupt', { method: 'POST', body: { sessionId: Call.session } }).catch(() => {});
+    }
+    Call.speaking = false;
+    if (Call.active) setOrb('listening', 'Sun raha hoon, Sir… bolo.');
+  }
+
+  async function callSay(text) {
+    const clean = String(text || '').trim();
+    if (!clean || !Call.active || Call.busy) return;
+    Call.busy = true;
+    callCaption('owner', clean);
+    setOrb('thinking', 'Samajh gaya — kaam kar raha hoon, Sir…');
+    try {
+      const res = await api('/api/call/say', { method: 'POST', body: { sessionId: Call.session, text: clean } });
+      Call.session = res.sessionId || Call.session;
+      const shown = res.text && res.text.length <= 600 ? res.text : (res.spoken || res.text || '✅ Done, Sir.');
+      callCaption('jarvis', shown, { images: res.images || [] });
+      if (res.awaitingConfirm) setOrb('confirming', 'Confirmation chahiye — "haan" ya "nahi" bolo.');
+      await playJarvis(res.audio, res.spoken || shown);
+      if (res.ended) { endCall('Call khatm. Phir milenge, Sir.'); return; }
+    } catch (err) {
+      if (err.message !== 'unauthorised') {
+        callCaption('jarvis', `⚠️ ${err.message}`);
+        await playJarvis(null, 'My apologies, Sir. Something went wrong on the computer.');
+      }
+    } finally {
+      Call.busy = false;
+      if (Call.active && !Call.muted) restartListening();
+    }
+  }
+
+  // ── listening: browser SR loop ────────────────────────────────────────────
+  function startSrLoop() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return false;
+    const rec = new SR();
+    rec.lang = $('#call-lang')?.value || 'en-IN';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (ev) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const piece = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += piece;
+        else interimText += piece;
+      }
+      if (interimText.trim()) {
+        // Owner talking over JARVIS = barge-in.
+        if (Call.speaking && interimText.trim().length > 2) stopPlayback();
+        callCaption('owner', interimText.trim(), { interim: true });
+      }
+      if (finalText.trim()) {
+        $('#call-captions')?.querySelector('.cap.interim')?.remove();
+        callSay(finalText.trim());
+      }
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        Call.recWanted = false;
+        setOrb('idle', 'Mic permission nahi mili. Browser me mic allow karo, ya neeche text box use karo.');
+      }
+    };
+    rec.onend = () => {
+      // Chrome stops continuous SR every so often — quietly re-arm it.
+      if (Call.active && Call.recWanted && !Call.muted && !Call.busy && !Call.speaking) {
+        setTimeout(() => { try { rec.start(); } catch { /* already running */ } }, 250);
+      }
+    };
+    Call.rec = rec;
+    Call.recWanted = true;
+    try { rec.start(); } catch { /* onend re-arms */ }
+    return true;
+  }
+
+  // ── listening fallback: MediaRecorder + silence detection + Whisper ──────
+  async function startRecorderLoop() {
+    try {
+      Call.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setOrb('idle', 'Mic nahi mila. Permission allow karo ya text box se bolo.');
+      return false;
+    }
+    Call.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = Call.audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    Call.audioCtx.createMediaStreamSource(Call.stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    const level = () => {
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const s of samples) sum += Math.abs(s - 128);
+      return sum / samples.length;
+    };
+    const recordOnce = () => new Promise((resolve) => {
+      const chunks = [];
+      let mime = 'audio/webm';
+      try { Call.recorder = new MediaRecorder(Call.stream); mime = Call.recorder.mimeType || mime; }
+      catch { return resolve(null); }
+      const rec = Call.recorder;
+      let sawSpeech = false;
+      let silenceMs = 0;
+      const started = Date.now();
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => resolve(sawSpeech ? { blob: new Blob(chunks, { type: mime }), mime } : null);
+      rec.start(200);
+      const watcher = setInterval(() => {
+        if (!Call.active || Call.muted || Call.busy) { clearInterval(watcher); try { rec.stop(); } catch { } return; }
+        const loud = level() > 4.2;
+        if (loud) {
+          if (Call.speaking) stopPlayback(); // barge-in
+          sawSpeech = true;
+          silenceMs = 0;
+        } else if (sawSpeech) silenceMs += 140;
+        if ((sawSpeech && silenceMs > 1000) || Date.now() - started > 15_000) {
+          clearInterval(watcher);
+          try { rec.stop(); } catch { /* stopped */ }
+        }
+      }, 140);
+    });
+    (async () => {
+      while (Call.active) {
+        if (Call.muted || Call.busy) { await new Promise((r) => setTimeout(r, 400)); continue; }
+        const clip = await recordOnce();
+        if (!clip) continue;
+        setOrb('thinking', 'Sun liya — samajh raha hoon…');
+        try {
+          const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+            reader.onerror = reject;
+            reader.readAsDataURL(clip.blob);
+          });
+          const heard = await api('/api/call/transcribe', { method: 'POST', body: { audioBase64: base64, mimeType: clip.mime } });
+          if (heard.text) await callSay(heard.text);
+          else setOrb('listening', 'Kuch sunai nahi diya — phir se bolo.');
+        } catch (err) {
+          callCaption('jarvis', `⚠️ ${err.message}`);
+          setOrb('listening', 'Sun raha hoon, Sir… bolo.');
+        }
+      }
+    })();
+    return true;
+  }
+
+  function restartListening() {
+    if (!Call.active || Call.muted) return;
+    if (Call.rec && Call.recWanted) { try { Call.rec.start(); } catch { /* running */ } }
+    // The MediaRecorder loop self-perpetuates; nothing to do.
+  }
+
+  function stopListening() {
+    Call.recWanted = false;
+    try { Call.rec?.stop(); } catch { /* stopped */ }
+    Call.rec = null;
+    try { Call.recorder?.stop(); } catch { /* stopped */ }
+    Call.stream?.getTracks().forEach((t) => t.stop());
+    Call.stream = null;
+    Call.audioCtx?.close().catch(() => {});
+    Call.audioCtx = null;
+  }
+
+  async function startCall() {
+    if (Call.active) return;
+    stopPlayback();
+    try {
+      const res = await api('/api/call/start', { method: 'POST', body: {} });
+      Call.session = res.sessionId;
+      Call.active = true;
+      Call.muted = false;
+      Call.startedAt = Date.now();
+      $('#call-start').hidden = true;
+      $('#call-mute').hidden = false;
+      $('#call-end').hidden = false;
+      $('#call-captions').innerHTML = '';
+      callCaption('jarvis', res.greeting);
+      setOrb('listening', 'Line par hoon, Sir. Bolo, main sun raha hoon.');
+      clearInterval(Call.timer);
+      Call.timer = setInterval(() => {
+        const s = Math.floor((Date.now() - Call.startedAt) / 1000);
+        $('#call-timer').textContent = `⏱ ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+      }, 1000);
+      try { Call.wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
+      try {
+        Call.events = new EventSource(`/api/call/events?session=${encodeURIComponent(Call.session)}&t=${encodeURIComponent(token)}`);
+        Call.events.addEventListener('thinking', () => { if (!Call.speaking) setOrb('thinking', 'Kaam kar raha hoon, Sir…'); });
+      } catch { /* SSE is decoration */ }
+      const srOk = startSrLoop();
+      if (!srOk) await startRecorderLoop();
+      await playJarvis(res.audio, res.spoken || res.greeting);
+      restartListening();
+    } catch (err) {
+      Call.active = false;
+      setOrb('idle', err.message === 'unauthorised' ? 'Session khatm — PIN dobara daalo.' : `Call shuru nahi hui: ${err.message}`);
+    }
+  }
+
+  function endCall(note = 'Call khatm. Kuch aur chahiye ho to main yahin hoon, Sir.') {
+    if (Call.session) api('/api/call/stop', { method: 'POST', body: { sessionId: Call.session } }).catch(() => {});
+    Call.active = false;
+    Call.session = '';
+    stopPlayback();
+    stopListening();
+    clearInterval(Call.timer);
+    $('#call-timer').textContent = '';
+    Call.events?.close();
+    Call.events = null;
+    try { Call.wakeLock?.release(); } catch { /* noop */ }
+    $('#call-start').hidden = false;
+    $('#call-mute').hidden = true;
+    $('#call-end').hidden = true;
+    setOrb('idle', note);
+  }
+
+  async function loadVoiceInfo() {
+    try {
+      const data = await api('/api/voice');
+      const rows = [
+        ['Voice engine', data.best || '— (setup baaki)'],
+        ['Sunna (Whisper)', data.transcription ? 'ready ✅' : 'setup baaki (observer.sh voice whisper)'],
+        ['WhatsApp voice mode', data.callMode ? 'ON' : 'off (/call on)'],
+        ['Asli WhatsApp call', data.wavoip?.connected ? '📞 READY — call karo, JARVIS uthayega' : (data.wavoip?.hint || 'engine off')],
+      ];
+      const list = $('#voice-list');
+      if (list) list.innerHTML = rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join('');
+      const hint = $('#call-wa-hint');
+      if (hint) {
+        hint.textContent = data.wavoip?.connected
+          ? '✅ Asli WhatsApp call READY hai — agent number pe voice call karo, JARVIS utha ke jawab dega. Niche Test se awaaz check kar lo.'
+          : `Asli WhatsApp call: ${data.wavoip?.hint || 'engine off'}. Tab tak WhatsApp call par JARVIS voice-note line milegi, aur ye Call tab hamesha kaam karta hai.`;
+      }
+    } catch { /* login handles 401 */ }
+  }
+
+  async function testJarvisVoice(btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ JARVIS bol raha hai…';
+    try {
+      const res = await fetch('/api/voice/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-bridge-token': token },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.audio) {
+        await new Promise((resolve) => {
+          const audio = new Audio(data.audio);
+          audio.onended = resolve;
+          audio.onerror = resolve;
+          audio.play().catch(resolve);
+        });
+      } else if (data.speakInBrowser) {
+        await speakInBrowser(data.speakInBrowser);
+        alert(`PC pe JARVIS voice setup baaki hai, isliye browser ki awaaz sunai di.\n\n${data.detail || ''}`);
+      } else {
+        alert(data.detail || 'Voice test fail hua.');
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶ Test JARVIS Voice';
+    }
+  }
+
+  function wireCallUi() {
+    $('#call-start')?.addEventListener('click', startCall);
+    $('#call-end')?.addEventListener('click', () => {
+      if (Call.session) callSay('goodbye jarvis').catch(() => endCall());
+      else endCall();
+      // callSay ends the UI on the farewell; this is the safety net.
+      setTimeout(() => { if (Call.active && !Call.speaking) endCall(); }, 6000);
+    });
+    $('#call-mute')?.addEventListener('click', (e) => {
+      Call.muted = !Call.muted;
+      e.target.textContent = Call.muted ? '🔇 Unmute' : '🎤 Mute';
+      if (Call.muted) { try { Call.rec?.stop(); } catch { /* stopped */ } setOrb('listening', 'Mic band hai. Unmute karo jab bolna ho.'); }
+      else restartListening();
+    });
+    orb()?.addEventListener('click', () => {
+      if (!Call.active) { startCall(); return; }
+      if (Call.speaking) stopPlayback();
+    });
+    $('#call-text-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('#call-text');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      if (!Call.active) await startCall();
+      callSay(text);
+    });
+    $('#call-lang')?.addEventListener('change', () => { if (Call.rec) { try { Call.rec.stop(); } catch { } Call.rec = null; if (Call.active) startSrLoop(); } });
+    $('#voice-test')?.addEventListener('click', (e) => testJarvisVoice(e.target));
+    $('#voice-callmode')?.addEventListener('click', async () => {
+      const data = await api('/api/voice').catch(() => ({}));
+      switchTab('chat');
+      await sendText(data.callMode ? '/call off' : '/call on');
+      loadVoiceInfo();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && Call.active) { /* keep call alive; SR may pause, onend re-arms on return */ }
+      else if (!document.hidden && Call.active) restartListening();
+    });
+  }
+
   // ── input helpers ─────────────────────────────────────────────────────────
   function autosize(el) {
     el.style.height = 'auto';
@@ -756,18 +1153,28 @@
     });
 
     // browser dictation (free, built into Chrome/Android; hidden if unsupported)
+    // For a full two-way voice conversation use the 📞 Call tab — this button
+    // is one-shot dictation into the chat box.
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) $('#mic').style.display = 'none';
     else $('#mic').addEventListener('click', () => {
       const rec = new SR();
-      rec.lang = 'hi-IN';
-      rec.interimResults = false;
+      rec.lang = $('#call-lang')?.value || 'en-IN';
+      rec.interimResults = true;
+      $('#mic').textContent = '🔴';
       rec.onresult = (ev) => {
-        const text = ev.results[0][0].transcript;
-        $('#chat-input').value = text;
+        let finalText = '';
+        let interimText = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
+          else interimText += ev.results[i][0].transcript;
+        }
+        $('#chat-input').value = finalText || interimText;
         autosize($('#chat-input'));
-        sendText(text);
+        if (finalText.trim()) sendText(finalText.trim());
       };
+      rec.onend = () => { $('#mic').textContent = '🎤'; };
+      rec.onerror = () => { $('#mic').textContent = '🎤'; };
       rec.start();
     });
 
@@ -790,6 +1197,11 @@
 
     if (token) showApp();
     else showLogin();
+  }
+
+  boot();
+})();
+
   }
 
   boot();

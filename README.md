@@ -17,6 +17,13 @@
 > OpenRouter (Gemma 4 31B free) as a second brain. Limits + model table:
 > [`whatsapp-agent/AI-KEYS.md`](whatsapp-agent/AI-KEYS.md). Local stays the default.
 >
+> **3.0 = JARVIS voice calls:** seedha agent number pe **WhatsApp voice call** karo —
+> JARVIS uthata hai, bolke diye instructions PC pe execute hote hain, jawab call me
+> hi milta hai (experimental VoIP engine, honest fallback ke saath:
+> [`whatsapp-agent/WHATSAPP-CALL.md`](whatsapp-agent/WHATSAPP-CALL.md)). Neural British
+> butler voice offline, phone-app me live 📞 Call tab, WhatsApp voice-mode
+> (`/call on`) — [`whatsapp-agent/VOICE.md`](whatsapp-agent/VOICE.md).
+>
 > **2.1 fixes `/agent`:** it now actually performs the task (verified steps, real
 > tool calls) and says "step N pe ruk gaya" instead of pretending success — plus
 > **workload routing** (`/brains`): tiny jobs go to a small local model, heavy jobs

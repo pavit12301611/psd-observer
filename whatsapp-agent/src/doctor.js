@@ -18,6 +18,9 @@ import { imageStats } from './imaging.js';
 import { humanSize } from './files.js';
 import { findDshBinary, findSupportedNode } from './harness.js';
 import { solverStatus } from './solver.js';
+import { listTTSEngines, ttsStatus, resolvePiper } from './tts.js';
+import { transcriptionAvailable, localWhisperTool, localWhisperModel } from './transcribe.js';
+import { loadVoipEngine } from './wavoip.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -216,6 +219,46 @@ export async function runDoctor({ config, ctx = {}, log = console } = {}) {
       title: 'AI brain',
       detail: 'No local model server, no Ollama and no free API key — built-in commands and Hinglish intents still work, but free-form chat and multi-step tasks do not.',
       fix: './scripts/observer.sh models recommend   (downloads a Hugging Face GGUF + wires it up, fully offline after that)   ·   ya free cloud key: ./scripts/observer.sh keys groq <gsk_...>   (AI-KEYS.md)',
+    });
+  }
+
+  // ── 4b. JARVIS voice: bolna (TTS), sunna (STT), asli call (VoIP) ─────────
+  {
+    const engines = listTTSEngines(config);
+    const best = engines[0];
+    const neural = best && ['piper', 'edge-tts', 'xtts-clone'].includes(best.name);
+    const piper = resolvePiper(config);
+    checks.push({
+      icon: !best ? '⚠️' : neural ? '✅' : '⚠️',
+      title: 'JARVIS ki awaaz (TTS)',
+      detail: !best
+        ? 'koi voice engine nahi — /voicereply, /call aur Call tab me JARVIS bol nahi payega'
+        : neural
+          ? `${best.label} — preset "${config.ttsVoice || 'jarvis'}" · /voice se test karo`
+          : `${best.label} — robotic fallback chal raha hai (Piper ${piper ? 'hai par priority me neeche' : 'missing'})`,
+      fix: neural ? null : 'bash scripts/observer.sh voice setup   (free neural British en_GB voice, offline)',
+    });
+    const tool = localWhisperTool(config);
+    const hasLocalStt = Boolean(tool && (tool.kind === 'python' || localWhisperModel(config)));
+    checks.push({
+      icon: transcriptionAvailable(config) ? '✅' : '⚠️',
+      title: 'JARVIS ka sunna (STT)',
+      detail: hasLocalStt
+        ? `local whisper ready (${tool.kind === 'cpp' ? localWhisperModel(config) : 'python whisper'}) — voice notes + calls 100% offline`
+        : config.groqApiKey
+          ? 'Groq free-tier Whisper (cloud) — local whisper nahi hai'
+          : 'koi transcriber nahi — voice notes aur call commands samajh nahi aayenge (phone browser dictation fir bhi chalegi)',
+      fix: transcriptionAvailable(config) && hasLocalStt ? null : 'bash scripts/observer.sh voice whisper   (local whisper.cpp + model) · ya GROQ_API_KEY free tier',
+    });
+    const voipEngine = await loadVoipEngine(config).catch(() => null);
+    const voipLinked = fs.existsSync(path.join(config.voipAuthDir || '', 'creds.json'));
+    checks.push({
+      icon: config.waCallAnswer && voipEngine && voipLinked ? '✅' : '⚠️',
+      title: 'Asli WhatsApp call uthana',
+      detail: config.waCallAnswer && voipEngine && voipLinked
+        ? 'VoIP engine + linked device ready — agent number pe call karo, JARVIS uthayega 📞'
+        : `WA_CALL_ANSWER=${config.waCallAnswer ? 'on' : 'off'} · engine ${voipEngine ? 'found' : 'missing'} · VoIP login ${voipLinked ? 'linked' : 'nahi'} (tab tak calls voice-note line par aati hain)`,
+      fix: config.waCallAnswer && voipEngine && voipLinked ? null : 'bash scripts/observer.sh voice call-engine && bash scripts/observer.sh voice link-voip   (guide: WHATSAPP-CALL.md)',
     });
   }
 

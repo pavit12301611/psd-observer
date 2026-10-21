@@ -1,5 +1,6 @@
 // config.js — tiny .env loader (no dotenv dependency) + validated settings.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +34,11 @@ const bool = (v, fallback = false) =>
 
 const int = (v, fallback) => {
   const n = Number.parseInt(String(v ?? ''), 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const float = (v, fallback) => {
+  const n = Number.parseFloat(String(v ?? ''));
   return Number.isFinite(n) ? n : fallback;
 };
 
@@ -243,19 +249,73 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // screenshot from WhatsApp, and the portal keeps the image on disk anyway.
     portalTimeoutMs: int(e.PORTAL_TIMEOUT_MS, 60_000),
     ocrLangs: e.OCR_LANGS || 'eng',
-    // TTS (offline, free) — only on explicit /voicereply. Special calm voice, tez thi to 150→135
+    // ── JARVIS voice (3.0): neural British butler, offline-first ─────────────
+    // Engine order (tts.js): XTTS clone → Piper en_GB neural → Edge en-GB-Ryan
+    // → espeak robot. One-command setup: bash scripts/observer.sh voice setup
     ttsEngine: (e.TTS_ENGINE || 'auto').toLowerCase(),
-    ttsVoice: e.TTS_VOICE || 'special',
+    ttsVoice: e.TTS_VOICE || 'jarvis',
     ttsLang: e.TTS_LANG || 'auto',
-    ttsSpeed: int(e.TTS_SPEED, 135),
+    ttsSpeed: e.TTS_SPEED ? int(e.TTS_SPEED, 140) : null, // null = preset decides
+    ttsFx: (e.TTS_FX || 'jarvis').toLowerCase(), // jarvis | none (ffmpeg polish)
+    jarvisPitch: float(e.JARVIS_PITCH, 0), // 0 = natural, 0.94 = a shade deeper
+    jarvisPersona: bool(e.JARVIS_PERSONA, true),
+    jarvisAddress: e.JARVIS_ADDRESS || 'Sir',
+    // JARVIS speaks ENGLISH ONLY (the owner can still speak Hindi/Hinglish —
+    // he is understood; the British voice just never tries Hindi, badly).
+    jarvisEnglishOnly: bool(e.JARVIS_ENGLISH_ONLY, true),
     piperBin: e.PIPER_BIN || '',
     piperModel: e.PIPER_MODEL || '',
-    // Voice notes → text. Groq free tier if GROQ_API_KEY is set, otherwise a
-    // local whisper.cpp binary + model file (fully offline).
+    piperLengthScale: float(e.PIPER_LENGTH_SCALE, 1.05), // >1 = slower, measured
+    piperNoiseScale: float(e.PIPER_NOISE_SCALE, 0.55),
+    piperNoiseWScale: float(e.PIPER_NOISE_W_SCALE, 0.7),
+    edgeTtsBin: e.EDGE_TTS_BIN || '',
+    edgeTtsVoice: e.EDGE_TTS_VOICE || '',
+    edgeTtsVoiceHindi: e.EDGE_TTS_VOICE_HINDI || 'hi-IN-MadhurNeural',
+    // True voice CLONE (optional, advanced): a local Coqui XTTS server
+    // (daswer123/xtts-api-server) + your reference clip. See VOICE.md.
+    xttsUrl: (e.XTTS_URL || '').replace(/\/$/, ''),
+    xttsSpeaker: e.XTTS_SPEAKER || '',
+    voiceDir: path.resolve(ROOT, e.VOICE_DIR || path.join(os.homedir(), '.local/share/observer-voice')),
+    // Voice notes / calls → text. SPEED FIRST since 3.1.11: when a Groq key
+    // exists, its Whisper large-v3 (API) transcribes — ~10x faster than the
+    // local base model AND far better at Hinglish. Local whisper.cpp stays
+    // as the automatic offline backup. STT_ENGINE=local pins it to offline.
+    sttEngine: (e.STT_ENGINE || 'auto').toLowerCase(), // auto|api|local
+    sttTimeoutMs: int(e.STT_TIMEOUT_MS, 20_000),
     whisperBin: e.WHISPER_BIN || '',
     whisperModel: e.WHISPER_MODEL || '',
-    whisperModelGroq: e.WHISPER_MODEL_GROQ || 'whisper-large-v3-turbo',
+    whisperModelPy: e.WHISPER_MODEL_PY || 'base',
+    whisperModelGroq: e.WHISPER_MODEL_GROQ || 'whisper-large-v3',
     whisperLanguage: e.WHISPER_LANGUAGE || 'auto',
+
+    // ── Voice calls (3.0) ────────────────────────────────────────────────────
+    // Phone-app live call + WhatsApp voice-note call mode.
+    voiceCall: bool(e.VOICE_CALL, true),
+    voiceMaxSpokenChars: int(e.VOICE_MAX_SPOKEN_CHARS, 340),
+    voiceSilenceEndMs: int(e.VOICE_SILENCE_END_MS, 600),
+    // Live calls: turn itna lamba ja raha ho to JARVIS khali chuppi ki jagah
+    // ek chhota "One moment, Sir." bol deta hai (3.1.11 speed pass).
+    waCallFiller: bool(e.WA_CALL_FILLER, true),
+    waCallFillerMs: int(e.WA_CALL_FILLER_MS, 1400),
+    // WhatsApp: also send a JARVIS voice note with every text reply.
+    whatsappVoiceReplies: bool(e.WHATSAPP_VOICE_REPLIES, false),
+    // REAL WhatsApp voice-call answering (experimental VoIP engine,
+    // src/wavoip.js). Needs a second linked device + ffmpeg. Setup:
+    //   bash scripts/observer.sh voice call-engine
+    // Until then, an incoming owner call falls back per WA_CALL_FALLBACK.
+    waCallAnswer: bool(e.WA_CALL_ANSWER, false),
+    // WASM call-setup logs in the journal ([voip-wasm:…], keyword-filtered by
+    // the engine) — THIS is where a silently-dropped call explains itself.
+    waVoipDebug: bool(e.WA_VOIP_DEBUG, true),
+    waVoipLogLevel: String(e.WA_VOIP_LOG_LEVEL ?? '').trim(), // '2' = unfiltered WASM firehose (forensics)
+    // Raw JSON of WASM AB-prop overrides, forwarded to the engine before it
+    // loads (CALL_WASM_AB_PROPS_JSON). E.g. WA_VOIP_AB_PROPS={"enable_fast_call_setup_callee_v2":false}
+    waVoipAbProps: String(e.WA_VOIP_AB_PROPS ?? '').trim(),
+    waCallFallback: (e.WA_CALL_FALLBACK || 'voice-session').toLowerCase(), // voice-session|ignore|reject
+    waCallFallbackDelayMs: int(e.WA_CALL_FALLBACK_DELAY_MS, 12_000),
+    waCallUnknown: (e.WA_CALL_UNKNOWN || 'ignore').toLowerCase(), // ignore|reject
+    waCallMaxMinutes: int(e.WA_CALL_MAX_MINUTES, 15),
+    voipEnginePath: e.VOIP_ENGINE_PATH || '',
 
     // ── DeepSeek Harness (`@deepseek-ai/dsh`) full-power Linux integration ──
     deepseekApiKey: e.DEEPSEEK_API_KEY || '',
@@ -285,6 +345,8 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
 
     dataDir,
     authDir: path.resolve(ROOT, e.AUTH_DIR || 'auth_info'),
+    // The WhatsApp call engine (baileys-caller) needs its OWN linked device.
+    voipAuthDir: path.resolve(ROOT, e.VOIP_AUTH_DIR || 'auth_info_voip'),
     downloadsDir: path.join(dataDir, 'downloads'),
     sharedDir: path.join(dataDir, 'shared'),
     storeFile: path.join(dataDir, 'store.json'),

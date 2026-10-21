@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO="${REPO:-pavit12301611/psd-observer}"
-BRANCH="${BRANCH:-arena/5055bd15-psd-observer}"
+BRANCH="${BRANCH:-arena/592311b3-psd-observer}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -x "$HERE/observer.sh" ]; then

@@ -28,6 +28,7 @@ import {
   candidateNumbers, candidateLids, isOwner, isGroupJid, isBroadcastJid,
   isNewsletterJid, jidToNumber, maskNumber, normalizeNumber, numberToJid,
 } from './allowlist.js';
+import { jarvisGreeting, spokenSummary } from './jarvis.js';
 import * as ai from './ai.js';
 import * as ocr from './ocr.js';
 import * as solver from './solver.js';
@@ -117,6 +118,11 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     stopped: false,
     simulated: [], // dry-run sent log for tests/dashboard
     downloadMediaMessage: null, // set by start() from the lazily loaded Baileys
+    // Incoming voice calls (3.0): the real answering engine (src/wavoip.js)
+    // is attached by index.js; until it reports connected, owner calls fall
+    // back to an instant JARVIS voice-note session (see handleCallEvents).
+    voipCoordinator: null,
+    callTimers: new Map(), // callId → fallback timer
     lastSentImage: null, // last screenshot we sent to owner — used to diff red marks
     lastSentImageAt: 0,
   };
@@ -197,6 +203,51 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     try { await state.sock.sendMessage(chatJid, { react: { text: emoji, key } }); } catch { /* cosmetic */ }
   }
 
+  // ── JARVIS voice identity + mode ──────────────────────────────────────────
+
+  /** True when a call/message JID belongs to the owner (phone JID, learned
+   *  owner LID, or the call event's callerPn). Unknown LIDs never pass. */
+  function isOwnerJid(jid, extra = []) {
+    if (!jid) return false;
+    const jidStr = String(jid);
+    if (jidStr.endsWith('@lid')) {
+      const user = jidStr.split('@')[0].split(':')[0];
+      if (state.ownerLids.has(jidStr) || state.ownerLids.has(user) || state.ownerLids.has(`${user}@lid`)) return true;
+    }
+    const numbers = [jidToNumber(jidStr)];
+    for (const cand of Array.isArray(extra) ? extra : [extra]) {
+      if (!cand) continue;
+      const candStr = String(cand);
+      numbers.push(jidToNumber(candStr), normalizeNumber(candStr.split('@')[0]));
+    }
+    return isOwner(numbers.filter(Boolean), config.ownerNumber);
+  }
+
+  function voiceModeOn() {
+    return config.voiceCall !== false
+      && Boolean(config.whatsappVoiceReplies || store.data.voiceCallMode);
+  }
+
+  /** In voice mode, follow the text reply with a JARVIS voice note. */
+  async function maybeVoiceReply(reply, chatJid, rawMsg) {
+    if (!voiceModeOn() || reply == null) return;
+    try {
+      const flat = typeof reply === 'string' ? { text: reply } : reply;
+      if (flat.audio) return; // already carries audio (e.g. /voicereply, /call on)
+      const text = String(flat.text ?? '').trim();
+      if (!text || text.startsWith('⏳')) return;
+      const spoken = (agent.spokenFor ? agent.spokenFor(reply) : spokenSummary(reply, config)) || '';
+      if (!spoken.trim()) return;
+      const audioReply = agent.jarvisAudioReply
+        ? await agent.jarvisAudioReply(spoken)
+        : null;
+      if (!audioReply || typeof audioReply === 'string' || !audioReply.audio) return;
+      await transportSend(chatJid, { audio: audioReply.audio, mimetype: audioReply.mimetype, ptt: audioReply.ptt }, rawMsg);
+    } catch (err) {
+      log.warn?.(`[wa] voice reply skipped: ${err.message}`);
+    }
+  }
+
   // ── inbound pipeline (shared by real WhatsApp and dry-run simulate) ─────
 
   async function processOwnerMessage({ chatJid, content, rawMsg }) {
@@ -214,7 +265,10 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     if (!config.dryRun) { try { await state.sock.sendPresenceUpdate('composing', chatJid); } catch { /* cosmetic */ } }
     try {
       const reply = await agent.handle(content.text, { waStatus: status, mediaMeta: content.mediaMeta });
-      if (reply != null) await transportSend(chatJid, reply, rawMsg);
+      if (reply != null) {
+        await transportSend(chatJid, reply, rawMsg);
+        await maybeVoiceReply(reply, chatJid, rawMsg);
+      }
       store.bump('replied');
       await react(chatJid, key, '✅');
     } catch (err) {
@@ -382,6 +436,32 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
       try {
         const { text, provider } = await transcribeAudio(config, buffer, content.media?.mimetype ?? 'audio/ogg', log);
         await transportSend(chatJid, `🎙️ *Samjha:* ${text.slice(0, 1500)}${text.length > 1500 ? '…' : ''}\n_(transcribed free · ${provider})_`, rawMsg);
+        // Voice notes go through the SAME voice brain as the live call:
+        // Hindi normalisation, "X aur Y" multi-command chaining, spoken
+        // confirmations and (in /call mode) a JARVIS voice-note answer.
+        if (agent.voice?.sayWhatsApp) {
+          try {
+            if (!config.dryRun && state.sock) { try { await state.sock.sendPresenceUpdate('composing', chatJid); } catch { /* cosmetic */ } }
+            const res = await agent.voice.sayWhatsApp(text);
+            const reply = res?.reply ?? (res?.text || null);
+            if (reply != null && reply !== '') await transportSend(chatJid, reply, rawMsg);
+            const flat = typeof reply === 'string' ? { text: reply } : (reply ?? {});
+            if (voiceModeOn() && res?.audio?.buffer && !flat.audio) {
+              await transportSend(chatJid, {
+                audio: res.audio.buffer,
+                mimetype: res.audio.mimetype ?? 'audio/ogg; codecs=opus',
+                ptt: (res.audio.mimetype || '').includes('opus') || res.audio.ext === 'ogg',
+              }, rawMsg);
+            } else if (reply != null) {
+              await maybeVoiceReply(reply, chatJid, rawMsg);
+            }
+            store.bump('replied');
+            if (!config.dryRun && state.sock) { try { await state.sock.sendPresenceUpdate('paused', chatJid); } catch { /* cosmetic */ } }
+            return;
+          } catch (err) {
+            log.warn?.(`[wa] voice pipeline failed (${err.message}); falling back to typed handling`);
+          }
+        }
         // Treat the transcript exactly like a typed message: it can be a command!
         return processOwnerMessage({ chatJid, content: { kind: 'text', text }, rawMsg });
       } catch (err) {
@@ -575,6 +655,114 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     return candidateLids(key).some((lid) => state.ownerLids.has(lid) || state.ownerLids.has(lid.split('@')[0]));
   }
 
+  // ── incoming WhatsApp voice calls ─────────────────────────────────────────
+  // This messaging socket can detect + reject calls but cannot carry audio
+  // (official Baileys limitation). The real answering happens in the VoIP
+  // engine (src/wavoip.js, its own linked device). Coordination rule:
+  //   • Engine connected → do nothing here. Only if it has NOT answered
+  //     within WA_CALL_FALLBACK_DELAY_MS (and no device accepted either) do
+  //     we step in — rejecting from here too early would kill the call.
+  //   • Engine absent/off → after a short "pickup" beat, reject and start a
+  //     JARVIS voice-note session, so calling still *reaches* JARVIS.
+  // Non-owner callers: ignored (or rejected per WA_CALL_UNKNOWN). Never,
+  // ever answered — a call into this agent is a call into the owner's PC.
+
+  function clearCallTimer(callId) {
+    const timer = state.callTimers.get(callId);
+    if (timer) { clearTimeout(timer); state.callTimers.delete(callId); }
+  }
+
+  async function rejectCallSafe(callId, from) {
+    try { await state.sock?.rejectCall?.(callId, from); } catch (err) { log.warn?.(`[wa] rejectCall failed: ${err.message}`); }
+  }
+
+  async function runCallFallback(callId, from, offerAt = 0) {
+    state.callTimers.delete(callId);
+    if (state.voipCoordinator?.recentlyAnswered?.(callId, offerAt)) return; // engine took it after all
+    log.info?.('[wa] owner call not answered by VoIP engine — starting JARVIS voice session fallback');
+    await rejectCallSafe(callId, from);
+    if (!store.data.voiceCallMode) { store.data.voiceCallMode = true; store.save(); }
+    const engineReady = Boolean(state.voipCoordinator?.isHandlingCalls?.());
+    const greeting = jarvisGreeting(config);
+    const spoken = `${greeting} I have picked up your call on our voice line, ${config.jarvisAddress || 'Sir'}. Simply send a voice note and I shall carry it out. To speak with me live, open the Call tab in your phone app.`;
+    try {
+      const audio = agent.jarvisAudioReply ? await agent.jarvisAudioReply(spoken) : null;
+      if (audio && typeof audio !== 'string') await sendToOwner(audio);
+    } catch (err) { log.warn?.(`[wa] call greeting voice failed: ${err.message}`); }
+    // Name the EXACT failed stage so the owner can fix it in one step —
+    // "call cut gaya" bina wajah ke kabhi nahi.
+    const st = state.voipCoordinator?.status?.() ?? null;
+    const lastEngineEvent = Array.isArray(st?.lastEvents) && st.lastEvents.length
+      ? st.lastEvents[st.lastEvents.length - 1]
+      : null;
+    const reason = engineReady
+      ? `Engine ready tha par is call ko answer nahi kar paaya — ek baar dobara call karke dekho; agent phone silent/DND pe rakho taaki wahi pehle na uthaye.${lastEngineEvent ? `\n_(engine ki aakhri khabar: ${lastEngineEvent.kind}${lastEngineEvent.detail ? ` — ${String(lastEngineEvent.detail).slice(0, 100)}` : ''})_` : ''}`
+      : st?.stage === 'engine-missing'
+        ? 'Wajah: VoIP engine *install hi nahi hua*. Fix (ek baar): `bash scripts/observer.sh voice call-engine`'
+        : st?.stage === 'not-linked'
+          ? 'Wajah: VoIP device *link nahi hua* (QR scan baaki hai). Fix: `bash scripts/observer.sh voice link-voip`'
+          : st?.stage === 'connect-failed' || st?.stage === 'connecting'
+            ? `Wajah: engine connect nahi ho pa raha${st.lastError ? ` (${String(st.lastError).slice(0, 120)})` : ''} — main khud retry kar raha hoon. Fix: \`bash scripts/observer.sh voice status\`, na bane to \`voice call-engine\` dobara.`
+            : 'Asli WhatsApp call uthane wala engine abhi ON nahi hai.';
+    await sendToOwner([
+      '📞 *Call received, Sir.*',
+      reason,
+      'Tab tak *Voice Call Mode ON* kar diya hai: voice note bhejo, main sun ke command execute karke JARVIS ki awaaz me jawab dunga.',
+      engineReady ? '' : 'Live baat-cheet ke liye phone app ka *📞 Call tab* abhi, isi waqt kaam karta hai. Poori guide: WHATSAPP-CALL.md',
+      'Live status: /call · Voice mode band karna ho: /call off',
+    ].filter(Boolean).join('\n'));
+  }
+
+  async function handleCallEvents(calls) {
+    for (const event of calls ?? []) {
+      try {
+        const callId = String(event.id ?? '');
+        const from = event.from ?? event.chatId ?? '';
+        if (event.status === 'accept') { clearCallTimer(callId); log.info?.('[wa] call accepted on some device — fallback cancelled'); continue; }
+        if (['terminate', 'reject', 'timeout'].includes(event.status)) { clearCallTimer(callId); continue; }
+        if (event.status !== 'offer' || event.isGroup) continue;
+
+        const owner = isOwnerJid(from, [event.callerPn, event.caller_pn]);
+        if (!owner) {
+          log.info?.(`[wa] incoming call from non-owner (${from}) — ${config.waCallUnknown === 'reject' ? 'rejecting' : 'ignored, ring jane diya'}`);
+          if (config.waCallUnknown === 'reject') await rejectCallSafe(callId, from);
+          continue;
+        }
+        log.info?.(`📞 [wa] OWNER is calling JARVIS on WhatsApp (from=${from}${event.callerPn || event.caller_pn ? `, callerPn=${event.callerPn ?? event.caller_pn}` : ''}, id=${callId})`);
+        // Tell the VoIP engine "the owner is ringing RIGHT NOW" — it may only
+        // see his anonymous @lid, while this socket just verified callerPn.
+        // Also nudges an immediate reconnect if the engine dropped earlier.
+        state.voipCoordinator?.noteOwnerCall?.({ callId, from, callerPn: event.callerPn ?? event.caller_pn ?? '' });
+        if (config.waCallFallback === 'ignore') continue;
+        if (config.waCallFallback === 'reject' && !state.voipCoordinator?.isHandlingCalls?.()) {
+          await rejectCallSafe(callId, from);
+          await sendToOwner('📞 Sir, WhatsApp calls abhi band hain (WA_CALL_FALLBACK=reject). Phone app ka 📞 Call tab use karo, ya /call on karke voice notes bhejo.');
+          continue;
+        }
+        // Give the real VoIP engine first chance to pick up. The engine's own
+        // pipeline (offer decryption queue + WASM relay-latency handshake)
+        // legitimately takes up to ~20s before acceptCall lands — rejecting
+        // from THIS socket earlier kills the ringing call on every device,
+        // so while the engine is up we wait at least 35s before stepping in.
+        const offerAt = Date.now();
+        const configured = Number(config.waCallFallbackDelayMs) || 12_000;
+        const handling = Boolean(state.voipCoordinator?.isHandlingCalls?.());
+        const engineWanted = Boolean(config.waCallAnswer);
+        const delay = handling
+          ? Math.max(35_000, configured)
+          : engineWanted
+            ? Math.min(6_000, configured) // reconnect-in-flight ko ek mauka
+            : Math.min(2_500, configured);
+        clearCallTimer(callId);
+        const timer = setTimeout(() => { runCallFallback(callId, from, offerAt).catch((err) => log.error?.(`[wa] call fallback failed: ${err.message}`)); }, delay);
+        timer.unref?.();
+        state.callTimers.set(callId, timer);
+      } catch (err) {
+        log.error?.(`[wa] call event handling failed: ${err.message}`);
+      }
+    }
+  }
+
   async function handleUpsert({ messages, type }) {
     if (type !== 'notify') return; // ignore history sync / appends
     const queued = [];
@@ -671,6 +859,8 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('messages.upsert', handleUpsert);
+    // 📞 WhatsApp calls: hand to the VoIP engine (real pickup) or fall back.
+    try { sock.ev.on('call', (calls) => { handleCallEvents(calls).catch((err) => log.error?.(`[wa] call handler failed: ${err.message}`)); }); } catch { /* very old Baileys build */ }
     // Learn the owner's LID so the owner gate also matches pure-LID addressing.
     sock.ev.on('lid-mapping.update', (mapping) => {
       const entries = Array.isArray(mapping) ? mapping : [mapping];
@@ -820,5 +1010,10 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     return { ignored: false, sent: state.simulated.slice(before) };
   }
 
-  return { start, stop, status, sendToOwner, simulate, runOwner, state };
+  return {
+    start, stop, status, sendToOwner, simulate, runOwner, state,
+    isOwnerJid, handleCallEvents,
+    learnOwnerLid: (lid) => rememberOwnerLid(lid),
+    setVoipCoordinator: (coordinator) => { state.voipCoordinator = coordinator; },
+  };
 }

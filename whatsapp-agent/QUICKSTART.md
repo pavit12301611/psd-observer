@@ -29,9 +29,9 @@ Everything is free; no paid API, no Observer app.
 ```bash
 # ek hi script — install + update + models + doctor, sab isi me
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/592311b3-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/592311b3-psd-observer"
 
 bash /tmp/observer.sh install --service --power --phone --model auto
 ```
@@ -54,24 +54,24 @@ Sirf download karna hai (install baad me): `--no-install`.
 Tum git use nahi karte, isliye ye sirf record ke liye hai. Agar kabhi git chahiye:
 
 ```bash
-git clone -b arena/5055bd15-psd-observer https://github.com/pavit12301611/psd-observer.git
+git clone -b arena/592311b3-psd-observer https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ```
 
-> ⚠️ 2.3 code sirf `arena/5055bd15-psd-observer` branch pe hai, `main` pe nahi.
+> ⚠️ 2.3 code sirf `arena/592311b3-psd-observer` branch pe hai, `main` pe nahi.
 
 ### 🅲 Na script, na curl-fallback — seedha tar/zip manually
 
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5055bd15-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/592311b3-psd-observer"
 tar -xzf agent.tar.gz
 mv psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent ~/observer-agent
 cd ~/observer-agent
 ```
 
-(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5055bd15-psd-observer.zip`)
+(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/592311b3-psd-observer.zip`)
 
 ---
 
@@ -121,9 +121,9 @@ chalata hai aur service restart karta hai.
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/592311b3-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/592311b3-psd-observer"
 
 bash /tmp/observer.sh update --dir ~/observer-agent
 bash /tmp/observer.sh update --check          # sirf version compare
@@ -149,7 +149,7 @@ karna padega), `data/` (PIN, token, notes, reminders, todos, downloads),
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/5055bd15-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/592311b3-psd-observer"
 tar -xzf agent.tar.gz
 cd psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent
 # naye code ko purani install ke upar copy karo (secrets ko chhod ke)
@@ -162,7 +162,7 @@ systemctl --user restart observer-whatsapp-agent
 
 Version check: `./scripts/observer.sh update --check` (remote version dikhata hai).
 Browser se bhi download kar sakte ho:
-`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/5055bd15-psd-observer.zip`
+`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/592311b3-psd-observer.zip`
 
 ---
 
@@ -419,3 +419,35 @@ Aur zyada: [`README.md`](README.md) (agent guide) · [`../FEDORA.md`](../FEDORA.
   8787 forward **mat** karo.
 - `.env`, `auth_info/` (WhatsApp login), `data/` — kabhi git me mat daalo
   (already gitignored).
+
+---
+
+## 12. JARVIS se call pe baat karo (3.0) ☎️
+
+**Bina kisi setup ke (abhi try karo):** phone app kholo → neeche **📞 Call**
+tab → *Call JARVIS* → bolo: "chrome kholo aur screenshot bhej do". JARVIS
+karega bhi, bolke jawab bhi dega.
+
+**Awaaz asli British neural banane ke liye (ek baar, PC pe):**
+
+```bash
+bash scripts/observer.sh voice setup     # Piper en_GB (~90 MB, offline)
+bash scripts/observer.sh voice whisper   # sunna offline (ya GROQ_API_KEY)
+bash scripts/observer.sh voice test      # test voice note
+```
+
+**Seedha WhatsApp call JARVIS uthaye (experimental, opt-in):**
+
+```bash
+bash scripts/observer.sh voice call-engine
+bash scripts/observer.sh voice link-voip   # QR scan (agent phone se)
+bash scripts/observer.sh voice answer on
+```
+
+Phir apne phone se agent number pe WhatsApp **voice call** karo — JARVIS
+utha lega. Engine kabhi fail ho to call automatic voice-note session ban
+jati hai; tum latakte nahi. Poori guide + sach + risk:
+[`WHATSAPP-CALL.md`](WHATSAPP-CALL.md) · awaaz ki guide: [`VOICE.md`](VOICE.md).
+
+WhatsApp commands: `/call on` (har jawab voice note me) · `/call` (status) ·
+`/voice` (engine status) · `/callme` (JARVIS tumhe call kare).

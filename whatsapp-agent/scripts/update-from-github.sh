@@ -8,8 +8,12 @@
 set -euo pipefail
 
 REPO="${REPO:-pavit12301611/psd-observer}"
-BRANCH="${BRANCH:-arena/5055bd15-psd-observer}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Track the branch this install came from (see observer.sh: .observer-branch)
+if [ -z "${BRANCH:-}" ] && [ -f "$HERE/../.observer-branch" ]; then
+  BRANCH="$(tr -d '[:space:]' < "$HERE/../.observer-branch" 2>/dev/null || echo "")"
+fi
+BRANCH="${BRANCH:-arena/592311b3-psd-observer}"
 
 # old flag compatibility: `--fresh <dir>` meant "install from scratch"
 ARGS=(update)

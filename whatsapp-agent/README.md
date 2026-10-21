@@ -1,4 +1,4 @@
-# 👁️ Observer Agent 2.4 — your PC, in your pocket
+# 👁️ Observer Agent 3.0 — your PC, in your pocket
 
 A personal agent that runs on **your own Fedora/Linux computer for ₹0** and is
 driven from **WhatsApp** *and* from an **installable phone app** — no Observer
@@ -11,6 +11,7 @@ app, no Twilio, no Meta Cloud API, no subscription, no per-message cost.
 - ⚡ **Offline intents** — even with **no AI at all**, "chrome kholo", "screenshot bhej do", "wifi off karo", "thesis.pdf dhundo" work instantly.
 - 🖥️ **Full PC control** — open *any* installed app, files, screenshots, OCR, typing/clicking, Wi-Fi/Bluetooth, volume/brightness/music, download links, zip, webcam, screen recording, services, processes, power.
 - 🎙️ **Voice notes & documents** — voice notes are transcribed (free), photos are OCR'd, PDFs/DOCX are read and summarised — then acted on like text.
+- ☎️ **JARVIS voice calls (3.0)** — seedha agent number pe **WhatsApp voice call** karo: JARVIS uthata hai, tum bolke instruction dete ho, woh PC pe execute karke **call me hi bolke jawab** deta hai ([`WHATSAPP-CALL.md`](WHATSAPP-CALL.md)). Neural British butler voice (offline Piper), phone-app ka 📞 Call tab, aur har jawab ke saath voice-note mode (`/call on`) — poori guide: [`VOICE.md`](VOICE.md).
 - 🔐 **Owner-only + confirmations** — one listener rule, destructive actions need `haan`/`yes`, shell is separately opt-in with a PIN.
 
 > ⚠️ **Honest warning:** Baileys is an *unofficial* WhatsApp Web client. WhatsApp can restrict numbers that automate or spam. This agent only ever talks 1-to-1 with you, replies only, is rate-limited — keep it that way, and never run it on your main number. The phone app is your own PC's web server: LAN-only unless you deliberately expose it.
@@ -32,9 +33,9 @@ in **one script**: [`scripts/observer.sh`](scripts/observer.sh). Download it onc
 
 ```bash
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/592311b3-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/592311b3-psd-observer"
 
 bash /tmp/observer.sh install --service --power --phone --model auto
 ```
@@ -48,6 +49,7 @@ model that fits the machine — all from that one file.
 | `observer.sh install` | first-time install (curl tarball, no git) |
 | `observer.sh update` | update code, keeps `.env` / login / `data/` |
 | `observer.sh models …` | Hugging Face GGUF: list, recommend, download, serve, wire |
+| `observer.sh voice …` | JARVIS voice: `setup` (Piper en_GB), `whisper`, `call-engine` + `link-voip` (asli WhatsApp call), `status` / `test` |
 | `observer.sh doctor` | what is broken + the exact fix |
 | `observer.sh service …` | systemd unit install/restart/logs |
 | `observer.sh start` / `relink` / `remote` / `fix` | run, new QR, Tailscale, desktop fixes |
@@ -528,9 +530,9 @@ is needed and Enter is pressed exactly once.
 ```bash
 # already installed (raw.githubusercontent block ho to API fallback):
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/5055bd15-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/592311b3-psd-observer/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/5055bd15-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/592311b3-psd-observer"
 
 bash /tmp/observer.sh update --dir ~/observer-agent   # apna install path
 bash /tmp/observer.sh update --check                  # sirf version dekho

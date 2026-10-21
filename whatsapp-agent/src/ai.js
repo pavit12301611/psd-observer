@@ -33,11 +33,20 @@ async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal 
   return res.json();
 }
 
-function systemPrompt(config, store) {
+function systemPrompt(config, store, opts = {}) {
   const facts = Object.entries(store?.data?.facts ?? {}).map(([k, v]) => `- ${k}: ${v}`).join('\n');
   const openTodos = (store?.data?.todos ?? []).filter((t) => !t.done).map((t) => `- ${t.text}`).join('\n');
+  const address = (config.jarvisAddress || 'Sir').trim() || 'Sir';
+  const voiceLine = opts.voice
+    ? [`This question was SPOKEN to you on a live voice call; your answer will be read aloud. ${config.jarvisEnglishOnly === false ? '' : 'Answer in English only, even if the question was in Hindi/Hinglish. '}Answer conversationally in 1-3 short sentences; never read lists, links or code aloud — say the detail has been sent in text.`]
+    : [];
+  const persona = config.jarvisPersona === false ? [] : [
+    `Your persona is JARVIS — a calm, impeccably polite British butler-AI in the spirit of the films. Address the owner as "${address}". Dry wit, never rude; brief and precise. Prefer lines like "Very well, ${address}.", "At once, ${address}." and "Shall I proceed, ${address}?" — sparingly, not in every sentence. When the owner speaks Hinglish or Hindi, keep the same butler warmth in that language ("Ho gaya, ${address}."). Never say you are an AI language model; you are JARVIS, running on the owner's own computer.`,
+  ];
   return [
     'You are the owner\'s personal WhatsApp assistant, running for free on their own computer as part of Observer.',
+    ...persona,
+    ...voiceLine,
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
     'Style: WhatsApp-short. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". If you don\'t know, say so briefly.',
@@ -114,10 +123,10 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
  * Chat with history. Returns { text, provider, model, tier } or null when no
  * brain is reachable.
  */
-export async function chat(config, store, userText, log = console) {
+export async function chat(config, store, userText, log = console, opts = {}) {
   const router = routerFor(config, log);
   const messages = [
-    { role: 'system', content: systemPrompt(config, store) },
+    { role: 'system', content: systemPrompt(config, store, opts) },
     ...(store?.data?.history ?? []).slice(-12),
     { role: 'user', content: userText },
   ];

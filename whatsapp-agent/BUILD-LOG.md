@@ -1,5 +1,281 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.11 — Speed pass: sunna Groq API se (tez + sahi), filler ack, /callme hi main raasta
+
+User ka faisla: native pickup ki ladai park — wo `/callme` (outgoing, unke PC par proven) se operate karega. Asli shikayat: jawab late + "mostly meri baat galat samajhta hai". Root cause `transcribe.js` me tha: **local whisper hamesha pehle** chalta tha (ggml-base, CPU par 2–6s, Hinglish weak) aur kuchh-na-kuchh text de deta tha, isliye maujood `groqWhisper` fallback kabhi chala hi nahi. Ab `STT_ENGINE=auto` (default): key hai to **Groq whisper-large-v3 pehle** (command-vocabulary primer + temperature 0 + timeout 20s, calls me 12s), local sirf backup; `STT_ENGINE=local` = audio kabhi bahar nahi. Primer-echo hallucination guard bhi: chuppi par Whisper primer ko hi "sun" le to use kuchh-nahi-suna maano (ghost command execute na ho). Groq model default turbo → large-v3 (accuracy pehle; short clip par waise bhi sub-second).
+
+Baaki deri bhi kaati: `voiceSilenceEndMs` 900→600 (config + segmenter defaults); live call me **filler ack** — koi turn `WA_CALL_FILLER_MS` (default 1400) se lamba jaye to call-start par pre-synthesised "One moment, Sir." PCM bol deta hai (per-call cache, 4s synth-race, per-turn exactly once; `feedSpeech` se `writePcm` refactor). Doctor ka sunna-line ab asal STT engine dikhata hai. Tests **222/222** (4 naye: API-first order, local-pin kabhi cloud nahi, primer-echo guard, filler pehle-bola-jata-hai ordering). Patch v9 (`:0` device normalize) is release me NAHI banaya — park hai; user jab bolega, ek test call me try hoga. Callback-workaround ki bhi zaroorat nahi padi — `/callme` user khud istemal kar raha hai.
+
+
+## v3.1.10 — Ek comma ki galti: deviceJidsCsv ek CSV string hoti hai, list nahi (patch v8)
+
+3.1.9 ki call (`00A45326…`): discovery kaam kar gayi — `peer devices: ["12223644725256@lid","12223644725256:30@lid","12223644725256:32@lid"]` (bare = primary device 0 implicit; 30/32 companions). Lekin join native par hi ruk gaya: `WaCallWebCallingBridge.cpp:390 Mismatch in participant arrays sizes` → call kabhi active nahi bani → `accept_timeout` 20s. Wajah: `joinVoipOngoingCall` ki teeno lists PARALLEL hoti hain (per participant ek entry); `deviceJidsCsv[i]` us participant ke saare devices ki **ek comma-joined string** hai — upstream ka `resolveGroupParticipant` bilkul yahi banata hai (`devices.join(",")`) aur index ka group-join wahi push karta hai. Mera v7 teen alag elements bhej raha tha (pn=1, lid=1, dev=3).
+
+Patch **v8**: `deviceJidsCsv = [_peerDevices.join(",")]` + har offer par raw `<call>` node attrs ka log (epoch/platform — WASM "platform NaN" bol raha hai kyunki platform attr numeric nahi mil raha; agla forensic point). Fast-callee prop se buffering par koi fark nahi pada (transaction_id ab bhi -1) — prop on rehne diya, nuqsaan nahi.
+
+
+## v3.1.9 — Akela blocker bacha: join-lobby 404 NACK (patch v7: asli device JIDs + fast-callee)
+
+3.1.8 (patch v6) ki call `0027DA7E…` me gate pehli baar 100% sahi chala: `lobbyAck= pending=true` → "waiting for LobbyAck" → LobbyAck aaya — aur wo **404 NACK** tha (`handle_lobby_ack: error code: 404`, event 94, `lobby_exit_nack_code: 404`). `joinable_accept_before_lobby_ack` is baar fieldstats se ghayab — timing theek; ab server join ko hi mana kar raha hai. (Ek chhoti galti bhi pakdi: onLog sniff nack wali "LobbyAck from" line par bhi ack-flag set kar deta tha — gate nack par khul gaya.)
+
+Offer ki asal shape (user ke journal se): attrs `[call-creator, call-id, device_class, caller_pn, joinable, caller_country_code]`, children `[audio, audio, capability, enc, encopt, net, rte, uploadfieldstat, userrate, voip_settings, relay]` — `offline` hai hi nahi (isOffline shak khatam), `platform` bhi nahi (isliye WASM "platform NaN / peer_platform 0" bolta hai). Peer har jagah bare `12223644725256@lid`, jabki phone ke stanza `…:0@lid` device se aate hain.
+
+Patch **v7**: (1) offer aate hi `discoverPeerDevices` (usync) se caller ke device JIDs seekho, join me wahi bhejo (3s race cap + bare fallback) — v2 ka andaza wala `[bareLid]` hata; (2) `enable_fast_call_setup_callee_v2: true` AB prop (binary me maujood, lib kabhi set nahi karta; `enable_pending_call` bhi binary me hai — anchored-grep wali meri pehli khoj galat thi); (3) gate nack-aware (event 94 par ack-flag saaf + nacked yaad rakho, last-resort accept turant khule aankhon se); (4) gate diagnostic me `getCallInfo()` ki jhalak. Saath me `WA_VOIP_AB_PROPS` (.env) → engine-load se pehle `CALL_WASM_AB_PROPS_JSON` forward, taaki aage ke prop A/B bina release ho.
+
+
+## v3.1.8 — Do lobby, do ack: gate claim-ack par khul gaya tha, join-ack chahiye tha (patch v6)
+
+3.1.7 (`00A789A6…`) ka 100-line journal poora sequence dikha gaya: offer record (transaction_id -1) → claim ka lobby → **LobbyAck #1** ("updating call log from LobbyAck message" + event 93) → hamaara join → `Handle MESSAGE Offer` + `None -> Rejoining` → **join ka lobby #2** → gate line: `lobbySent=00A7… lobbyAck=00A7… pending=false` → accept → phone terminate + **LobbyAck #2 (post-mortem)** → Accept 404.
+
+Matlab claim-lobby ka ack sirf joinable call-log banata hai; server ki nazar me room-entry JOIN-wale lobby se hoti hai, aur WASM ka `joinable_accept_before_lobby_ack` usi doosre ack ki baat karta hai. Mera gate pehle ack ko final samajh baitha (v4 design me "first ack wins" jaan-boojh ke chhoda tha — galat saabit hua).
+
+Patch **v6**: lobby nikalte hi `_lobbyAckCallId = ""` — do jagah (join-flag site par braced block me, aur byte-sniff ke hit par). Gate ab hamesha sabse taaze lobby ke ack ka intezaar karega; LobbyAck #2 pichhli baar ~1s me aa raha tha, poll window 20s ka hai.
+
+
+## v3.1.7 — Gate ka signal andha tha: xmlPayload XML nahi, WABinary bytes hain (patch v5)
+
+3.1.6 ki call (`00CB7BCF…`) bilkul 3.1.5 jaisi mari — `joinable_accept_before_lobby_ack: 1`, Accept 404. Matlab v4 gate engage hi nahi hua. Sandbox probe (`/tmp/probe-lobby.mjs`, asal WasmEngine + `checkOngoingCalls`) ne pakda: `onSignalingXmpp` ka teesra argument `typeof=object` hai — **Uint8Array WABinary bytes**, jisme tag ka naam ASCII codes me baitha hai (`0,248,7,252,5,108,111,98,98,121,…` = "lobby"). v4 ka sniff `String(xmlPayload).includes("<lobby")` numbers-ki-comma-string par kabhi match hi nahi kar sakta tha. `_lobbySentCallId` kabhi set nahi hua → `lobbyPending=false` → accept turant.
+
+Patch **v5**: (1) flag claim ke turant baad (`_lobbySentCallId = claimId` — claim hamesha `<lobby>` emit karta hai, sandbox-proven, aur ye offer-feed se pehle hota hai, isliye accept-poll ki pehli tick se pehle pakka set); (2) wahi flag join par bhi; (3) bytes-sniff theek kiya — pehle 48 bytes ASCII padho, "lobby" dhundho (probe `V5-SNIFF-PROVEN` asal payload par); (4) gate har call par ek diagnostic line: `lobbySent=… lobbyAck=… pending=…`. Doctor journal tail 60→100 (fieldstats/relay spam shuru ki lines kaat deta tha).
+
+
+## v3.1.6 — Accept ka race: LobbyAck se pehle accept = 404 NACK (patch v4 lobby-ack gate)
+
+3.1.5 ki test call (`00F4B696…`, do baar same pattern) sabse aage gayi: claim-first kaam kar gaya — lobby is baar nacked NAHI hui (`LobbyAck` aaya), call active hui, upstream ka deferred accept chala (`call is active; accepting now`), `Rejoining -> AcceptSent`, `<accept>` → `00F4…@call`. Phir phone ne 1s me terminate kar diya. Journal ke aakhir me sach: **`Accept ACK: error code = 404. Treating as an Accept NACK`** aur fieldstats `joinable_accept_before_lobby_ack: 1`, `time_since_accept_ms: 496`. Upstream ka accept-poll `getCallInfo()` ka koi-bhi-jawab milte hi accept kar deta hai — LobbyAck (~1s baad) ka wait hi nahi karta. Server ke hisab se hum room ke participant bane hi nahi the, isliye accept 404.
+
+Patch **v4**: teensniffer flags engine par — bahar jaata `<lobby>` (`onSignalingXmpp`), WASM log `LobbyAck from` (`onLog`, log-level gate se pehle taaki logs off hon tab bhi chale), aur signaling ka `<ack type=lobby>` case. Accept-poll ab tab tak rukta hai jab tak us call ki lobby ack na ho jaye; lobby-less calls purane raaste par; deadline (20s) par last-resort accept. Phone ka +1s terminate isiliye premature-accept ka reaction lagta hai (uske baad bhi phone 3× RelayLatency bhejta raha, asal hangup +45s par aaya).
+
+
+## v3.1.5 — Claim pehle: offer se pehle claim, varna rejoin+404; upstream event-2 = CallOfferReceived
+
+3.1.4 ki asli test call (`0065B9DE…`) ka poora WASM transcript mila: `wa_call_join_ongoing_call` chala, state `None -> Rejoining` hui, dusri `<lobby>` gayi — phir `handle_lobby_ack: error code: 404` aur event **94 = `LobbyNacked`**. Sabse zaroori signal: `is_rejoin: 1`. Matlab claim (v1/v2 me offer FEED HONE KE BAAD) itni der se aaya ki WASM ne apni hi ringing call ko "ongoing/missed" mankar rejoin join kiya — live 1:1 call ke liye galat raasta.
+
+Doosri khoj WA Web ke `WAWebVoipWaCallEnums` se: event **2 = `CallOfferReceived`** — ringing signal. Upstream dist ispar `#activeCall?._forceEnd("remote_end")` maarta hai! Yahi wajah thi ki call engine engage hote hi "0s me kat gayi" (diary me jhootha `remote_end`) aur deferred accept kabhi chala hi nahi.
+
+Patch **v3**: (1) claim `CB:call` me `processIncomingCall` se pehle; v1/v2 ka after-feed claim upgrade par auto-remove. (2) event-2 forceEnd → sirf log line; asli hangup `<terminate>`/`<reject>`/event-10 se saare. (3) event-93 join sirf safety-net, accepted/active call par kabhi nahi. RelayLatency to respond hua (`Peer …:0@lid not found` — nacked state me peer register hi nahi tha; live claim ke saath ye bhi theek hona chahiye — agar phir aaya to device-specific JIDs join me daalne honge, ye agla suspect hai).
+
+
+## v3.1.4 — Lobby paar, ab JOIN bhi karna tha (event 93 = UpdateJoinableCallLog)
+
+> 3.1.3 ki test call: journal me pehli baar `WASM -> sending <lobby>`
+> aaya — patch v1 kaam kar gaya, WASM jag gaya. Par call phir bhi active
+> nahi bani; uske badle do naye WASM event aaye: 93 aur 96. WA Web ke
+> nikale hue asli JS (`vinikjkkj/wa-diff`: WAWebVoipWaCallEnums) se decode
+> kiya: **93 = UpdateJoinableCallLog**, 96 = telemetry. Matlab lobby ke
+> baad call *joinable ongoing call* banti hai aur host ko use
+> **`joinVoipOngoingCall`** karke join karna padta hai — tab jaake active
+> call banti hai jiska deferred acceptCall intezaar karta hai. Engine ke
+> paas iska wrapper pehle se tha, bas kabhi wire nahi hua.
+>
+> Patch **v2** (per-part idempotent — v1 installs par sirf naye hisse):
+> offer ke waqt caller PN/LID stash, event 93 par join (call-id match +
+> ek-baar guard), `joinAndAccept=false` taaki asli accept engine ke
+> maujooda poll se hi ho (double-accept = event 92 = call mar sakti hai),
+> aur WASM log filter me `lobby|buffered|ongoing|join|ack` taaki promotion
+> chain default level par dikhe. Doctor ab patch ka version batata hai.
+> Sandbox: v2-patched engine fresh + v1-upgrade dono path par verify,
+> WASM lobby-send regression saaf. Tests **218/218**.
+
+---
+
+## v3.1.3 — WASM so raha tha: `checkOngoingCalls` wala kadam hi gayab tha
+
+> User ki saaf 3.1.2 machine par do test call, dono `accept_timeout`.
+> Spam-filtered journal ne poori kahani di: offer WASM tak gaya
+> ("Recording call offer received", status 0), humne answer kiya, caller's
+> RelayLatency bhi aaya — par WASM ne sab "no active call, IGNORED" karke
+> phenk diya. `<preaccept>` kabhi bheja hi nahi.
+>
+> Sandbox me engine ka WASM khud chalaya (synthetic offers, level-4 logs,
+> strings-dive) aur jad mili: WA Web ka host har inbound offer ke baad
+> **`checkOngoingCalls([callId],[creatorJid])`** bulata hai — tabhi WASM
+> buffered "pending call" ko engage karta hai: `<lobby>` → `<preaccept>` →
+> relaylatency → ACTIVE → tab acceptCall chalta hai. baileys-caller yeh
+> call kabhi karta hi nahi (upstream ke apne commits is event-92/670007 se
+> ladai dikhate hain; unka deferred-accept usi promotion ka intezaar karta
+> hai jo bina checkOngoingCalls ke kabhi aati nahi). Sandbox proof:
+> patched wrapper dabate hi WASM ne `<lobby>` stanza `<callId>@call` ko
+> bheja. Saath me dusri chhupi galti: signaling bridge `@call` addressing
+> ko bare-JID me badal kar lobby stanza ko misroute kar deta.
+>
+> Fix: `scripts/patch-voip-engine.mjs` — installed engine ke dist par 3
+> chhote text-patch (wrapper, offer-par call, @call addressing), marker se
+> idempotent, `node --check` verify + failure par restore. `voice
+> call-engine` aur har `update` par auto-apply; `voice doctor` me stage;
+> doctor journal se 670007-spam filter; `WA_VOIP_LOG_LEVEL=2` knob.
+> Tests **217/217** (3 naye patcher tests). Aakhri saboot ab bhi user ki
+> real test call degi — par is baar har kadam journal me dikhega.
+
+---
+
+## v3.1.2 — "unknown command: voice": update khud install ko kha raha tha
+
+> User ne 3.1.1 ke liye `update` chalaya — aur `voice` command hi gayab ho
+> gaya. Wajah script ki line 30 me band padhi thi:
+> `BRANCH="${BRANCH:-arena/5055bd15-psd-observer}"` — ek **purani session
+> branch (v2.10.0)**. Har plain `update` wahan ka bundle kheench ke install
+> ko chup-chaap *downgrade* kar deta tha. Upar se update ka plain
+> `npm install` `--no-save` wale baileys-caller engine ko **prune** kar
+> deta hai (sandbox me prove kiya: install → present, npm install → gone) —
+> matlab har update call-pickup ko bhi saath le doobta tha. Aur
+> `voice call-engine` ka re-run `WA_CALL_ANSWER=false` reset kar deta tha.
+> Teenon ek saath fix:
+>
+> 1. **Sticky branch**: install/update `.observer-branch` receipt likhte
+>    hain; script use env ke baad, built-in default se pehle padhta hai.
+>    Default ab current branch; saathi scripts + docs ke install-URL bhi
+>    update. Ek `BRANCH=<sahi> update` = hamesha ke liye theek.
+> 2. **Engine parking**: update `npm install` se pehle
+>    baileys-caller + @roamhq + qrcode-terminal ko `.voip-park/` me rakhta
+>    hai, baad me wapas jagah par (sandbox simulation PASS).
+> 3. **call-engine re-run safe**: WA_CALL_ANSWER=true pehle se ho to wohi
+>    rehta hai + service restart; standalone fallback ab apna
+>    `@whiskeysockets/baileys@7.0.0-rc14` bhi install karta hai (engine ka
+>    lazy peer-import uske apne folder se resolve hota hai — bina iske
+>    standalone copy connect par hi girti).
+>
+> Sabak (dobara): install/update ke defaults bhi production code hain —
+> branch badle to script ka default BHI badlo, warna user ki machine
+> purane zamane me phasi rehti hai aur hum engine ko dosh dete rehte hain.
+
+---
+
+## v3.1.1 — Real-machine pickup debug: engine source padh ke do apne hi bug mare
+
+> User (poora setup ke baad): "call nhi utha rha hai". Is baar guess nahi —
+> `baileys-caller` ka **asli source** (tarball) padh ke adapter verify kiya.
+> API assumptions (answer/writeAudio/stream:/incoming-meta) sahi nikli.
+> Asli culprits **hamare** code me the:
+>
+> 1. **Error = death samajh liya**: library per-call failures (offer
+>    decrypt/accept) bhi client `'error'` event se deti hai. Hum har error
+>    pe `connected=false` + fresh client reconnect kar dete the — jo call
+>    setup ho rahi thi, usi ka client disconnect ho jata tha. Ab error
+>    sirf diary entry hai; connection sirf `connect()` fail/`stop()` pe
+>    badalta hai.
+> 2. **Fallback race**: library ka accept pipeline (offer decrypt queue +
+>    WASM relay-latency handshake, khud ka wait 20s) hamare 12s fallback
+>    se lamba chal sakta hai — messaging socket pehle reject kar deta to
+>    call sab devices pe mar jaati. Engine up ho to fallback floor ab
+>    **35s** hai.
+> 3. **Aadha whisper model "OK"**: download 83% pe toota; existence-check
+>    use sahi maan baitha. Ab `.part` + resume + ≥140MB size-verify +
+>    atomic move; purana toota file khud heal hota hai.
+>
+> Saath me forensics jo is round ko aakhri banana chahiye: engine ki
+> **breadcrumb diary** (`status().lastEvents` → `/api/voice`), WASM ke
+> accept/reject reasons journal me (`WA_VOIP_DEBUG=true` default,
+> keyword-filtered), fallback message me engine ki aakhri khabar, aur
+> **`observer.sh voice doctor`** — stages + diary + journal ek dump me.
+> Sandbox me asli engine install karke load/construct smoke bhi PASS.
+> Tests **214/214** (2 naye: error-survival, 35s floor). Jo sandbox me
+> aaj bhi prove nahi ho sakta: asli WhatsApp network pe WASM ka
+> `preprocess_offer` faisla — ab woh journal/doctor me padha ja sakta hai.
+
+---
+
+## v3.1.0 — "Call kaat ke voice note kyun?" fix + scheduled calls + English-only
+
+> User report: real machine pe call **uthne ki bajaye cut hoke voice note**
+> aa raha tha. Root causes jo pakde gaye (teeno asli):
+>
+> 1. **`npm install` ERESOLVE fail** — `baileys-caller` ka peer Baileys
+>    `rc11` hai, agent `rc14` pin karta hai; bina `--legacy-peer-deps` ke
+>    engine install hi nahi hota tha aur har call chup-chaap fallback pe
+>    jaati thi. Ab flag + post-install **load smoke-test** (files ≠ loadable).
+> 2. **Owner `@lid` trap** — WhatsApp calls aksar sirf anonymous LID
+>    dikhati hain; engine "unknown caller" samajh ke ignore karta tha,
+>    phir messaging socket 12s baad reject + fallback. Ab messaging
+>    socket (jise `callerPn` milta hai) engine ko live `noteOwnerCall`
+>    signal deta hai → same ringing call cross-check se uthti hai + LID
+>    seekh bhi leta hai. Bina corroboration ke unknown LID ab bhi kabhi
+>    answer nahi hoti (security same).
+> 3. **One-shot connect** — ek baar handshake fail/drop = restart tak
+>    engine dead. Ab fresh-client **auto-reconnect** (exponential
+>    backoff) + owner-call pe turant retry nudge. Fallback coordination
+>    bhi ab call-id ki jagah **offer-time correlation** use karti hai
+>    (do sockets ke ids alag format ke hote hain).
+>
+> Aur jo maanga gaya: **call me casual baat + sawal-jawab** (offline
+> English smalltalk + AI concise spoken answers), **`/callat`** —
+> set time pe JARVIS khud call karke taaza update bolta hai (`src/callscheduler.js`,
+> `schedule_jarvis_call` tool; engine off ho to voice note), aur
+> **`JARVIS_ENGLISH_ONLY=true` default** — owner Hindi bolega, JARVIS
+> sirf saaf English bolega (Devanagari British voice ko kabhi nahi
+> milega). Fallback message ab **exact failed stage + fix** khud
+> batata hai. Tests: **212/212** (8 naye: LID cross-check, reconnect,
+> stage diagnosis, smalltalk, English-only, scheduler, /callat).
+> Honest hadh wahi: asli WA call E2E owner machine pe hi prove hogi —
+> par ab na uthe to wajah guess nahi karni padegi, message me hogi.
+
+---
+
+## v3.0.0 — JARVIS Voice Call ☎️ (asli WhatsApp call pickup + neural British awaaz)
+
+> Branch: `arena/592311b3-psd-observer` · Tests: **204 pass / 0 fail** · ₹0.
+
+- **Asli maang**: "mein sidha WhatsApp pe voice call karunga, yeh utha kar
+  jawab dena chahiye" + "JARVIS ki awaaz theek kar". Teen sach pehle tai
+  kiye gaye: (1) **official Baileys call utha nahi sakta** (sirf detect +
+  `rejectCall`), isliye pickup experimental engine
+  [`baileys-caller`](https://github.com/Akane7101/baileys-caller) (WhatsApp
+  Web VoIP WASM) se hai — default OFF, opt-in, alag linked device
+  (`auth_info_voip/`); (2) film wale JARVIS (Paul Bettany) ki **exact**
+  awaaz free/legal ship nahi ho sakti — closest free approximation hai
+  **Piper `en_GB-alan-medium`** + butler persona + ffmpeg FX (chaaho to
+  apna XTTS clone server jod sakte ho); (3) reject+explanation ko
+  "pickup" bolke **nahi** becha gaya — engine na ho to honest instant
+  voice-note session fallback hai.
+- **Purani voice kyun kharab thi (root cause)**: espeak female `en+f3`
+  default thi aur neural Piper uske *neeche* priority me; Piper kabhi
+  auto-install/discover hota hi nahi tha. STT me whisper.cpp ko **raw OGG**
+  khilaya jata tha (usko 16 kHz mono WAV chahiye) aur cpp/Python CLI
+  ghalti se ek samjhe gaye the. TTS bhi sirf `/voicereply` pe tha.
+- **Nayi files**: `src/jarvis.js` (persona, spokenSummary, Devanagari →
+  runnable Hinglish `क्रोम खोलो`→`chrome kholo`, number-words sirf unit
+  ke paas digit — "bata **do**" safe, wake-word/call-control) ·
+  `src/voicecall.js` (EK voice-dimag teenon surfaces ke liye: async
+  greeting, "X **aur** Y" multi-command chaining (max 4, confirm pe
+  rukti hai), ruko/dobara/goodbye, barge-in, boli hui haan wahi typed
+  confirm-gate se guzarti hai — nayi baat haan nahi banti) ·
+  `src/wavoip.js` (baileys-caller adapter: dependency-optional dynamic
+  load, owner-verification PN/known-LID/`callerPn` — unknown LID kabhi
+  answer nahi, adaptive RMS VAD, 200 ms PCM chunks, `clearAudio()`
+  barge-in, max-duration hangup, `/callme` outgoing) ·
+  `scripts/link-voip.mjs` (VoIP device QR) · `test/voice.test.js`
+  (12 test, fake VoipClient ke saath full answer→turn coverage).
+- **Badli hui files**: `src/tts.js` poora naya (XTTS → Piper en_GB →
+  Edge en-GB-Ryan → espeak… order, phrase cache, sentence streaming,
+  Hindi routing) · `src/transcribe.js` (WAV-convert → local whisper →
+  Groq) · `src/whatsapp.js` (`sock.ev.on('call')` coordinator + fallback
+  ladder; voice notes ab voicecall dimag se; `/call on` me har text
+  jawab ke baad JARVIS voice note) · `src/commands.js` (`/call`, `/call
+  on|off`, `/callme`, `/voice`) · `src/server.js` (`/api/voice`,
+  `/api/call/start|say|transcribe|interrupt|stop`, SSE
+  `/api/call/events`) · `webapp/` (📞 Call tab — orb, captions, barge-in,
+  MediaRecorder→Whisper fallback) · `src/ai.js`+`agentloop.js` (JARVIS
+  persona prompts, safe `speak_text` tool) · `src/doctor.js` (TTS/STT/
+  VoIP checks exact fix ke saath) · `scripts/observer.sh voice
+  setup|whisper|call-engine|link-voip|answer|test|status` ·
+  guides `VOICE.md` + `WHATSAPP-CALL.md`.
+- **Honest hadh**: asal WhatsApp-call E2E is sandbox me **verify nahi**
+  ho sakta (koi asli WhatsApp account/QR yahan nahi) — engine adapter
+  fake ke against fully tested hai, par pehli asli call user ki machine
+  pe hi prove hogi. Engine ToS-grey + experimental hai; `baileys-caller`
+  Baileys `^7.0.0-rc11` peer mangta hai (repo rc14 pe hai — install pe
+  peer warning aa sakti hai). Fallback + app Call tab bina is sab ke
+  garanteed chalte hain.
+- **Trap jo is build me sabse mehenat kha gaya**: ek ruka hua lamba turn
+  kai "success" edits chhod gaya jo file me mile hi nahi (parallel
+  same-file edits ek-doosre ko overwrite kar gaye) — `node --check`
+  pass, par runtime pe `isOwnerJid`/`personaLines`/`createWaVoip`/
+  `listTTSEngines`/`float`/`os` sab "not defined". Sabak (ab hamesha):
+  syntax-check kabhi kaafi nahi — diff audit + runtime smoke (`/call`,
+  dry-run boot, simulate) + main se per-file test compare karke har
+  missing hissa pakda gaya. Final: 204/204.
+
+---
+
 ## v2.9.0 — DeepSeek Harness (`@deepseek-ai/dsh`) on Fedora Linux + Full WhatsApp Power 🚀
 
 - **Real world constraint**: DeepSeek ka official Desktop installer abhi sirf macOS/Windows ke liye hai — Linux ke liye unka official open-source agent engine **`@deepseek-ai/dsh`** (`0.2.1-rc.2`, MIT, Node `>=22.19` ya `>=24`) hai. Alag third-party WhatsApp plugin lagane se second competing WhatsApp linked device banta aur Fedora desktop/OCR/PWA tools cut ho jaate.

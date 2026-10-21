@@ -1,4 +1,128 @@
 {
+  "3.1.11": {
+    "title": "Speed update — sunna ab Groq API se: tez bhi, sahi bhi 🚀",
+    "bullets": [
+      "Asli chor pakda gaya: transcribe hamesha pehle chhota wala local whisper (base) chalata tha — dheema (2–6s) aur Hinglish aksar galat sunta tha; Groq ko mauka hi nahi milta tha kyunki local 'kuchh na kuchh' text de deta tha. Ab **GROQ_API_KEY hai to Whisper large-v3 (API) pehle** chalta hai — ~0.5s me transcript aur Hinglish me bohot zyada sahi. Local whisper ab sirf automatic offline backup hai.",
+      "Tumhari shart waisi ki waisi: sirf **sunna** API se hota hai — processing, commands aur JARVIS ki awaaz sab tumhare PC par hi rehte hain. Audio bilkul bahar na bhejna ho to .env me `STT_ENGINE=local` kar do.",
+      "Turn aur tez: bolna band karne ke baad ka intezaar 900ms → 600ms. Aur koi turn lamba jaye (bada command chal raha ho) to JARVIS chuppi ki jagah beech me 'One moment, Sir.' bol deta hai — line mari hui nahi lagti.",
+      "Ek safety: puri chuppi par Whisper kabhi-kabhi apna hint-text hi 'sun' leta hai. Aisi ghost baat ab 'kuchh nahi suna' maani jayegi — bina bole koi command nahi chalega.",
+      "Yehi speed **voice-notes aur phone-app call** dono pe lagegi — pipeline ek hi hai. Native call-pickup abhi park hai (tum /callme se operate kar rahe ho, jo proper chal raha hai); jab bologe, aakhri ':0' device wala fix ek hi test call me try kar lenge."
+    ]
+  },
+  "3.1.10": {
+    "title": "Ek comma ki galti thi — devices CSV string me jaane the 📋",
+    "bullets": [
+      "3.1.9 me device-discovery **kaam kar gayi** — journal me: `peer devices: [\"12223644725256@lid\",\"…:30@lid\",\"…:32@lid\"]`. Lekin maine wo devices alag-alag list me bhej diye, aur native engine ne join wahi rok diya: **`Mismatch in participant arrays sizes`** — call active hi nahi bani, 20s timeout. Param ka naam hi ishara tha: `deviceJidsCsv` = har participant ke liye **ek CSV string**",
+      "Engine patch **v8**: devices ab `join(\",\")` karke ek hi string me jaate hain — bilkul waisa jaisa library ka khud ka `resolveGroupParticipant` banata hai. Sizes ab 1/1/1 match karenge, join chalega, aur phir asli imtihaan hoga: server is baar lobby ko kya kehta hai",
+      "Saath me har call par `<call>` node ke raw attrs bhi journal me aayenge (epoch/platform wali baaki khoj ke liye — WASM `platform NaN` bol raha tha)",
+      "`bash observer.sh update` → `engine patch : v8 applied` → ek test call. Journal me `Mismatch` ki jagah `wa_call_join_ongoing_call begin` aana chahiye — wahi se chain aage badhengi",
+      "Sach ye hai ki ye lambi khoj hai — har galti journal me naam-lekar milti hai aur ek-ek karke khatam ho rahi hai. Voice-note fallback hamesha ki tarah chalu hai"
+    ]
+  },
+  "3.1.9": {
+    "title": "Join me ab asli device JIDs + fast-callee — lobby 404 par seedha vaar 🎯",
+    "bullets": [
+      "3.1.8 me gate pehli baar bilkul sahi chala (`pending=true` → LobbyAck ka intezaar) — aur phir journal ne akela asal blocker dikha diya: **join wala lobby server se 404 NACK** ho raha hai. Timing wala saara jhanjhat khatam; ab ladai sirf is 404 se hai",
+      "Engine patch **v7**: join ab usync se caller ke **asli device JIDs** (`…:0@lid`) seekh kar bhejta hai — pehle andaze se bare user-JID ja raha tha, jise server 'device not found' karke 404 karta hai. Library ke paas ye discovery tha hi (outgoing calls use karte hain), inbound join me kabhi wired nahi tha",
+      "Saath me WASM ki `enable_fast_call_setup_callee_v2` setting on — asli clients isi callee fast-setup path par chalte hain, library ne kabhi on hi nahi ki thi. (Kabhi band karna ho to `.env` me naya `WA_VOIP_AB_PROPS` hai — bina release ke engine experiments ab wahi se honge)",
+      "Gate ab NACK ko bhi samajhta hai (pehle nack wali line par bhi khul jata tha), aur diary me `getCallInfo` ki jhalak bhi dikhegi. Doctor ab v7 report karta hai",
+      "`bash observer.sh update` → doctor me `engine patch : v7 applied` → ek test call. Journal me `peer devices for …: […]` aur `joining lobby call … devices=[…]` dikhna chahiye — aur is baar `handle_lobby_ack: error code: 404` nahi"
+    ]
+  },
+  "3.1.8": {
+    "title": "Do lobby, do ack — gate ab JOIN wale ack ka intezaar karta hai 🚪",
+    "bullets": [
+      "3.1.7 ka journal sabse saaf tha — gate ki apni diagnostic line boli: `lobbyAck=<call id> pending=false`, phir bhi accept 404 kha gaya. Wajah journal me hi thi: ek call me **do lobby** jaate hain. Pehla claim-wala — uska ack sirf 'call log' update karta hai (usi se joinable banti hai). Doosra **join-wala** — wahi asal room-entry hai, aur `joinable_accept_before_lobby_ack` usi ke ack ki baat karta hai. Mera gate pehle ack par khul gaya",
+      "Engine patch **v6**: naya lobby jaate hi purana ack bhool jao (join par bhi, aur bytes nikalte hi bhi) — gate ab hamesha **aakhri lobby ke ack** ka intezaar karta hai. Join-wala LobbyAck pichhli baar bhi aaya tha, bas call marne ke baad; is baar gate use zinda pakdega",
+      "`bash observer.sh update` — patch v6 khud lagega. Doctor me `engine patch : v6 applied`. Phir ek test call: is baar sequence aisi honi chahiye — `accept gate … pending=true` → `waiting for LobbyAck` → `LobbyAck from …` → `accepting now` → **Accept ACK 404 nahi**",
+      "Har version me chain ka ek aur pakka saboot milta hai aur wahi fix hota hai — ye wala saboot gate ne khud apni line me diya tha. Voice-note fallback guaranteed floor bana rahega"
+    ]
+  },
+  "3.1.7": {
+    "title": "Gate ka signal hi andha tha — bytes wala bug pakda gaya 🔬",
+    "bullets": [
+      "3.1.6 me gate laga tha, lekin journal phir wahi bola: `joinable_accept_before_lobby_ack: 1`. Sandbox probe ne wajah pakdi: engine ke `onSignalingXmpp` ko XML **string** nahi, WABinary **bytes** milte hain (`108,111,98,98,121` = \"lobby\" ASCII me) — mera text-wala sniff `\"<lobby\"` wahan mil hi nahi sakta tha, isliye gate ko kabhi pata hi nahi chala ki lobby gaya hai. Galti meri thi, ab proof ke saath theek hai",
+      "Engine patch **v5**: lobby-sent flag ab un do jagaho se set hota hai jo pakka janti hain ki lobby ja raha hai — **claim** (offer feed hone se bhi pehle, accept-poll ki pehli tick se pehle) aur **join**. Bytes-wala sniff bhi ab bytes ko ASCII padhke \"lobby\" pakadta hai (sandbox me asal payload par proven)",
+      "Gate ab har call par ek diagnostic line chhodta hai: `accept gate for <id>: lobbySent=… lobbyAck=… pending=…` — agle journal se seedha pata chalega gate ne kya dekha aur kya kiya. Doctor ka journal section bhi 60 se 100 lines ho gaya taaki shuruaat ki lines kate nahi",
+      "`bash observer.sh update` — patch v4 se v5 khud lagega. Doctor me `engine patch : v5 applied` dikhna chahiye. Phir ek test call: journal me `accept gate … pending=true` → `waiting for LobbyAck` → LobbyAck ke baad `accepting now`, aur **Accept ACK 404 nahi** — yehi jeet hai",
+      "Honest status: har kadam par ek hi kaam ho raha hai — journal jo saboot deta hai usi ko fix karte hain. Voice-note fallback hamesha ka guaranteed floor hai"
+    ]
+  },
+  "3.1.6": {
+    "title": "Accept ab LobbyAck ke baad — 404 NACK wala race khatam 📞",
+    "bullets": [
+      "3.1.5 ki test call ab tak ki sabse aage gayi: claim-first se lobby ka 404 khatam, call **active** hui, aur `<accept>` pehli baar wire par gaya! Lekin accept, server ke **LobbyAck se ~1 second pehle** race karke nikal gaya — server ne `Accept ACK: error code = 404` (NACK) diya aur phone ne call kaat di. WASM ke apne stats me saaf likha tha: `joinable_accept_before_lobby_ack: 1`",
+      "Engine patch **v4 (lobby-ack gate)**: engine ab teen jagah se lobby handshake track karta hai — bahar jaata `<lobby>`, WASM ka `LobbyAck` log, aur `<ack type=lobby>` stanza. Jiski lobby ack nahi hui, us call ka accept **rukta** hai; ack aate hi accept jata hai. Lobby-less calls par purana behaviour hi rehta hai, aur ack kabhi na aaye to deadline par last-resort accept bhi try hota hai",
+      "`voice doctor` ab v4 report karta hai (v3 dikhe to samjho accept abhi bhi race karega)",
+      "`bash observer.sh update` — patch v3 se v4 khud lag jayega. Phir ek test call: journal me `active, but lobby unacked — waiting for LobbyAck` ke baad `accepting now` dikhna chahiye, aur is baar Accept ACK 404 nahi aana chahiye",
+      "Honest status: chain ab accept tak proven hai; media (aawaz dono taraf) is test call se prove hoga. Voice-note fallback hamesha ki tarah guaranteed floor hai"
+    ]
+  },
+  "3.1.5": {
+    "title": "Claim pehle, offer baad me — rejoin-404 ka asli ilaaj 📞",
+    "bullets": [
+      "3.1.4 ki test call ne do aur gahri cheezein pakdi (WA Web ke asli enum se decode): claim abhi offer ke BAAD ja raha tha, isliye engine apni hi bajti-hui call ko 'missed/rejoin' samajhta tha — join to hua, par Rejoining mode me, aur server ne lobby ko 404 se nack kar diya (event 94 = LobbyNacked)",
+      "Engine patch **v3**: claim ab offer feed hone se PEHLE hota hai (CB:call handler me) — call live ring karegi, rejoin nahi. Purana after-feed claim upgrade par khud hat jata hai (double-claim nahi)",
+      "Upstream ki doosri landmine mili: event **2 = CallOfferReceived** (ringing), par engine usi par call ko `remote_end` bolke 0s me kaat deta tha — wohi 'call ended (remote_end) after 0s' wali line. v3 me ye fix hai; asli hangup usko terminate/event-10 se petta rehta hai",
+      "join wali safety-net ab accepted/active call ko kabhi nahi chhooti. `voice doctor` ab v3 report karta hai",
+      "`bash observer.sh update` karna hai — patch v2 se v3 khud lag jayega. Phir ek normal test call hi faisla karegi. Honest status wahi: jab tak ek real call end-to-end prove na ho, pickup experimental hai; voice-note fallback hamesha ka guaranteed floor hai"
+    ]
+  },
+  "3.1.4": {
+    "title": "Lobby ke aage ka kadam bhi mila — call ko JOIN bhi karna padta hai 🤝📞",
+    "bullets": [
+      "3.1.3 ke baad journal me pehli baar `WASM -> sending <lobby>` dikha — WASM jag gaya! Phir do naye signal aaye (event 93/96). WA Web ke asli enum se decode kiye: 93 = *UpdateJoinableCallLog* — matlab call ab *joinable ongoing call* ban gayi hai. Use active banane ke liye host ko `joinVoipOngoingCall` bulana padta hai — engine ke paas ye function tha, par wired hi nahi tha",
+      "Engine patch **v2**: event 93 aate hi lobby-call join hoti hai (caller ka PN/LID offer se leke), `joinAndAccept=false` ke saath taaki asli accept engine ka maujooda answer-flow hi kare — double-accept ka koi khatra nahi. v1-wale installs par sirf naye hisse lagte hain (per-part idempotent)",
+      "WASM log filter me `lobby|buffered|ongoing|join|ack` shabd jude — ab promotion ki poori chain default level par hi `voice doctor` ke journal me dikhegi",
+      "Doctor ab batata hai patch *v1 hai ya v2* — v1 dikhe to bas `voice call-engine` dobara chalao, v2 lag jayega"
+    ]
+  },
+  "3.1.3": {
+    "title": "Call na uthne ki ASLI jad mili — WASM ko jagane wala kadam hi gayab tha 🔓📞",
+    "bullets": [
+      "Asli machine ke journal ne pakad kar diya: offer WASM tak pahunchta tha, hum answer bhi karte the — par WASM call ko *buffer me park* karke baitha rehta tha aur 20s baad `accept_timeout`. Sandbox me WASM chala ke prove kiya: WhatsApp Web ka host har offer ke baad `checkOngoingCalls()` bulata hai, tabhi WASM `<lobby>` bhej ke call ko active banata hai. Engine (baileys-caller) yeh kadam *kabhi karta hi nahi tha*",
+      "Naya `scripts/patch-voip-engine.mjs`: installed engine par teen chhote, guarded patch — checkOngoingCalls wrapper + har inbound offer par call + `<callId>@call` wale stanzas ki addressing bachana. `voice call-engine` aur har `update` par khud lagta hai; `voice doctor` me 'engine patch' stage bhi dikhta hai",
+      "Sandbox verification: patched engine se `checkOngoingCalls` dabate hi WASM ne `<lobby>` stanza bheja — wahi pehla kadam jo real machine par kabhi hua hi nahi tha",
+      "Doctor ka journal ab `status: 670007` wali spam-line (har 250ms ek!) filter karta hai — asal wajah wali lines ab doobti nahi. Saath me `WA_VOIP_LOG_LEVEL=2` forensic knob"
+    ]
+  },
+  "3.1.2": {
+    "title": "Update wala khamosh katil band: galat branch + engine-prune fix 🩹",
+    "bullets": [
+      "Sabse bada sach: script me update ki default branch *purani session branch* (v2.10) padhi thi — matlab plain `update` chalate hi poora install chup-chaap *downgrade* ho jata tha aur `voice` commands hi gayab! Ab install apni branch hamesha yaad rakhta hai (`.observer-branch`) — dobara nahi hoga",
+      "Doosra chupa katil: har update ka `npm install` call-engine (baileys-caller) ko *prune* kar deta tha (--no-save install tha). Ab update engine ko park karke wapas lagata hai — call pickup update ke baad bhi zinda rahega",
+      "`voice call-engine` dobara chalane par ab `WA_CALL_ANSWER=true` band nahi hota (pehle har repair-run chupke se answering OFF kar deta tha) + standalone-engine fallback me missing baileys bhi jud gaya",
+      "Agar tumhara install downgrade ho gaya hai (voice command gayab), ek baar ye chalao: `BRANCH=arena/592311b3-psd-observer bash scripts/observer.sh update` — uske baad se hamesha ke liye sahi rahega"
+    ]
+  },
+  "3.1.1": {
+    "title": "Call pickup ke do chupe katil fix + `voice doctor` 🩺☎️",
+    "bullets": [
+      "Asli machine par call na uthne ki do wajah code me pakdi gayi: (1) engine ki chhoti *per-call error* par hum khud poora client disconnect/reconnect kar dete the — chalti hui call-setup khud hi mar jaati thi; (2) hamara fallback *12 second* par call kaat sakta tha, jabki engine ko accept karne me kabhi-kabhi *20 second* lagte hain. Dono fix — ab engine ko poora 35s ka mauka milta hai, error par connection nahi toot'ta",
+      "Naya forensic command: `bash scripts/observer.sh voice doctor` — setup stages + engine ki *live diary* + journal ki call-wali lines, ek hi dump me. Call kabhi na uthe to iska output hi kaafi hai wajah pakadne ke liye",
+      "Engine ab har kadam diary me likhta hai (connect → incoming → answering → connected → ended+reason) aur WASM ke apne accept/reject reasons journal me dikhte hain (`WA_VOIP_DEBUG`)",
+      "Whisper model ka aadha-download wala jhooth bhi band: ab size-verify + resume ke saath download hota hai — purana toota model khud heal ho jata hai (`voice doctor`/`voice whisper` chalao)"
+    ]
+  },
+  "3.1.0": {
+    "title": "Asli call pickup pakka + JARVIS khud call karega + English-only awaaz ☎️🇬🇧",
+    "bullets": [
+      "Call *kaat ke voice note* wala masla fix: engine ab khud reconnect karta hai, owner ki call @lid me aaye to bhi cross-check se *asli pickup* hota hai, aur kabhi call na uthe to message me *exact wajah + ek-command fix* likha aayega. Installer ka peer-deps wala chhupa fail bhi fix — bas `bash observer.sh voice call-engine` dobara chala do",
+      "`/callat at 18:30 /brief` — set time pe *JARVIS khud tumhe WhatsApp call karke update bolega*! Call me bolke bhi laga sakte ho: \"Jarvis, call me at 6 with the update\". Engine off ho to voice note aa jayega — update kabhi miss nahi",
+      "JARVIS ab *sirf English* bolta hai (tum Hindi/Hinglish bolo, woh samajh lega) — kharab Hindi pronunciation khatm. `JARVIS_ENGLISH_ONLY=false` se kabhi bhi ulta kar sakte ho",
+      "Call me *casual baat-cheet + sawalon ke jawab*: \"hello\", \"kaise ho\", \"thank you\" pe instant butler jawab (offline bhi), aur asli sawal AI short spoken English me jawab dega. Call ke baad chat me chhota transcript bhi milega"
+    ]
+  },
+  "3.0.0": {
+    "title": "JARVIS Voice Call — seedha WhatsApp call karo, JARVIS uthayega ☎️🎩",
+    "bullets": [
+      "Agent number pe *seedha WhatsApp voice call* karo — JARVIS call utha kar bolta hai, tum bolke instruction dete ho, PC execute karta hai, jawab *usi call me* milta hai! Setup (ek baar): `bash observer.sh voice call-engine` + `voice link-voip` + `voice answer on` (experimental engine — poora sach WHATSAPP-CALL.md me)",
+      "Asli *neural British butler awaaz* (Piper en_GB, 100% offline): purani female robot default gayi! Ek command: `bash observer.sh voice setup` — phir /voicereply, /call, Call tab sab me JARVIS. Local whisper ke liye: `observer.sh voice whisper`",
+      "Phone app me naya *📞 Call tab*: glowing orb, live captions, barge-in (JARVIS bol raha ho to beech me bolo — ruk jayega), browser-mic ya Whisper transcription, bina kisi setup ke",
+      "WhatsApp *Voice Mode* (`/call on`): har jawab text + JARVIS voice note; voice note bhej ke command chalao — *\"chrome kholo aur screenshot bhej do\"* jaise multi-commands bhi. Destructive kaam pehle poochega: *\"Shall I proceed, Sir?\"*",
+      "Naye commands: `/call`, `/call on|off`, `/callme` (JARVIS khud call kare), `/voice` — aur /doctor me voice ki 3 nayi checking lines exact fix ke saath. Guides: VOICE.md · WHATSAPP-CALL.md"
+    ]
+  },
   "2.10.0": {
     "title": "Ultra-Accuracy Question Image Solver — 100% Verified Answers 🧠🔬",
     "bullets": [

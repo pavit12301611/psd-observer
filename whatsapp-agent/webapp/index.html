@@ -122,10 +122,51 @@
     </section>
 
     <!-- Settings -->
+    <section id="tab-call" class="tab">
+      <div class="call-wrap">
+        <h2 class="call-name">J A R V I S</h2>
+        <div id="orb" class="orb idle" title="Tap: JARVIS ko tok do (barge-in)">
+          <span class="orb-ring r1"></span><span class="orb-ring r2"></span>
+          <span class="orb-core">J</span>
+          <span class="orb-bars"><i></i><i></i><i></i><i></i><i></i></span>
+        </div>
+        <p id="call-state" class="muted small" style="text-align:center">Call shuru karo — bolo “chrome kholo aur screenshot bhej do”. JARVIS sunega, karega, bol ke jawab dega.</p>
+        <p id="call-timer" class="muted small" style="text-align:center"></p>
+        <div class="call-controls">
+          <button id="call-start" class="primary" type="button">📞 Call JARVIS</button>
+          <button id="call-mute" class="ghost" type="button" hidden>🔇 Mute</button>
+          <button id="call-end" class="ghost danger" type="button" hidden>⏹ End call</button>
+          <select id="call-lang" title="Boli ki bhasha">
+            <option value="en-IN" selected>EN-IN (Hinglish)</option>
+            <option value="hi-IN">हिंदी</option>
+            <option value="en-GB">EN-GB</option>
+            <option value="en-US">EN-US</option>
+          </select>
+          <label class="small"><input id="call-browser-voice" type="checkbox"> Phone ki voice</label>
+        </div>
+        <div id="call-captions" class="call-captions" aria-live="polite"></div>
+        <form id="call-text-form" class="call-controls" autocomplete="off">
+          <input id="call-text" type="text" placeholder="Mic nahi chal raha? Yahan type karke bolo…" style="flex:1;min-width:180px">
+          <button class="ghost" type="submit">Bolo ▶</button>
+        </form>
+        <p id="call-wa-hint" class="muted small"></p>
+        <p class="muted small">Asli WhatsApp call JARVIS uthaye — setup: <code>bash observer.sh voice call-engine</code> (WHATSAPP-CALL.md). Bina setup ke yahi Call tab + WhatsApp voice notes kaam karte hain.</p>
+      </div>
+    </section>
+
     <section id="tab-settings" class="tab">
       <div class="card">
         <h2>Status</h2>
         <dl id="status-list" class="kv"></dl>
+      </div>
+      <div class="card">
+        <h2>🔊 JARVIS Voice</h2>
+        <dl id="voice-list" class="kv"></dl>
+        <div class="chips" style="margin-top:10px;padding:0">
+          <button id="voice-test" class="primary" type="button">▶ Test JARVIS Voice</button>
+          <button id="voice-callmode" class="ghost" type="button">📞 WhatsApp Voice Mode on/off</button>
+        </div>
+        <p class="muted small">Setup (PC pe, ek baar): <code>bash observer.sh voice setup</code> — free neural British voice. Guide: VOICE.md · WhatsApp call: WHATSAPP-CALL.md</p>
       </div>
       <div class="card" id="harness-card">
         <h2>🚀 DeepSeek Harness</h2>
@@ -161,6 +202,7 @@
     <button data-tab="controls" role="tab">🎛️ <span>Panel</span></button>
     <button data-tab="screen" role="tab">🖥️ <span>Screen</span></button>
     <button data-tab="files" role="tab">📁 <span>Files</span></button>
+    <button data-tab="call" role="tab">📞 <span>Call</span></button>
     <button data-tab="settings" role="tab">⚙️ <span>Settings</span></button>
   </nav>
 </div>
