@@ -66,15 +66,16 @@ export function parseLearnCommands(input) {
   const commands = [];
   for (const raw of parts) {
     if (!raw) continue;
+    const hadLeadingSlash = raw.trim().startsWith('/');
     // Allow leading slash
     const trimmed = raw.replace(/^\//, '').trim();
     if (!trimmed) continue;
-    // Single word without space and no explicit verb → interpret as open <app>
+    // Single word without space and no explicit verb → interpret as open <app> unless it's a slash/known command
     if (!trimmed.includes(' ') && !trimmed.includes('|') && !trimmed.includes(';')) {
       const w = trimmed.toLowerCase();
-      // If it's already a known command verb alone, keep as is
-      const knownSingle = new Set(['apps','windows','tasks','files','downloads','screenshot','ocr','status','time','date','help','ping']);
-      if (knownSingle.has(w)) {
+      // If it's already a known command verb alone or had an explicit leading '/', keep as is
+      const knownSingle = new Set(['apps','windows','tasks','files','downloads','screenshot','ocr','status','time','date','help','ping','notes','todos','todo','memory','reminders']);
+      if (hadLeadingSlash || RESERVED.has(w) || knownSingle.has(w)) {
         commands.push({ cmd: w, args: '', raw: trimmed });
       } else {
         // treat as app name to open: chrome → open_app chrome

@@ -39,6 +39,7 @@ import { createHarness } from './harness.js';
 import * as solver from './solver.js';
 import { createVoiceCall } from './voicecall.js';
 import { jarvisGreeting, spokenSummary } from './jarvis.js';
+import * as mem from './memory.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -142,6 +143,7 @@ export function createAgent({
   // WhatsApp voice notes: speech → this same handle() → JARVIS voice back.
   const voice = createVoiceCall({
     config,
+    store,
     log,
     runText: (text) => handle(text, { source: 'voicecall', voice: true, waStatus: () => 'voice call' }),
     speak: (text) => tts.synthesize(text, config, log),
@@ -595,19 +597,43 @@ export function createAgent({
     return '📝 *Notes*\n\n' + store.data.notes.map((n) => `#${n.id} · ${n.text}`).join('\n');
   }
 
-  function remember(args) {
+  function remember(args, ctx = {}) {
     const text = (args || '').replace(/^that\s+/i, '').trim();
-    if (!text) return '🧠 Usage: /remember <thing> — e.g. /remember my bike number is UK04 AB 1234';
-    const key = text.slice(0, 48);
-    store.data.facts[key] = text;
-    store.save();
-    return '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
+    if (!text) return '🧠 Usage: /remember <thing> — e.g. /remember my bike number is UK04 AB 1234 (ya seedha bolo "mera naam Pavit hai")';
+    const parsedRule = mem.parseRuleStatement(text);
+    if (parsedRule) {
+      if (parsedRule.kind === 'directive') {
+        mem.rememberFact(store, `owner_priority_rule: ${parsedRule.value}`, { explicit: true });
+        return '🧠 Remembered — bilkul! Jo aap kahenge wohi hoga, chahe pehle se kuch aur save ho. (/memory to see all)';
+      }
+      if (parsedRule.kind === 'fact') {
+        const r = mem.rememberFact(store, parsedRule.text, { explicit: true });
+        return r?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
+      }
+      const r = mem.addRule(store, parsedRule);
+      return r?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
+    }
+    const res = mem.rememberFact(store, text, { explicit: true });
+    if (res && ctx?.voice && config.jarvisEnglishOnly !== false) {
+      if (res.key === 'name') {
+        return res.updated
+          ? `Very well, ${res.value}. I have updated your name from ${res.previousValue} to ${res.value}.`
+          : `Pleasure to meet you, ${res.value}. I shall remember your name.`;
+      }
+      return `Noted and remembered, ${mem.getOwnerAddress(store, config)}.`;
+    }
+    return res?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
   }
 
-  function memory() {
-    const facts = Object.values(store.data.facts ?? {});
-    if (!facts.length) return '🧠 I haven\'t memorised anything yet. Try: /remember my office Wi-Fi password is …';
-    return '🧠 *What I remember*\n\n' + facts.map((f) => `• ${f}`).join('\n') + '\n\n/forget memory — wipe these';
+  function memory(args = '', ctx = {}) {
+    const q = String(args ?? '').trim();
+    if (q) {
+      const answered = mem.handleMemoryIntent(store, config, q, { voice: Boolean(ctx?.voice) });
+      if (answered) return answered;
+      const val = mem.getFactValue(store, q);
+      if (val) return `🧠 *${mem.canonicalSlot(q).label}*: *${val}*`;
+    }
+    return mem.formatMemoryList(store);
   }
 
   // Pending destructive PC actions awaiting "/pc confirm" (60 s window).
@@ -672,7 +698,7 @@ export function createAgent({
       }
       case 'open': {
         if (!rest) return '🚀 Usage: /open <app name> — /apps lists everything installed.';
-        return act('open_app', { app: rest });
+        return act('open_app', { app: mem.resolvePreferredApp(store, rest) });
       }
       case 'close': case 'quit': return act('close_app', { app: rest });
       case 'notify': return rest ? pc.desktopNotify(rest) : '🔔 Usage: /pc notify <text>';
@@ -1529,12 +1555,25 @@ export function createAgent({
       case 'todo': case 'todos': case 'task': return todo(args);
       case 'note': return note(args);
       case 'notes': return notes();
-      case 'remember': return remember(args);
-      case 'memory': return memory();
-      case 'forget':
-        if (/^memory$/i.test(args || '')) { store.data.facts = {}; store.save(); return '🧠 Memorised facts wiped.'; }
+      case 'remember': return remember(args, ctx);
+      case 'memory': return memory(args, ctx);
+      case 'forget': {
+        const fArg = String(args || '').trim();
+        if (/^(?:memory|all|facts|sab)$/i.test(fArg)) {
+          store.data.facts = {};
+          store.data.factValues = {};
+          store.data.rules = [];
+          store.save();
+          return '🧠 Memorised facts wiped.';
+        }
+        if (fArg && !/^(?:chat|history)$/i.test(fArg)) {
+          const res = mem.forgetFact(store, fArg);
+          if (res.ok) return `🧹 Memory se *${res.label}* hata diya.`;
+          return `🧠 *${fArg}* naam se kuch memory me save nahi tha.`;
+        }
         store.clearHistory();
         return '🧹 Chat memory cleared. Fresh start!';
+      }
       case 'model': case 'ai': if (!args) return ai.aiStatus(config); return askAI(args, ctx);
       case 'ask': return args ? askAI(args, ctx) : '💬 Usage: /ask <question> — or just type your question normally.';
       case 'summarize': case 'summarise': case 'tldr': {
@@ -1623,7 +1662,7 @@ export function createAgent({
       case 'apps': case 'applications': return act('list_apps');
       case 'windows': case 'tasks': return act('list_windows');
       case 'focus': case 'switch': return act('focus_window', { title: args });
-      case 'open': return args ? act('open_app', { app: args }) : '🚀 Usage: /open <app> — /apps lists installed apps.';
+      case 'open': return args ? act('open_app', { app: mem.resolvePreferredApp(store, args, { bypassSaved: Boolean(ctx?.bypassSaved) }) }) : '🚀 Usage: /open <app> — /apps lists installed apps.';
       case 'close': case 'quit': return args ? act('close_app', { app: args }) : '🚪 Usage: /close <app>';
 
       // ── network & system ────────────────────────────────────────────────
@@ -1732,8 +1771,56 @@ export function createAgent({
     return ai.NO_BRAIN_HINT;
   }
 
+  /** Execute a user-defined trigger→action rule from `store.data.rules`. */
+  async function runCustomRule(rule, ctx = {}) {
+    if (!rule) return null;
+    if (rule.kind === 'reply') return rule.action;
+    const actionText = String(rule.action ?? '').trim();
+    if (!actionText) return null;
+    const ruleCtx = { ...ctx, bypassSaved: true };
+
+    // Multi-step pipe/semicolon chain ("open chrome | open code")
+    if (/[|;\n]/.test(actionText)) {
+      const steps = learn.parseLearnCommands(actionText);
+      if (steps?.length) {
+        const outs = [];
+        for (const step of steps) {
+          const cmd = step.inferredOpen ? 'open' : step.cmd;
+          const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
+          outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+        }
+        return outs.join('\n\n---\n\n');
+      }
+    }
+
+    // Slash command ("/brief", "/open brave")
+    const slash = actionText.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+    if (slash) return handleCommand(slash[1].toLowerCase(), slash[2].trim(), ruleCtx);
+
+    // Natural-language intent ("brave kholo", "screenshot bhejo", "volume 40")
+    const parsed = parseIntent(actionText);
+    if (parsed) {
+      if (parsed.reply) return parsed.reply;
+      return handleCommand(parsed.cmd, parsed.args ?? '', ruleCtx);
+    }
+
+    // Single-word or space-separated app shorthand ("brave", "chrome slack")
+    const steps = learn.parseLearnCommands(actionText);
+    if (steps?.length) {
+      const outs = [];
+      for (const step of steps) {
+        const cmd = step.inferredOpen ? 'open' : step.cmd;
+        const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
+        outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+      }
+      return outs.join('\n\n---\n\n');
+    }
+
+    return intent(actionText, ruleCtx);
+  }
+
   /** Natural-language shortcuts. Returns a reply, or undefined to continue to AI/Observer. */
-  function intent(text) {
+  function intent(text, ctx = {}) {
     let m;
     if (/^remind me\b/i.test(text)) {
       // "remind me in 5 minutes to drink water" → remind("in 5 minutes to drink water")
@@ -1742,7 +1829,9 @@ export function createAgent({
     }
     if ((m = text.match(/^(?:note(?:\s+kar\s+lo)?\s*[:\-]?\s+|note that\s+)([\s\S]+)$/i))) return note(m[1]);
     if ((m = text.match(/^(?:add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+)([\s\S]+)$/i))) return todo(`add ${m[1]}`);
-    if ((m = text.match(/^remember\s+(?:that\s+)?([\s\S]+)$/i))) return remember(m[1]);
+    if ((m = text.match(/^remember\s+(?:that\s+)?([\s\S]+)$/i))) return remember(m[1], ctx);
+    const memReply = mem.handleMemoryIntent(store, config, text, { voice: Boolean(ctx?.voice) });
+    if (memReply !== undefined) return memReply;
     if ((m = text.match(/^(?:what(?:'s| is) the )?weather\s+(?:in|at)\s+([\s\S]+?)\??$/i))) return tools.weather(m[1]);
     if ((m = text.match(/^([\s\S]+?)\s+ka\s+mausam\??$/i))) return tools.weather(m[1]);
     if ((m = text.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))) {
@@ -1752,7 +1841,8 @@ export function createAgent({
       try { return `🧮 ${text.trim()} = *${tools.calc(text)}*`; } catch { /* not maths after all */ }
     }
     if (/^(hi|hello|hey|namaste|hii+|yo)[!. ]*$/i.test(text)) {
-      return `👋 Namaste! I'm your Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
+      const ownerName = mem.getOwnerName(store);
+      return `👋 Namaste${ownerName ? ` *${ownerName}*` : ''}! I'm your Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
     }
     return undefined;
   }
@@ -1838,10 +1928,45 @@ export function createAgent({
       if (store.data.pending) {
         if (AFFIRM.test(working)) return toReply(await actions.runPending(effCtx));
         if (DENY.test(working)) { actions.clearPending(); return '👍 Cancelled — kuch nahi kiya.'; }
+        // "nahi, chrome kholo" while a confirm is parked → cancel pending AND run the new instruction!
+        const overrideWhilePending = mem.unwrapImmediateOverride(working);
+        if (overrideWhilePending.bypassSaved && overrideWhilePending.text !== working) {
+          actions.clearPending();
+          working = overrideWhilePending.text;
+          effCtx = { ...effCtx, bypassSaved: true };
+        }
       }
 
-      const quick = intent(working);
+      const quick = intent(working, effCtx);
       if (quick !== undefined) return await quick;
+
+      // Immediate override preambles ("firefox nahi chrome kholo", "is baar firefox kholo", "pehle wala chhodo, /note ...")
+      const unwrapped = mem.unwrapImmediateOverride(working);
+      if (unwrapped.bypassSaved) {
+        working = unwrapped.text;
+        effCtx = { ...effCtx, bypassSaved: true };
+        const innerCmd = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+        if (innerCmd) {
+          return await handleCommand(innerCmd[1].toLowerCase(), innerCmd[2].trim(), effCtx);
+        }
+        const innerQuick = intent(working, effCtx);
+        if (innerQuick !== undefined) return await innerQuick;
+      }
+
+      // User-defined custom rules & learned keywords run BEFORE built-in NLP defaults,
+      // unless the owner explicitly bypassed saved rules in this message.
+      if (!effCtx.bypassSaved) {
+        const matched = mem.matchRule(store, working);
+        if (matched) {
+          if (matched.type === 'learned') {
+            const learnedRes = await runLearned(matched.keyword, effCtx);
+            if (learnedRes != null) return learnedRes;
+          } else if (matched.type === 'rule') {
+            const ruleRes = await runCustomRule(matched.rule, effCtx);
+            if (ruleRes != null) return ruleRes;
+          }
+        }
+      }
 
       // Offline intent layer: works with zero AI, understands Hinglish.
       const parsed = parseIntent(working);

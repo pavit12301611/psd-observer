@@ -345,7 +345,9 @@ async function handleToolCall(name, args = {}) {
       return [{
         type: 'text',
         text: JSON.stringify({
-          memory: data.memory || [],
+          memory: Object.values(data.facts || {}),
+          facts: data.facts || {},
+          rules: data.rules || [],
           notes: (data.notes || []).slice(-20),
           todos: (data.todos || []).filter((t) => !t.done),
           recentDownloads: (data.downloads || []).slice(-10),

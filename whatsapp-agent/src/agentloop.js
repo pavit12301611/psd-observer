@@ -22,6 +22,7 @@
 import { routerFor } from './router.js';
 import { throwIfStopped, isStoppedError } from './cancel.js';
 import { personaLines } from './jarvis.js';
+import { formatMemoryForPrompt } from './memory.js';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
@@ -75,6 +76,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     'open_app', 'screenshot', 'look_at_screen', 'system_status', 'send_file',
     'search_files', 'read_file', 'write_file', 'download_url', 'notify',
     'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
+    'remember_fact',
     // The "hands" loop is the one tool that can finish visual tasks, so it is
     // always offered — even to a small local model with a tight tool budget.
     'computer_use',
@@ -96,11 +98,11 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
   }
 
   function systemPrompt(plan, ctx = {}) {
-    const facts = Object.values(store?.data?.facts ?? {}).slice(-20).map((f) => `- ${f}`).join('\n');
+    const memoryBlock = formatMemoryForPrompt(store, config);
     const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
     return [
       'You are the owner\'s personal assistant, running 100% free on their own Fedora computer (Observer WhatsApp Agent).',
-      ...personaLines(config, { voice: Boolean(ctx.voice) }),
+      ...personaLines(config, { voice: Boolean(ctx.voice), store }),
       ctx.voice ? `The owner is speaking to you on a live VOICE CALL right now and is listening for your spoken reply.${config.jarvisEnglishOnly === false ? '' : ' ALWAYS reply in English only, even when the owner speaks Hindi or Hinglish (you understand him perfectly; your spoken voice is English).'} Be conversational: greetings, small talk and spoken questions are all welcome — answer questions in 1-3 short spoken sentences, and put any long detail (lists, links, code) in text instead of reading it aloud. If he asks you to call him later with an update, use schedule_jarvis_call. Prefer speak_text only when explicitly asked to read/announce something; otherwise your final text is spoken automatically.` : '',
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
       `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
@@ -117,7 +119,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       '8. Do not take a screenshot at the end unless the owner asked for one or it is the proof they need.',
       `This request was sized as *${plan.tier}* (${plan.complexity?.reasons?.join(', ') || 'simple ask'}); you have ${plan.maxSteps} steps. Be efficient: the fewest tool calls that finish the job.`,
       `Access level: ${actions.level?.() ?? 'full'}. Shell: ${config.allowShell ? 'enabled (PIN protected)' : 'disabled'}.`,
-      facts ? `Things the owner asked you to remember:\n${facts}` : '',
+      memoryBlock,
       todos ? `Open to-dos:\n${todos}` : '',
     ].filter(Boolean).join('\n');
   }

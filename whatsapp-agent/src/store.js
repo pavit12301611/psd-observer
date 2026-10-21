@@ -10,7 +10,9 @@ const EMPTY = () => ({
   callSchedules: [],  // {id, text, dueTs, createdTs} — JARVIS calls the owner at dueTs and speaks text (or runs it if it starts with /)
   cronJobs: [],       // {id, text, schedule, scheduleRaw, nextDueTs, createdTs, lastRunTs}
   learned: [],        // custom keywords: {id, keyword, commands: [{cmd,args,raw,inferredOpen}], rawText, createdTs}
-  facts: {},          // /remember key -> value, injected into the AI prompt
+  rules: [],          // custom trigger->action overrides: {id, trigger, triggerNorm, kind, action, createdTs}
+  facts: {},          // /remember key -> display value, injected into the AI prompt
+  factValues: {},     // canonical slot key -> clean value (e.g. name -> "Pavit"), overwritten on updates
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
   pending: null,      // destructive action waiting for "haan"/"yes"
@@ -31,6 +33,9 @@ export class Store {
       this.data = { ...EMPTY(), ...parsed, stats: { ...EMPTY().stats, ...(parsed.stats ?? {}) } };
       if (!Array.isArray(this.data.cronJobs)) this.data.cronJobs = [];
       if (!Array.isArray(this.data.learned)) this.data.learned = [];
+      if (!Array.isArray(this.data.rules)) this.data.rules = [];
+      if (!this.data.facts || typeof this.data.facts !== 'object') this.data.facts = {};
+      if (!this.data.factValues || typeof this.data.factValues !== 'object') this.data.factValues = {};
     } catch {
       this.data = EMPTY(); // first run, or a corrupt file: start clean rather than crash
     }

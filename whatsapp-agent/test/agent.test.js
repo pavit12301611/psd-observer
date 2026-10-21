@@ -320,3 +320,82 @@ test('mailbox: message is offered to Observer, reply resolves the waiter once', 
   assert.equal(mailbox.deliverReply({ text: 'late stray reply' }), 'direct'); // nobody waiting → server sends
   assert.ok(mailbox.observerOnline());
 });
+
+test('memory: natural-language name save, recall, and overwrite of pre-existing facts', async () => {
+  const { agent, store } = makeAgent();
+  // Seed a legacy raw-slice fact ("pehle se save hai") to verify canonical overwrite removes stale conflicting entries
+  store.data.facts['my name is Aman'] = 'my name is Aman';
+  store.save();
+
+  // Owner states their name in natural Hinglish
+  const r1 = await agent.handle('mera naam Pavit hai');
+  assert.match(r1, /Pavit/);
+  assert.match(r1, /Aman/); // confirms overwrite of old saved value
+  // Legacy duplicate key must be purged so AI/recall never sees two names
+  assert.equal(store.data.facts['my name is Aman'], undefined);
+  assert.equal(store.data.factValues.name, 'Pavit');
+
+  // Recall works offline in Hinglish & English
+  assert.match(await agent.handle('mera naam kya hai?'), /Pavit/);
+  assert.match(await agent.handle('what is my name?'), /Pavit/);
+  assert.match(await agent.handle('main kaun hoon?'), /Pavit/);
+
+  // Greeting uses remembered owner name
+  assert.match(await agent.handle('namaste'), /Pavit/);
+
+  // Owner updates name again via correction phrasing ("nahi mera naam X hai")
+  const r2 = await agent.handle('nahi mera naam Pavit nahi, Rudra hai');
+  assert.match(r2, /Rudra/);
+  assert.equal(store.data.factValues.name, 'Rudra');
+  assert.match(await agent.handle('mera naam kya hai'), /Rudra/);
+
+  // Other personal facts (city, bike) also canonicalize and overwrite cleanly
+  await agent.handle('main Dehradun me rehta hoon');
+  assert.match(await agent.handle('main kahan rehta hoon?'), /Dehradun/);
+  await agent.handle('mera shehar ab Bengaluru hai');
+  assert.match(await agent.handle('where do I live?'), /Bengaluru/);
+  assert.equal(Object.values(store.data.facts).filter((f) => /Dehradun/i.test(f)).length, 0);
+});
+
+test('memory: custom trigger->action rules and owner overrides beat pre-saved/default behavior', async () => {
+  const { agent } = makeAgent();
+  await agent.handle('/todo add Buy milk');
+
+  // Pre-save a learned command
+  await agent.handle('/learn morning /notes');
+  assert.match(await agent.handle('morning'), /No notes yet/i);
+
+  // Owner overrides "morning" in natural Hinglish: "agar main morning kahun to /todo list"
+  const savedRule = await agent.handle('agar main morning kahun to /todo list');
+  assert.match(savedRule, /morning/i);
+
+  // Now saying "morning" executes what the owner newly instructed (/todo list), NOT the old /notes
+  const out = await agent.handle('morning');
+  assert.match(out, /Buy milk/);
+
+  // Owner can even override a built-in phrase ("gaana chalao" normally runs media play)
+  await agent.handle('jab main gaana chalao bolun to /todo list');
+  assert.match(await agent.handle('gaana chalao'), /Buy milk/);
+
+  // Immediate correction ("pehle wala chhodo, /note Fresh note") runs the new command directly
+  assert.match(await agent.handle('pehle wala chhodo, /note Fresh note'), /Saved note/);
+  assert.match(await agent.handle('/notes'), /Fresh note/);
+});
+
+test('memory: voice call remembers owner name & honorific in Hindi/Hinglish and uses it live', async () => {
+  const { agent } = makeAgent();
+  const heard1 = await agent.voice.say('call-1', 'मेरा नाम पवित है');
+  assert.match(heard1.text, /Pavit/);
+
+  const who = await agent.voice.say('call-1', 'mera naam kya hai');
+  assert.match(who.text, /Pavit/);
+
+  // Owner asks to be addressed as Boss
+  const addr = await agent.voice.say('call-1', 'mujhe Boss bulao');
+  assert.match(addr.text, /Boss/);
+
+  // Next greeting / smalltalk on the voice call addresses the owner as Boss
+  const hi = await agent.voice.say('call-1', 'hello jarvis');
+  assert.match(hi.spoken, /Boss/);
+});
+

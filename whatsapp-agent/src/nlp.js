@@ -12,6 +12,8 @@
 // It is a pure function returning a command the command router already knows,
 // or null. AI tool-calling (agentloop.js) handles everything beyond this list.
 
+import { extractFact, parseRuleStatement, unwrapImmediateOverride } from './memory.js';
+
 /** Short questions that only *look* like commands ("open source kya hai?"). */
 const QUESTION_WORDS = /\b(kya|kaise|kyun|kyu|kab|kahan|kaun|kitna|kitni|what|who|why|how|when|where|which|explain|samjhao|matlab|meaning)\b/i;
 
@@ -31,7 +33,15 @@ const looksLikeChat = (rest) => QUESTION_WORDS.test(rest) || /\?$/.test(rest) ||
 export function parseIntent(input) {
   const original = clean(input);
   if (!original || original.length > 500) return null;
-  const text = stripPoliteness(original);
+
+  // ── Memory & custom rules ("mera naam Pavit hai", "agar main X kahun to Y karo") ──
+  if (parseRuleStatement(original) || extractFact(original)) {
+    return asCmd('remember', original);
+  }
+
+  // ── Immediate overrides ("firefox nahi chrome kholo", "is baar chrome kholo") ──
+  const unwrapped = unwrapImmediateOverride(original);
+  const text = stripPoliteness(unwrapped.text);
   const low = text.toLowerCase();
   if (!text) return null;
   let m;

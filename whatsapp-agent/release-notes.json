@@ -1,4 +1,12 @@
 {
+  "3.1.12": {
+    "title": "Smart Owner Memory + Full Override — naam yaad rakhega aur jo kahoge wohi karega 🧠⚡",
+    "bullets": [
+      "Natural-language **Owner Memory (`src/memory.js`)**: ab `/remember` likhne ki zaroorat nahi — chat ya voice call me seedha bolo *\"mera naam Pavit hai\"*, *\"मेरा नाम पवित है\"*, *\"my name is Pavit\"*, *\"mujhe Boss bulao\"*, *\"main Dehradun me rehta hoon\"*, ya *\"mera browser brave hai\"* — agent turant samajh kar `store.json` me hamesha ke liye save kar lega.",
+      "**Purana save ho to bhi naya bolte hi overwrite**: agar pehle se koi aur naam, fact, preference ya command save hai aur tum bolo *\"nahi mera naam X hai\"*, *\"mera naam badal ke X kar do\"*, ya *\"mera shehar ab Y hai\"* — purani entry hat jayegi aur naya sach hi yaad rahega (offline recall + AI prompt + JARVIS voice call teeno me).",
+      "**Jo main kahun wohi karo (Custom Trigger → Action Rules + Override)**: bolo *\"agar main <X> kahun to <Y> karo\"* / *\"jab main <X> bolun to <Y>\"* — chahe `<X>` pehle se `/learn` me save ho ya built-in command ho (jaise *\"gaana chalao\"*), agent ab tumhara naya rule chalayega. Aur kisi ek baar ke liye *\"pehle wala chhodo, <command>\"* ya *\"brave nahi firefox kholo\"* bologe to turant wohi karega."
+    ]
+  },
   "3.1.11": {
     "title": "Speed update — sunna ab Groq API se: tez bhi, sahi bhi 🚀",
     "bullets": [
