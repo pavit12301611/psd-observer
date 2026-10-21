@@ -1,4 +1,13 @@
 {
+  "3.1.2": {
+    "title": "Update wala khamosh katil band: galat branch + engine-prune fix 🩹",
+    "bullets": [
+      "Sabse bada sach: script me update ki default branch *purani session branch* (v2.10) padhi thi — matlab plain `update` chalate hi poora install chup-chaap *downgrade* ho jata tha aur `voice` commands hi gayab! Ab install apni branch hamesha yaad rakhta hai (`.observer-branch`) — dobara nahi hoga",
+      "Doosra chupa katil: har update ka `npm install` call-engine (baileys-caller) ko *prune* kar deta tha (--no-save install tha). Ab update engine ko park karke wapas lagata hai — call pickup update ke baad bhi zinda rahega",
+      "`voice call-engine` dobara chalane par ab `WA_CALL_ANSWER=true` band nahi hota (pehle har repair-run chupke se answering OFF kar deta tha) + standalone-engine fallback me missing baileys bhi jud gaya",
+      "Agar tumhara install downgrade ho gaya hai (voice command gayab), ek baar ye chalao: `BRANCH=arena/592311b3-psd-observer bash scripts/observer.sh update` — uske baad se hamesha ke liye sahi rahega"
+    ]
+  },
   "3.1.1": {
     "title": "Call pickup ke do chupe katil fix + `voice doctor` 🩺☎️",
     "bullets": [

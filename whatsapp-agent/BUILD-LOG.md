@@ -1,5 +1,37 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.2 — "unknown command: voice": update khud install ko kha raha tha
+
+> User ne 3.1.1 ke liye `update` chalaya — aur `voice` command hi gayab ho
+> gaya. Wajah script ki line 30 me band padhi thi:
+> `BRANCH="${BRANCH:-arena/5055bd15-psd-observer}"` — ek **purani session
+> branch (v2.10.0)**. Har plain `update` wahan ka bundle kheench ke install
+> ko chup-chaap *downgrade* kar deta tha. Upar se update ka plain
+> `npm install` `--no-save` wale baileys-caller engine ko **prune** kar
+> deta hai (sandbox me prove kiya: install → present, npm install → gone) —
+> matlab har update call-pickup ko bhi saath le doobta tha. Aur
+> `voice call-engine` ka re-run `WA_CALL_ANSWER=false` reset kar deta tha.
+> Teenon ek saath fix:
+>
+> 1. **Sticky branch**: install/update `.observer-branch` receipt likhte
+>    hain; script use env ke baad, built-in default se pehle padhta hai.
+>    Default ab current branch; saathi scripts + docs ke install-URL bhi
+>    update. Ek `BRANCH=<sahi> update` = hamesha ke liye theek.
+> 2. **Engine parking**: update `npm install` se pehle
+>    baileys-caller + @roamhq + qrcode-terminal ko `.voip-park/` me rakhta
+>    hai, baad me wapas jagah par (sandbox simulation PASS).
+> 3. **call-engine re-run safe**: WA_CALL_ANSWER=true pehle se ho to wohi
+>    rehta hai + service restart; standalone fallback ab apna
+>    `@whiskeysockets/baileys@7.0.0-rc14` bhi install karta hai (engine ka
+>    lazy peer-import uske apne folder se resolve hota hai — bina iske
+>    standalone copy connect par hi girti).
+>
+> Sabak (dobara): install/update ke defaults bhi production code hain —
+> branch badle to script ka default BHI badlo, warna user ki machine
+> purane zamane me phasi rehti hai aur hum engine ko dosh dete rehte hain.
+
+---
+
 ## v3.1.1 — Real-machine pickup debug: engine source padh ke do apne hi bug mare
 
 > User (poora setup ke baad): "call nhi utha rha hai". Is baar guess nahi —

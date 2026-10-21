@@ -27,7 +27,19 @@
 set -euo pipefail
 
 REPO="${REPO:-pavit12301611/psd-observer}"
-BRANCH="${BRANCH:-arena/5055bd15-psd-observer}"
+# Where this file lives — if it sits inside an install (<dir>/scripts/), that
+# install wins over anything else we might discover.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+# Which branch do install/update track? Precedence: $BRANCH env → sticky
+# receipt (.observer-branch in the install root, written by install/update)
+# → built-in default. The sticky file is load-bearing: without it, an older
+# copy of this script kept pulling from a STALE session branch and a routine
+# `update` silently DOWNGRADED a live 3.1 install back to v2.10 (voice
+# commands vanished). One `BRANCH=<right> update` now fixes it forever.
+if [ -z "${BRANCH:-}" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/../.observer-branch" ]; then
+  BRANCH="$(tr -d '[:space:]' < "$SELF_DIR/../.observer-branch" 2>/dev/null || echo "")"
+fi
+BRANCH="${BRANCH:-arena/592311b3-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 API="https://api.github.com/repos/${REPO}/contents"
@@ -35,9 +47,6 @@ DEFAULT_DIR="${DEFAULT_DIR:-$HOME/observer-agent}"
 SERVICE="observer-whatsapp-agent"
 MODEL_SERVICE="observer-model"
 SELF_URL="${RAW}/whatsapp-agent/scripts/observer.sh"
-# Where this file lives — if it sits inside an install (<dir>/scripts/), that
-# install wins over anything else we might discover.
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 # ── pretty output ────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -215,6 +224,7 @@ cmd_install() {
     ok "created .env (owner +91 95289 23866 · agent +91 88595 55795 already filled in)"
   fi
   ok "code installed · version $(local_version "$dest")"
+  printf '%s\n' "$BRANCH" > "$dest/.observer-branch" 2>/dev/null || true   # future updates track THIS branch
 
   say "Installing Node dependencies"
   ( cd "$dest" && npm install --no-audit --no-fund ) || die "npm install failed — check your internet, then: cd $dest && npm install"
@@ -313,8 +323,35 @@ cmd_update() {
     [ -n "$missing" ] && info "new optional settings in .env.example: $missing"
   fi
 
+  # The VoIP engine (voice call-engine) lives in node_modules as a --no-save
+  # install — and a plain `npm install` PRUNES it (verified). Every update
+  # therefore used to silently delete WhatsApp call pickup. Park the engine
+  # (+ its private deps) aside and put it back afterwards.
+  local parked="$dest/.voip-park" had_engine=0
+  rm -rf "$parked"
+  if [ -d "$dest/node_modules/baileys-caller" ]; then
+    had_engine=1; mkdir -p "$parked"
+    for item in baileys-caller @roamhq qrcode-terminal; do
+      [ -e "$dest/node_modules/$item" ] && mv "$dest/node_modules/$item" "$parked/" 2>/dev/null || true
+    done
+    info "VoIP engine park kar liya (taaki npm use uda na de)"
+  fi
+
   say "Installing dependencies"
   ( cd "$dest" && npm install --no-audit --no-fund ) || warn "npm install failed — run it yourself: cd $dest && npm install"
+
+  if [ "$had_engine" -eq 1 ]; then
+    for item in baileys-caller @roamhq qrcode-terminal; do
+      if [ -e "$parked/$item" ] && [ ! -e "$dest/node_modules/$item" ]; then
+        mv "$parked/$item" "$dest/node_modules/$item" 2>/dev/null || true
+      fi
+    done
+    rm -rf "$parked"
+    if [ -d "$dest/node_modules/baileys-caller" ]; then ok "VoIP engine wapas jagah par ✓"
+    else warn "⚠️ VoIP engine wapas nahi lag paya — ek baar chala do: bash scripts/observer.sh voice call-engine"; fi
+  fi
+  printf '%s\n' "$BRANCH" > "$dest/.observer-branch" 2>/dev/null || true   # sticky: future updates track THIS branch
+  info "update branch: ${BRANCH} (yaad rakh liya — .observer-branch)"
 
   # Leave a receipt the new process can read at startup: data/ survives
   # updates, so the "updated!" WhatsApp message knows the real duration.
@@ -1770,7 +1807,13 @@ DONE
             curl -fL --retry 3 https://codeload.github.com/Akane7101/baileys-caller/tar.gz/refs/heads/main \
               | tar -xz -C "$VOIP_DIR" || die "baileys-caller download fail"
             mv "$VOIP_DIR"/baileys-caller-main "$VOIP_DIR/baileys-caller" 2>/dev/null || true
-            ( cd "$VOIP_DIR/baileys-caller" && npm install --no-audit --no-fund --legacy-peer-deps ) \
+            # Standalone copy must carry its OWN baileys: the engine does a
+            # lazy import("@whiskeysockets/baileys") resolved from ITS folder —
+            # a peer that only exists in the agent's node_modules is invisible
+            # from ~/.local/share. (In node_modules mode the agent's rc14 is
+            # found via the parent dir, which is why that path works.)
+            ( cd "$VOIP_DIR/baileys-caller" && npm install --no-audit --no-fund --legacy-peer-deps \
+                && npm install --no-save --no-audit --no-fund --legacy-peer-deps "@whiskeysockets/baileys@7.0.0-rc14" ) \
               || die "baileys-caller deps install fail (@roamhq/wrtc native build dekho)"
           }
       fi
@@ -1786,9 +1829,25 @@ DONE
       else
         warn "Engine files hain par LOAD nahi ho raha — upar ka error dekho. Dobara chalao: bash observer.sh voice call-engine (na bane to error note karke batao)"
       fi
-      env_set "$envfile" "WA_CALL_ANSWER" "false"
-      info "WA_CALL_ANSWER abhi false rakha hai — pehle device LINK karo:"
-      cat <<DONE
+      if grep -qE '^WA_CALL_ANSWER=true' "$envfile" 2>/dev/null; then
+        # Re-run after an update/repair: device already linked, answering
+        # already ON. Never flip it off again — just restart so the running
+        # service picks the (re)installed engine up.
+        ok "WA_CALL_ANSWER pehle se true hai (device linked) — setting waisi hi rakhi"
+        restart_agent "$dir"
+        cat <<DONE
+
+────────────────────────────────────────────────────────────────────────
+ 📞 ENGINE READY + DEVICE PEHLE SE LINKED HAI
+────────────────────────────────────────────────────────────────────────
+ Service restart ho gaya. Test call karo — JARVIS ko uthana chahiye.
+ Kuch gadbad lage to: bash scripts/observer.sh voice doctor
+────────────────────────────────────────────────────────────────────────
+DONE
+      else
+        env_set "$envfile" "WA_CALL_ANSWER" "false"
+        info "WA_CALL_ANSWER abhi false rakha hai — pehle device LINK karo:"
+        cat <<DONE
 
 ────────────────────────────────────────────────────────────────────────
  📞 ENGINE READY — ab ek baar QR link karo:
@@ -1800,6 +1859,7 @@ DONE
  Guide: whatsapp-agent/WHATSAPP-CALL.md
 ────────────────────────────────────────────────────────────────────────
 DONE
+      fi
       ;;
 
     link-voip|link)
