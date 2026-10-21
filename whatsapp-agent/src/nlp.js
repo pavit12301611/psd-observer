@@ -12,6 +12,8 @@
 // It is a pure function returning a command the command router already knows,
 // or null. AI tool-calling (agentloop.js) handles everything beyond this list.
 
+import { extractFact, parseRuleStatement, unwrapImmediateOverride } from './memory.js';
+
 /** Short questions that only *look* like commands ("open source kya hai?"). */
 const QUESTION_WORDS = /\b(kya|kaise|kyun|kyu|kab|kahan|kaun|kitna|kitni|what|who|why|how|when|where|which|explain|samjhao|matlab|meaning)\b/i;
 
@@ -31,7 +33,15 @@ const looksLikeChat = (rest) => QUESTION_WORDS.test(rest) || /\?$/.test(rest) ||
 export function parseIntent(input) {
   const original = clean(input);
   if (!original || original.length > 500) return null;
-  const text = stripPoliteness(original);
+
+  // ── Memory & custom rules ("mera naam Pavit hai", "agar main X kahun to Y karo") ──
+  if (parseRuleStatement(original) || extractFact(original)) {
+    return asCmd('remember', original);
+  }
+
+  // ── Immediate overrides ("firefox nahi chrome kholo", "is baar chrome kholo") ──
+  const unwrapped = unwrapImmediateOverride(original);
+  const text = stripPoliteness(unwrapped.text);
   const low = text.toLowerCase();
   if (!text) return null;
   let m;
@@ -146,6 +156,9 @@ export function parseIntent(input) {
   // ── system ────────────────────────────────────────────────────────────────
   if (/^(?:battery|charge|charging)\s*(?:(?:kya|kitni|kitna|status|batao|hai)\s*){0,2}\??$/i.test(low)) return asCmd('pc', 'battery');
   if (/^(?:disk|storage|jagah|space)\s*(?:kya|kitni|status|batao|free)?\s*(?:hai)?\??$/i.test(low)) return asCmd('pc', 'disk');
+  if (/^(?:(?:ram|memory\s+usage|cpu|cpu\s+usage|cpu\s+load|system\s+load|pc\s+ka\s+haal|system\s+ka\s+haal)\s*(?:kya|kitni|kitna|status|batao|hai)?\??|uptime\??)$/i.test(low)) return asCmd('system');
+  if (/^(?:time\s+kya\s+(?:hua|hai)|abhi\s+kitne\s+baje\s+hain|kitne\s+baje\s+hain|what\s+time\s+is\s+it|current\s+time|samay\s+kya\s+hua\s+hai)\??$/i.test(low)) return asCmd('time');
+  if (/^(?:aaj\s+(?:kya\s+date|ki\s+tareekh|kaun\s*sa\s+din)\s*(?:hai)?|what(?:'s|\s+is)\s+today'?s\s+date|today'?s\s+date)\??$/i.test(low)) return asCmd('date');
   if (/^(?:pc|system)\s+(?:status|info)$/i.test(text) || /^system\s+status$/i.test(text)) return asCmd('pc', 'status');
   if (/^(?:process(?:es)?|top|top\s+process(?:es)?)\s*(?:dikhao|list|kya\s+chal\s+raha)?$/i.test(text)) return asCmd('pc', 'top');
   if ((m = text.match(/^(?:kill|band\s+kar(?:o|do)?\s+process|process\s+band\s+kar(?:o|do)?)\s+(.+)$/i))) return asCmd('kill', clean(m[1]));
@@ -222,6 +235,17 @@ export function parseIntent(input) {
   // ── troubleshooting ───────────────────────────────────────────────────────
   if (/^(?:doctor|diagnose|diagnostics|health|healthcheck|sab\s+theek|kya\s+kaam\s+nahi|kya\s+theek\s+nahi|screenshot\s+(?:kaam\s+nahi|black|kaala)|why\s+(?:is|are)\s+(?:my\s+)?screenshot)\b/i.test(text)) {
     return asCmd('doctor');
+  }
+
+  // ── productivity & quick actions ─────────────────────────────────────────
+  if (/^(?:(?:mere\s+)?(?:todos?|tasks?|to-dos?)\s+(?:dikhao|batao|list)|kya\s+(?:kya\s+)?kaam\s+baaki\s+hai|show\s+(?:my\s+)?(?:todos?|tasks?))\??$/i.test(low)) return asCmd('todo');
+  if (/^(?:(?:mere\s+)?notes?\s+(?:dikhao|batao|list)|show\s+(?:my\s+)?notes?)\??$/i.test(low)) return asCmd('notes');
+  if (/^(?:(?:mere\s+)?reminders?\s+(?:dikhao|batao|list)|show\s+(?:my\s+)?reminders?)\??$/i.test(low)) return asCmd('reminders');
+  if (/^(?:(?:aaj\s+ka\s+)?brief(?:\s+do|\s+batao)?|morning\s+brief|daily\s+brief|daily\s+summary)$/i.test(low)) return asCmd('brief');
+  if (/^(?:undo(?:\s+kar(?:o|do))?|pichla\s+kaam\s+(?:wapas\s+lo|undo\s+karo))$/i.test(low)) return asCmd('undo');
+  if ((m = text.match(/^(?:youtube\s+(?:pe|par)\s+(.+?)\s+(?:chalao|bajao|play\s+kar(?:o|do)|lagao)|play\s+(.+?)\s+on\s+youtube)$/i))) {
+    const q = clean(m[1] || m[2]);
+    if (q) return asCmd('open', `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`);
   }
 
   // ── meta ──────────────────────────────────────────────────────────────────

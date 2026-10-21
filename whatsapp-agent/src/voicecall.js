@@ -23,6 +23,7 @@
 
 import crypto from 'node:crypto';
 import { parseIntent } from './nlp.js';
+import { getOwnerAddress } from './memory.js';
 import {
   jarvisGreeting, jarvisFarewell, spokenSummary, normalizeSpokenText,
   isEndCallPhrase, isStopPhrase, isRepeatPhrase, isAffirmPhrase, isDenyPhrase,
@@ -72,9 +73,10 @@ export function replyParts(reply) {
  *   hasPending()    → a destructive action is parked awaiting haan/nahi
  *   stopAll()       → invoked for "ruko/stop" (runText('/stop') works too)
  */
-export function createVoiceCall({ config = {}, runText, speak = null, hasPending = () => false, stopAll = null, log = console }) {
+export function createVoiceCall({ config = {}, store = null, runText, speak = null, hasPending = () => false, stopAll = null, log = console }) {
   if (typeof runText !== 'function') throw new Error('createVoiceCall needs runText(text)');
   const sessions = new Map();
+  const addr = () => getOwnerAddress(store, config);
 
   async function safeSpeak(text) {
     if (!text || typeof speak !== 'function') return null;
@@ -122,7 +124,7 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
 // eslint-disable-next-line no-unused-vars
   async function start(source = 'app', sessionId = null) {
     const session = getOrCreate(sessionId, source);
-    const greeting = jarvisGreeting(config);
+    const greeting = jarvisGreeting(config, new Date(), store);
     session.lastSpoken = greeting;
     session.transcript.push({ who: 'jarvis', text: greeting, ts: Date.now() });
     emit(session, 'started', { text: greeting });
@@ -146,7 +148,7 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
           .replace(/reply\s+(haan|yes)\b.*$/i, '')
           .replace(/[.?\s]+$/, '')
           .trim();
-        spoken = `${ask ? `${ask}. ` : ''}Shall I proceed, ${config.jarvisAddress || 'Sir'}?`;
+        spoken = `${ask ? `${ask}. ` : ''}Shall I proceed, ${addr()}?`;
       }
     } else {
       session.state = 'listening';
@@ -163,7 +165,7 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
     const heard = normalizeSpokenText(rawText);
     const base = { ok: true, sessionId: session.id, source: session.source, heard, turn: session.turns + 1 };
     if (!heard) {
-      const spoken = `I beg your pardon, ${config.jarvisAddress || 'Sir'}? I did not quite catch that.`;
+      const spoken = `I beg your pardon, ${addr()}? I did not quite catch that.`;
       session.lastSpoken = spoken;
       return { ...base, state: session.state, text: '', spoken, audio: await safeSpeak(spoken), images: [] };
     }
@@ -174,7 +176,7 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
 
     // ── local call controls (no AI, no queue) ──────────────────────────────
     if (isEndCallPhrase(heard)) {
-      const farewell = jarvisFarewell(config);
+      const farewell = jarvisFarewell(config, store);
       session.lastSpoken = farewell;
       session.transcript.push({ who: 'jarvis', text: farewell, ts: Date.now() });
       const audio = await safeSpeak(farewell);
@@ -190,7 +192,7 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
       emit(session, 'thinking', { text: heard });
       const reply = stopAll ? await stopAll() : await runText('/stop');
       const { parts, fullText } = finishResult(session, { reply, heard });
-      const spoken = `Stopped, ${config.jarvisAddress || 'Sir'}.`;
+      const spoken = `Stopped, ${addr()}.`;
       session.lastSpoken = spoken;
       emit(session, 'reply', { text: fullText, spoken });
       return { ...base, state: session.state, text: fullText, spoken, audio: await safeSpeak(spoken), images: parts.images, reply: parts.raw };
@@ -211,7 +213,7 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
     // ── casual conversation: greetings/thanks/small talk, instant + offline.
     // Real questions still fall through to the agent (and its AI brains).
     if (!hasPending()) {
-      const chatty = smalltalkReply(heard, config);
+      const chatty = smalltalkReply(heard, config, new Date(), store);
       if (chatty) {
         const { fullText, spoken } = finishResult(session, { text: chatty, heard });
         emit(session, 'reply', { text: fullText, spoken });

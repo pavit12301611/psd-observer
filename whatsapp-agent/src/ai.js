@@ -14,6 +14,7 @@
 // without a description.
 
 import { routerFor } from './router.js';
+import { getOwnerAddress, getAgentName, formatMemoryForPrompt } from './memory.js';
 
 const TIMEOUT_MS = 60_000;
 
@@ -34,24 +35,25 @@ async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal 
 }
 
 function systemPrompt(config, store, opts = {}) {
-  const facts = Object.entries(store?.data?.facts ?? {}).map(([k, v]) => `- ${k}: ${v}`).join('\n');
+  const memoryBlock = formatMemoryForPrompt(store, config);
   const openTodos = (store?.data?.todos ?? []).filter((t) => !t.done).map((t) => `- ${t.text}`).join('\n');
-  const address = (config.jarvisAddress || 'Sir').trim() || 'Sir';
+  const address = getOwnerAddress(store, config);
+  const agentName = getAgentName(store, config);
   const voiceLine = opts.voice
     ? [`This question was SPOKEN to you on a live voice call; your answer will be read aloud. ${config.jarvisEnglishOnly === false ? '' : 'Answer in English only, even if the question was in Hindi/Hinglish. '}Answer conversationally in 1-3 short sentences; never read lists, links or code aloud — say the detail has been sent in text.`]
     : [];
   const persona = config.jarvisPersona === false ? [] : [
-    `Your persona is JARVIS — a calm, impeccably polite British butler-AI in the spirit of the films. Address the owner as "${address}". Dry wit, never rude; brief and precise. Prefer lines like "Very well, ${address}.", "At once, ${address}." and "Shall I proceed, ${address}?" — sparingly, not in every sentence. When the owner speaks Hinglish or Hindi, keep the same butler warmth in that language ("Ho gaya, ${address}."). Never say you are an AI language model; you are JARVIS, running on the owner's own computer.`,
+    `Your name is ${agentName} — a calm, ultra-fast, impeccably polite British butler-AI in the spirit of JARVIS. Address the owner as "${address}". Dry wit, never rude; brief and precise. Prefer lines like "Very well, ${address}.", "At once, ${address}." and "Shall I proceed, ${address}?" — sparingly, not in every sentence. When the owner speaks Hinglish or Hindi, keep the same butler warmth in that language ("Ho gaya, ${address}."). Never say you are an AI language model; you are ${agentName}, running on the owner's own computer.`,
   ];
   return [
-    'You are the owner\'s personal WhatsApp assistant, running for free on their own computer as part of Observer.',
+    `You are ${agentName}, the owner's personal WhatsApp + PC assistant, running for free on their own computer as part of Observer.`,
     ...persona,
     ...voiceLine,
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
     'Style: WhatsApp-short. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". If you don\'t know, say so briefly.',
     'You also have built-in tools the owner can trigger with slash commands: /remind /todo /note /weather /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
-    facts ? `Things the owner asked you to remember:\n${facts}` : '',
+    memoryBlock,
     openTodos ? `Open to-dos:\n${openTodos}` : '',
   ].filter(Boolean).join('\n\n');
 }

@@ -25,7 +25,7 @@ import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
-import { routerFor, looksLikeWebTask } from './router.js';
+import { routerFor, looksLikeWebTask, estimateComplexity } from './router.js';
 import { parseIntent } from './nlp.js';
 import { runDoctor } from './doctor.js';
 import * as watch from './watch.js';
@@ -39,9 +39,10 @@ import { createHarness } from './harness.js';
 import * as solver from './solver.js';
 import { createVoiceCall } from './voicecall.js';
 import { jarvisGreeting, spokenSummary } from './jarvis.js';
+import * as mem from './memory.js';
 
 const execAsync = promisify(exec);
-const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
+const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
 
 *Just talk (English / Hindi / Hinglish)*
@@ -142,6 +143,7 @@ export function createAgent({
   // WhatsApp voice notes: speech → this same handle() → JARVIS voice back.
   const voice = createVoiceCall({
     config,
+    store,
     log,
     runText: (text) => handle(text, { source: 'voicecall', voice: true, waStatus: () => 'voice call' }),
     speak: (text) => tts.synthesize(text, config, log),
@@ -595,19 +597,43 @@ export function createAgent({
     return '📝 *Notes*\n\n' + store.data.notes.map((n) => `#${n.id} · ${n.text}`).join('\n');
   }
 
-  function remember(args) {
+  function remember(args, ctx = {}) {
     const text = (args || '').replace(/^that\s+/i, '').trim();
-    if (!text) return '🧠 Usage: /remember <thing> — e.g. /remember my bike number is UK04 AB 1234';
-    const key = text.slice(0, 48);
-    store.data.facts[key] = text;
-    store.save();
-    return '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
+    if (!text) return '🧠 Usage: /remember <thing> — e.g. /remember my bike number is UK04 AB 1234 (ya seedha bolo "mera naam Pavit hai")';
+    const parsedRule = mem.parseRuleStatement(text);
+    if (parsedRule) {
+      if (parsedRule.kind === 'directive') {
+        mem.rememberFact(store, `owner_priority_rule: ${parsedRule.value}`, { explicit: true });
+        return '🧠 Remembered — bilkul! Jo aap kahenge wohi hoga, chahe pehle se kuch aur save ho. (/memory to see all)';
+      }
+      if (parsedRule.kind === 'fact') {
+        const r = mem.rememberFact(store, parsedRule.text, { explicit: true });
+        return r?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
+      }
+      const r = mem.addRule(store, parsedRule);
+      return r?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
+    }
+    const res = mem.rememberFact(store, text, { explicit: true });
+    if (res && ctx?.voice && config.jarvisEnglishOnly !== false) {
+      if (res.key === 'name') {
+        return res.updated
+          ? `Very well, ${res.value}. I have updated your name from ${res.previousValue} to ${res.value}.`
+          : `Pleasure to meet you, ${res.value}. I shall remember your name.`;
+      }
+      return `Noted and remembered, ${mem.getOwnerAddress(store, config)}.`;
+    }
+    return res?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats. (/memory to see all)';
   }
 
-  function memory() {
-    const facts = Object.values(store.data.facts ?? {});
-    if (!facts.length) return '🧠 I haven\'t memorised anything yet. Try: /remember my office Wi-Fi password is …';
-    return '🧠 *What I remember*\n\n' + facts.map((f) => `• ${f}`).join('\n') + '\n\n/forget memory — wipe these';
+  function memory(args = '', ctx = {}) {
+    const q = String(args ?? '').trim();
+    if (q) {
+      const answered = mem.handleMemoryIntent(store, config, q, { voice: Boolean(ctx?.voice) });
+      if (answered) return answered;
+      const val = mem.getFactValue(store, q);
+      if (val) return `🧠 *${mem.canonicalSlot(q).label}*: *${val}*`;
+    }
+    return mem.formatMemoryList(store);
   }
 
   // Pending destructive PC actions awaiting "/pc confirm" (60 s window).
@@ -672,7 +698,7 @@ export function createAgent({
       }
       case 'open': {
         if (!rest) return '🚀 Usage: /open <app name> — /apps lists everything installed.';
-        return act('open_app', { app: rest });
+        return act('open_app', { app: mem.resolvePreferredApp(store, rest) });
       }
       case 'close': case 'quit': return act('close_app', { app: rest });
       case 'notify': return rest ? pc.desktopNotify(rest) : '🔔 Usage: /pc notify <text>';
@@ -1529,12 +1555,25 @@ export function createAgent({
       case 'todo': case 'todos': case 'task': return todo(args);
       case 'note': return note(args);
       case 'notes': return notes();
-      case 'remember': return remember(args);
-      case 'memory': return memory();
-      case 'forget':
-        if (/^memory$/i.test(args || '')) { store.data.facts = {}; store.save(); return '🧠 Memorised facts wiped.'; }
+      case 'remember': return remember(args, ctx);
+      case 'memory': return memory(args, ctx);
+      case 'forget': {
+        const fArg = String(args || '').trim();
+        if (/^(?:memory|all|facts|sab)$/i.test(fArg)) {
+          store.data.facts = {};
+          store.data.factValues = {};
+          store.data.rules = [];
+          store.save();
+          return '🧠 Memorised facts wiped.';
+        }
+        if (fArg && !/^(?:chat|history)$/i.test(fArg)) {
+          const res = mem.forgetFact(store, fArg);
+          if (res.ok) return `🧹 Memory se *${res.label}* hata diya.`;
+          return `🧠 *${fArg}* naam se kuch memory me save nahi tha.`;
+        }
         store.clearHistory();
         return '🧹 Chat memory cleared. Fresh start!';
+      }
       case 'model': case 'ai': if (!args) return ai.aiStatus(config); return askAI(args, ctx);
       case 'ask': return args ? askAI(args, ctx) : '💬 Usage: /ask <question> — or just type your question normally.';
       case 'summarize': case 'summarise': case 'tldr': {
@@ -1623,7 +1662,7 @@ export function createAgent({
       case 'apps': case 'applications': return act('list_apps');
       case 'windows': case 'tasks': return act('list_windows');
       case 'focus': case 'switch': return act('focus_window', { title: args });
-      case 'open': return args ? act('open_app', { app: args }) : '🚀 Usage: /open <app> — /apps lists installed apps.';
+      case 'open': return args ? act('open_app', { app: mem.resolvePreferredApp(store, args, { bypassSaved: Boolean(ctx?.bypassSaved) }) }) : '🚀 Usage: /open <app> — /apps lists installed apps.';
       case 'close': case 'quit': return args ? act('close_app', { app: args }) : '🚪 Usage: /close <app>';
 
       // ── network & system ────────────────────────────────────────────────
@@ -1732,27 +1771,100 @@ export function createAgent({
     return ai.NO_BRAIN_HINT;
   }
 
+  /** Execute a user-defined trigger→action rule from `store.data.rules`. */
+  async function runCustomRule(rule, ctx = {}) {
+    if (!rule) return null;
+    if (rule.kind === 'reply') return rule.action;
+    const actionText = String(rule.action ?? '').trim();
+    if (!actionText) return null;
+    const ruleCtx = { ...ctx, bypassSaved: true };
+
+    // Multi-step pipe/semicolon chain ("open chrome | open code")
+    if (/[|;\n]/.test(actionText)) {
+      const steps = learn.parseLearnCommands(actionText);
+      if (steps?.length) {
+        const outs = [];
+        for (const step of steps) {
+          const cmd = step.inferredOpen ? 'open' : step.cmd;
+          const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
+          outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+        }
+        return outs.join('\n\n---\n\n');
+      }
+    }
+
+    // Slash command ("/brief", "/open brave")
+    const slash = actionText.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+    if (slash) return handleCommand(slash[1].toLowerCase(), slash[2].trim(), ruleCtx);
+
+    // Natural-language intent ("brave kholo", "screenshot bhejo", "volume 40")
+    const parsed = parseIntent(actionText);
+    if (parsed) {
+      if (parsed.reply) return parsed.reply;
+      return handleCommand(parsed.cmd, parsed.args ?? '', ruleCtx);
+    }
+
+    // Single-word or space-separated app shorthand ("brave", "chrome slack")
+    const steps = learn.parseLearnCommands(actionText);
+    if (steps?.length) {
+      const outs = [];
+      for (const step of steps) {
+        const cmd = step.inferredOpen ? 'open' : step.cmd;
+        const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
+        outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+      }
+      return outs.join('\n\n---\n\n');
+    }
+
+    return intent(actionText, ruleCtx);
+  }
+
   /** Natural-language shortcuts. Returns a reply, or undefined to continue to AI/Observer. */
-  function intent(text) {
+  function intent(text, ctx = {}) {
     let m;
+    // Let compound command chains ("todo: X aur note: Y") fall through to the chain runner
+    if (/\s+(?:aur|phir|fir|uske\s+baad|and\s+then|then)\s+(?:note|todo|remind|remember|mera|meri|mujhe|open|close|screenshot|volume|awaaz|wifi|bluetooth|\/)/i.test(text)) {
+      return undefined;
+    }
     if (/^remind me\b/i.test(text)) {
       // "remind me in 5 minutes to drink water" → remind("in 5 minutes to drink water")
       // parseWhen already swallows the "to" after the duration / clock time.
       return remind(text.replace(/^remind me\s+/i, ''));
     }
     if ((m = text.match(/^(?:note(?:\s+kar\s+lo)?\s*[:\-]?\s+|note that\s+)([\s\S]+)$/i))) return note(m[1]);
-    if ((m = text.match(/^(?:add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+)([\s\S]+)$/i))) return todo(`add ${m[1]}`);
-    if ((m = text.match(/^remember\s+(?:that\s+)?([\s\S]+)$/i))) return remember(m[1]);
+    if ((m = text.match(/^(?:add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+)(?:add\s+)?([\s\S]+)$/i))) return todo(`add ${m[1]}`);
+    if ((m = text.match(/^remember\s+(?:that\s+)?([\s\S]+)$/i))) return remember(m[1], ctx);
+    const memReply = mem.handleMemoryIntent(store, config, text, { voice: Boolean(ctx?.voice) });
+    if (memReply !== undefined) return memReply;
     if ((m = text.match(/^(?:what(?:'s| is) the )?weather\s+(?:in|at)\s+([\s\S]+?)\??$/i))) return tools.weather(m[1]);
     if ((m = text.match(/^([\s\S]+?)\s+ka\s+mausam\??$/i))) return tools.weather(m[1]);
     if ((m = text.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))) {
       return `🧮 ${m[1]}% of ${m[2]} = *${(Number(m[1]) / 100) * Number(m[2])}*`;
     }
+    if ((m = text.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pratishat)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      return `🧮 ${m[2]}% of ${m[1]} = *${(Number(m[2]) / 100) * Number(m[1])}*`;
+    }
+    // Hinglish spoken math ("45 guna 12", "100 plus 250", "500 minus 120", "100 bhaag 4")
+    if (/^\d+(?:\.\d+)?\s+(?:guna|into|times|multiply(?:\s+by)?|plus|jod|minus|ghata|bhaag|divide(?:\s+by)?)\s+\d+/i.test(text)) {
+      const expr = text
+        .replace(/\b(?:kitna\s*(?:hota\s*hai|hai)?|kya\s*hai|equals?)\??$/i, '')
+        .replace(/\b(?:guna|into|times|multiply(?:\s+by)?)\b/gi, '*')
+        .replace(/\b(?:plus|jod)\b/gi, '+')
+        .replace(/\b(?:minus|ghata)\b/gi, '-')
+        .replace(/\b(?:bhaag|divide(?:\s+by)?)\b/gi, '/')
+        .trim();
+      try { return `🧮 ${expr} = *${tools.calc(expr)}*`; } catch { /* fall through */ }
+    }
+    if ((m = text.match(/^(-?\d+(?:\.\d+)?)\s*([a-zA-Z°]+)\s+(?:in|to|into|me|mein)\s+([a-zA-Z°]+)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      try { return `📏 ${tools.convertUnit(Number(m[1]), m[2], m[3])}`; } catch { /* not a known unit pair */ }
+    }
     if (tools.looksLikeCalc(text)) {
       try { return `🧮 ${text.trim()} = *${tools.calc(text)}*`; } catch { /* not maths after all */ }
     }
-    if (/^(hi|hello|hey|namaste|hii+|yo)[!. ]*$/i.test(text)) {
-      return `👋 Namaste! I'm your Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
+    if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
+      const ownerName = mem.getOwnerName(store);
+      const agentName = mem.getAgentName(store, config);
+      return `👋 Namaste${ownerName ? ` *${ownerName}*` : ''}! Main *${agentName}* hoon — aapka fast & powerful Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
     }
     return undefined;
   }
@@ -1838,10 +1950,45 @@ export function createAgent({
       if (store.data.pending) {
         if (AFFIRM.test(working)) return toReply(await actions.runPending(effCtx));
         if (DENY.test(working)) { actions.clearPending(); return '👍 Cancelled — kuch nahi kiya.'; }
+        // "nahi, chrome kholo" while a confirm is parked → cancel pending AND run the new instruction!
+        const overrideWhilePending = mem.unwrapImmediateOverride(working);
+        if (overrideWhilePending.bypassSaved && overrideWhilePending.text !== working) {
+          actions.clearPending();
+          working = overrideWhilePending.text;
+          effCtx = { ...effCtx, bypassSaved: true };
+        }
       }
 
-      const quick = intent(working);
+      const quick = intent(working, effCtx);
       if (quick !== undefined) return await quick;
+
+      // Immediate override preambles ("firefox nahi chrome kholo", "is baar firefox kholo", "pehle wala chhodo, /note ...")
+      const unwrapped = mem.unwrapImmediateOverride(working);
+      if (unwrapped.bypassSaved) {
+        working = unwrapped.text;
+        effCtx = { ...effCtx, bypassSaved: true };
+        const innerCmd = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+        if (innerCmd) {
+          return await handleCommand(innerCmd[1].toLowerCase(), innerCmd[2].trim(), effCtx);
+        }
+        const innerQuick = intent(working, effCtx);
+        if (innerQuick !== undefined) return await innerQuick;
+      }
+
+      // User-defined custom rules & learned keywords run BEFORE built-in NLP defaults,
+      // unless the owner explicitly bypassed saved rules in this message.
+      if (!effCtx.bypassSaved) {
+        const matched = mem.matchRule(store, working);
+        if (matched) {
+          if (matched.type === 'learned') {
+            const learnedRes = await runLearned(matched.keyword, effCtx);
+            if (learnedRes != null) return learnedRes;
+          } else if (matched.type === 'rule') {
+            const ruleRes = await runCustomRule(matched.rule, effCtx);
+            if (ruleRes != null) return ruleRes;
+          }
+        }
+      }
 
       // Offline intent layer: works with zero AI, understands Hinglish.
       const parsed = parseIntent(working);
@@ -1850,13 +1997,65 @@ export function createAgent({
         return await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
       }
 
+      // Fast offline multi-command chaining ("todo add milk aur note: wifi 1234", "volume 40 karo aur screenshot bhej do")
+      if (!looksLikeWebTask(working) && !working.includes('?')) {
+        const chainParts = working.split(/\s+(?:aur|phir|fir|uske\s+baad|iske\s+baad|and\s+then|then|aur\s+phir)\s+/i).map((p) => p.trim()).filter(Boolean);
+        if (chainParts.length >= 2 && chainParts.length <= 4) {
+          const isQuickIntent = (s) => (
+            /^(?:remind me\b|note(?:\s+kar\s+lo)?\s*[:\-]\s+|note that\s+|add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+|remember\s+|(?:what(?:'s| is) the )?weather\s+(?:in|at)\s+|\S+\s+ka\s+mausam|\d+(?:\.\d+)?\s*%\s*of\s*\d+|\d+(?:\.\d+)?\s+ka\s+\d+\s*(?:%|percent))/i.test(s)
+            || tools.looksLikeCalc(s)
+            || Boolean(mem.parseRuleStatement(s) || mem.extractFact(s))
+          );
+          const allOfflineRunnable = chainParts.every((p) => (
+            p.startsWith('/')
+            || isQuickIntent(p)
+            || (!effCtx.bypassSaved && mem.matchRule(store, p) !== null)
+            || parseIntent(p) !== null
+          ));
+          if (allOfflineRunnable) {
+            const chainTexts = [];
+            let lastMediaReply = null;
+            for (const part of chainParts) {
+              let stepRes = null;
+              const sl = part.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+              if (sl) {
+                stepRes = await handleCommand(sl[1].toLowerCase(), sl[2].trim(), effCtx);
+              } else {
+                const q = intent(part, effCtx);
+                if (q !== undefined) {
+                  stepRes = await q;
+                } else if (!effCtx.bypassSaved && mem.matchRule(store, part)) {
+                  const mr = mem.matchRule(store, part);
+                  stepRes = mr.type === 'learned' ? await runLearned(mr.keyword, effCtx) : await runCustomRule(mr.rule, effCtx);
+                } else {
+                  const pi = parseIntent(part);
+                  if (pi) stepRes = pi.reply ? pi.reply : await handleCommand(pi.cmd, pi.args ?? '', effCtx);
+                }
+              }
+              if (typeof stepRes === 'string') {
+                chainTexts.push(stepRes);
+              } else if (stepRes && typeof stepRes === 'object') {
+                if (stepRes.text) chainTexts.push(stepRes.text);
+                if (stepRes.image || stepRes.document || stepRes.audio || stepRes.video) lastMediaReply = stepRes;
+              }
+              if (store.data.pending) break; // stop chain if a destructive action parked for confirmation
+            }
+            const joined = chainTexts.join('\n\n---\n\n');
+            if (lastMediaReply) return { ...lastMediaReply, text: joined };
+            if (joined) return joined;
+          }
+        }
+      }
+
       // Full-power DeepSeek Harness primary mode (`/dsh auto on` or AI_PROVIDER=dsh).
       if (harness.status().autoRoute) {
         return await handleDsh(working, effCtx);
       }
 
       // Free AI with tools: multi-step tasks on the PC.
-      if (agentLoop.enabled) {
+      // Pure Q&A / chat questions skip the 20-tool-schema overhead and go straight to askAI (2x-4x faster, with chat history).
+      const complexity = estimateComplexity(working);
+      if (agentLoop.enabled && (complexity.needsTools || looksLikeWebTask(working))) {
         const agentReply = await agentLoop.run(working, effCtx);
         if (agentReply != null) return agentReply;
       }

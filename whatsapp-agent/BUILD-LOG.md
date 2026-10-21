@@ -1,5 +1,26 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.13 — PSD_Ai Identity + Turbo Speed & Power Upgrade
+
+User ki maang: *"bhai iska naam change karke 'PSD_Ai' rakh aur na ise na aur powerful aur fast bana"*.
+1. **Identity → `PSD_Ai`**: `config.agentName` default `'PSD_Ai'`, `memory.getAgentName(store, config)` (natural language me overridable भी), `jarvis.js` (`personaLines`, `smalltalkReply`, wake words `psd` / `psd_ai` / `पीएसडी`), `ai.js`, `agentloop.js`, `commands.js` (`HELP`, greetings, `"tumhara naam kya hai?"` / `"what is your name?"`), `pccontrol.js` notifications, `index.js` startup banner, aur `webapp/index.html` me agent ka naam **PSD_Ai** kar diya.
+2. **Speed Boost (2x–4x Faster)**:
+   - **Fast Chat Bypass (`commands.js`)**: Jab message pure Q&A / conversation ho (`!complexity.needsTools && !looksLikeWebTask`), 20 tool schemas (`~4,000 tokens`) bhejne ke bajay seedha `askAI` (with full chat history) chalta hai.
+   - **Parallel Tool Execution (`agentloop.js`)**: Ek step me aaye multiple tool calls ab sequentially rukne ke bajay `Promise.all` se parallel chalte hain.
+   - **Zero-Latency Multi-Command Chaining in Chat (`commands.js`)**: `"X aur Y"` / `"X phir Y"` / `"X and then Y"` ab sirf voice call hi nahi, typed WhatsApp chat me bhi offline `< 5ms` me execute hote hain.
+3. **More Offline Power (`nlp.js`, `commands.js`, `apps.js`)**: Hinglish math (`"500 ka 18 percent"`, `"45 guna 12"`), natural unit conversions (`"10 km in mi"`), instant time/date/RAM/CPU/tasks/notes/brief/undo queries, YouTube direct play (`"youtube pe <query> chalao"`), aur web app shortcuts (`youtube`, `github`, `chatgpt`, `gmail`, `whatsapp web`, `arena.ai`) bina AI wait kiye turant chalte hain. Tests **226/226** pass.
+
+
+## v3.1.12 — Smart Owner Memory + Full Override: naam yaad rakhega aur jo kahoge wohi karega (`src/memory.js`)
+
+User ki maang: *"bro isme esi memory rakh ki mein agar kahun ki mera naam yeh hai to yeh yaad rakhein aur kuch aur ho jo pehle se save hai par agar mein kahun to yeh wohi karein jo mein kahun"*. Pehle `/remember` sirf `text.slice(0, 48)` ko raw key bana kar `store.data.facts` me daalta tha — na natural conversation (*"mera naam Pavit hai"*) se khud yaad rakhta tha, na purana conflicting fact overwrite hota tha, na offline `"mera naam kya hai?"` ka jawab aata tha, aur na hi kisi pehle se saved/built-in command ko natural language me override karne ka raasta tha.
+
+Ab naya **`src/memory.js`** engine har jagah (`commands.js`, `nlp.js`, `actions.js`, `ai.js`, `agentloop.js`, `jarvis.js`, `voicecall.js`, `macro.js`, `mcp-server.js`) juda hai:
+1. **Natural-language Fact & Name Memory**: Chat ya live voice call me Hindi/Hinglish/Devanagari/English me bolo *"mera naam Pavit hai"*, *"मेरा नाम पवित है"*, *"my name is Pavit"*, *"mujhe Boss bulao"*, *"main Dehradun me rehta hoon"*, *"mera browser brave hai"* — agent canonical slot (`name`, `address`, `city`, `browser`, `editor`, `bike`, `wifi_password`, etc.) pehchan kar `store.json` (`facts` + `factValues`) me save karta hai. Offline bhi *"mera naam kya hai?"* / *"what is my name?"* / *"main kaun hoon?"* / *"main kahan rehta hoon?"* puchhne par turant jawab deta hai, aur JARVIS greetings/voice calls me wahi naam/title bolta hai.
+2. **Canonical Overwrite (pehle se kuch save ho to naya bolte hi replace)**: Agar pehle se koi aur naam ya fact save hai (purane raw-slice keys samet) aur owner kahe *"nahi mera naam X nahi Y hai"*, *"mera naam badal ke Y kar do"*, ya bas naya *"mera naam Y hai"* — purani conflicting entry hat jaati hai aur naya value hi bachta hai.
+3. **Custom Trigger → Action Rules & Immediate Overrides**: Owner bole *"agar main <X> kahun to <Y> karo"* / *"jab main <X> bolun to <Y>"* — `store.data.rules` me save hota hai aur built-in NLP defaults ya purane `/learn` macros se **pehle** chalta hai (chahe `<X>` pehle se `/learn` me ho ya *"gaana chalao"* jaisa built-in command). Kisi ek baar ke liye *"pehle wala chhodo, <cmd>"*, *"is baar <cmd>"*, ya *"<old> nahi <new> kholo"* bolne par saved preference bypass karke turant wohi karta hai jo owner ne abhi kaha. Tests **225/225** pass.
+
+
 ## v3.1.11 — Speed pass: sunna Groq API se (tez + sahi), filler ack, /callme hi main raasta
 
 User ka faisla: native pickup ki ladai park — wo `/callme` (outgoing, unke PC par proven) se operate karega. Asli shikayat: jawab late + "mostly meri baat galat samajhta hai". Root cause `transcribe.js` me tha: **local whisper hamesha pehle** chalta tha (ggml-base, CPU par 2–6s, Hinglish weak) aur kuchh-na-kuchh text de deta tha, isliye maujood `groqWhisper` fallback kabhi chala hi nahi. Ab `STT_ENGINE=auto` (default): key hai to **Groq whisper-large-v3 pehle** (command-vocabulary primer + temperature 0 + timeout 20s, calls me 12s), local sirf backup; `STT_ENGINE=local` = audio kabhi bahar nahi. Primer-echo hallucination guard bhi: chuppi par Whisper primer ko hi "sun" le to use kuchh-nahi-suna maano (ghost command execute na ho). Groq model default turbo → large-v3 (accuracy pehle; short clip par waise bhi sub-second).

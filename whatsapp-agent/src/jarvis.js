@@ -15,32 +15,34 @@
 //
 // Pure functions only — no I/O — so every rule is unit-testable offline.
 
+import { getOwnerAddress, getAgentName } from './memory.js';
+
 export const DEFAULT_MAX_SPOKEN_CHARS = 340;
 
-const addressOf = (config = {}) => String(config.jarvisAddress || 'Sir').trim() || 'Sir';
+const addressOf = (config = {}, store = null) => getOwnerAddress(store ?? config?.store, config);
 
 // ── greetings & stock phrases ────────────────────────────────────────────────
 
-export function jarvisGreeting(config = {}, now = new Date()) {
+export function jarvisGreeting(config = {}, now = new Date(), store = null) {
   const tz = config.timezone || 'Asia/Kolkata';
   let hour = now.getHours();
   try {
     hour = Number(new Intl.DateTimeFormat('en-IN', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(now));
   } catch { /* keep local hour */ }
   const part = hour < 5 ? 'evening' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
-  const who = addressOf(config);
+  const who = addressOf(config, store);
   return hour < 5
     ? `Good ${part}, ${who}. Burning the midnight oil, I see. All systems are at your disposal.`
     : `Good ${part}, ${who}. All systems are now fully operational. How may I assist you?`;
 }
 
-export function jarvisFarewell(config = {}) {
-  return `Very good, ${addressOf(config)}. I shall be here when you need me.`;
+export function jarvisFarewell(config = {}, store = null) {
+  return `Very good, ${addressOf(config, store)}. I shall be here when you need me.`;
 }
 
 const ACKS = ['Right away', 'Very well', 'Certainly', 'Of course', 'At once'];
-export function jarvisAck(config = {}, seed = Date.now()) {
-  return `${ACKS[Math.abs(Math.trunc(seed)) % ACKS.length]}, ${addressOf(config)}.`;
+export function jarvisAck(config = {}, seed = Date.now(), store = null) {
+  return `${ACKS[Math.abs(Math.trunc(seed)) % ACKS.length]}, ${addressOf(config, store)}.`;
 }
 
 // ── persona for the AI brains ────────────────────────────────────────────────
@@ -49,11 +51,12 @@ export function jarvisAck(config = {}, seed = Date.now()) {
  * Lines appended to AI system prompts. `voice: true` adds the strict
  * spoken-reply rules used during calls (short, no lists, confirm in one line).
  */
-export function personaLines(config = {}, { voice = false } = {}) {
+export function personaLines(config = {}, { voice = false, store = null } = {}) {
   if (config.jarvisPersona === false) return [];
-  const who = addressOf(config);
+  const who = addressOf(config, store);
+  const agentName = getAgentName(store, config);
   const lines = [
-    `Your name is J.A.R.V.I.S. — a calm, impeccably polite British digital butler in the manner of Iron Man's JARVIS. Address the owner as "${who}". Dry wit is welcome, never at the owner's expense. Never say "As an AI".`,
+    `Your name is ${agentName} — a calm, ultra-fast, impeccably polite British digital butler in the manner of JARVIS. Address the owner as "${who}". Dry wit is welcome, never at the owner's expense. Never say "As an AI".`,
     'Preference order for style: accomplish first, report briefly. One or two crisp sentences beat a paragraph.',
   ];
   if (voice) {
@@ -183,6 +186,16 @@ const DEVANAGARI_WORDS = {
   'आज': 'aaj', 'कल': 'kal', 'ऐप': 'app', 'ऐप्स': 'apps', 'विंडो': 'window',
   'पीडीएफ': 'pdf', 'धन्यवाद': 'dhanyavaad', 'शुक्रिया': 'shukriya', 'और': 'aur', 'फिर': 'phir',
   'पे': 'pe', 'पर': 'par', 'में': 'mein', 'का': 'ka', 'की': 'ki', 'के': 'ke', 'को': 'ko', 'से': 'se',
+  'नाम': 'naam', 'मैं': 'main', 'मुझे': 'mujhe', 'मुझको': 'mujhko', 'हूँ': 'hoon', 'हूं': 'hoon',
+  'रखो': 'rakho', 'रखना': 'rakhna', 'रख': 'rakh', 'रखें': 'rakhein', 'रखे': 'rakhe',
+  'भूल': 'bhool', 'जाओ': 'jao', 'हटाओ': 'hatao', 'बदलो': 'badlo', 'बदल': 'badal',
+  'बुलाओ': 'bulao', 'बुलाना': 'bulana', 'बोलो': 'bolo', 'बोलना': 'bolna', 'कहो': 'kaho', 'कहना': 'kehna',
+  'अगर': 'agar', 'जब': 'jab', 'तो': 'to', 'तब': 'tab', 'वही': 'wohi', 'जो': 'jo',
+  'पहले': 'pehle', 'अब': 'ab', 'बल्कि': 'balki', 'सेव': 'save', 'मेमोरी': 'memory',
+  'पता': 'pata', 'कौन': 'kaun', 'कहाँ': 'kahan', 'कहां': 'kahan', 'शहर': 'shehar',
+  'उम्र': 'umar', 'जन्मदिन': 'janamdin', 'भाषा': 'bhasha', 'बॉस': 'Boss', 'सर': 'Sir',
+  'पवित': 'Pavit', 'राहुल': 'Rahul', 'अमन': 'Aman',
+  'पीएसडी': 'PSD', 'एआई': 'Ai', 'तुम्हारा': 'tumhara', 'तेरा': 'tera', 'आपका': 'aapka', 'तुम': 'tum', 'आप': 'aap',
   'एक': 'ek', 'दस': 'das', 'बीस': 'bees', 'तीस': 'tees', 'चालीस': 'chalis', 'पचास': 'pachas',
   'साठ': 'saath', 'सत्तर': 'sattar', 'अस्सी': 'assi', 'नब्बे': 'nabbe', 'सौ': 'sau',
 };
@@ -254,11 +267,12 @@ const MISHEARINGS = [
 /** Strip a leading/any wake word. Returns { text, hadWake }. */
 export function stripWakeWord(text) {
   const original = String(text ?? '').trim();
+  const hasWake = /\b(?:jarvis|psd[_\s-]*ai)\b/i.test(original) || /^(?:hey|ok|okay|hello|hi)\s+psd\b/i.test(original);
   const stripped = original
-    .replace(/^(?:hey|ok|okay|hello|hi)?[,\s]*jarvis[,\s]+/i, '')
+    .replace(/^(?:hey|ok|okay|hello|hi)?[,\s]*(?:jarvis|psd[_\s-]*ai|psd)[,\s]+/i, '')
     .replace(/\bjarvis\b[,\s]*/gi, '')
     .trim();
-  return { text: stripped || original.replace(/\bjarvis\b/gi, '').trim(), hadWake: /\bjarvis\b/i.test(original) };
+  return { text: stripped || original.replace(/\bjarvis\b/gi, '').trim(), hadWake: hasWake };
 }
 
 /**
@@ -332,12 +346,12 @@ export function isDenyPhrase(text) {
  * butler polish. Returns null for everything else (real questions go to
  * the agent/AI as usual). Input should already be normalizeSpokenText-ed.
  */
-export function smalltalkReply(text, config = {}, now = new Date()) {
+export function smalltalkReply(text, config = {}, now = new Date(), store = null) {
   const clean = cleanPhrase(text);
   if (!clean) return null;
-  const address = addressOf(config);
+  const address = addressOf(config, store);
   if (/^(hello|hi+|hey|namaste|namaskar|good (?:morning|afternoon|evening|night)|namaskar jarvis|ram ram)$/.test(clean)) {
-    return jarvisGreeting(config, now);
+    return jarvisGreeting(config, now, store);
   }
   if (/^(how are you|how r u|kaise ho|kaisi ho|kaisa hai|how is it going|how'?s it going|what'?s up|aur batao|sab theek)$/.test(clean)) {
     return `All systems are running smoothly, ${address} — I am quite well, and entirely at your service. What would you like me to do?`;
@@ -346,7 +360,8 @@ export function smalltalkReply(text, config = {}, now = new Date()) {
     return `Always a pleasure, ${address}.`;
   }
   if (/^(who are you|your name|what is your name|tum kaun ho|tumhara naam kya hai|tera naam kya hai|aap kaun ho)$/.test(clean)) {
-    return `I am JARVIS — your personal assistant, running right here on your own computer, ${address}. Commands, questions or conversation: simply ask.`;
+    const agentName = getAgentName(store, config);
+    return `I am ${agentName} — your personal assistant, running right here on your own computer, ${address}. Commands, questions or conversation: simply ask.`;
   }
   if (/^(what can you do|what do you do|tum kya kar sakte ho|kya kya kar sakte ho|kaise kaam karte ho)$/.test(clean)) {
     return `Quite a lot, ${address}. I can open apps, take screenshots, find and send files, control volume, Wi-Fi and music, download links, answer questions — and even call you at a set time with updates. Just tell me what you need.`;

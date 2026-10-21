@@ -110,7 +110,7 @@ const stopWatch = startWatchLoop({
   log: console,
 });
 
-console.info('👁️  Observer WhatsApp Agent — free, native WhatsApp + phone app');
+console.info(`👁️  ${config.agentName || 'PSD_Ai'} (Observer WhatsApp Agent) — free, native WhatsApp + phone app`);
 console.info(`   Owner (only listener): +${config.ownerNumber}`);
 console.info(`   Agent WhatsApp number: +${config.agentNumber}`);
 console.info(`   Mode: ${dryRun ? 'DRY-RUN (no WhatsApp connection)' : config.usePairingCode ? 'link by pairing code' : 'link by QR scan'}`);

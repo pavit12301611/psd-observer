@@ -624,7 +624,7 @@ export async function lockSession() {
 
 export async function desktopNotify(text) {
   await tryBins(
-    [['notify-send', ['Observer WhatsApp Agent', String(text).slice(0, 256)]]],
+    [['notify-send', ['PSD_Ai (Observer Agent)', String(text).slice(0, 256)]]],
     'notify-send not found: sudo dnf install libnotify',
   );
   return '🔔 Notification shown on the PC.';

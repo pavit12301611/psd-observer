@@ -27,6 +27,7 @@ import * as finder from './elementfinder.js';
 import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
 import * as hands from './hands.js';
+import * as mem from './memory.js';
 import { StoppedError, isStoppedError } from './cancel.js';
 import * as tts from './tts.js';
 import { runDoctor } from './doctor.js';
@@ -126,9 +127,10 @@ export function createActions({ config, store, log = console, journal = null, no
       description: 'Open/launch an installed application by name, e.g. "chrome", "vs code", "spotify". Also accepts a URL.',
       params: { app: { type: 'string', description: 'App name, or a URL to open in the browser', required: true } },
       confirmText: ({ app }) => `Open “${app}” on the PC`,
-      run: async ({ app }) => {
+      run: async ({ app }, ctx) => {
         if (/^https?:\/\//i.test(String(app ?? '').trim())) return pc.openTarget(String(app).trim());
-        return (await apps.launchApp(app)).text;
+        const target = mem.resolvePreferredApp(store, app, { bypassSaved: Boolean(ctx?.bypassSaved) });
+        return (await apps.launchApp(target)).text;
       },
     },
     {
@@ -694,14 +696,26 @@ export function createActions({ config, store, log = console, journal = null, no
     },
     {
       name: 'remember_fact', level: 'safe', label: 'Remember fact',
-      description: 'Remember a long-term fact about the owner, used by the AI in future chats.',
-      params: { text: { type: 'string', description: 'The fact', required: true } },
+      description: 'Remember or update a long-term fact, owner name (mera naam), preference, or custom rule in persistent memory. Automatically overwrites any older saved value for the same key.',
+      params: { text: { type: 'string', description: 'The fact or rule to remember/update', required: true } },
       run: async ({ text }) => {
         const value = String(text ?? '').trim();
         if (!value) throw new Error('nothing to remember');
-        store.data.facts[value.slice(0, 48)] = value;
-        store.save();
-        return '🧠 Remembered. I\'ll keep it in mind in our chats.';
+        const rule = mem.parseRuleStatement(value);
+        if (rule) {
+          if (rule.kind === 'directive') {
+            mem.rememberFact(store, `owner_priority_rule: ${rule.value}`, { explicit: true });
+            return '🧠 Remembered. I\'ll keep it in mind in our chats.';
+          }
+          if (rule.kind === 'fact') {
+            const r = mem.rememberFact(store, rule.text, { explicit: true });
+            return r?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats.';
+          }
+          const r = mem.addRule(store, rule);
+          return r?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats.';
+        }
+        const res = mem.rememberFact(store, value, { explicit: true });
+        return res?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats.';
       },
     },
 

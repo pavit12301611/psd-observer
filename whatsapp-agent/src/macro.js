@@ -33,12 +33,10 @@ export function startRecording(store, nameRaw) {
   const name = learn.normalizeKeyword(nameRaw);
   const err = learn.validateKeyword(name);
   if (err) return { ok: false, error: err };
-  if (store.getLearned?.(name)) {
-    return { ok: false, error: `/${name} pehle se sikha hua hai. Naya naam lo, ya pehle /teach delete ${name}.` };
-  }
-  store.data.recording = { name, steps: [], startedTs: Date.now() };
+  const overwriting = Boolean(store.getLearned?.(name));
+  store.data.recording = { name, steps: [], startedTs: Date.now(), overwriting };
   store.save?.();
-  return { ok: true, name };
+  return { ok: true, name, overwriting };
 }
 
 /** Called after a command succeeded. Returns the step, or null when skipped. */
