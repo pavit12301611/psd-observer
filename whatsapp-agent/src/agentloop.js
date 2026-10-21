@@ -21,6 +21,7 @@
 
 import { routerFor } from './router.js';
 import { throwIfStopped, isStoppedError } from './cancel.js';
+import { personaLines } from './jarvis.js';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
@@ -94,11 +95,13 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     return scored.slice(0, wanted).map((entry) => entry.tool);
   }
 
-  function systemPrompt(plan) {
+  function systemPrompt(plan, ctx = {}) {
     const facts = Object.values(store?.data?.facts ?? {}).slice(-20).map((f) => `- ${f}`).join('\n');
     const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
     return [
       'You are the owner\'s personal assistant, running 100% free on their own Fedora computer (Observer WhatsApp Agent).',
+      ...personaLines(config, { voice: Boolean(ctx.voice) }),
+      ctx.voice ? 'The owner is speaking to you on a live VOICE CALL right now and is listening for your spoken reply. Prefer speak_text only when explicitly asked to read/announce something; otherwise your final text is spoken automatically.' : '',
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
       `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
       'You can actually DO things on the owner\'s computer: open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
@@ -244,7 +247,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     const adapter = makeAdapter(model, selectedTools, plan, opts.signal);
 
     let messages = adapter.usesContents ? null : [
-      { role: 'system', content: systemPrompt(plan) },
+      { role: 'system', content: systemPrompt(plan, ctx) },
       { role: 'user', content: String(text) },
     ];
     let contents = adapter.usesContents ? adapter.contentsStart(String(text)) : null;
@@ -325,12 +328,16 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       if (attachments.length) {
         const images = attachments.filter((a) => a.image).map((a) => a.image);
         const first = attachments[0];
+        const spoken = attachments.find((a) => a.audio);
         return pack({
           text: finalText,
           image: images[0] ?? first.image,
           extraImages: images.slice(1),
           document: first.document,
           video: first.video,
+          audio: spoken?.audio,
+          mimetype: spoken?.mimetype,
+          ptt: spoken?.ptt,
         });
       }
       return pack(finalText);

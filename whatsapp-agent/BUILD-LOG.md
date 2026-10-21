@@ -1,5 +1,71 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.0.0 — JARVIS Voice Call ☎️ (asli WhatsApp call pickup + neural British awaaz)
+
+> Branch: `arena/592311b3-psd-observer` · Tests: **204 pass / 0 fail** · ₹0.
+
+- **Asli maang**: "mein sidha WhatsApp pe voice call karunga, yeh utha kar
+  jawab dena chahiye" + "JARVIS ki awaaz theek kar". Teen sach pehle tai
+  kiye gaye: (1) **official Baileys call utha nahi sakta** (sirf detect +
+  `rejectCall`), isliye pickup experimental engine
+  [`baileys-caller`](https://github.com/Akane7101/baileys-caller) (WhatsApp
+  Web VoIP WASM) se hai — default OFF, opt-in, alag linked device
+  (`auth_info_voip/`); (2) film wale JARVIS (Paul Bettany) ki **exact**
+  awaaz free/legal ship nahi ho sakti — closest free approximation hai
+  **Piper `en_GB-alan-medium`** + butler persona + ffmpeg FX (chaaho to
+  apna XTTS clone server jod sakte ho); (3) reject+explanation ko
+  "pickup" bolke **nahi** becha gaya — engine na ho to honest instant
+  voice-note session fallback hai.
+- **Purani voice kyun kharab thi (root cause)**: espeak female `en+f3`
+  default thi aur neural Piper uske *neeche* priority me; Piper kabhi
+  auto-install/discover hota hi nahi tha. STT me whisper.cpp ko **raw OGG**
+  khilaya jata tha (usko 16 kHz mono WAV chahiye) aur cpp/Python CLI
+  ghalti se ek samjhe gaye the. TTS bhi sirf `/voicereply` pe tha.
+- **Nayi files**: `src/jarvis.js` (persona, spokenSummary, Devanagari →
+  runnable Hinglish `क्रोम खोलो`→`chrome kholo`, number-words sirf unit
+  ke paas digit — "bata **do**" safe, wake-word/call-control) ·
+  `src/voicecall.js` (EK voice-dimag teenon surfaces ke liye: async
+  greeting, "X **aur** Y" multi-command chaining (max 4, confirm pe
+  rukti hai), ruko/dobara/goodbye, barge-in, boli hui haan wahi typed
+  confirm-gate se guzarti hai — nayi baat haan nahi banti) ·
+  `src/wavoip.js` (baileys-caller adapter: dependency-optional dynamic
+  load, owner-verification PN/known-LID/`callerPn` — unknown LID kabhi
+  answer nahi, adaptive RMS VAD, 200 ms PCM chunks, `clearAudio()`
+  barge-in, max-duration hangup, `/callme` outgoing) ·
+  `scripts/link-voip.mjs` (VoIP device QR) · `test/voice.test.js`
+  (12 test, fake VoipClient ke saath full answer→turn coverage).
+- **Badli hui files**: `src/tts.js` poora naya (XTTS → Piper en_GB →
+  Edge en-GB-Ryan → espeak… order, phrase cache, sentence streaming,
+  Hindi routing) · `src/transcribe.js` (WAV-convert → local whisper →
+  Groq) · `src/whatsapp.js` (`sock.ev.on('call')` coordinator + fallback
+  ladder; voice notes ab voicecall dimag se; `/call on` me har text
+  jawab ke baad JARVIS voice note) · `src/commands.js` (`/call`, `/call
+  on|off`, `/callme`, `/voice`) · `src/server.js` (`/api/voice`,
+  `/api/call/start|say|transcribe|interrupt|stop`, SSE
+  `/api/call/events`) · `webapp/` (📞 Call tab — orb, captions, barge-in,
+  MediaRecorder→Whisper fallback) · `src/ai.js`+`agentloop.js` (JARVIS
+  persona prompts, safe `speak_text` tool) · `src/doctor.js` (TTS/STT/
+  VoIP checks exact fix ke saath) · `scripts/observer.sh voice
+  setup|whisper|call-engine|link-voip|answer|test|status` ·
+  guides `VOICE.md` + `WHATSAPP-CALL.md`.
+- **Honest hadh**: asal WhatsApp-call E2E is sandbox me **verify nahi**
+  ho sakta (koi asli WhatsApp account/QR yahan nahi) — engine adapter
+  fake ke against fully tested hai, par pehli asli call user ki machine
+  pe hi prove hogi. Engine ToS-grey + experimental hai; `baileys-caller`
+  Baileys `^7.0.0-rc11` peer mangta hai (repo rc14 pe hai — install pe
+  peer warning aa sakti hai). Fallback + app Call tab bina is sab ke
+  garanteed chalte hain.
+- **Trap jo is build me sabse mehenat kha gaya**: ek ruka hua lamba turn
+  kai "success" edits chhod gaya jo file me mile hi nahi (parallel
+  same-file edits ek-doosre ko overwrite kar gaye) — `node --check`
+  pass, par runtime pe `isOwnerJid`/`personaLines`/`createWaVoip`/
+  `listTTSEngines`/`float`/`os` sab "not defined". Sabak (ab hamesha):
+  syntax-check kabhi kaafi nahi — diff audit + runtime smoke (`/call`,
+  dry-run boot, simulate) + main se per-file test compare karke har
+  missing hissa pakda gaya. Final: 204/204.
+
+---
+
 ## v2.9.0 — DeepSeek Harness (`@deepseek-ai/dsh`) on Fedora Linux + Full WhatsApp Power 🚀
 
 - **Real world constraint**: DeepSeek ka official Desktop installer abhi sirf macOS/Windows ke liye hai — Linux ke liye unka official open-source agent engine **`@deepseek-ai/dsh`** (`0.2.1-rc.2`, MIT, Node `>=22.19` ya `>=24`) hai. Alag third-party WhatsApp plugin lagane se second competing WhatsApp linked device banta aur Fedora desktop/OCR/PWA tools cut ho jaate.

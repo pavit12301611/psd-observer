@@ -37,6 +37,8 @@ import { createProgress, describeHandsStep } from './progress.js';
 import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
 import { createHarness } from './harness.js';
 import * as solver from './solver.js';
+import { createVoiceCall } from './voicecall.js';
+import { jarvisGreeting, spokenSummary } from './jarvis.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
@@ -131,6 +133,20 @@ export function createAgent({
   const harness = createHarness({ config, store, log });
   const actions = createActions({ config, store, log, journal, notify: notifyOwner, harness });
   const agentLoop = createAgentLoop({ config, store, actions, log });
+  // Real WhatsApp call answering (src/wavoip.js) is attached by index.js —
+  // it needs the WhatsApp layer's owner-LID knowledge, which commands.js
+  // deliberately does not own.
+  let waVoip = null;
+  // ONE voice brain for the real WhatsApp call, the phone-app call and
+  // WhatsApp voice notes: speech → this same handle() → JARVIS voice back.
+  const voice = createVoiceCall({
+    config,
+    log,
+    runText: (text) => handle(text, { source: 'voicecall', voice: true, waStatus: () => 'voice call' }),
+    speak: (text) => tts.synthesize(text, config, log),
+    hasPending: () => Boolean(store.data.pending),
+    stopAll: () => stopCommand(),
+  });
   const router = routerFor(config, log);
   // /usage needs per-call counts; the router owns the calls, the store owns
   // persistence, so the hook joins them (and never throws into a model call).
@@ -365,9 +381,74 @@ export function createAgent({
     return `🔁 Done — scheduled #${job.id}: *${job.text}*\n_${job.scheduleRaw} → ${tools.formatDateTime(job.nextDueTs, tz)} (in ${tools.humanDuration(job.nextDueTs - Date.now())})_`;
   }
 
+  // ── JARVIS voice call centre (/call, /callme, /voice) ─────────────────────
+
+  function callStatusLines() {
+    const voip = waVoip?.status?.() ?? null;
+    const mode = Boolean(store.data.voiceCallMode || config.whatsappVoiceReplies);
+    return [
+      `• WhatsApp Voice Mode (/call): ${mode ? '*ON* — har jawab JARVIS voice note me' : 'off — /call on se chalu karo'}`,
+      voip
+        ? `• Asli WhatsApp call uthana: ${voip.connected ? '*READY 📞* — seedha call karo, JARVIS uthayega' : `${voip.enabled ? 'engine on, ' : ''}${voip.hint}`}`
+        : '• Asli WhatsApp call uthana: engine attached nahi (setup: `bash scripts/observer.sh voice call-engine`)',
+      '• Phone app 📞 Call tab: bolo → command execute → JARVIS jawab (koi setup nahi)',
+      '• Voice note bhi bhej sakte ho — transcribe karke wahi command chalega',
+    ];
+  }
+
+  async function jarvisAudioReply(text) {
+    try {
+      const result = await tts.synthesize(text, config, log);
+      const isOpus = result.mimetype.includes('opus') || result.ext === 'ogg';
+      return { audio: result.buffer, mimetype: result.mimetype, ptt: isOpus, text };
+    } catch (err) {
+      return `${text}\n\n⚠️ _Voice note nahi bana: ${err.message}_`;
+    }
+  }
+
+  async function callCommand(args) {
+    const sub = String(args ?? '').trim().toLowerCase();
+    if (/^(on|start|chalu|enable)$/.test(sub)) {
+      store.data.voiceCallMode = true;
+      store.save();
+      const greeting = jarvisGreeting(config);
+      const spoken = `${greeting} Voice call mode is now on. Send me a voice note, and consider it done.`;
+      const reply = await jarvisAudioReply(spoken);
+      const note = [
+        '📞 *Voice Call Mode: ON*',
+        'Ab har jawab JARVIS ki awaaz me aayega. *Voice note bhejo* — main sun ke command execute kar dunga ("chrome kholo aur screenshot bhej do" chalega).',
+        waVoip?.status?.().connected
+          ? 'Aur haan — *seedha WhatsApp call bhi kar sakte ho*, main utha lunga. 📞'
+          : 'Asli WhatsApp call uthane ke liye ek baar: `bash observer.sh voice call-engine` (WHATSAPP-CALL.md)',
+        'Band karne ke liye: /call off',
+      ].join('\n');
+      return typeof reply === 'string' ? `${note}\n\n${reply}` : { ...reply, text: note };
+    }
+    if (/^(off|stop|band|disable)$/.test(sub)) {
+      store.data.voiceCallMode = false;
+      store.save();
+      return '📞 Voice Call Mode: OFF — jawab wapas sirf text me aayenge. /call on se kabhi bhi chalu kar lena.';
+    }
+    return ['📞 *JARVIS Voice Call — status*', ...callStatusLines(), '', tts.ttsStatus(config)].join('\n');
+  }
+
+  async function callMeCommand(args) {
+    if (!waVoip) {
+      return '📞 Sir, outbound WhatsApp call ke liye VoIP engine chahiye.\nSetup (ek baar): `bash scripts/observer.sh voice call-engine` phir `bash scripts/observer.sh voice link-voip`\nTab tak phone app ka 📞 Call tab use karo — wahan main sun bhi sakta hoon, bol bhi.';
+    }
+    const st = waVoip.status();
+    if (!st.connected) return `📞 VoIP engine ready nahi: ${st.hint}`;
+    try {
+      await waVoip.callOwner(String(args ?? '').trim());
+      return '📞 Call kar raha hoon, Sir — phone uthao, JARVIS line par hai.';
+    } catch (err) {
+      return `⚠️ Call nahi lagi: ${err.message}`;
+    }
+  }
+
   async function voiceReply(args) {
     const text = String(args ?? '').trim();
-    if (!text) return '🔊 Usage: /voicereply <text> — e.g. /voicereply namaste bhai, kaise ho\n(Only this command sends voice — normal replies stay text)';
+    if (!text) return '🔊 Usage: /voicereply <text> — e.g. /voicereply Good evening, Sir\nJARVIS ki awaaz me voice note jayega. Har jawab voice me chahiye? /call on';
     try {
       const result = await tts.synthesize(text, config, log);
       const isOpus = result.mimetype.includes('opus') || result.ext === 'ogg';
@@ -378,8 +459,8 @@ export function createAgent({
         text: `🔊 ${text.slice(0, 200)}${text.length > 200 ? '…' : ''}`,
       };
     } catch (err) {
-      if (/engine nahi|not installed|not found/i.test(err.message)) {
-        return `⚠️ ${err.message}\n\nInstall: sudo dnf install espeak-ng ffmpeg\nThen try again: /voicereply hello`;
+      if (/setup nahi|engine nahi|not installed|not found|kaam nahi kiya/i.test(err.message)) {
+        return `⚠️ ${err.message}\n\nEk command me asli JARVIS voice: \`bash scripts/observer.sh voice setup\`\nPhir try karo: /voicereply Good evening, Sir`;
       }
       return `⚠️ Voice nahi bana paaya: ${err.message}`;
     }
@@ -1412,6 +1493,9 @@ export function createAgent({
       case 'timer': return remind(args);
       case 'cron': case 'schedule': case 'repeat': case 'jobs': return cronCmd(args);
       case 'voicereply': return await voiceReply(args);
+      case 'call': case 'voicecall': return await callCommand(args);
+      case 'callme': case 'callkaro': return await callMeCommand(args);
+      case 'voice': case 'jarvis': return ['📞 *JARVIS Voice*', ...callStatusLines(), '', tts.ttsStatus(config)].join('\n');
       case 'learn': case 'teach': case 'alias': return learnCmd(args);
       case 'unlearn': case 'undefine': case 'forgetword': return learnCmd(`del ${args}`);
       case 'todo': case 'todos': case 'task': return todo(args);
@@ -1772,5 +1856,12 @@ export function createAgent({
     }
   }
 
-  return { handle, HELP, actions, shots, harness, isHarnessAuto: () => harness.status().autoRoute };
+  return {
+    handle, HELP, actions, shots, harness, voice,
+    attachWaVoip: (engine) => { waVoip = engine; },
+    waVoipStatus: () => waVoip?.status?.() ?? null,
+    jarvisAudioReply,
+    spokenFor: (reply) => spokenSummary(reply, config),
+    isHarnessAuto: () => harness.status().autoRoute,
+  };
 }

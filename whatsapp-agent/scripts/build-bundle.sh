@@ -16,6 +16,7 @@ rm -f "$STAGE/whatsapp-agent/release-bundle.tar.gz"
 
 for file in package.json package-lock.json release-notes.json .env.example start.sh \
             README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md BUILD-LOG.md \
+            VOICE.md WHATSAPP-CALL.md \
             docker-compose.yml Containerfile; do
   [ -f "$AGENT_DIR/$file" ] && cp -a "$AGENT_DIR/$file" "$STAGE/whatsapp-agent/$file"
 done

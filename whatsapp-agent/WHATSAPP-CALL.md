@@ -1,0 +1,116 @@
+# ☎️ WHATSAPP-CALL.md — seedha WhatsApp call karo, JARVIS uthayega
+
+**Tum:** agent number pe WhatsApp **voice call** karte ho.
+**JARVIS:** call utha kar bolta hai — *"Good evening, Sir. How may I
+assist you?"* Tum bolke instruction dete ho ("chrome kholo aur screenshot
+bhej do"), configured AI models use command me badal ke PC pe execute
+karte hain, aur result **usi call me bol ke** milta hai. "Goodbye,
+JARVIS" bolte hi hangup + chat me chhota summary.
+
+---
+
+## Pehle poora sach (3 baatein)
+
+1. **Official Baileys call utha hi nahi sakta.** Sirf call *dekh* sakta
+   hai aur `rejectCall` kar sakta hai — media/audio usme hai hi nahi.
+   Isliye asli pickup ke liye ek **experimental VoIP engine**
+   ([`baileys-caller`](https://github.com/Akane7101/baileys-caller) —
+   WhatsApp Web ka VoIP WASM) lagaya gaya hai. Yeh default **OFF** hai;
+   ON karna tumhara faisala hai.
+2. **Yeh unofficial/ToS-grey hai** — bilkul Baileys ki tarah. Risk agent
+   number (doosra SIM) pe rakho, main number kabhi mat lagao. WhatsApp
+   protocol badle to engine toot sakta hai — isliye neeche wala fallback
+   hamesha zinda rehta hai.
+3. **Engine OFF/fail ho to call zaya nahi jati:** owner ki call detect
+   hote hi call kaat ke **turant JARVIS voice-note session** chalu ho
+   jata hai (voice mode ON + greeting voice note) — tum voice note bhej
+   ke waise hi baat kar sakte ho. Phone-app ka **📞 Call tab** to bina
+   kisi setup ke hamesha hai hi.
+
+## Setup (ek baar, ~5 minute)
+
+```bash
+bash scripts/observer.sh voice setup        # JARVIS ki awaaz (Piper en_GB)
+bash scripts/observer.sh voice whisper      # sunna, offline (ya GROQ_API_KEY)
+bash scripts/observer.sh voice call-engine  # baileys-caller install
+bash scripts/observer.sh voice link-voip    # QR scan — 2nd linked device
+bash scripts/observer.sh voice answer on    # WA_CALL_ANSWER=true + restart
+```
+
+Phir apne phone se agent number pe **seedha WhatsApp voice call** karo.
+
+> 📱 `link-voip` pe QR **agent number wale phone** se scan karna hai
+> (WhatsApp → Linked devices). Yeh ek **alag** linked device hai
+> (`auth_info_voip/`) — messaging wala login alag rehta hai, dono ladte
+> nahi. Agent phone ko **silent/DND** pe rakho, warna VoIP device ke
+> uthane se pehle woh bajega.
+
+Kya-kya ready hai: `observer.sh voice status`, WhatsApp pe `/call`, ya
+`/doctor` (voice section exact fix deta hai).
+
+## Call me kya-kya chalega
+
+- 🎙️ **Natural baat:** Hindi/Hinglish/English — "jarvis, thesis wali PDF
+  dhundo aur bhej do". Devanagari transcription bhi command ban jati hai.
+- 🔗 **Ek saath kai kaam:** "chrome kholo **aur** screenshot bhej do".
+- 🔒 **Safety gate waise ka waisa:** app band/delete/power jaise kaam
+  pehle rukenge — *"Shall I proceed, Sir?"* — tumhari boli hui **"haan"**
+  ke bina kuch nahi hoga. Galti se kuch aur bol diya to woh haan **nahi**
+  gina jata.
+- 🗣️ **Barge-in:** JARVIS bol raha ho aur tum beech me bolo — woh ruk ke
+  sunta hai. **"Ruko"** = bolna + chal raha kaam dono band.
+- 🔁 **"Dobara bolo"** repeat · **"Goodbye JARVIS / chal bye"** hangup.
+- ⏱️ Max call length default 15 min (`WA_CALL_MAX_MINUTES`), uske baad
+  khud shukriya bol ke kaat deta hai. Call ke baad chat me short summary.
+
+## Kaun si call uthegi? (security)
+
+| Caller | Hoga kya |
+|---|---|
+| ✅ Tum (owner number / tumhara known LID / `callerPn` match) | JARVIS uthayega |
+| ❓ Unknown number ya unknown `@lid` | **Kabhi nahi uthegi** — default ignore (chaho to `WA_CALL_UNKNOWN=reject`) |
+| 👥 Group / video call | Reject (sirf 1-to-1 voice) |
+| 📵 Dusri call jab ek chal rahi ho | Busy/reject |
+
+PC control sirf owner-verified caller ko hi milta hai — naam sun ke ya
+awaaz sun ke kabhi nahi, sirf number/LID match pe.
+
+## Fallback ladder (engine na ho tab)
+
+`WA_CALL_FALLBACK` (.env):
+
+| Value | Owner call aane par |
+|---|---|
+| `voice-session` *(default)* | call cut → voice mode ON → JARVIS greeting **voice note** + honest text. Tum voice note bhejo, baat chalegi. |
+| `reject` | call cut + sirf text sandesh |
+| `ignore` | kuch mat karo, agent phone bajta rahe |
+
+Engine ON ho par kisi wajah se call answer na kare (~12s), to bhi yahi
+fallback sambhal leta hai — tum latke nahi rehoge.
+
+## /callme — JARVIS khud call kare
+
+Engine ready ho to WhatsApp pe **`/callme`** bhejo: JARVIS tumhe call
+karke greeting bolega, phir normal call jaise instructions lo.
+`/callme <message>` se pehli line wahi bolega.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Call bajti rehti hai, JARVIS nahi uthata | `/call` bhejo — status batayega: engine? link? `WA_CALL_ANSWER`? Phir `observer.sh voice status` |
+| Call cut hote hi voice note aa gaya | Yeh fallback hai — matlab engine ready nahi. Upar wale 4 setup steps check karo |
+| QR scan ke baad bhi "not linked" | `voice link-voip` dobara; agent phone pe Linked devices me naya device dikhna chahiye; phir `voice answer on` (restart) |
+| JARVIS sunta hai par jawab robotic hai | `voice setup` (Piper) nahi chala — espeak pe gir gaya hai. `/voice` dekho |
+| Awaaz samajh nahi aati / galat transcript | `voice whisper` se local base model; ya `GROQ_API_KEY`; shor kam rakho, waqfa deke bolo |
+| Call judti hai, kuch sunai nahi deta | `ffmpeg` install karo (`sudo dnf install ffmpeg`) + `/doctor` |
+| Engine baar-baar fail | `voice answer off` karke fallback pe raho; engine experimental hai, WhatsApp ke protocol change pe toot sakta hai |
+
+## Files
+
+`src/wavoip.js` (engine adapter — answer, VAD, PCM playback, barge-in) ·
+`src/voicecall.js` (shared dimag) · `src/jarvis.js` (bhasha) ·
+`src/whatsapp.js` (`call` events + fallback coordination) ·
+`scripts/link-voip.mjs` (QR linking) · `observer.sh voice …` (setup)
+
+Awaaz/sunne ki poori guide: **[`VOICE.md`](VOICE.md)**.

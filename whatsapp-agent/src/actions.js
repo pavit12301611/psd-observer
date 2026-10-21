@@ -28,6 +28,7 @@ import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
 import * as hands from './hands.js';
 import { StoppedError, isStoppedError } from './cancel.js';
+import * as tts from './tts.js';
 import { runDoctor } from './doctor.js';
 import { createProgress, describeHandsStep } from './progress.js';
 
@@ -79,6 +80,18 @@ export function createActions({ config, store, log = console, journal = null, no
         return `🚀 *DeepSeek Harness*\n\n${res.text}\n\n_Session \`${String(res.sessionId).slice(0, 8)}\` · ${res.toolCalls.length} tool call(s)_`;
       },
     }] : []),
+
+    // ── JARVIS voice ────────────────────────────────────────────────────────
+    {
+      name: 'speak_text', level: 'safe', label: 'Speak aloud (JARVIS)',
+      description: 'Say a sentence aloud in the JARVIS voice, verbatim — use ONLY when the owner explicitly asks you to read/announce/say something (e.g. "read this paragraph", "announce: dinner is ready"). In a voice call your normal final reply is already spoken, so do not wrap ordinary replies in speak_text. Keep it under ~300 words.',
+      params: { text: { type: 'string', description: 'The exact words to speak', required: true } },
+      run: async ({ text }) => {
+        const clean = String(text ?? '').trim().slice(0, 2000);
+        if (!clean) return '🔊 (kuch bolne ko nahi mila)';
+        return `🔊 ${clean}`;
+      },
+    },
 
     // ── apps & windows ──────────────────────────────────────────────────────
     {

@@ -34,9 +34,11 @@ import * as hands from './hands.js';
 import { pngSize } from './elementfinder.js';
 import { routerFor } from './router.js';
 import * as solver from './solver.js';
+import * as tts from './tts.js';
+import { transcribeAudio, transcriptionAvailable } from './transcribe.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '2.10.0';
+const VERSION = '3.0.0';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -103,7 +105,7 @@ function safeEqual(a, b) {
 }
 
 export function createBridgeServer({
-  config, store, whatsapp, mailbox, actions, harness = null, runOwner, log = console,
+  config, store, whatsapp, mailbox, actions, harness = null, voice = null, wavoip = null, runOwner, log = console,
   // Injectable so tests never touch a real desktop, and so the number of
   // screenshots per request is explicit and measurable.
   screen = null,
@@ -314,6 +316,121 @@ export function createBridgeServer({
           if (!runOwner) return json(res, 503, { detail: 'Agent is still starting up.' });
           const reply = await runOwner(text);
           return json(res, 200, replyForApp(reply));
+        }
+
+        // ── JARVIS voice call (phone app 📞 Call tab) ──────────────────────
+        // Browser mic → text (SpeechRecognition, or /api/call/transcribe for
+        // browsers without it) → the shared voice brain (intents → API-model
+        // tool loop → execute) → JARVIS audio back. One round-trip per turn;
+        // /api/call/events mirrors live state while long commands run.
+        case 'GET /api/voice': {
+          const engines = tts.listTTSEngines(config);
+          return json(res, 200, {
+            ok: true,
+            engines: engines.map((e) => ({ name: e.name, label: e.label })),
+            best: engines[0]?.label ?? null,
+            statusText: tts.ttsStatus(config),
+            transcription: transcriptionAvailable(config),
+            voiceCall: config.voiceCall !== false,
+            callMode: Boolean(store.data.voiceCallMode || config.whatsappVoiceReplies),
+            wavoip: wavoip ? wavoip.status() : null,
+          });
+        }
+
+        case 'POST /api/voice/test': {
+          const body = await readJsonBody(req);
+          const sample = String(body.text ?? `Good evening, ${config.jarvisAddress || 'Sir'}. This is JARVIS at your service.`).slice(0, 300);
+          try {
+            const result = await tts.synthesize(sample, config, log);
+            return json(res, 200, { ok: true, audio: dataUrl(result.buffer, (result.mimetype || 'audio/ogg').split(';')[0]), mimetype: result.mimetype, engine: result.engine, text: sample });
+          } catch (err) {
+            return json(res, 503, { ok: false, detail: err.message, speakInBrowser: sample });
+          }
+        }
+
+        case 'POST /api/call/start': {
+          if (!voice) return json(res, 503, { detail: 'Voice engine is not wired in this build.' });
+          if (config.voiceCall === false) return json(res, 403, { detail: 'Voice calls are off (VOICE_CALL=false).' });
+          const body = await readJsonBody(req);
+          const started = await voice.start('app', body.sessionId ? String(body.sessionId) : null);
+          return json(res, 200, {
+            ok: true,
+            sessionId: started.sessionId,
+            greeting: started.greeting,
+            spoken: started.spoken,
+            state: started.state,
+            audio: started.audio ? dataUrl(started.audio.buffer, (started.audio.mimetype || 'audio/ogg').split(';')[0]) : null,
+            audioMimetype: started.audio?.mimetype ?? null,
+          });
+        }
+
+        case 'POST /api/call/say': {
+          if (!voice) return json(res, 503, { detail: 'Voice engine is not wired in this build.' });
+          if (config.voiceCall === false) return json(res, 403, { detail: 'Voice calls are off (VOICE_CALL=false).' });
+          const body = await readJsonBody(req);
+          const text = String(body.text ?? '').slice(0, 4000);
+          if (!text.trim()) return json(res, 400, { detail: 'text is required' });
+          if (body.from && normalizeNumber(body.from) !== config.ownerNumber) {
+            return json(res, 403, { detail: 'This agent only listens to the owner.' });
+          }
+          const result = await voice.say(body.sessionId ? String(body.sessionId) : null, text, { source: 'app' });
+          return json(res, 200, {
+            ok: true,
+            sessionId: result.sessionId,
+            heard: result.heard,
+            text: result.text ?? '',
+            spoken: result.spoken ?? '',
+            state: result.state,
+            ended: Boolean(result.ended),
+            awaitingConfirm: Boolean(result.awaitingConfirm),
+            images: (result.images ?? []).map((img) => dataUrl(img)),
+            documentName: result.document?.fileName ?? '',
+            audio: result.audio ? dataUrl(result.audio.buffer, (result.audio.mimetype || 'audio/ogg').split(';')[0]) : null,
+            audioMimetype: result.audio?.mimetype ?? null,
+          });
+        }
+
+        case 'POST /api/call/transcribe': {
+          const body = await readJsonBody(req);
+          if (!body.audioBase64) return json(res, 400, { detail: 'audioBase64 is required' });
+          const buffer = Buffer.from(stripDataPrefix(body.audioBase64), 'base64');
+          if (!buffer.length) return json(res, 400, { detail: 'empty audio' });
+          if (buffer.length > 12 * 1024 * 1024) return json(res, 413, { detail: 'audio clip too large (12 MB max)' });
+          try {
+            const out = await transcribeAudio(config, buffer, String(body.mimeType || 'audio/webm'), log);
+            return json(res, 200, { ok: true, text: out.text, provider: out.provider });
+          } catch (err) {
+            return json(res, 503, { ok: false, detail: err.message });
+          }
+        }
+
+        case 'POST /api/call/interrupt': {
+          if (!voice) return json(res, 503, { detail: 'Voice engine is not wired in this build.' });
+          const body = await readJsonBody(req);
+          return json(res, 200, { ok: voice.interrupt(String(body.sessionId ?? '')) });
+        }
+
+        case 'POST /api/call/stop': {
+          if (!voice) return json(res, 503, { detail: 'Voice engine is not wired in this build.' });
+          const body = await readJsonBody(req);
+          return json(res, 200, { ok: voice.end(String(body.sessionId ?? '')) });
+        }
+
+        case 'GET /api/call/events': {
+          if (!voice) return json(res, 503, { detail: 'Voice engine is not wired in this build.' });
+          const sessionId = url.searchParams.get('session') || '';
+          res.writeHead(200, {
+            'content-type': 'text/event-stream',
+            'cache-control': 'no-store',
+            connection: 'keep-alive',
+          });
+          res.write(`event: ready\ndata: ${JSON.stringify({ sessionId })}\n\n`);
+          const unsubscribe = voice.on(sessionId, (event) => {
+            try { res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ }
+          });
+          const heartbeat = setInterval(() => { try { res.write(': heartbeat\n\n'); } catch { /* gone */ } }, 25_000);
+          req.on('close', () => { clearInterval(heartbeat); unsubscribe(); });
+          return; // socket stays open — this *is* the response
         }
 
         case 'POST /api/action': {

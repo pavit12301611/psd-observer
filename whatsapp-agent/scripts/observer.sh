@@ -1426,6 +1426,11 @@ ${B}Setup${R}
   keys groq <gsk_...>         add/replace a free Groq key (also: deepseek, openrouter, gemini)
   keys --test                 test every saved key
   keys --remove groq          remove a key
+  voice setup                 JARVIS neural British voice (Piper en_GB, free, offline)
+  voice whisper               local speech-to-text (whisper.cpp — voice notes + calls)
+  voice call-engine           experimental VoIP engine — asli WhatsApp call uthana
+  voice link-voip             VoIP device QR link (ek baar) + WA_CALL_ANSWER on
+  voice test|status           JARVIS voice test / poori voice status
   harness setup               install official DeepSeek Harness (@deepseek-ai/dsh) + Fedora app + WhatsApp MCP
   harness web                 launch official DeepSeek Harness Web UI on Fedora
   harness key <sk-...>        save DeepSeek API key in .env + ~/.dsh/.credentials.yaml
@@ -1620,11 +1625,238 @@ DONE
   esac
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  JARVIS VOICE — bolna (Piper en_GB) · sunna (whisper) · asli WhatsApp call
+# ═══════════════════════════════════════════════════════════════════════════════
+
+VOICE_DIR="${VOICE_DIR:-$HOME/.local/share/observer-voice}"
+VOIP_DIR="${VOIP_DIR:-$HOME/.local/share/observer-voip}"
+
+voice_download_piper_model() {
+  local id="$1" relpath="$2"
+  local base="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/${relpath}"
+  mkdir -p "$VOICE_DIR/models"
+  [ -f "$VOICE_DIR/models/${id}.onnx" ] || \
+    curl -fL --retry 3 -o "$VOICE_DIR/models/${id}.onnx" "${base}/${id}.onnx" \
+    || die "Piper model ${id} download fail — net check karo, phir se chalao"
+  [ -f "$VOICE_DIR/models/${id}.onnx.json" ] || \
+    curl -fL --retry 3 -o "$VOICE_DIR/models/${id}.onnx.json" "${base}/${id}.onnx.json" \
+    || die "Piper model config ${id} download fail"
+  ok "Piper voice: ${id}"
+}
+
+cmd_voice() {
+  local sub="${1:-status}"; shift || true
+  local dir=""
+  dir=$(find_install "" 2>/dev/null || echo "$DEFAULT_DIR")
+  local envfile="$dir/.env"
+
+  case "$sub" in
+    setup|install|jarvis)
+      say "JARVIS voice setup — free neural British voice (Piper, offline)"
+      local arch piper_ver="2023.11.14-2"
+      case "$(uname -m)" in
+        x86_64) arch="x86_64" ;;
+        aarch64|arm64) arch="aarch64" ;;
+        *) die "Piper prebuilt $(uname -m) ke liye nahi hai — sudo dnf install espeak-ng ffmpeg (robotic fallback)" ;;
+      esac
+      mkdir -p "$VOICE_DIR/models"
+      if [ ! -x "$VOICE_DIR/piper/piper" ]; then
+        info "Piper binary download ho raha hai (${arch})…"
+        curl -fL --retry 3 -o "/tmp/piper.tar.gz" \
+          "https://github.com/rhasspy/piper/releases/download/${piper_ver}/piper_linux_${arch}.tar.gz" \
+          || die "Piper download fail — GitHub reachable hai? (curl -I https://github.com)"
+        tar -xzf /tmp/piper.tar.gz -C "$VOICE_DIR" || die "Piper extract fail"
+        rm -f /tmp/piper.tar.gz
+      fi
+      [ -x "$VOICE_DIR/piper/piper" ] || die "Piper binary extract ke baad bhi nahi mila ($VOICE_DIR/piper/)"
+      ok "Piper engine: $VOICE_DIR/piper/piper"
+      # JARVIS ke sabse close free voices: alan (default) + ryan-high (deep alt)
+      voice_download_piper_model "en_GB-alan-medium" "en/en_GB/alan/medium"
+      voice_download_piper_model "en_GB-ryan-high" "en/en_GB/ryan/high"
+      if [ -d "$dir/src" ]; then
+        env_set "$envfile" "TTS_ENGINE" "auto"
+        env_set "$envfile" "TTS_VOICE" "jarvis"
+        ok ".env wired: TTS_VOICE=jarvis (Piper auto-detect hoga, path set karne ki zaroorat nahi)"
+        have ffmpeg || warn "ffmpeg nahi hai — JARVIS FX/opus ke liye: sudo dnf install ffmpeg"
+        restart_agent "$dir"
+      fi
+      cat <<DONE
+
+────────────────────────────────────────────────────────────────────────
+ 🔊 JARVIS VOICE READY!
+────────────────────────────────────────────────────────────────────────
+ • WhatsApp pe test : /voicereply Good evening, Sir
+ • Har jawab voice me: /call on
+ • Phone app        : 📞 Call tab → Start Call → bolo!
+ • Gehri awaaz      : JARVIS_PITCH=0.94 (.env) ya /voicereply voice jarvis-deep …
+ • Sunna bhi chahiye : bash observer.sh voice whisper   (voice notes/calls ke liye)
+ • Asli WhatsApp call: bash observer.sh voice call-engine
+ Guide: whatsapp-agent/VOICE.md
+────────────────────────────────────────────────────────────────────────
+DONE
+      ;;
+
+    whisper|stt)
+      say "Local speech-to-text — whisper.cpp (offline, voice notes + calls)"
+      local wdir="$VOICE_DIR/whisper.cpp"
+      if ! have cmake || ! have g++; then
+        if have dnf; then
+          info "Build tools chahiye (cmake, gcc-c++, make) — sudo lagega:"
+          sudo dnf install -y cmake gcc-c++ make git || die "dnf install fail — manual: sudo dnf install cmake gcc-c++ make git"
+        else
+          die "cmake/g++ nahi mile — package manager se lagao, phir se chalao. (Ya GROQ_API_KEY free tier use karo bina install ke.)"
+        fi
+      fi
+      if [ ! -x "$wdir/build/bin/whisper-cli" ]; then
+        mkdir -p "$VOICE_DIR"
+        if [ ! -d "$wdir/.git" ]; then
+          if have git; then git clone --depth 1 https://github.com/ggerganov/whisper.cpp "$wdir" || die "whisper.cpp clone fail"
+          else
+            curl -fL --retry 3 https://codeload.github.com/ggerganov/whisper.cpp/tar.gz/refs/heads/master \
+              | tar -xz -C "$VOICE_DIR" || die "whisper.cpp download fail"
+            mv "$VOICE_DIR"/whisper.cpp-master "$wdir" 2>/dev/null || true
+          fi
+        fi
+        ( cd "$wdir" && cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build -j --config Release >/dev/null ) \
+          || die "whisper.cpp build fail — cd $wdir && cmake -B build && cmake --build build -j (error yahan dikhega)"
+      fi
+      [ -x "$wdir/build/bin/whisper-cli" ] || die "whisper-cli build ke baad bhi nahi mila"
+      ok "whisper-cli: $wdir/build/bin/whisper-cli"
+      if [ ! -f "$wdir/models/ggml-base.bin" ]; then
+        info "Model ggml-base (~150 MB, Hinglish ok) download ho raha hai…"
+        curl -fL --retry 3 -o "$wdir/models/ggml-base.bin" \
+          "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" \
+          || die "whisper model download fail"
+      fi
+      ok "Model: ggml-base.bin (aur accurate chahiye to ggml-small.bin isi folder me daal do)"
+      if [ -d "$dir/src" ]; then
+        env_set "$envfile" "WHISPER_BIN" "$wdir/build/bin/whisper-cli"
+        env_set "$envfile" "WHISPER_MODEL" "$wdir/models/ggml-base.bin"
+        have ffmpeg || warn "ffmpeg zaroori hai (ogg→wav): sudo dnf install ffmpeg"
+        restart_agent "$dir"
+      fi
+      info "Test: WhatsApp pe voice note bhejo — '🎙️ Samjha: …' aayega aur command chal jayega."
+      ;;
+
+    call-engine|voip|engine)
+      say "WhatsApp CALL-ANSWERING engine (experimental — asli call uthana)"
+      warn "Official Baileys call utha NAHI sakta. Ye experimental baileys-caller"
+      warn "(WhatsApp Web VoIP WASM) lagta hai — doosre linked device par."
+      warn "Risk: WhatsApp kabhi bhi tod sakta hai; agent number hi use karna."
+      [ -d "$dir/src" ] || die "Agent install nahi mila ($dir) — pehle: bash observer.sh install"
+      have ffmpeg || die "ffmpeg zaroori hai: sudo dnf install ffmpeg"
+      cd "$dir" || die "cd $dir fail"
+      if [ ! -d node_modules/baileys-caller/dist ] && [ ! -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then
+        info "baileys-caller install ho raha hai (git dep, 1-3 min lag sakte hain)…"
+        npm install --no-save "baileys-caller@git+https://github.com/Akane7101/baileys-caller.git" \
+          || {
+            warn "npm git install fail — standalone dir me try kar raha hoon"
+            mkdir -p "$VOIP_DIR"
+            curl -fL --retry 3 https://codeload.github.com/Akane7101/baileys-caller/tar.gz/refs/heads/main \
+              | tar -xz -C "$VOIP_DIR" || die "baileys-caller download fail"
+            mv "$VOIP_DIR"/baileys-caller-main "$VOIP_DIR/baileys-caller" 2>/dev/null || true
+            ( cd "$VOIP_DIR/baileys-caller" && npm install --no-audit --no-fund ) \
+              || die "baileys-caller deps install fail (@roamhq/wrtc native build dekho)"
+          }
+      fi
+      ok "VoIP engine installed"
+      env_set "$envfile" "WA_CALL_ANSWER" "false"
+      info "WA_CALL_ANSWER abhi false rakha hai — pehle device LINK karo:"
+      cat <<DONE
+
+────────────────────────────────────────────────────────────────────────
+ 📞 ENGINE READY — ab ek baar QR link karo:
+────────────────────────────────────────────────────────────────────────
+   bash scripts/observer.sh voice link-voip
+ (AGENT phone se scan — ye 2nd companion device hai, messaging alag rahega)
+ Link ke baad WA_CALL_ANSWER=true ho jayega aur agent number pe
+ WhatsApp voice call karte hi JARVIS call UTHA kar jawab dega. 🤖📞
+ Guide: whatsapp-agent/WHATSAPP-CALL.md
+────────────────────────────────────────────────────────────────────────
+DONE
+      ;;
+
+    link-voip|link)
+      say "VoIP device link (QR) — asli WhatsApp call uthane ke liye"
+      [ -d "$dir/src" ] || die "Agent install nahi mila ($dir)"
+      service_active 2>/dev/null && info "Note: service chal raha hai — link ke baad restart hoga taaki engine session pakde."
+      ( cd "$dir" && node scripts/link-voip.mjs auth_info_voip ) \
+        || die "Link complete nahi hua — upar wala error dekho (engine missing ho to: bash observer.sh voice call-engine)"
+      env_set "$envfile" "WA_CALL_ANSWER" "true"
+      env_set "$envfile" "WA_CALL_FALLBACK" "voice-session"
+      ok "WA_CALL_ANSWER=true (.env)"
+      restart_agent "$dir"
+      cat <<DONE
+
+────────────────────────────────────────────────────────────────────────
+ 📞✅ JARVIS AB WHATSAPP CALL UTHAYEGA!
+────────────────────────────────────────────────────────────────────────
+ Apne phone se agent number par WhatsApp VOICE CALL karo:
+   "Good evening, Sir…" → bolo "chrome kholo aur screenshot bhej do"
+   → kaam hoga → JARVIS call me hi bolega. Khatm: "goodbye jarvis".
+ Status kabhi bhi: WhatsApp /voice · terminal: bash observer.sh voice status
+ Agent phone ko silent/DND par rakho (call wahan bhi bajegi, jawab PC dega).
+────────────────────────────────────────────────────────────────────────
+DONE
+      ;;
+
+    answer)
+      local mode="${1:-on}"
+      [ -d "$dir/src" ] || die "Agent install nahi mila ($dir)"
+      if [ "$mode" = "off" ]; then env_set "$envfile" "WA_CALL_ANSWER" "false"; ok "WA_CALL_ANSWER=false"
+      else env_set "$envfile" "WA_CALL_ANSWER" "true"; ok "WA_CALL_ANSWER=true"; fi
+      restart_agent "$dir"
+      ;;
+
+    test)
+      say "JARVIS voice test"
+      [ -d "$dir/src" ] || die "Agent install nahi mila ($dir)"
+      ( cd "$dir" && node --input-type=module -e "
+        import fs from 'node:fs';
+        const { loadConfig } = await import('./src/config.js');
+        const tts = await import('./src/tts.js');
+        console.log(tts.ttsStatus(loadConfig({ dryRun: true })).split('\n').slice(0, 3).join('\n'));
+        try {
+          const r = await tts.synthesize('Good evening, Sir. JARVIS at your service. All systems are now fully operational.', loadConfig({ dryRun: true }), console);
+          fs.writeFileSync('/tmp/jarvis-test.' + r.ext, r.buffer);
+          console.log('TEST FILE: /tmp/jarvis-test.' + r.ext + ' (engine: ' + r.engine + ', ' + r.buffer.length + ' bytes)');
+        } catch (e) { console.error('SYNTH FAIL:', e.message); process.exit(1); }
+      " ) || die "Voice test fail — upar error dekho (setup: bash observer.sh voice setup)"
+      info "Suno: ffplay /tmp/jarvis-test.ogg · ya WhatsApp: /voicereply Good evening, Sir"
+      ;;
+
+    status|*)
+      say "JARVIS Voice Status"
+      info "voice dir  : $VOICE_DIR"
+      if [ -x "$VOICE_DIR/piper/piper" ]; then ok "piper       : installed"
+      elif have piper; then ok "piper       : PATH ($(command -v piper))"
+      else warn "piper       : missing — bash observer.sh voice setup"; fi
+      if [ -d "$VOICE_DIR/models" ] && ls "$VOICE_DIR/models"/*.onnx >/dev/null 2>&1; then
+        ok "piper voices: $(ls "$VOICE_DIR/models"/*.onnx | xargs -n1 basename | tr '\n' ' ')"
+      else warn "piper voices: none"; fi
+      if [ -x "$VOICE_DIR/whisper.cpp/build/bin/whisper-cli" ]; then ok "whisper     : local ready"
+      elif have whisper-cli || have whisper; then ok "whisper     : PATH"
+      else warn "whisper     : missing — bash observer.sh voice whisper (ya GROQ_API_KEY)"; fi
+      have ffmpeg && ok "ffmpeg      : installed (JARVIS FX + opus + call audio)" || warn "ffmpeg      : missing — sudo dnf install ffmpeg"
+      have edge-tts && ok "edge-tts    : installed (en-GB-RyanNeural online fallback)" || info "edge-tts    : not installed (optional: pip install edge-tts)"
+      if [ -d "$dir/node_modules/baileys-caller" ] || [ -d "$VOIP_DIR/baileys-caller" ]; then ok "voip engine : baileys-caller installed"
+      else warn "voip engine : missing — bash observer.sh voice call-engine"; fi
+      if [ -f "$dir/auth_info_voip/creds.json" ]; then ok "voip login  : linked (auth_info_voip)"
+      else warn "voip login  : not linked — bash observer.sh voice link-voip"; fi
+      info "WA_CALL_ANSWER: $(grep -E '^WA_CALL_ANSWER=' "$envfile" 2>/dev/null | cut -d= -f2 || echo 'default(false)')"
+      info "TTS_VOICE     : $(grep -E '^TTS_VOICE=' "$envfile" 2>/dev/null | cut -d= -f2 || echo 'default(jarvis)')"
+      info "Live status   : WhatsApp pe /voice bhejo, ya observer.sh voice test"
+      ;;
+  esac
+}
+
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
     install|setup)        cmd_install "$@" ;;
     update|upgrade)       cmd_update "$@" ;;
+    voice|jarvis|call)    cmd_voice "$@" ;;
     harness|dsh|deepseek) cmd_harness "$@" ;;
     keys|key|api-key|api-keys) cmd_keys "$@" ;;
     models|model|local)   cmd_models "$@" ;;

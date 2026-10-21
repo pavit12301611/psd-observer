@@ -1,4 +1,14 @@
 {
+  "3.0.0": {
+    "title": "JARVIS Voice Call — seedha WhatsApp call karo, JARVIS uthayega ☎️🎩",
+    "bullets": [
+      "Agent number pe *seedha WhatsApp voice call* karo — JARVIS call utha kar bolta hai, tum bolke instruction dete ho, PC execute karta hai, jawab *usi call me* milta hai! Setup (ek baar): `bash observer.sh voice call-engine` + `voice link-voip` + `voice answer on` (experimental engine — poora sach WHATSAPP-CALL.md me)",
+      "Asli *neural British butler awaaz* (Piper en_GB, 100% offline): purani female robot default gayi! Ek command: `bash observer.sh voice setup` — phir /voicereply, /call, Call tab sab me JARVIS. Local whisper ke liye: `observer.sh voice whisper`",
+      "Phone app me naya *📞 Call tab*: glowing orb, live captions, barge-in (JARVIS bol raha ho to beech me bolo — ruk jayega), browser-mic ya Whisper transcription, bina kisi setup ke",
+      "WhatsApp *Voice Mode* (`/call on`): har jawab text + JARVIS voice note; voice note bhej ke command chalao — *\"chrome kholo aur screenshot bhej do\"* jaise multi-commands bhi. Destructive kaam pehle poochega: *\"Shall I proceed, Sir?\"*",
+      "Naye commands: `/call`, `/call on|off`, `/callme` (JARVIS khud call kare), `/voice` — aur /doctor me voice ki 3 nayi checking lines exact fix ke saath. Guides: VOICE.md · WHATSAPP-CALL.md"
+    ]
+  },
   "2.10.0": {
     "title": "Ultra-Accuracy Question Image Solver — 100% Verified Answers 🧠🔬",
     "bullets": [
