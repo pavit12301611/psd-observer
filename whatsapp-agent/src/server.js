@@ -38,7 +38,7 @@ import * as tts from './tts.js';
 import { transcribeAudio, transcriptionAvailable } from './transcribe.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '3.1.6';
+const VERSION = '3.1.7';
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {

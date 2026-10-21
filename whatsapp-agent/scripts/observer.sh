@@ -1954,9 +1954,12 @@ DONE
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
-      if grep -q "observer-patch: lobby-ack-gate v4" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+      if grep -q "observer-patch: lobby-sent-flags v5" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+         || grep -q "observer-patch: lobby-sent-flags v5" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
+        ok "engine patch    : v5 applied (claim-first + LobbyAck gate + lobby-sent flags — accept server-ack ke baad hi jata hai, bina iske pickup nahi hoti)"
+      elif grep -q "observer-patch: lobby-ack-gate v4" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: lobby-ack-gate v4" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
-        ok "engine patch    : v4 applied (claim-first + LobbyAck gate — accept server-ack ke baad hi jata hai, bina iske pickup nahi hoti)"
+        warn "engine patch    : sirf v4 hai (gate hai par uska lobby-sent signal bytes-bug se kabhi set nahi hota) — bash observer.sh voice call-engine (v5 lag jayega)"
       elif grep -q "observer-patch: claim-offer-first v3" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: claim-offer-first v3" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
         warn "engine patch    : sirf v3 hai (accept LobbyAck se pehle race karke 404 NACK khayega) — bash observer.sh voice call-engine (v4 lag jayega)"
@@ -1996,7 +1999,7 @@ DONE
       journalctl --user -u "$SERVICE" -n 4000 --no-pager 2>/dev/null \
         | grep -E "\[wavoip\]|\[baileys-caller\]|\[voip-wasm|OWNER is calling|call fallback|wa call|connect failed|VoIP device connected" \
         | grep -v "status: 670007" \
-        | tail -60 || warn "journal nahi mila (systemd service?)"
+        | tail -100 || warn "journal nahi mila (systemd service?)"
       echo "────────────────────────────────────────────────────────────────"
       info "Padho: 'incoming WhatsApp call' aaya? → 'answering' → 'call connected'?"
       info "Jahan chain tooti, wajah wahi hai. [voip-wasm] wali line sabse sachhi hoti hai."

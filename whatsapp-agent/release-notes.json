@@ -1,4 +1,14 @@
 {
+  "3.1.7": {
+    "title": "Gate ka signal hi andha tha — bytes wala bug pakda gaya 🔬",
+    "bullets": [
+      "3.1.6 me gate laga tha, lekin journal phir wahi bola: `joinable_accept_before_lobby_ack: 1`. Sandbox probe ne wajah pakdi: engine ke `onSignalingXmpp` ko XML **string** nahi, WABinary **bytes** milte hain (`108,111,98,98,121` = \"lobby\" ASCII me) — mera text-wala sniff `\"<lobby\"` wahan mil hi nahi sakta tha, isliye gate ko kabhi pata hi nahi chala ki lobby gaya hai. Galti meri thi, ab proof ke saath theek hai",
+      "Engine patch **v5**: lobby-sent flag ab un do jagaho se set hota hai jo pakka janti hain ki lobby ja raha hai — **claim** (offer feed hone se bhi pehle, accept-poll ki pehli tick se pehle) aur **join**. Bytes-wala sniff bhi ab bytes ko ASCII padhke \"lobby\" pakadta hai (sandbox me asal payload par proven)",
+      "Gate ab har call par ek diagnostic line chhodta hai: `accept gate for <id>: lobbySent=… lobbyAck=… pending=…` — agle journal se seedha pata chalega gate ne kya dekha aur kya kiya. Doctor ka journal section bhi 60 se 100 lines ho gaya taaki shuruaat ki lines kate nahi",
+      "`bash observer.sh update` — patch v4 se v5 khud lagega. Doctor me `engine patch : v5 applied` dikhna chahiye. Phir ek test call: journal me `accept gate … pending=true` → `waiting for LobbyAck` → LobbyAck ke baad `accepting now`, aur **Accept ACK 404 nahi** — yehi jeet hai",
+      "Honest status: har kadam par ek hi kaam ho raha hai — journal jo saboot deta hai usi ko fix karte hain. Voice-note fallback hamesha ka guaranteed floor hai"
+    ]
+  },
   "3.1.6": {
     "title": "Accept ab LobbyAck ke baad — 404 NACK wala race khatam 📞",
     "bullets": [

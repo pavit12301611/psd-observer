@@ -1,5 +1,12 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.7 — Gate ka signal andha tha: xmlPayload XML nahi, WABinary bytes hain (patch v5)
+
+3.1.6 ki call (`00CB7BCF…`) bilkul 3.1.5 jaisi mari — `joinable_accept_before_lobby_ack: 1`, Accept 404. Matlab v4 gate engage hi nahi hua. Sandbox probe (`/tmp/probe-lobby.mjs`, asal WasmEngine + `checkOngoingCalls`) ne pakda: `onSignalingXmpp` ka teesra argument `typeof=object` hai — **Uint8Array WABinary bytes**, jisme tag ka naam ASCII codes me baitha hai (`0,248,7,252,5,108,111,98,98,121,…` = "lobby"). v4 ka sniff `String(xmlPayload).includes("<lobby")` numbers-ki-comma-string par kabhi match hi nahi kar sakta tha. `_lobbySentCallId` kabhi set nahi hua → `lobbyPending=false` → accept turant.
+
+Patch **v5**: (1) flag claim ke turant baad (`_lobbySentCallId = claimId` — claim hamesha `<lobby>` emit karta hai, sandbox-proven, aur ye offer-feed se pehle hota hai, isliye accept-poll ki pehli tick se pehle pakka set); (2) wahi flag join par bhi; (3) bytes-sniff theek kiya — pehle 48 bytes ASCII padho, "lobby" dhundho (probe `V5-SNIFF-PROVEN` asal payload par); (4) gate har call par ek diagnostic line: `lobbySent=… lobbyAck=… pending=…`. Doctor journal tail 60→100 (fieldstats/relay spam shuru ki lines kaat deta tha).
+
+
 ## v3.1.6 — Accept ka race: LobbyAck se pehle accept = 404 NACK (patch v4 lobby-ack gate)
 
 3.1.5 ki test call (`00F4B696…`, do baar same pattern) sabse aage gayi: claim-first kaam kar gaya — lobby is baar nacked NAHI hui (`LobbyAck` aaya), call active hui, upstream ka deferred accept chala (`call is active; accepting now`), `Rejoining -> AcceptSent`, `<accept>` → `00F4…@call`. Phir phone ne 1s me terminate kar diya. Journal ke aakhir me sach: **`Accept ACK: error code = 404. Treating as an Accept NACK`** aur fieldstats `joinable_accept_before_lobby_ack: 1`, `time_since_accept_ms: 496`. Upstream ka accept-poll `getCallInfo()` ka koi-bhi-jawab milte hi accept kar deta hai — LobbyAck (~1s baad) ka wait hi nahi karta. Server ke hisab se hum room ke participant bane hi nahi the, isliye accept 404.

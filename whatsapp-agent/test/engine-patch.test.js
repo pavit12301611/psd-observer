@@ -202,6 +202,11 @@ test('engine patch: all parts apply once on a fresh engine', async () => {
   assert.match(idx, /_lobbyWaitLogged/, 'v4: accept gate present');
   assert.ok(idx.indexOf('_lobbyWaitLogged') < idx.indexOf('call._accepted = true;'),
     'v4: gate really runs BEFORE the accept');
+  assert.match(idx, /_lobbySentCallId = claimId/, 'v5: claim flags the gate');
+  assert.match(idx, /_lobbySentCallId = call\.callId/, 'v5: join flags the gate');
+  assert.match(idx, /_lobbySentBytes/, 'v5: byte-wise lobby sniff');
+  assert.doesNotMatch(idx, /String\(xmlPayload\)\.includes\("<lobby"\)/, 'v5: impossible text sniff gone');
+  assert.match(idx, /_gateLogged/, 'v5: gate diagnostics logged');
   assert.match(sig, /isCallRoomPeer/);
   assert.match(sig, /lobby-ack-gate v4 \(stanza\)/, 'v4: lobby ack stanza sniffed');
   assert.match(sig, /_lobbyAckCallId = String\(callIdForRouting/, 'v4: stanza feeds the gate');
@@ -228,6 +233,7 @@ test('engine patch: v1/v2 install upgrades — legacy claim removed, nothing dup
   assert.equal((idx.match(/checkOngoingCalls\?\.\(\[claimId\]/g) || []).length, 1, 'claim present exactly once');
   assert.match(idx, /this\.emit\("incoming"/, 'emit line intact');
   assert.match(idx, /lobby-ack-gate v4/, 'v4 lands on upgraded installs too');
+  assert.match(idx, /lobby-sent-flags v5/, 'v5 lands on upgraded installs too');
   const r2 = patchEngineDir(dir, quiet);
   assert.equal(r2.state, 'already');
 });

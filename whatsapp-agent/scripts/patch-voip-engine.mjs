@@ -29,6 +29,14 @@
  *     returns anything, which is ~1s BEFORE the LobbyAck; the server then
  *     404-NACKs the accept (3.1.5 journal: `joinable_accept_before_lobby_ack:
  *     1`, "Accept ACK: error code = 404") and the peer terminates. (v4)
+ *  6. v4's outbound-lobby sniff could never fire: `onSignalingXmpp` receives
+ *     WABinary BYTES (Uint8Array), not an XML string — sandbox probe:
+ *     `0,248,7,252,5,108,111,98,98,121,…` ("lobby" as ASCII codes) — so the
+ *     lobby-sent flag stayed unset and the gate let the accept race again in
+ *     3.1.6. v5 sets the flag at the two places that KNOW a lobby is going
+ *     out (the claim and the join — both emit <lobby>, sandbox-proven),
+ *     byte-decodes the sniff as a backup, and logs the gate's decision once
+ *     per call so the next journal is self-explaining. (v5)
  *
  * Every part is individually idempotent (needle check), so it is safe on
  * fresh installs, on older patched installs (only missing parts land; the
@@ -49,6 +57,7 @@ const M1 = 'observer-patch: check-ongoing-calls v1';
 const M2 = 'observer-patch: join-ongoing-call v2';
 const M3 = 'observer-patch: claim-offer-first v3';
 const M4 = 'observer-patch: lobby-ack-gate v4';
+const M5 = 'observer-patch: lobby-sent-flags v5';
 
 // Remove the superseded v1/v2 after-feed claim block from index.mjs, whatever
 // comment wording the patcher version that wrote it used. The block sits
@@ -282,6 +291,65 @@ const PARTS = {
                     }
                     catch { }
                     call._accepted = true;`);
+      },
+    },
+    {
+      // v5: the claim itself emits <lobby> (sandbox-proven), so flag it here —
+      // before the offer is even fed, hence before any accept poll can tick.
+      needle: '_lobbySentCallId = claimId',
+      apply: (src) => {
+        const anchor = '                    this.#engine?.checkOngoingCalls?.([claimId], [claimCreator]);';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, anchor + `
+                    /* ${M5} — claiming emits <lobby>; tell the accept gate. */
+                    if (this.#engine)
+                        this.#engine._lobbySentCallId = claimId;`);
+      },
+    },
+    {
+      // v5: joining also emits <lobby>; flag it at the join itself.
+      needle: '_lobbySentCallId = call.callId',
+      apply: (src) => {
+        const anchor = '                call._joinedLobby = true;';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, anchor + `
+                /* ${M5} — joining emits <lobby>; tell the accept gate. */
+                if (this.#engine)
+                    this.#engine._lobbySentCallId = call.callId;`);
+      },
+    },
+    {
+      // v5: fix the (send) sniff — xmlPayload is WABinary bytes, not XML text.
+      needle: '_lobbySentBytes',
+      apply: (src) => {
+        const anchor = '                        if (this.#engine && String(xmlPayload).includes("<lobby"))';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                        /* ${M5} — xmlPayload is WABinary BYTES; the tag
+                           name sits as ASCII in the first bytes ("lobby"
+                           at offset ~5). The v4 text search never matched. */
+                        let _lobbySentBytes = "";
+                        if (typeof xmlPayload === "string")
+                            _lobbySentBytes = xmlPayload.slice(0, 64);
+                        else if (xmlPayload && typeof xmlPayload.length === "number") {
+                            for (let i = 0; i < Math.min(xmlPayload.length, 48); i++)
+                                _lobbySentBytes += String.fromCharCode(xmlPayload[i]);
+                        }
+                        if (this.#engine && _lobbySentBytes.includes("lobby"))`);
+      },
+    },
+    {
+      // v5: one diagnostic line per call so journals show the gate's inputs.
+      needle: '_gateLogged',
+      apply: (src) => {
+        const anchor = `                        const lobbyPending = String(this.#engine?._lobbySentCallId ?? "").toUpperCase() === cid
+                            && String(this.#engine?._lobbyAckCallId ?? "").toUpperCase() !== cid;`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, anchor + `
+                        /* ${M5} — self-explaining journals */
+                        if (!call._gateLogged) {
+                            call._gateLogged = true;
+                            console.log(\`[baileys-caller] accept gate for \${call.callId}: lobbySent=\${this.#engine?._lobbySentCallId ?? "-"} lobbyAck=\${this.#engine?._lobbyAckCallId ?? "-"} pending=\${lobbyPending}\`);
+                        }`);
       },
     },
   ],
