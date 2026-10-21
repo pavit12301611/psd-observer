@@ -85,6 +85,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
   const dataDir = path.resolve(ROOT, e.DATA_DIR || 'data');
   const config = {
     dryRun,
+    agentName: (e.AGENT_NAME || 'PSD_Ai').trim() || 'PSD_Ai',
     // The owner's two numbers are the shipped defaults so it works out of the
     // box; either can be overridden in a private .env (gitignored).
     ownerNumber: normalizeNumber(e.OWNER_NUMBER || '919528923866'),

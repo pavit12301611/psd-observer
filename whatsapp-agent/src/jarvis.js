@@ -15,7 +15,7 @@
 //
 // Pure functions only — no I/O — so every rule is unit-testable offline.
 
-import { getOwnerAddress } from './memory.js';
+import { getOwnerAddress, getAgentName } from './memory.js';
 
 export const DEFAULT_MAX_SPOKEN_CHARS = 340;
 
@@ -54,8 +54,9 @@ export function jarvisAck(config = {}, seed = Date.now(), store = null) {
 export function personaLines(config = {}, { voice = false, store = null } = {}) {
   if (config.jarvisPersona === false) return [];
   const who = addressOf(config, store);
+  const agentName = getAgentName(store, config);
   const lines = [
-    `Your name is J.A.R.V.I.S. — a calm, impeccably polite British digital butler in the manner of Iron Man's JARVIS. Address the owner as "${who}". Dry wit is welcome, never at the owner's expense. Never say "As an AI".`,
+    `Your name is ${agentName} — a calm, ultra-fast, impeccably polite British digital butler in the manner of JARVIS. Address the owner as "${who}". Dry wit is welcome, never at the owner's expense. Never say "As an AI".`,
     'Preference order for style: accomplish first, report briefly. One or two crisp sentences beat a paragraph.',
   ];
   if (voice) {
@@ -194,6 +195,7 @@ const DEVANAGARI_WORDS = {
   'पता': 'pata', 'कौन': 'kaun', 'कहाँ': 'kahan', 'कहां': 'kahan', 'शहर': 'shehar',
   'उम्र': 'umar', 'जन्मदिन': 'janamdin', 'भाषा': 'bhasha', 'बॉस': 'Boss', 'सर': 'Sir',
   'पवित': 'Pavit', 'राहुल': 'Rahul', 'अमन': 'Aman',
+  'पीएसडी': 'PSD', 'एआई': 'Ai', 'तुम्हारा': 'tumhara', 'तेरा': 'tera', 'आपका': 'aapka', 'तुम': 'tum', 'आप': 'aap',
   'एक': 'ek', 'दस': 'das', 'बीस': 'bees', 'तीस': 'tees', 'चालीस': 'chalis', 'पचास': 'pachas',
   'साठ': 'saath', 'सत्तर': 'sattar', 'अस्सी': 'assi', 'नब्बे': 'nabbe', 'सौ': 'sau',
 };
@@ -265,11 +267,12 @@ const MISHEARINGS = [
 /** Strip a leading/any wake word. Returns { text, hadWake }. */
 export function stripWakeWord(text) {
   const original = String(text ?? '').trim();
+  const hasWake = /\b(?:jarvis|psd[_\s-]*ai)\b/i.test(original) || /^(?:hey|ok|okay|hello|hi)\s+psd\b/i.test(original);
   const stripped = original
-    .replace(/^(?:hey|ok|okay|hello|hi)?[,\s]*jarvis[,\s]+/i, '')
+    .replace(/^(?:hey|ok|okay|hello|hi)?[,\s]*(?:jarvis|psd[_\s-]*ai|psd)[,\s]+/i, '')
     .replace(/\bjarvis\b[,\s]*/gi, '')
     .trim();
-  return { text: stripped || original.replace(/\bjarvis\b/gi, '').trim(), hadWake: /\bjarvis\b/i.test(original) };
+  return { text: stripped || original.replace(/\bjarvis\b/gi, '').trim(), hadWake: hasWake };
 }
 
 /**
@@ -357,7 +360,8 @@ export function smalltalkReply(text, config = {}, now = new Date(), store = null
     return `Always a pleasure, ${address}.`;
   }
   if (/^(who are you|your name|what is your name|tum kaun ho|tumhara naam kya hai|tera naam kya hai|aap kaun ho)$/.test(clean)) {
-    return `I am JARVIS — your personal assistant, running right here on your own computer, ${address}. Commands, questions or conversation: simply ask.`;
+    const agentName = getAgentName(store, config);
+    return `I am ${agentName} — your personal assistant, running right here on your own computer, ${address}. Commands, questions or conversation: simply ask.`;
   }
   if (/^(what can you do|what do you do|tum kya kar sakte ho|kya kya kar sakte ho|kaise kaam karte ho)$/.test(clean)) {
     return `Quite a lot, ${address}. I can open apps, take screenshots, find and send files, control volume, Wi-Fi and music, download links, answer questions — and even call you at a set time with updates. Just tell me what you need.`;

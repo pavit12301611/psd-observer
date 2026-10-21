@@ -25,7 +25,7 @@ import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
-import { routerFor, looksLikeWebTask } from './router.js';
+import { routerFor, looksLikeWebTask, estimateComplexity } from './router.js';
 import { parseIntent } from './nlp.js';
 import { runDoctor } from './doctor.js';
 import * as watch from './watch.js';
@@ -42,7 +42,7 @@ import { jarvisGreeting, spokenSummary } from './jarvis.js';
 import * as mem from './memory.js';
 
 const execAsync = promisify(exec);
-const HELP = `🤖 *Observer WhatsApp Agent* — free, owner-only, full PC control
+const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
 
 *Just talk (English / Hindi / Hinglish)*
@@ -1822,13 +1822,17 @@ export function createAgent({
   /** Natural-language shortcuts. Returns a reply, or undefined to continue to AI/Observer. */
   function intent(text, ctx = {}) {
     let m;
+    // Let compound command chains ("todo: X aur note: Y") fall through to the chain runner
+    if (/\s+(?:aur|phir|fir|uske\s+baad|and\s+then|then)\s+(?:note|todo|remind|remember|mera|meri|mujhe|open|close|screenshot|volume|awaaz|wifi|bluetooth|\/)/i.test(text)) {
+      return undefined;
+    }
     if (/^remind me\b/i.test(text)) {
       // "remind me in 5 minutes to drink water" → remind("in 5 minutes to drink water")
       // parseWhen already swallows the "to" after the duration / clock time.
       return remind(text.replace(/^remind me\s+/i, ''));
     }
     if ((m = text.match(/^(?:note(?:\s+kar\s+lo)?\s*[:\-]?\s+|note that\s+)([\s\S]+)$/i))) return note(m[1]);
-    if ((m = text.match(/^(?:add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+)([\s\S]+)$/i))) return todo(`add ${m[1]}`);
+    if ((m = text.match(/^(?:add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+)(?:add\s+)?([\s\S]+)$/i))) return todo(`add ${m[1]}`);
     if ((m = text.match(/^remember\s+(?:that\s+)?([\s\S]+)$/i))) return remember(m[1], ctx);
     const memReply = mem.handleMemoryIntent(store, config, text, { voice: Boolean(ctx?.voice) });
     if (memReply !== undefined) return memReply;
@@ -1837,12 +1841,30 @@ export function createAgent({
     if ((m = text.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))) {
       return `🧮 ${m[1]}% of ${m[2]} = *${(Number(m[1]) / 100) * Number(m[2])}*`;
     }
+    if ((m = text.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pratishat)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      return `🧮 ${m[2]}% of ${m[1]} = *${(Number(m[2]) / 100) * Number(m[1])}*`;
+    }
+    // Hinglish spoken math ("45 guna 12", "100 plus 250", "500 minus 120", "100 bhaag 4")
+    if (/^\d+(?:\.\d+)?\s+(?:guna|into|times|multiply(?:\s+by)?|plus|jod|minus|ghata|bhaag|divide(?:\s+by)?)\s+\d+/i.test(text)) {
+      const expr = text
+        .replace(/\b(?:kitna\s*(?:hota\s*hai|hai)?|kya\s*hai|equals?)\??$/i, '')
+        .replace(/\b(?:guna|into|times|multiply(?:\s+by)?)\b/gi, '*')
+        .replace(/\b(?:plus|jod)\b/gi, '+')
+        .replace(/\b(?:minus|ghata)\b/gi, '-')
+        .replace(/\b(?:bhaag|divide(?:\s+by)?)\b/gi, '/')
+        .trim();
+      try { return `🧮 ${expr} = *${tools.calc(expr)}*`; } catch { /* fall through */ }
+    }
+    if ((m = text.match(/^(-?\d+(?:\.\d+)?)\s*([a-zA-Z°]+)\s+(?:in|to|into|me|mein)\s+([a-zA-Z°]+)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      try { return `📏 ${tools.convertUnit(Number(m[1]), m[2], m[3])}`; } catch { /* not a known unit pair */ }
+    }
     if (tools.looksLikeCalc(text)) {
       try { return `🧮 ${text.trim()} = *${tools.calc(text)}*`; } catch { /* not maths after all */ }
     }
-    if (/^(hi|hello|hey|namaste|hii+|yo)[!. ]*$/i.test(text)) {
+    if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
       const ownerName = mem.getOwnerName(store);
-      return `👋 Namaste${ownerName ? ` *${ownerName}*` : ''}! I'm your Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
+      const agentName = mem.getAgentName(store, config);
+      return `👋 Namaste${ownerName ? ` *${ownerName}*` : ''}! Main *${agentName}* hoon — aapka fast & powerful Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
     }
     return undefined;
   }
@@ -1975,13 +1997,65 @@ export function createAgent({
         return await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
       }
 
+      // Fast offline multi-command chaining ("todo add milk aur note: wifi 1234", "volume 40 karo aur screenshot bhej do")
+      if (!looksLikeWebTask(working) && !working.includes('?')) {
+        const chainParts = working.split(/\s+(?:aur|phir|fir|uske\s+baad|iske\s+baad|and\s+then|then|aur\s+phir)\s+/i).map((p) => p.trim()).filter(Boolean);
+        if (chainParts.length >= 2 && chainParts.length <= 4) {
+          const isQuickIntent = (s) => (
+            /^(?:remind me\b|note(?:\s+kar\s+lo)?\s*[:\-]\s+|note that\s+|add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+|remember\s+|(?:what(?:'s| is) the )?weather\s+(?:in|at)\s+|\S+\s+ka\s+mausam|\d+(?:\.\d+)?\s*%\s*of\s*\d+|\d+(?:\.\d+)?\s+ka\s+\d+\s*(?:%|percent))/i.test(s)
+            || tools.looksLikeCalc(s)
+            || Boolean(mem.parseRuleStatement(s) || mem.extractFact(s))
+          );
+          const allOfflineRunnable = chainParts.every((p) => (
+            p.startsWith('/')
+            || isQuickIntent(p)
+            || (!effCtx.bypassSaved && mem.matchRule(store, p) !== null)
+            || parseIntent(p) !== null
+          ));
+          if (allOfflineRunnable) {
+            const chainTexts = [];
+            let lastMediaReply = null;
+            for (const part of chainParts) {
+              let stepRes = null;
+              const sl = part.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+              if (sl) {
+                stepRes = await handleCommand(sl[1].toLowerCase(), sl[2].trim(), effCtx);
+              } else {
+                const q = intent(part, effCtx);
+                if (q !== undefined) {
+                  stepRes = await q;
+                } else if (!effCtx.bypassSaved && mem.matchRule(store, part)) {
+                  const mr = mem.matchRule(store, part);
+                  stepRes = mr.type === 'learned' ? await runLearned(mr.keyword, effCtx) : await runCustomRule(mr.rule, effCtx);
+                } else {
+                  const pi = parseIntent(part);
+                  if (pi) stepRes = pi.reply ? pi.reply : await handleCommand(pi.cmd, pi.args ?? '', effCtx);
+                }
+              }
+              if (typeof stepRes === 'string') {
+                chainTexts.push(stepRes);
+              } else if (stepRes && typeof stepRes === 'object') {
+                if (stepRes.text) chainTexts.push(stepRes.text);
+                if (stepRes.image || stepRes.document || stepRes.audio || stepRes.video) lastMediaReply = stepRes;
+              }
+              if (store.data.pending) break; // stop chain if a destructive action parked for confirmation
+            }
+            const joined = chainTexts.join('\n\n---\n\n');
+            if (lastMediaReply) return { ...lastMediaReply, text: joined };
+            if (joined) return joined;
+          }
+        }
+      }
+
       // Full-power DeepSeek Harness primary mode (`/dsh auto on` or AI_PROVIDER=dsh).
       if (harness.status().autoRoute) {
         return await handleDsh(working, effCtx);
       }
 
       // Free AI with tools: multi-step tasks on the PC.
-      if (agentLoop.enabled) {
+      // Pure Q&A / chat questions skip the 20-tool-schema overhead and go straight to askAI (2x-4x faster, with chat history).
+      const complexity = estimateComplexity(working);
+      if (agentLoop.enabled && (complexity.needsTools || looksLikeWebTask(working))) {
         const agentReply = await agentLoop.run(working, effCtx);
         if (agentReply != null) return agentReply;
       }

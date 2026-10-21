@@ -205,6 +205,35 @@ const BINARY_ALIASES = {
   telegram: ['telegram-desktop', 'telegram'],
 };
 
+const WEB_APP_SHORTCUTS = {
+  youtube: 'https://www.youtube.com',
+  yt: 'https://www.youtube.com',
+  google: 'https://www.google.com',
+  gmail: 'https://mail.google.com',
+  github: 'https://github.com',
+  chatgpt: 'https://chatgpt.com',
+  'chat gpt': 'https://chatgpt.com',
+  claude: 'https://claude.ai',
+  gemini: 'https://gemini.google.com',
+  arena: 'https://arena.ai/agent',
+  'arena ai': 'https://arena.ai/agent',
+  'whatsapp web': 'https://web.whatsapp.com',
+  netflix: 'https://www.netflix.com',
+  instagram: 'https://www.instagram.com',
+  linkedin: 'https://www.linkedin.com',
+  reddit: 'https://www.reddit.com',
+  wikipedia: 'https://www.wikipedia.org',
+};
+
+function resolveWebShortcut(query) {
+  const low = String(query ?? '').toLowerCase().trim();
+  if (WEB_APP_SHORTCUTS[low]) return WEB_APP_SHORTCUTS[low];
+  if (/^(?:[a-z0-9-]+\.)+(?:com|in|org|net|io|ai|dev|co|edu|gov)(?:\/\S*)?$/i.test(low)) {
+    return `https://${low}`;
+  }
+  return null;
+}
+
 function resolveBinCandidates(query) {
   const low = String(query ?? '').toLowerCase().trim();
   if (BINARY_ALIASES[low]) return BINARY_ALIASES[low];
@@ -316,6 +345,17 @@ export async function launchApp(query) {
       if (!s.graphical) throw new Error(NO_SESSION_HINT);
       await tryLaunch([direct]);
       return { text: `🚀 Launched \`${trimmed}\` on the PC.`, app: trimmed };
+    }
+  }
+  // Known web app / domain fallback ("youtube kholo", "github kholo", "arena.ai kholo")
+  const webUrl = resolveWebShortcut(trimmed);
+  if (webUrl) {
+    const sWeb = sessionInfo(displayEnv());
+    if (!sWeb.graphical) throw new Error(NO_SESSION_HINT);
+    const xdg = findBin('xdg-open');
+    if (xdg) {
+      await tryLaunch([xdg, webUrl]);
+      return { text: `🌐 Opened *${trimmed}* (${webUrl}) in the PC's browser.`, app: trimmed };
     }
   }
   const apps = appList(discoverApps(), 12).map((a) => `• ${a.name}`).join('\n');

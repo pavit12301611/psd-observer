@@ -22,7 +22,7 @@
 import { routerFor } from './router.js';
 import { throwIfStopped, isStoppedError } from './cancel.js';
 import { personaLines } from './jarvis.js';
-import { formatMemoryForPrompt } from './memory.js';
+import { getAgentName, formatMemoryForPrompt } from './memory.js';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
@@ -98,10 +98,11 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
   }
 
   function systemPrompt(plan, ctx = {}) {
+    const agentName = getAgentName(store, config);
     const memoryBlock = formatMemoryForPrompt(store, config);
     const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
     return [
-      'You are the owner\'s personal assistant, running 100% free on their own Fedora computer (Observer WhatsApp Agent).',
+      `You are ${agentName}, the owner's personal assistant, running 100% free on their own Fedora computer (Observer WhatsApp Agent).`,
       ...personaLines(config, { voice: Boolean(ctx.voice), store }),
       ctx.voice ? `The owner is speaking to you on a live VOICE CALL right now and is listening for your spoken reply.${config.jarvisEnglishOnly === false ? '' : ' ALWAYS reply in English only, even when the owner speaks Hindi or Hinglish (you understand him perfectly; your spoken voice is English).'} Be conversational: greetings, small talk and spoken questions are all welcome — answer questions in 1-3 short spoken sentences, and put any long detail (lists, links, code) in text instead of reading it aloud. If he asks you to call him later with an update, use schedule_jarvis_call. Prefer speak_text only when explicitly asked to read/announce something; otherwise your final text is spoken automatically.` : '',
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
@@ -281,15 +282,26 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
         else messages = [...messages, result.assistant];
 
         let confirmation = null;
-        for (const call of result.toolCalls) {
+        // Pre-check duplicates in order, then execute all runnable tool calls in parallel for speed
+        const batch = result.toolCalls.map((call) => {
           throwIfStopped(opts.signal, 'Agent');
           const signature = `${call.name}:${JSON.stringify(call.args ?? {})}`;
           const times = (callCounts.get(signature) ?? 0) + 1;
           callCounts.set(signature, times);
+          return { call, skip: times > 2 };
+        });
 
-          if (times > 2) {
-            // Small models love to repeat the same call. Feed the previous
-            // outcome back and move on instead of burning every step.
+        const outcomes = await Promise.all(
+          batch.map(async ({ call, skip }) => {
+            if (skip) return { call, skip: true, outcome: null };
+            throwIfStopped(opts.signal, 'Agent');
+            const outcome = await actions.execute(call.name, call.args, { ...ctx, source: 'ai' });
+            return { call, skip: false, outcome };
+          }),
+        );
+
+        for (const { call, skip, outcome } of outcomes) {
+          if (skip) {
             const note = 'You already called this exact tool with these arguments. Its result is above — use it, do not repeat.';
             if (adapter.usesContents) contents = adapter.appendToolResult(contents, call, note);
             else messages = adapter.appendTool(messages, call, note);
@@ -297,7 +309,6 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
           }
 
           toolCalls += 1;
-          const outcome = await actions.execute(call.name, call.args, { ...ctx, source: 'ai' });
           const textOut = clip(outcome.text);
           if (adapter.usesContents) contents = adapter.appendToolResult(contents, call, textOut);
           else messages = adapter.appendTool(messages, call, textOut);

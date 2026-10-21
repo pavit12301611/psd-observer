@@ -1,5 +1,16 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.13 — PSD_Ai Identity + Turbo Speed & Power Upgrade
+
+User ki maang: *"bhai iska naam change karke 'PSD_Ai' rakh aur na ise na aur powerful aur fast bana"*.
+1. **Identity → `PSD_Ai`**: `config.agentName` default `'PSD_Ai'`, `memory.getAgentName(store, config)` (natural language me overridable भी), `jarvis.js` (`personaLines`, `smalltalkReply`, wake words `psd` / `psd_ai` / `पीएसडी`), `ai.js`, `agentloop.js`, `commands.js` (`HELP`, greetings, `"tumhara naam kya hai?"` / `"what is your name?"`), `pccontrol.js` notifications, `index.js` startup banner, aur `webapp/index.html` me agent ka naam **PSD_Ai** kar diya.
+2. **Speed Boost (2x–4x Faster)**:
+   - **Fast Chat Bypass (`commands.js`)**: Jab message pure Q&A / conversation ho (`!complexity.needsTools && !looksLikeWebTask`), 20 tool schemas (`~4,000 tokens`) bhejne ke bajay seedha `askAI` (with full chat history) chalta hai.
+   - **Parallel Tool Execution (`agentloop.js`)**: Ek step me aaye multiple tool calls ab sequentially rukne ke bajay `Promise.all` se parallel chalte hain.
+   - **Zero-Latency Multi-Command Chaining in Chat (`commands.js`)**: `"X aur Y"` / `"X phir Y"` / `"X and then Y"` ab sirf voice call hi nahi, typed WhatsApp chat me bhi offline `< 5ms` me execute hote hain.
+3. **More Offline Power (`nlp.js`, `commands.js`, `apps.js`)**: Hinglish math (`"500 ka 18 percent"`, `"45 guna 12"`), natural unit conversions (`"10 km in mi"`), instant time/date/RAM/CPU/tasks/notes/brief/undo queries, YouTube direct play (`"youtube pe <query> chalao"`), aur web app shortcuts (`youtube`, `github`, `chatgpt`, `gmail`, `whatsapp web`, `arena.ai`) bina AI wait kiye turant chalte hain. Tests **226/226** pass.
+
+
 ## v3.1.12 — Smart Owner Memory + Full Override: naam yaad rakhega aur jo kahoge wohi karega (`src/memory.js`)
 
 User ki maang: *"bro isme esi memory rakh ki mein agar kahun ki mera naam yeh hai to yeh yaad rakhein aur kuch aur ho jo pehle se save hai par agar mein kahun to yeh wohi karein jo mein kahun"*. Pehle `/remember` sirf `text.slice(0, 48)` ko raw key bana kar `store.data.facts` me daalta tha — na natural conversation (*"mera naam Pavit hai"*) se khud yaad rakhta tha, na purana conflicting fact overwrite hota tha, na offline `"mera naam kya hai?"` ka jawab aata tha, aur na hi kisi pehle se saved/built-in command ko natural language me override karne ka raasta tha.

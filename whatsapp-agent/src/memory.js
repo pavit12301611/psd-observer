@@ -98,6 +98,7 @@ const NON_NAME_STATES = new Set([
 ]);
 
 const SLOT_SYNONYMS = [
+  { key: 'agent_name', label: 'Agent name', patterns: [/^(?:(?:tumhara|tera|aapka|your|agent(?:'s)?|bot(?:'s)?|assistant(?:'s)?)\s+)(?:asli\s+|naya\s+|new\s+)?(?:naam|nam|name|नाम)$/i, /^(?:agent\s+name|bot\s+name|assistant\s+name)$/i] },
   { key: 'name', label: 'Name', patterns: [/^(?:(?:mera|my|apna|owner(?:'s)?)\s+)?(?:asli\s+|pura\s+|real\s+|full\s+)?(?:naam|nam|name|नाम)$/i] },
   { key: 'address', label: 'Preferred address', patterns: [/^(?:(?:preferred\s+)?address|title|salutation|call\s+me|bulao|bolna)$/i] },
   { key: 'city', label: 'City', patterns: [/^(?:(?:mera|my|current|home)\s+)?(?:shehar|shahar|city|town|location|hometown|place|शहर)$/i] },
@@ -240,6 +241,15 @@ export function extractFact(rawInput, existingFacts = {}, { explicit = false } =
     const val = cleanValue(m[1]);
     if (looksLikeValidName(val)) {
       return { key: 'name', label: 'Name', value: val, display: `My name is ${val}`, isOverride, explicit: hasExplicitPrefix };
+    }
+  }
+
+  // ── A2. Agent's own name ("tumhara naam PSD_Ai hai", "apna naam PSD_Ai rakho", "your name is PSD_Ai") ──
+  if ((m = normalized.match(/^(?:(?:tumhara|tera|aapka|apna|iska|agent\s+ka|bot\s+ka)\s+(?:naam|nam|name)|your\s+name)\s+(?:change\s+karke|badal\s+ke|hata\s+ke|set\s+karke|ab\s+(?:se\s+)?|hai\s+|is\s+)?(.+?)(?:\s+(?:rakh(?:o|na|lo|do)?|kar(?:\s*do|\s*lo)?|save\s+kar(?:\s*do|\s*lo)?|hai|he|h))?[.!।]*$/i))
+      || (m = normalized.match(/^(?:change|set|update|rename)\s+(?:your|the\s+agent'?s|the\s+bot'?s)\s+name\s+(?:to|as)\s+(.+?)[.!।]*$/i))) {
+    const val = cleanValue(m[1]);
+    if (val && val.length >= 2 && val.length <= 40 && !QUESTION_RE.test(val)) {
+      return { key: 'agent_name', label: 'Agent name', value: val, display: `Agent's name is ${val}`, isOverride: true, explicit: hasExplicitPrefix };
     }
   }
 
@@ -424,6 +434,10 @@ export function rememberFact(store, rawText, { explicit = false } = {}) {
     reply = updated
       ? `🧠 Remembered — aapka naam update kar diya: ab *${parsed.value}* yaad rakhunga (pehle *${previousValue}* save tha). (/memory to see all)`
       : `🧠 Remembered — aapka naam *${parsed.value}* yaad rakh liya. (/memory to see all)`;
+  } else if (parsed.key === 'agent_name') {
+    reply = updated
+      ? `🧠 Done! Mera naam ab *${parsed.value}* hai (pehle *${previousValue}* save tha).`
+      : `🧠 Done! Mera naam ab *${parsed.value}* hai.`;
   } else if (parsed.key === 'address') {
     reply = updated
       ? `🧠 Remembered — ab se aapko *${parsed.value}* kahunga (pehle *${previousValue}* save tha). (/memory to see all)`
@@ -475,6 +489,12 @@ export function getFactValue(store, slotOrQuery) {
 
 export function getOwnerName(store) {
   return getFactValue(store, 'name');
+}
+
+export function getAgentName(store, config = {}) {
+  const custom = getFactValue(store, 'agent_name');
+  if (custom) return custom;
+  return String(config?.agentName || 'PSD_Ai').trim() || 'PSD_Ai';
 }
 
 export function getOwnerAddress(store, config = {}) {
@@ -799,11 +819,14 @@ export function formatMemoryList(store) {
 }
 
 export function formatMemoryForPrompt(store, config = {}) {
+  const agentName = getAgentName(store, config);
   const name = getOwnerName(store);
   const address = getOwnerAddress(store, config);
   const facts = Object.values(store?.data?.facts ?? {});
   const rules = store?.data?.rules ?? [];
-  const lines = [];
+  const lines = [
+    `Your name (assistant identity): ${agentName} (if the owner asks "tumhara naam kya hai" / "what is your name" / "who are you" / "tum kaun ho", always answer "${agentName}").`,
+  ];
   if (name) lines.push(`Owner's name: ${name} (if they ask "mera naam kya hai" / "what is my name" / "who am I", answer "${name}").`);
   if (address) lines.push(`Preferred way to address the owner: "${address}".`);
   if (facts.length) {
@@ -882,6 +905,9 @@ export function handleMemoryIntent(store, config, rawText, opts = {}) {
           ? `Very well, ${factRes.value}. I have updated your name from ${factRes.previousValue} to ${factRes.value}.`
           : `Pleasure to meet you, ${factRes.value}. I shall remember your name.`;
       }
+      if (factRes.key === 'agent_name') {
+        return `Very well, ${address}. My name is now ${factRes.value}.`;
+      }
       if (factRes.key === 'address') {
         return `Very well, ${factRes.value}. I shall address you as ${factRes.value} from now on.`;
       }
@@ -890,7 +916,17 @@ export function handleMemoryIntent(store, config, rawText, opts = {}) {
     return factRes.reply;
   }
 
-  // 4. Memory recall queries ("mera naam kya hai?", "what is my name?", "tumhe kya yaad hai?")
+  // 4. Memory recall queries ("mera naam kya hai?", "tumhara naam kya hai?", "tumhe kya yaad hai?")
+  // 4a-0. Asking for the agent's own name / identity ("tumhara naam kya hai?", "tum kaun ho?", "what is your name?")
+  if (/^(?:(?:tumhara|tera|aapka|your)\s+(?:asli\s+|pura\s+)?(?:naam|nam|name)\s+(?:kya\s*(?:hai|he|tha)?|batao|bata|bolo)|(?:tumhara|tera|aapka|your)\s+(?:naam|nam|name)\s*\?|apna\s+(?:naam|nam|name)\s+bata(?:o)?|what(?:'s|\s+is)\s+your\s+name|who\s+are\s+you|tum\s+kaun\s+ho|tu\s+kaun\s+hai|aap\s+kaun\s+ho|kaun\s+bol\s+raha\s+hai)[?!.।]*$/i.test(norm)) {
+    const agentName = getAgentName(store, config);
+    const ownerName = getOwnerName(store);
+    if (englishVoice) {
+      return `I am ${agentName} — your personal AI assistant, running right here on your own computer, ${address}.`;
+    }
+    return `🤖 Mera naam *${agentName}* hai${ownerName ? `, *${ownerName}*` : ''}! Main aapka fast & powerful personal AI + full PC control assistant hoon.`;
+  }
+
   // 4a. Asking for owner's name
   if (/^(?:(?:mera|my)\s+(?:asli\s+|pura\s+)?(?:naam|nam|name)\s+(?:kya\s*(?:hai|tha|save\s+hai|he)?|batao|bata|bolo)|(?:mera|my)\s+(?:naam|nam|name)\s*\?|what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|main\s+kaun\s+(?:hoon|hu|hun)|mai\s+kaun\s+(?:hoon|hu|hun)|(?:kya\s+)?tumhe\s+mera\s+naam\s+(?:pata|yaad)\s+hai|do\s+you\s+(?:know|remember)\s+my\s+name)[?!.।]*$/i.test(norm)) {
     const name = getOwnerName(store);

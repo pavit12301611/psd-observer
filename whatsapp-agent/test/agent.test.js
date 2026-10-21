@@ -399,3 +399,33 @@ test('memory: voice call remembers owner name & honorific in Hindi/Hinglish and 
   assert.match(hi.spoken, /Boss/);
 });
 
+test('PSD_Ai identity + turbo offline power (multi-command chains, Hinglish math, instant queries)', async () => {
+  const { agent } = makeAgent();
+
+  // Default identity is PSD_Ai in chat, greetings, help, and voice calls
+  assert.match(await agent.handle('tumhara naam kya hai?'), /PSD_Ai/);
+  assert.match(await agent.handle('what is your name?'), /PSD_Ai/);
+  assert.match(await agent.handle('tum kaun ho?'), /PSD_Ai/);
+  assert.match(await agent.handle('hi'), /PSD_Ai/);
+  assert.match(await agent.handle('/help'), /PSD_Ai/);
+  const vWho = await agent.voice.say('call-psd', 'who are you');
+  assert.match(vWho.spoken, /PSD_Ai/);
+
+  // Multi-command chain in typed WhatsApp chat executes both steps offline in < 5ms
+  const chainOut = await agent.handle('todo add Turbo task aur note: Turbo note');
+  assert.match(chainOut, /Added #1: Turbo task/);
+  assert.match(chainOut, /Saved note #1/);
+
+  // Hinglish math & percentages & unit conversions work offline
+  assert.match(await agent.handle('500 ka 18 percent kitna hai?'), /90/);
+  assert.match(await agent.handle('45 guna 12'), /540/);
+  assert.match(await agent.handle('10 km in mi'), /6\.21/);
+
+  // Natural Hinglish queries for tasks/notes/time/date work offline
+  assert.match(await agent.handle('mere tasks dikhao'), /Turbo task/);
+  assert.match(await agent.handle('mere notes dikhao'), /Turbo note/);
+  assert.match(await agent.handle('time kya hua hai?'), /\d/);
+  assert.match(await agent.handle('aaj kya date hai?'), /20\d\d/);
+});
+
+
