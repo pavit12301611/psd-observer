@@ -15,6 +15,13 @@ const WASM_ENGINE = [
   'export class WasmEngine {',
   '    #instance = null;',
   '    #makeStringList = (arr) => arr;',
+  '    #applyDefaultAbProps = () => {',
+  '        const boolProps = {',
+  '            enable_pending_call: false,',
+  '            enable_silent_offer: false,',
+  '        };',
+  '        return boolProps;',
+  '    };',
   '    getCallInfo = () => {',
   '        if (!this.#instance)',
   '            return null;',
@@ -209,7 +216,15 @@ test('engine patch: all parts apply once on a fresh engine', async () => {
   assert.match(idx, /_gateLogged/, 'v5: gate diagnostics logged');
   assert.match(idx, /lobby-ack-reset v6 \(join\)/, 'v6: join forgets the claim ack');
   assert.match(idx, /lobby-ack-reset v6 \(send\)/, 'v6: every lobby send forgets earlier acks');
-  assert.equal((idx.match(/_lobbyAckCallId = "";+?/g) || []).length, 2, 'v6: exactly two ack resets');
+  assert.equal((idx.match(/_lobbyAckCallId = "";/g) || []).length, 3, 'v6+v7: ack resets at join, send, and on nack');
+  assert.match(wasm, /enable_fast_call_setup_callee_v2: true/, 'v7: fast-callee AB prop on');
+  assert.match(idx, /_peerDevicesPromise = \(async/, 'v7: device discovery starts at offer');
+  assert.match(idx, /discoverPeerDevices\(lid\)/, 'v7: uses usync device discovery');
+  assert.match(idx, /_peerDevices = await Promise\.race/, 'v7: join awaits devices (capped)');
+  assert.match(idx, /deviceJidsCsv,/, 'v7: join passes discovered devices');
+  assert.match(idx, /nack-aware-gate v7/, 'v7: lobby nack tracked');
+  assert.match(idx, /const lobbyNacked =/, 'v7: gate consults the nack flag');
+  assert.match(idx, /getCallInfo=\$\{JSON/, 'v7: gate logs a getCallInfo glimpse');
   assert.match(sig, /isCallRoomPeer/);
   assert.match(sig, /lobby-ack-gate v4 \(stanza\)/, 'v4: lobby ack stanza sniffed');
   assert.match(sig, /_lobbyAckCallId = String\(callIdForRouting/, 'v4: stanza feeds the gate');

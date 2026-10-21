@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.9 — Akela blocker bacha: join-lobby 404 NACK (patch v7: asli device JIDs + fast-callee)
+
+3.1.8 (patch v6) ki call `0027DA7E…` me gate pehli baar 100% sahi chala: `lobbyAck= pending=true` → "waiting for LobbyAck" → LobbyAck aaya — aur wo **404 NACK** tha (`handle_lobby_ack: error code: 404`, event 94, `lobby_exit_nack_code: 404`). `joinable_accept_before_lobby_ack` is baar fieldstats se ghayab — timing theek; ab server join ko hi mana kar raha hai. (Ek chhoti galti bhi pakdi: onLog sniff nack wali "LobbyAck from" line par bhi ack-flag set kar deta tha — gate nack par khul gaya.)
+
+Offer ki asal shape (user ke journal se): attrs `[call-creator, call-id, device_class, caller_pn, joinable, caller_country_code]`, children `[audio, audio, capability, enc, encopt, net, rte, uploadfieldstat, userrate, voip_settings, relay]` — `offline` hai hi nahi (isOffline shak khatam), `platform` bhi nahi (isliye WASM "platform NaN / peer_platform 0" bolta hai). Peer har jagah bare `12223644725256@lid`, jabki phone ke stanza `…:0@lid` device se aate hain.
+
+Patch **v7**: (1) offer aate hi `discoverPeerDevices` (usync) se caller ke device JIDs seekho, join me wahi bhejo (3s race cap + bare fallback) — v2 ka andaza wala `[bareLid]` hata; (2) `enable_fast_call_setup_callee_v2: true` AB prop (binary me maujood, lib kabhi set nahi karta; `enable_pending_call` bhi binary me hai — anchored-grep wali meri pehli khoj galat thi); (3) gate nack-aware (event 94 par ack-flag saaf + nacked yaad rakho, last-resort accept turant khule aankhon se); (4) gate diagnostic me `getCallInfo()` ki jhalak. Saath me `WA_VOIP_AB_PROPS` (.env) → engine-load se pehle `CALL_WASM_AB_PROPS_JSON` forward, taaki aage ke prop A/B bina release ho.
+
+
 ## v3.1.8 — Do lobby, do ack: gate claim-ack par khul gaya tha, join-ack chahiye tha (patch v6)
 
 3.1.7 (`00A789A6…`) ka 100-line journal poora sequence dikha gaya: offer record (transaction_id -1) → claim ka lobby → **LobbyAck #1** ("updating call log from LobbyAck message" + event 93) → hamaara join → `Handle MESSAGE Offer` + `None -> Rejoining` → **join ka lobby #2** → gate line: `lobbySent=00A7… lobbyAck=00A7… pending=false` → accept → phone terminate + **LobbyAck #2 (post-mortem)** → Accept 404.

@@ -1,4 +1,14 @@
 {
+  "3.1.9": {
+    "title": "Join me ab asli device JIDs + fast-callee — lobby 404 par seedha vaar 🎯",
+    "bullets": [
+      "3.1.8 me gate pehli baar bilkul sahi chala (`pending=true` → LobbyAck ka intezaar) — aur phir journal ne akela asal blocker dikha diya: **join wala lobby server se 404 NACK** ho raha hai. Timing wala saara jhanjhat khatam; ab ladai sirf is 404 se hai",
+      "Engine patch **v7**: join ab usync se caller ke **asli device JIDs** (`…:0@lid`) seekh kar bhejta hai — pehle andaze se bare user-JID ja raha tha, jise server 'device not found' karke 404 karta hai. Library ke paas ye discovery tha hi (outgoing calls use karte hain), inbound join me kabhi wired nahi tha",
+      "Saath me WASM ki `enable_fast_call_setup_callee_v2` setting on — asli clients isi callee fast-setup path par chalte hain, library ne kabhi on hi nahi ki thi. (Kabhi band karna ho to `.env` me naya `WA_VOIP_AB_PROPS` hai — bina release ke engine experiments ab wahi se honge)",
+      "Gate ab NACK ko bhi samajhta hai (pehle nack wali line par bhi khul jata tha), aur diary me `getCallInfo` ki jhalak bhi dikhegi. Doctor ab v7 report karta hai",
+      "`bash observer.sh update` → doctor me `engine patch : v7 applied` → ek test call. Journal me `peer devices for …: […]` aur `joining lobby call … devices=[…]` dikhna chahiye — aur is baar `handle_lobby_ack: error code: 404` nahi"
+    ]
+  },
   "3.1.8": {
     "title": "Do lobby, do ack — gate ab JOIN wale ack ka intezaar karta hai 🚪",
     "bullets": [

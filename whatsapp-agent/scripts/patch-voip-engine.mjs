@@ -44,6 +44,17 @@
  *     accept race the join-lobby's ack. v6 forgets any earlier ack whenever
  *     a lobby goes out (reset at the join and at the byte sniff), so the
  *     gate always waits for the LATEST lobby's ack. (v6)
+ *  8. With the gate finally honest, the 3.1.8 journal isolated the true
+ *     blocker: the JOIN's lobby is **404-nacked by the server**
+ *     (`handle_lobby_ack: error code: 404`, event 94). Our v2 join guessed
+ *     `deviceJidsCsv: [bare user JID]` — but the wire wants the caller's
+ *     real DEVICE JIDs (`1234:0@lid`), which the library already knows how
+ *     to discover for outgoing calls (`discoverPeerDevices`, usync). v7
+ *     discovers them at offer time and joins with them; enables the WASM's
+ *     `enable_fast_call_setup_callee_v2` AB prop (the callee path real
+ *     clients run; the lib never set it); makes the gate nack-aware (a
+ *     LobbyAck *nack* also produces the "LobbyAck from" log line that
+ *     fooled the gate in 3.1.8); and logs a glimpse of `getCallInfo()`. (v7)
  *
  * Every part is individually idempotent (needle check), so it is safe on
  * fresh installs, on older patched installs (only missing parts land; the
@@ -66,6 +77,7 @@ const M3 = 'observer-patch: claim-offer-first v3';
 const M4 = 'observer-patch: lobby-ack-gate v4';
 const M5 = 'observer-patch: lobby-sent-flags v5';
 const M6 = 'observer-patch: lobby-ack-reset v6';
+const M7 = 'observer-patch: real-join v7';
 
 // Remove the superseded v1/v2 after-feed claim block from index.mjs, whatever
 // comment wording the patcher version that wrote it used. The block sits
@@ -105,6 +117,18 @@ const PARTS = {
     };
 `;
         return src.replace(anchor, insertion + anchor);
+      },
+    },
+    {
+      // v7: the callee fast-setup path real clients run with; never enabled
+      // by the lib. Overridable at runtime via CALL_WASM_AB_PROPS_JSON.
+      needle: 'enable_fast_call_setup_callee_v2: true',
+      apply: (src) => {
+        const anchor = '            enable_pending_call: false,';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, anchor + `
+            /* ${M7} (fast-callee) — callee fast call setup, as on real clients. */
+            enable_fast_call_setup_callee_v2: true,`);
       },
     },
   ],
@@ -389,6 +413,140 @@ const PARTS = {
                                ack belonged to a previous lobby. */
                             this.#engine._lobbyAckCallId = "";
                         }`);
+      },
+    },
+    {
+      // v7: start learning the caller's device JIDs the moment the offer is
+      // surfaced, so the lobby join (seconds later) can name real devices.
+      needle: '_peerDevicesPromise = (async',
+      apply: (src) => {
+        const anchor = '        call._isVideoOffer = isVideo;';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, anchor + `
+        /* ${M7} (join-devices) — learn the caller's real device JIDs now so
+           the lobby join can name them. v2 guessed the bare user JID, which
+           the server lobby-nacks (404): it expects devices (1234:0@lid).
+           Mirrors the outgoing path's discoverPeerDevices usage. */
+        call._peerDevicesPromise = (async () => {
+            try {
+                const lid = peerJid.endsWith("@lid") ? peerJid : ((await this.#signaling.resolveLid(peerJid).catch(() => null)) || peerJid);
+                try {
+                    await this.#sock?.presenceSubscribe?.(lid);
+                }
+                catch { }
+                const devices = await this.#signaling.discoverPeerDevices(lid);
+                console.log(\`[baileys-caller] peer devices for \${lid}: \${JSON.stringify(devices)}\`);
+                return Array.isArray(devices) ? devices : [];
+            }
+            catch {
+                return [];
+            }
+        })();`);
+      },
+    },
+    {
+      // v7: join with the discovered device JIDs (async; 3s cap, bare-JID
+      // fallback keeps the old behaviour if discovery comes up empty).
+      needle: '_peerDevices = await',
+      apply: (src) => {
+        const anchor = `                try {
+                    console.log(\`[baileys-caller] joining lobby call \${call.callId} (${M2})\`);
+                    this.#engine.joinOngoingCall({
+                        callId: call.callId,
+                        callCreatorJid: call.peerJid,
+                        initialPeerJid: call.peerJid,
+                        pnUserJids: call._callerPn ? [call._callerPn] : [],
+                        lidUserJids: [call.peerJid],
+                        deviceJidsCsv: [call.peerJid],
+                        hasVideo: !!call._isVideoOffer,
+                        groupJid: "",
+                        callCreatorIsNotContact: false,
+                        joinAndAccept: false,
+                    });
+                }
+                catch (err) {
+                    console.log(\`[baileys-caller] joinOngoingCall failed: \${err?.message || err}\`);
+                }`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                void (async () => {
+                    /* ${M7} (join-devices) — join with the caller's REAL
+                       device JIDs (usync), like resolveGroupParticipant and
+                       the outgoing path do. */
+                    let _peerDevices = [];
+                    try {
+                        _peerDevices = await Promise.race([
+                            call._peerDevicesPromise ?? Promise.resolve([]),
+                            new Promise((r) => setTimeout(() => r([]), 3000)),
+                        ]);
+                    }
+                    catch { }
+                    const deviceJidsCsv = Array.isArray(_peerDevices) && _peerDevices.length ? _peerDevices : [call.peerJid];
+                    try {
+                        console.log(\`[baileys-caller] joining lobby call \${call.callId} (${M2}) devices=\${JSON.stringify(deviceJidsCsv)}\`);
+                        this.#engine.joinOngoingCall({
+                            callId: call.callId,
+                            callCreatorJid: call.peerJid,
+                            initialPeerJid: call.peerJid,
+                            pnUserJids: call._callerPn ? [call._callerPn] : [],
+                            lidUserJids: [call.peerJid],
+                            deviceJidsCsv,
+                            hasVideo: !!call._isVideoOffer,
+                            groupJid: "",
+                            callCreatorIsNotContact: false,
+                            joinAndAccept: false,
+                        });
+                    }
+                    catch (err) {
+                        console.log(\`[baileys-caller] joinOngoingCall failed: \${err?.message || err}\`);
+                    }
+                })();`);
+      },
+    },
+    {
+      // v7: a lobby NACK also produces the "LobbyAck from" log line (3.1.8:
+      // the gate accepted on a 404). Track nacks explicitly via event 94.
+      needle: 'nack-aware-gate v7',
+      apply: (src) => {
+        const anchor = '        else if (eventType === WASM_EVENT_CALL_REJECTED) {';
+        if (!src.includes(anchor)) return null;
+        const insertion = `        else if (eventType === 94) {
+            /* ${M7} (nack-aware-gate v7) — LobbyNacked. The v4 log sniff set
+               the ack flag on the nack's own "LobbyAck from" line; undo that
+               here and remember the nack for the accept decision. */
+            try {
+                if (this.#engine) {
+                    this.#engine._lobbyAckCallId = "";
+                    this.#engine._lobbyNackedCallId = String(this.#activeCall?.callId ?? "");
+                }
+                console.log(\`[baileys-caller] lobby NACKED for \${this.#activeCall?.callId ?? "?"} (gate informed)\`);
+            }
+            catch { }
+        }
+`;
+        return src.replace(anchor, insertion + anchor);
+      },
+    },
+    {
+      // v7: if the lobby was nacked there is nothing to wait for — fall
+      // through to the last-resort accept immediately (with a clear log).
+      needle: 'const lobbyNacked',
+      apply: (src) => {
+        const anchor = '                        if (lobbyPending && Date.now() <= deadline) {';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                        const lobbyNacked = String(this.#engine?._lobbyNackedCallId ?? "").toUpperCase() === cid;
+                        if (lobbyPending && lobbyNacked)
+                            console.log(\`[baileys-caller] lobby was NACKED for \${call.callId}; proceeding to accept anyway (nothing to lose)\`);
+                        if (lobbyPending && !lobbyNacked && Date.now() <= deadline) {`);
+      },
+    },
+    {
+      // v7: show what getCallInfo() actually returns (never seen in any
+      // journal yet — its shape decides whether the gate can key off it).
+      needle: 'getCallInfo=${JSON',
+      apply: (src) => {
+        const anchor = '                            console.log(`[baileys-caller] accept gate for ${call.callId}: lobbySent=${this.#engine?._lobbySentCallId ?? "-"} lobbyAck=${this.#engine?._lobbyAckCallId ?? "-"} pending=${lobbyPending}`);';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, '                            console.log(`[baileys-caller] accept gate for ${call.callId}: lobbySent=${this.#engine?._lobbySentCallId ?? "-"} lobbyAck=${this.#engine?._lobbyAckCallId ?? "-"} pending=${lobbyPending} getCallInfo=${JSON.stringify(String(info ?? "")).slice(0, 220)}`);');
       },
     },
   ],

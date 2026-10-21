@@ -300,6 +300,9 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // the engine) — THIS is where a silently-dropped call explains itself.
     waVoipDebug: bool(e.WA_VOIP_DEBUG, true),
     waVoipLogLevel: String(e.WA_VOIP_LOG_LEVEL ?? '').trim(), // '2' = unfiltered WASM firehose (forensics)
+    // Raw JSON of WASM AB-prop overrides, forwarded to the engine before it
+    // loads (CALL_WASM_AB_PROPS_JSON). E.g. WA_VOIP_AB_PROPS={"enable_fast_call_setup_callee_v2":false}
+    waVoipAbProps: String(e.WA_VOIP_AB_PROPS ?? '').trim(),
     waCallFallback: (e.WA_CALL_FALLBACK || 'voice-session').toLowerCase(), // voice-session|ignore|reject
     waCallFallbackDelayMs: int(e.WA_CALL_FALLBACK_DELAY_MS, 12_000),
     waCallUnknown: (e.WA_CALL_UNKNOWN || 'ignore').toLowerCase(), // ignore|reject

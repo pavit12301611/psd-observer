@@ -195,6 +195,15 @@ function engineCandidates(config = {}) {
 
 /** Load the baileys-caller engine from node_modules or the observer-voip dir. */
 export async function loadVoipEngine(config = {}) {
+  // The engine reads CALL_WASM_AB_PROPS_JSON at module load, so forward the
+  // owner's WA_VOIP_AB_PROPS override BEFORE importing it. Lets us A/B WASM
+  // AB props from .env without a release (engine-patch defaults still apply
+  // first; this only overrides).
+  try {
+    if (config.waVoipAbProps && !process.env.CALL_WASM_AB_PROPS_JSON) {
+      process.env.CALL_WASM_AB_PROPS_JSON = config.waVoipAbProps;
+    }
+  } catch { /* env forwarding is best-effort */ }
   try {
     const mod = await import('baileys-caller');
     if (mod?.VoipClient) return { mod, via: 'node_modules' };
