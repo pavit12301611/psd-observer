@@ -1,4 +1,14 @@
 {
+  "3.1.11": {
+    "title": "Speed update — sunna ab Groq API se: tez bhi, sahi bhi 🚀",
+    "bullets": [
+      "Asli chor pakda gaya: transcribe hamesha pehle chhota wala local whisper (base) chalata tha — dheema (2–6s) aur Hinglish aksar galat sunta tha; Groq ko mauka hi nahi milta tha kyunki local 'kuchh na kuchh' text de deta tha. Ab **GROQ_API_KEY hai to Whisper large-v3 (API) pehle** chalta hai — ~0.5s me transcript aur Hinglish me bohot zyada sahi. Local whisper ab sirf automatic offline backup hai.",
+      "Tumhari shart waisi ki waisi: sirf **sunna** API se hota hai — processing, commands aur JARVIS ki awaaz sab tumhare PC par hi rehte hain. Audio bilkul bahar na bhejna ho to .env me `STT_ENGINE=local` kar do.",
+      "Turn aur tez: bolna band karne ke baad ka intezaar 900ms → 600ms. Aur koi turn lamba jaye (bada command chal raha ho) to JARVIS chuppi ki jagah beech me 'One moment, Sir.' bol deta hai — line mari hui nahi lagti.",
+      "Ek safety: puri chuppi par Whisper kabhi-kabhi apna hint-text hi 'sun' leta hai. Aisi ghost baat ab 'kuchh nahi suna' maani jayegi — bina bole koi command nahi chalega.",
+      "Yehi speed **voice-notes aur phone-app call** dono pe lagegi — pipeline ek hi hai. Native call-pickup abhi park hai (tum /callme se operate kar rahe ho, jo proper chal raha hai); jab bologe, aakhri ':0' device wala fix ek hi test call me try kar lenge."
+    ]
+  },
   "3.1.10": {
     "title": "Ek comma ki galti thi — devices CSV string me jaane the 📋",
     "bullets": [

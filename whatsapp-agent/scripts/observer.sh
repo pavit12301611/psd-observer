@@ -1945,12 +1945,14 @@ DONE
       if [ -x "$VOICE_DIR/piper/piper" ]; then ok "piper (bolna)   : installed"; else warn "piper (bolna)   : MISSING — bash observer.sh voice setup"; fi
       local mfile="$VOICE_DIR/whisper.cpp/models/ggml-base.bin" msize=0
       [ -f "$mfile" ] && msize=$(stat -c %s "$mfile" 2>/dev/null || echo 0)
-      if [ -x "$VOICE_DIR/whisper.cpp/build/bin/whisper-cli" ] && [ "$msize" -ge 140000000 ]; then
-        ok "whisper (sunna) : ready (model $msize bytes)"
+      if grep -qE '^GROQ_API_KEY=.+' "$dir/.env" 2>/dev/null; then
+        ok "sunna (STT)     : Groq API whisper-large-v3 (tez + Hinglish me sahi) · local whisper backup"
+      elif [ -x "$VOICE_DIR/whisper.cpp/build/bin/whisper-cli" ] && [ "$msize" -ge 140000000 ]; then
+        warn "sunna (STT)     : sirf local whisper (model $msize bytes) — dheema + aksar galat sunta hai; .env me GROQ_API_KEY (free) daal do, 10x tez ho jayega"
       elif [ -x "$VOICE_DIR/whisper.cpp/build/bin/whisper-cli" ]; then
         warn "whisper model AADHA hai ($msize bytes, chahiye ~148M) — bash observer.sh voice whisper (khud theek kar dega)"
       else
-        warn "whisper (sunna) : MISSING — bash observer.sh voice whisper (ya GROQ_API_KEY)"
+        warn "sunna (STT)     : MISSING — .env me GROQ_API_KEY (free, sabse tez) ya bash observer.sh voice whisper"
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi

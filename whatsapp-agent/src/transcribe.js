@@ -1,10 +1,13 @@
 // transcribe.js — speech → text, for free. Feeds BOTH WhatsApp voice notes
 // and the live call (src/wavoip.js / phone-app call upload).
 //
-// Priority (privacy first, matching the rest of the agent):
-//   1. Local whisper.cpp (`whisper-cli`) or Python `whisper` — offline, ₹0.
-//      Setup in one command:  bash scripts/observer.sh voice whisper
-//   2. Groq free-tier Whisper (same free key as the chat brain).
+// Priority (SPEED first since 3.1.11 — local-first made calls feel slow
+// AND the small local model kept mishearing the owner's Hinglish):
+//   1. Groq Whisper API (large-v3) when GROQ_API_KEY exists — sub-second,
+//      far more accurate on mixed Hindi+English. Only the audio clip goes
+//      out; every bit of processing/execution + TTS stays on this machine.
+//   2. Local whisper.cpp / python whisper — automatic offline backup.
+// STT_ENGINE=local pins it to offline-only (audio never leaves the PC).
 //
 // BUG FIXED in 3.0: the old code handed WhatsApp's .ogg/opus straight to
 // whisper.cpp, which only accepts 16 kHz mono WAV — local transcription
@@ -95,47 +98,71 @@ async function localWhisper(config, buffer, mimetype) {
   }
 }
 
-async function groqWhisper(config, buffer, mimetype) {
+// Vocabulary primer: biases Whisper toward the owner's actual command
+// words (and toward HEARING Hinglish instead of forcing English/Hindi).
+const STT_PRIMER = 'Ye Hinglish/English voice command hai ek PC assistant ke liye: JARVIS, chrome kholo, band karo, screenshot bhej do, volume kam karo badhao, wifi bluetooth off on, gaana bajao, file dhundho, mausam batao.';
+
+async function groqWhisper(config, buffer, mimetype, timeoutMs = 20_000) {
   if (!config.groqApiKey) return null;
   if (buffer.length > 25 * 1024 * 1024) throw new Error('audio is over Groq\'s 25 MB free-tier limit');
   const ext = extFor(mimetype);
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mimetype || 'audio/ogg' }), `voice.${ext}`);
-  form.append('model', config.whisperModelGroq || 'whisper-large-v3-turbo');
+  form.append('model', config.whisperModelGroq || 'whisper-large-v3');
   form.append('response_format', 'json');
-  // A Hinglish prompt measurably improves mixed Hindi+English recognition.
-  form.append('prompt', 'Ye Hinglish/English voice command hai ek PC assistant ke liye: chrome kholo, screenshot bhej do, volume kam karo, wifi off, JARVIS.');
+  form.append('temperature', '0');
+  form.append('prompt', STT_PRIMER);
   if (config.whisperLanguage && config.whisperLanguage !== 'auto') form.append('language', config.whisperLanguage);
   const res = await fetch(`${config.groqBaseUrl || 'https://api.groq.com/openai/v1'}/audio/transcriptions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${config.groqApiKey}` },
     body: form,
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`Groq transcription said ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const data = await res.json();
-  return (data.text ?? '').trim() || null;
+  const text = (data.text ?? '').trim();
+  // On near-silence Whisper sometimes parrots the priming prompt back as if
+  // spoken. That is not the owner talking — treat it as "heard nothing" so
+  // a ghost "chrome kholo" can never execute itself.
+  if (text && /voice command hai|PC assistant ke liye/i.test(text)) return null;
+  return text || null;
 }
 
 /** Returns { text, provider } or throws with a helpful message. */
-export async function transcribeAudio(config, buffer, mimetype = 'audio/ogg', log = console) {
+export async function transcribeAudio(config, buffer, mimetype = 'audio/ogg', log = console, { timeoutMs } = {}) {
   if (!buffer?.length) throw new Error('empty audio');
+  const apiTimeout = Math.max(3_000, Number(timeoutMs ?? config.sttTimeoutMs) || 20_000);
+  const engine = String(config.sttEngine || 'auto').toLowerCase();
   const errors = [];
-  // Local first: private, offline, free. Cloud is the fallback, not the default.
-  try {
+  const tryGroq = async () => {
+    if (!config.groqApiKey) return null;
+    const started = Date.now();
+    const text = await groqWhisper(config, buffer, mimetype, apiTimeout);
+    if (text) log.info?.(`[voice] Groq STT ${Date.now() - started}ms me suna: "${text.slice(0, 80)}"`);
+    return text;
+  };
+  const tryLocal = async () => {
+    const started = Date.now();
     const text = await localWhisper(config, buffer, mimetype);
-    if (text) return { text, provider: 'whisper (local, offline)' };
-  } catch (err) {
-    errors.push(`local whisper: ${err.message}`);
-    log.warn?.(`[voice] local whisper failed: ${err.message}`);
-  }
-  if (config.groqApiKey) {
+    if (text) log.info?.(`[voice] local whisper ${Date.now() - started}ms me suna: "${text.slice(0, 80)}"`);
+    return text;
+  };
+  // auto/api → API first (tez + sahi), local backup. local → offline only,
+  // audio kabhi bahar nahi jaata. (3.1.11 se pehle ulta tha: dheema local
+  // model hamesha pehle chalta tha aur Galat sunke bhi Groq ko mauka hi
+  // nahi milta tha — wahi "late + galat samajhta hai" wali shikayat thi.)
+  const order = engine === 'local'
+    ? [['local whisper', tryLocal]]
+    : [['Groq', tryGroq], ['local whisper', tryLocal]];
+  const providers = { Groq: 'Groq Whisper (API)', 'local whisper': 'whisper (local, offline)' };
+  for (const [name, attempt] of order) {
     try {
-      const text = await groqWhisper(config, buffer, mimetype);
-      if (text) return { text, provider: 'Groq Whisper (free tier)' };
+      const text = await attempt();
+      if (text) return { text, provider: providers[name] };
     } catch (err) {
-      errors.push(`Groq: ${err.message}`);
-      log.warn?.(`[voice] Groq transcription failed: ${err.message}`);
+      errors.push(`${name}: ${err.message}`);
+      log.warn?.(`[voice] ${name} transcription failed: ${err.message}`);
     }
   }
   throw new Error(errors.length ? `${HINT}\n\n_${errors[0]}_` : HINT);

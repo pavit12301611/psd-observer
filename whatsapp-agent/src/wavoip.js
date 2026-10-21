@@ -84,7 +84,7 @@ export function encodeWavS16(samples, sampleRate = 16000) {
  */
 export class UtteranceSegmenter {
   constructor({
-    sampleRate = 16000, silenceEndMs = 900, minUtteranceMs = 350,
+    sampleRate = 16000, silenceEndMs = 600, minUtteranceMs = 350,
     maxUtteranceMs = 30_000, onUtterance = () => {}, onSpeechStart = () => {},
   } = {}) {
     this.sampleRate = sampleRate;
@@ -230,7 +230,7 @@ export function createWaVoip({
   learnOwnerLid = () => {}, transcribe = null, loadEngine = null,
   decodePcm = decodeToPcm16k, speakText = null, log = console,
 }) {
-  const doTranscribe = transcribe ?? ((buffer, mime) => transcribeAudio(config, buffer, mime, log));
+  const doTranscribe = transcribe ?? ((buffer, mime, opts) => transcribeAudio(config, buffer, mime, log, opts));
   const doSpeak = speakText ?? ((text) => synthesize(text, config, log));
   const state = {
     client: null,
@@ -332,10 +332,9 @@ export function createWaVoip({
   }
   const isHandlingCalls = () => enabled() && state.connected;
 
-  async function feedSpeech(call, audioResult, conversation) {
-    if (!audioResult?.buffer) return false;
-    const pcm = await decodePcm(audioResult.buffer);
-    if (conversation.ended) return false;
+  /** Push ready PCM into the call (200 ms slices); sets speak-until for barge-in. */
+  function writePcm(call, pcm, conversation) {
+    if (!pcm?.length || conversation.ended) return false;
     conversation.speaking = true;
     const chunkBytes = 16000 * 2 / 5; // 200 ms slices at 16 kHz s16
     for (let offset = 0; offset < pcm.length; offset += chunkBytes) {
@@ -346,6 +345,12 @@ export function createWaVoip({
     return true;
   }
 
+  async function feedSpeech(call, audioResult, conversation) {
+    if (!audioResult?.buffer) return false;
+    const pcm = await decodePcm(audioResult.buffer);
+    return writePcm(call, pcm, conversation);
+  }
+
   /** Wire one live call object into the full conversation loop. */
   function attachConversation(call, { openingText = '' } = {}) {
     const sessionId = `wa-call-${call.callId || Date.now()}`;
@@ -353,10 +358,30 @@ export function createWaVoip({
       call, sessionId, startedAt: Date.now(), turns: 0,
       speaking: false, speakUntil: 0, ended: false, queue: [], processing: false,
       log: [], // {heard, spoken} — sent as a short transcript when the call ends
+      fillerPcms: [], fillerIdx: 0, // pre-synthesised "One moment, Sir." PCMs
     };
     state.activeCall = conversation;
     state.answeredAt.set(String(call.callId || ''), Date.now());
     state.lastAnsweredAnyAt = Date.now();
+
+    // Pre-synthesise the "thinking" filler lines NOW (once per call), so a
+    // long-running turn can say "One moment, Sir." INSTANTLY instead of
+    // leaving dead air while the brain works. Best-effort: TTS trouble just
+    // means no filler, exactly like before. (3.1.11 speed pass)
+    if (config.waCallFiller !== false) {
+      (async () => {
+        for (const line of ['One moment, Sir.', 'Certainly, Sir — just a moment.', 'Working on it, Sir.']) {
+          if (conversation.ended) return;
+          try {
+            const audio = await Promise.race([
+              doSpeak(line),
+              new Promise((resolve) => setTimeout(() => resolve(null), 4_000).unref?.()),
+            ]);
+            if (audio?.buffer) conversation.fillerPcms.push(await decodePcm(audio.buffer));
+          } catch { /* filler is a nicety, never a blocker */ }
+        }
+      })();
+    }
 
     const maxMs = Math.max(60_000, (Number(config.waCallMaxMinutes) || 15) * 60_000);
     const maxTimer = setTimeout(() => {
@@ -366,7 +391,7 @@ export function createWaVoip({
     maxTimer.unref?.();
 
     const segmenter = new UtteranceSegmenter({
-      silenceEndMs: Number(config.voiceSilenceEndMs) || 900,
+      silenceEndMs: Number(config.voiceSilenceEndMs) || 600,
       onSpeechStart: () => {
         // Barge-in: stop JARVIS mid-sentence the moment the owner speaks.
         if (conversation.speaking && Date.now() < conversation.speakUntil) {
@@ -388,30 +413,49 @@ export function createWaVoip({
       try {
         while (conversation.queue.length && !conversation.ended) {
           const samples = conversation.queue.shift();
-          let heardText = '';
+          // Dead-air killer (3.1.11): if this whole turn (STT + brain +
+          // TTS) is still busy after waCallFillerMs, speak a pre-cached
+          // "One moment, Sir." — a fast turn never hears it, a slow one no
+          // longer feels like the line went dead.
+          let fillerTimer = null;
+          if (config.waCallFiller !== false) {
+            fillerTimer = setTimeout(() => {
+              const pcms = conversation.fillerPcms;
+              if (conversation.ended || !pcms.length) return;
+              const pcm = pcms[conversation.fillerIdx % pcms.length];
+              conversation.fillerIdx += 1;
+              if (writePcm(call, pcm, conversation)) log.info?.('[wavoip] filler ack bola (turn lamba ja raha tha)');
+            }, Math.max(300, Number(config.waCallFillerMs) || 1400));
+            fillerTimer.unref?.();
+          }
           try {
-            const { text } = await doTranscribe(encodeWavS16(samples), 'audio/wav');
-            heardText = String(text ?? '').trim();
-          } catch (err) {
-            log.warn?.(`[wavoip] transcription failed: ${err.message}`);
-          }
-          if (!heardText) continue;
-          conversation.turns += 1;
-          log.info?.(`[wa call] owner: ${heardText.slice(0, 120)}`);
-          const result = await voice.say(sessionId, heardText, { source: 'whatsapp-call' });
-          log.info?.(`[wa call] jarvis: ${String(result?.spoken ?? '').slice(0, 120)}`);
-          conversation.log.push({ heard: heardText, spoken: String(result?.spoken ?? ''), text: String(result?.text ?? '') });
-          // Media produced mid-call (screenshot, file) goes to the chat.
-          const raw = result?.reply;
-          if (raw && typeof raw === 'object' && (raw.image || raw.document || raw.video)) {
-            sendToOwner({ ...raw, text: `📞 Call ke dauraan: ${heardText.slice(0, 120)}` }).catch(() => {});
-          }
-          await feedSpeech(call, result?.audio, conversation).catch((err) => {
-            log.warn?.(`[wavoip] could not speak reply: ${err.message}`);
-          });
-          if (result?.ended) {
-            const wait = Math.max(600, conversation.speakUntil - Date.now());
-            setTimeout(() => { try { call.end('hangup'); } catch { /* done */ } }, Math.min(wait, 8000)).unref?.();
+            let heardText = '';
+            try {
+              const { text } = await doTranscribe(encodeWavS16(samples), 'audio/wav', { timeoutMs: 12_000 });
+              heardText = String(text ?? '').trim();
+            } catch (err) {
+              log.warn?.(`[wavoip] transcription failed: ${err.message}`);
+            }
+            if (!heardText) continue;
+            conversation.turns += 1;
+            log.info?.(`[wa call] owner: ${heardText.slice(0, 120)}`);
+            const result = await voice.say(sessionId, heardText, { source: 'whatsapp-call' });
+            log.info?.(`[wa call] jarvis: ${String(result?.spoken ?? '').slice(0, 120)}`);
+            conversation.log.push({ heard: heardText, spoken: String(result?.spoken ?? ''), text: String(result?.text ?? '') });
+            // Media produced mid-call (screenshot, file) goes to the chat.
+            const raw = result?.reply;
+            if (raw && typeof raw === 'object' && (raw.image || raw.document || raw.video)) {
+              sendToOwner({ ...raw, text: `📞 Call ke dauraan: ${heardText.slice(0, 120)}` }).catch(() => {});
+            }
+            await feedSpeech(call, result?.audio, conversation).catch((err) => {
+              log.warn?.(`[wavoip] could not speak reply: ${err.message}`);
+            });
+            if (result?.ended) {
+              const wait = Math.max(600, conversation.speakUntil - Date.now());
+              setTimeout(() => { try { call.end('hangup'); } catch { /* done */ } }, Math.min(wait, 8000)).unref?.();
+            }
+          } finally {
+            if (fillerTimer) clearTimeout(fillerTimer);
           }
         }
       } finally {

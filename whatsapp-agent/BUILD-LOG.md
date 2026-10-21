@@ -1,5 +1,12 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.11 — Speed pass: sunna Groq API se (tez + sahi), filler ack, /callme hi main raasta
+
+User ka faisla: native pickup ki ladai park — wo `/callme` (outgoing, unke PC par proven) se operate karega. Asli shikayat: jawab late + "mostly meri baat galat samajhta hai". Root cause `transcribe.js` me tha: **local whisper hamesha pehle** chalta tha (ggml-base, CPU par 2–6s, Hinglish weak) aur kuchh-na-kuchh text de deta tha, isliye maujood `groqWhisper` fallback kabhi chala hi nahi. Ab `STT_ENGINE=auto` (default): key hai to **Groq whisper-large-v3 pehle** (command-vocabulary primer + temperature 0 + timeout 20s, calls me 12s), local sirf backup; `STT_ENGINE=local` = audio kabhi bahar nahi. Primer-echo hallucination guard bhi: chuppi par Whisper primer ko hi "sun" le to use kuchh-nahi-suna maano (ghost command execute na ho). Groq model default turbo → large-v3 (accuracy pehle; short clip par waise bhi sub-second).
+
+Baaki deri bhi kaati: `voiceSilenceEndMs` 900→600 (config + segmenter defaults); live call me **filler ack** — koi turn `WA_CALL_FILLER_MS` (default 1400) se lamba jaye to call-start par pre-synthesised "One moment, Sir." PCM bol deta hai (per-call cache, 4s synth-race, per-turn exactly once; `feedSpeech` se `writePcm` refactor). Doctor ka sunna-line ab asal STT engine dikhata hai. Tests **222/222** (4 naye: API-first order, local-pin kabhi cloud nahi, primer-echo guard, filler pehle-bola-jata-hai ordering). Patch v9 (`:0` device normalize) is release me NAHI banaya — park hai; user jab bolega, ek test call me try hoga. Callback-workaround ki bhi zaroorat nahi padi — `/callme` user khud istemal kar raha hai.
+
+
 ## v3.1.10 — Ek comma ki galti: deviceJidsCsv ek CSV string hoti hai, list nahi (patch v8)
 
 3.1.9 ki call (`00A45326…`): discovery kaam kar gayi — `peer devices: ["12223644725256@lid","12223644725256:30@lid","12223644725256:32@lid"]` (bare = primary device 0 implicit; 30/32 companions). Lekin join native par hi ruk gaya: `WaCallWebCallingBridge.cpp:390 Mismatch in participant arrays sizes` → call kabhi active nahi bani → `accept_timeout` 20s. Wajah: `joinVoipOngoingCall` ki teeno lists PARALLEL hoti hain (per participant ek entry); `deviceJidsCsv[i]` us participant ke saare devices ki **ek comma-joined string** hai — upstream ka `resolveGroupParticipant` bilkul yahi banata hai (`devices.join(",")`) aur index ka group-join wahi push karta hai. Mera v7 teen alag elements bhej raha tha (pn=1, lid=1, dev=3).

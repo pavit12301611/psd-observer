@@ -276,19 +276,27 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     xttsUrl: (e.XTTS_URL || '').replace(/\/$/, ''),
     xttsSpeaker: e.XTTS_SPEAKER || '',
     voiceDir: path.resolve(ROOT, e.VOICE_DIR || path.join(os.homedir(), '.local/share/observer-voice')),
-    // Voice notes → text. Local whisper first (whisper.cpp / python whisper),
-    // Groq free tier as fallback. Setup: bash scripts/observer.sh voice whisper
+    // Voice notes / calls → text. SPEED FIRST since 3.1.11: when a Groq key
+    // exists, its Whisper large-v3 (API) transcribes — ~10x faster than the
+    // local base model AND far better at Hinglish. Local whisper.cpp stays
+    // as the automatic offline backup. STT_ENGINE=local pins it to offline.
+    sttEngine: (e.STT_ENGINE || 'auto').toLowerCase(), // auto|api|local
+    sttTimeoutMs: int(e.STT_TIMEOUT_MS, 20_000),
     whisperBin: e.WHISPER_BIN || '',
     whisperModel: e.WHISPER_MODEL || '',
     whisperModelPy: e.WHISPER_MODEL_PY || 'base',
-    whisperModelGroq: e.WHISPER_MODEL_GROQ || 'whisper-large-v3-turbo',
+    whisperModelGroq: e.WHISPER_MODEL_GROQ || 'whisper-large-v3',
     whisperLanguage: e.WHISPER_LANGUAGE || 'auto',
 
     // ── Voice calls (3.0) ────────────────────────────────────────────────────
     // Phone-app live call + WhatsApp voice-note call mode.
     voiceCall: bool(e.VOICE_CALL, true),
     voiceMaxSpokenChars: int(e.VOICE_MAX_SPOKEN_CHARS, 340),
-    voiceSilenceEndMs: int(e.VOICE_SILENCE_END_MS, 900),
+    voiceSilenceEndMs: int(e.VOICE_SILENCE_END_MS, 600),
+    // Live calls: turn itna lamba ja raha ho to JARVIS khali chuppi ki jagah
+    // ek chhota "One moment, Sir." bol deta hai (3.1.11 speed pass).
+    waCallFiller: bool(e.WA_CALL_FILLER, true),
+    waCallFillerMs: int(e.WA_CALL_FILLER_MS, 1400),
     // WhatsApp: also send a JARVIS voice note with every text reply.
     whatsappVoiceReplies: bool(e.WHATSAPP_VOICE_REPLIES, false),
     // REAL WhatsApp voice-call answering (experimental VoIP engine,

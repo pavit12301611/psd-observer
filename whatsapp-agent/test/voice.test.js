@@ -26,6 +26,7 @@ import { createWhatsApp } from '../src/whatsapp.js';
 import { createBridgeServer } from '../src/server.js';
 import { Mailbox } from '../src/mailbox.js';
 import { Store } from '../src/store.js';
+import { transcribeAudio } from '../src/transcribe.js';
 
 const silent = { info() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -272,6 +273,118 @@ test('wavoip: owner call is ANSWERED, heard, executed and spoken back', async ()
   await sleep(80);
   assert.deepEqual(said, ['chrome kholo'], 'owner speech reached the voice brain');
   assert.ok(call.written.length >= 2, 'reply PCM spoken back into the call');
+  wavoip.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── 3.1.11 speed pass: API STT first, filler ack ─────────────────────────────
+
+test('transcribe: Groq key hai to API STT pehle (tez + sahi), local backup', async () => {
+  const realFetch = global.fetch;
+  let sawAuth = '';
+  global.fetch = async (url, opts) => {
+    sawAuth = opts.headers.authorization;
+    assert.match(String(url), /audio\/transcriptions/);
+    return { ok: true, json: async () => ({ text: 'chrome kholo aur screenshot lo' }) };
+  };
+  try {
+    const out = await transcribeAudio(
+      { groqApiKey: 'gsk-test', sttEngine: 'auto', whisperModelGroq: 'whisper-large-v3' },
+      Buffer.from('x'), 'audio/wav', silent,
+    );
+    assert.equal(out.text, 'chrome kholo aur screenshot lo');
+    assert.match(out.provider, /Groq/);
+    assert.equal(sawAuth, 'Bearer gsk-test');
+  } finally { global.fetch = realFetch; }
+});
+
+test('transcribe: STT_ENGINE=local kabhi cloud call nahi karta', async () => {
+  const realFetch = global.fetch;
+  let fetched = false;
+  global.fetch = async () => { fetched = true; throw new Error('cloud nahi!'); };
+  try {
+    // Sandbox/CI me local whisper hai nahi → helpful error, par cloud call
+    // ka sawaal hi nahi (yehi privacy switch ka vaada hai).
+    await assert.rejects(
+      () => transcribeAudio({ groqApiKey: 'gsk-test', sttEngine: 'local' }, Buffer.from('x'), 'audio/wav', silent),
+      /transcriber chahiye/,
+    );
+    assert.equal(fetched, false);
+  } finally { global.fetch = realFetch; }
+});
+
+test('transcribe: primer echo (chuppi pe hallucination) = kuchh nahi suna', async () => {
+  const realFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({ text: 'Ye Hinglish/English voice command hai ek PC assistant ke liye: chrome kholo' }),
+  });
+  try {
+    await assert.rejects(
+      () => transcribeAudio({ groqApiKey: 'gsk-test', sttEngine: 'auto' }, Buffer.from('x'), 'audio/wav', silent),
+      /transcriber chahiye/,
+      'ghost command kabhi execute nahi hona chahiye',
+    );
+  } finally { global.fetch = realFetch; }
+});
+
+test('wavoip: lamba turn dead-air ki jagah filler bolta hai (One moment, Sir.)', async () => {
+  const dir = tempDir();
+  class FakeCall extends EventEmitter {
+    constructor(peer) {
+      super();
+      this.callId = 'call-filler';
+      this.peerJid = peer;
+      this.written = [];
+    }
+    answer() {}
+    end() { this.emit('ended', 'hangup'); }
+    writeAudio(chunk) { this.written.push(chunk); return true; }
+    clearAudio() { return 1; }
+  }
+  class FakeClient extends EventEmitter {
+    constructor() { super(); FakeClient.instance = this; }
+    async connect() {}
+    disconnect() {}
+  }
+  const said = [];
+  const fakeVoice = {
+    start: async () => ({ greeting: 'Good evening, Sir.', spoken: 'Good evening, Sir.', audio: { buffer: Buffer.from('g'), mimetype: 'audio/ogg' } }),
+    // Slow brain: filler threshold (60ms) se zyada sochta hai.
+    say: async (_id, text) => { said.push(text); await sleep(300); return { spoken: 'Done, Sir.', text: '✅', audio: { buffer: Buffer.from('r'), mimetype: 'audio/ogg' } }; },
+    interrupt() {}, end() {},
+  };
+  const config = makeConfig(dir, { waCallAnswer: true, waCallFillerMs: 60 });
+  const wavoip = createWaVoip({
+    config,
+    log: silent,
+    voice: fakeVoice,
+    isOwnerJid: (jid) => jid.startsWith('919528923866'),
+    sendToOwner: async () => {},
+    transcribe: async () => ({ text: 'chrome kholo', provider: 'fake' }),
+    // Filler lines speakText se aati hain ('F:' prefix) → PCM fill byte 7;
+    // greeting/reply audio → fill byte 1. Written order hi saboot hai.
+    speakText: async (text) => ({ buffer: Buffer.from(`F:${text}`), mimetype: 'audio/ogg' }),
+    decodePcm: async (buf) => Buffer.alloc(3200, String(buf).startsWith('F:') ? 7 : 1),
+    loadEngine: async () => ({ mod: { VoipClient: FakeClient }, via: 'test' }),
+  });
+  await wavoip.start();
+  await sleep(20);
+  const call = new FakeCall('919528923866@s.whatsapp.net');
+  FakeClient.instance.emit('incoming', call, { peerJid: call.peerJid });
+  call.emit('connected');
+  await sleep(40); // greeting + filler pre-cache
+  const loud = () => new Float32Array(320).fill(0.35);
+  const quiet = () => new Float32Array(320).fill(0.001);
+  for (let i = 0; i < 25; i++) call.emit('audio', loud());
+  for (let i = 0; i < 60; i++) call.emit('audio', quiet());
+  await sleep(520); // filler @60ms, reply @~300ms
+  assert.deepEqual(said, ['chrome kholo']);
+  const fills = call.written.map((c) => c[0]);
+  assert.ok(fills.includes(7), 'filler PCM call me gaya');
+  assert.equal(fills.filter((b) => b === 7).length, 1, 'ek turn me filler exactly ek baar');
+  assert.ok(fills.indexOf(7) < fills.length - 1, 'filler asli jawab se PEHLE bola gaya');
+  assert.equal(fills[fills.length - 1], 1, 'aakhri chunk asli jawab hai');
   wavoip.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 });
