@@ -50,8 +50,15 @@ Kya-kya ready hai: `observer.sh voice status`, WhatsApp pe `/call`, ya
 
 ## Call me kya-kya chalega
 
-- 🎙️ **Natural baat:** Hindi/Hinglish/English — "jarvis, thesis wali PDF
-  dhundo aur bhej do". Devanagari transcription bhi command ban jati hai.
+- 🎙️ **Natural baat:** tum Hindi/Hinglish/English bolo — JARVIS samjhega
+  aur **sirf English me jawab dega** (British awaaz, saaf pronunciation;
+  `JARVIS_ENGLISH_ONLY=false` se band kar sakte ho). "jarvis, thesis wali
+  PDF dhundo aur bhej do" — Devanagari transcription bhi command ban jati hai.
+- 💬 **Casual baat + sawal:** "hello", "kaise ho", "thank you" pe instant
+  butler jawab (bina internet/brain ke bhi), aur asli sawalo ("what is the
+  capital of France?") ke jawab AI chhote spoken English sentences me
+  dega; lamba detail chat me text ban ke aayega. Call khatm hone pe chat
+  me chhota **transcript** bhi milta hai.
 - 🔗 **Ek saath kai kaam:** "chrome kholo **aur** screenshot bhej do".
 - 🔒 **Safety gate waise ka waisa:** app band/delete/power jaise kaam
   pehle rukenge — *"Shall I proceed, Sir?"* — tumhari boli hui **"haan"**
@@ -92,14 +99,29 @@ fallback sambhal leta hai — tum latke nahi rehoge.
 
 Engine ready ho to WhatsApp pe **`/callme`** bhejo: JARVIS tumhe call
 karke greeting bolega, phir normal call jaise instructions lo.
-`/callme <message>` se pehli line wahi bolega.
+`/callme <message>` se greeting ke baad wahi line bolke sunna shuru karega.
+
+## ⏰ /callat — set time pe JARVIS ki update-call
+
+```
+/callat at 18:30 /brief        (6:30 baje call aayegi, taaza brief bolega)
+/callat in 30m Dinner ready hai, khana kha lena
+/callat tomorrow 9am /weather delhi
+```
+
+Waqt pe JARVIS **khud call karega**, update bolega, aur line khuli
+rakhega — tum wahin se aage instructions de sakte ho. Message `/` se
+shuru ho to woh command **usi waqt** chalti hai (taaza output). Engine
+us pal ready na ho to update **voice note + text** me aa jayega — miss
+nahi hoga. List/cancel: `/callat`, `/callat del <#>`. Live call me bhi
+bol sakte ho: *"Jarvis, call me at 6 and give me the brief."*
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Call bajti rehti hai, JARVIS nahi uthata | `/call` bhejo — status batayega: engine? link? `WA_CALL_ANSWER`? Phir `observer.sh voice status` |
-| Call cut hote hi voice note aa gaya | Yeh fallback hai — matlab engine ready nahi. Upar wale 4 setup steps check karo |
+| Call cut hote hi voice note aa gaya | Fallback chala — **usi message me exact wajah + fix likha hota hai** (engine install nahi / device link nahi / connect fail / ready par answer nahi). Wahi ek command chalao. Sabse common: purane installer pe peer-deps fail — `bash scripts/observer.sh voice call-engine` dobara |
+| Call bajti rehti hai, JARVIS nahi uthata | `/call` bhejo — stage batayega (engine? link? `WA_CALL_ANSWER`?). Engine gira ho to ab woh **khud reconnect** karta hai; owner call `@lid` me aaye to bhi cross-check se uth jati hai. `observer.sh voice status` |
 | QR scan ke baad bhi "not linked" | `voice link-voip` dobara; agent phone pe Linked devices me naya device dikhna chahiye; phir `voice answer on` (restart) |
 | JARVIS sunta hai par jawab robotic hai | `voice setup` (Piper) nahi chala — espeak pe gir gaya hai. `/voice` dekho |
 | Awaaz samajh nahi aati / galat transcript | `voice whisper` se local base model; ya `GROQ_API_KEY`; shor kam rakho, waqfa deke bolo |

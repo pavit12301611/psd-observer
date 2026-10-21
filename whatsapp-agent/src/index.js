@@ -16,6 +16,7 @@ import { distroPrettyName } from './tools.js';
 import { sessionInfo, inputDiagnostics } from './pccontrol.js';
 import { routerFor } from './router.js';
 import { createWaVoip } from './wavoip.js';
+import { startCallScheduleLoop } from './callscheduler.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -67,7 +68,8 @@ const wavoip = createWaVoip({
   config,
   log: console,
   voice: agent.voice,
-  isOwnerJid: (jid) => whatsapp.isOwnerJid(jid),
+  isOwnerJid: (jid, extra) => whatsapp.isOwnerJid(jid, extra),
+  learnOwnerLid: (lid) => whatsapp.learnOwnerLid?.(lid),
   sendToOwner: (reply) => whatsapp.sendToOwner(reply),
 });
 agent.attachWaVoip(wavoip);
@@ -86,6 +88,9 @@ const bridge = createBridgeServer({
   log: console,
 });
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
+// /callat: at the set time JARVIS himself calls the owner with the update
+// (asli call na lage to voice note). Survives restarts via the store file.
+const callScheduleLoop = startCallScheduleLoop({ config, store, agent, wavoip, whatsapp, log: console });
 // Scheduled jobs that are commands ("/brief") run through the agent, exactly
 // like typing them — one code path, same safety gates.
 const stopCron = startCronLoop(
@@ -172,6 +177,7 @@ process.on('SIGTERM', shutdown);
 async function shutdown() {
   console.info('\n[agent] shutting down…');
   stopReminders();
+  callScheduleLoop.stop();
   stopCron();
   stopWatch();
   stopShots();

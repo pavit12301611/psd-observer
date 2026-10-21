@@ -1749,18 +1749,32 @@ DONE
       cd "$dir" || die "cd $dir fail"
       if [ ! -d node_modules/baileys-caller/dist ] && [ ! -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then
         info "baileys-caller install ho raha hai (git dep, 1-3 min lag sakte hain)…"
-        npm install --no-save "baileys-caller@git+https://github.com/Akane7101/baileys-caller.git" \
+        # --legacy-peer-deps is ESSENTIAL: baileys-caller peers Baileys rc11,
+        # the agent pins rc14 — plain npm aborts with ERESOLVE right here
+        # (that one failure is why calls silently fell back to voice notes).
+        npm install --no-save --legacy-peer-deps --no-audit --no-fund "baileys-caller@git+https://github.com/Akane7101/baileys-caller.git" \
           || {
             warn "npm git install fail — standalone dir me try kar raha hoon"
             mkdir -p "$VOIP_DIR"
             curl -fL --retry 3 https://codeload.github.com/Akane7101/baileys-caller/tar.gz/refs/heads/main \
               | tar -xz -C "$VOIP_DIR" || die "baileys-caller download fail"
             mv "$VOIP_DIR"/baileys-caller-main "$VOIP_DIR/baileys-caller" 2>/dev/null || true
-            ( cd "$VOIP_DIR/baileys-caller" && npm install --no-audit --no-fund ) \
+            ( cd "$VOIP_DIR/baileys-caller" && npm install --no-audit --no-fund --legacy-peer-deps ) \
               || die "baileys-caller deps install fail (@roamhq/wrtc native build dekho)"
           }
       fi
-      ok "VoIP engine installed"
+      # Prove the engine actually loads (files on disk ≠ importable module).
+      if node --input-type=module -e "
+        const { loadConfig } = await import('./src/config.js');
+        const { loadVoipEngine } = await import('./src/wavoip.js');
+        const loaded = await loadVoipEngine(loadConfig({ dryRun: true }));
+        if (!loaded?.mod?.VoipClient) { console.error('ENGINE NOT LOADABLE'); process.exit(1); }
+        console.log('ENGINE OK via ' + (loaded.via || 'baileys-caller'));
+      " 2>&1 | grep -q "ENGINE OK"; then
+        ok "VoIP engine installed + load hota hai ✓"
+      else
+        warn "Engine files hain par LOAD nahi ho raha — upar ka error dekho. Dobara chalao: bash observer.sh voice call-engine (na bane to error note karke batao)"
+      fi
       env_set "$envfile" "WA_CALL_ANSWER" "false"
       info "WA_CALL_ANSWER abhi false rakha hai — pehle device LINK karo:"
       cat <<DONE
@@ -1805,7 +1819,20 @@ DONE
       local mode="${1:-on}"
       [ -d "$dir/src" ] || die "Agent install nahi mila ($dir)"
       if [ "$mode" = "off" ]; then env_set "$envfile" "WA_CALL_ANSWER" "false"; ok "WA_CALL_ANSWER=false"
-      else env_set "$envfile" "WA_CALL_ANSWER" "true"; ok "WA_CALL_ANSWER=true"; fi
+      else
+        # Preflight: answer=true bina engine/link ke sirf confusion deta hai
+        # (har call chup-chaap fallback). Pehle teeno stage check karke batao.
+        if [ ! -d "$dir/node_modules/baileys-caller/dist" ] && [ ! -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then
+          warn "⚠️ VoIP engine abhi install NAHI hai — pehle: bash observer.sh voice call-engine"
+          warn "   (WA_CALL_ANSWER=true kar raha hoon, par engine bina calls voice-note par hi aayengi)"
+        elif [ ! -f "$dir/auth_info_voip/creds.json" ]; then
+          warn "⚠️ VoIP device LINK nahi hua (auth_info_voip/creds.json missing) — pehle QR: bash observer.sh voice link-voip"
+          warn "   (bina link ke engine connect nahi hoga; calls voice-note par aayengi)"
+        else
+          ok "engine ✓ · VoIP device linked ✓ · WA_CALL_ANSWER=true kar raha hoon"
+        fi
+        env_set "$envfile" "WA_CALL_ANSWER" "true"; ok "WA_CALL_ANSWER=true"
+      fi
       restart_agent "$dir"
       ;;
 

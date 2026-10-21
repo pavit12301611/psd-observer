@@ -1,5 +1,41 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.0 — "Call kaat ke voice note kyun?" fix + scheduled calls + English-only
+
+> User report: real machine pe call **uthne ki bajaye cut hoke voice note**
+> aa raha tha. Root causes jo pakde gaye (teeno asli):
+>
+> 1. **`npm install` ERESOLVE fail** — `baileys-caller` ka peer Baileys
+>    `rc11` hai, agent `rc14` pin karta hai; bina `--legacy-peer-deps` ke
+>    engine install hi nahi hota tha aur har call chup-chaap fallback pe
+>    jaati thi. Ab flag + post-install **load smoke-test** (files ≠ loadable).
+> 2. **Owner `@lid` trap** — WhatsApp calls aksar sirf anonymous LID
+>    dikhati hain; engine "unknown caller" samajh ke ignore karta tha,
+>    phir messaging socket 12s baad reject + fallback. Ab messaging
+>    socket (jise `callerPn` milta hai) engine ko live `noteOwnerCall`
+>    signal deta hai → same ringing call cross-check se uthti hai + LID
+>    seekh bhi leta hai. Bina corroboration ke unknown LID ab bhi kabhi
+>    answer nahi hoti (security same).
+> 3. **One-shot connect** — ek baar handshake fail/drop = restart tak
+>    engine dead. Ab fresh-client **auto-reconnect** (exponential
+>    backoff) + owner-call pe turant retry nudge. Fallback coordination
+>    bhi ab call-id ki jagah **offer-time correlation** use karti hai
+>    (do sockets ke ids alag format ke hote hain).
+>
+> Aur jo maanga gaya: **call me casual baat + sawal-jawab** (offline
+> English smalltalk + AI concise spoken answers), **`/callat`** —
+> set time pe JARVIS khud call karke taaza update bolta hai (`src/callscheduler.js`,
+> `schedule_jarvis_call` tool; engine off ho to voice note), aur
+> **`JARVIS_ENGLISH_ONLY=true` default** — owner Hindi bolega, JARVIS
+> sirf saaf English bolega (Devanagari British voice ko kabhi nahi
+> milega). Fallback message ab **exact failed stage + fix** khud
+> batata hai. Tests: **212/212** (8 naye: LID cross-check, reconnect,
+> stage diagnosis, smalltalk, English-only, scheduler, /callat).
+> Honest hadh wahi: asli WA call E2E owner machine pe hi prove hogi —
+> par ab na uthe to wajah guess nahi karni padegi, message me hogi.
+
+---
+
 ## v3.0.0 — JARVIS Voice Call ☎️ (asli WhatsApp call pickup + neural British awaaz)
 
 > Branch: `arena/592311b3-psd-observer` · Tests: **204 pass / 0 fail** · ₹0.

@@ -94,7 +94,14 @@ wahi rukti hai.)
 | `/call on` / `/call off` | WhatsApp Voice Mode — har jawab + JARVIS voice note |
 | `/call` | call-centre status |
 | `/callme [message]` | JARVIS tumhe WhatsApp call kare (VoIP engine chahiye) |
+| `/callat at 18:30 /brief` | set time pe JARVIS khud call karke update de (engine na ho to voice note) |
 | `/voicereply <text>` | ek voice note JARVIS ki awaaz me |
+
+> 🇬🇧 **JARVIS sirf English bolta hai** (default, `JARVIS_ENGLISH_ONLY=true`):
+> tum Hindi/Hinglish bolo — woh samajh lega, par British awaaz Hindi script
+> kabhi nahi padhegi (wahi kharab pronunciation wala masla tha). Casual baat
+> ("hello", "kaise ho", "thank you") ke jawab bhi call me instant English
+> me milte hain; sawal AI short spoken sentences me deta hai.
 
 ## Advanced: true voice clone (XTTS)
 

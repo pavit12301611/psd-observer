@@ -98,7 +98,8 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 *Do things*
 • /remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>
 • /cron add every 10m <text> · /cron add roz 9 baje <text> · /cron list|del
-• /voicereply <text> — free offline voice note (only on this command)
+• /voicereply <text> — JARVIS ki awaaz me voice note · /call on — har jawab voice me
+• /callme — JARVIS tumhe WhatsApp call kare · /callat at 18:30 /brief — set time pe JARVIS ki update-call · /voice — voice status
 • /auto <task> — UI autopilot (verified): open chrome | tap Search | type hello | key enter | screenshot
 • /arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)
 • /use <task> — *haath*: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)
@@ -386,11 +387,14 @@ export function createAgent({
   function callStatusLines() {
     const voip = waVoip?.status?.() ?? null;
     const mode = Boolean(store.data.voiceCallMode || config.whatsappVoiceReplies);
+    const nextCall = (store.data.callSchedules ?? [])[0];
     return [
       `• WhatsApp Voice Mode (/call): ${mode ? '*ON* — har jawab JARVIS voice note me' : 'off — /call on se chalu karo'}`,
       voip
         ? `• Asli WhatsApp call uthana: ${voip.connected ? '*READY 📞* — seedha call karo, JARVIS uthayega' : `${voip.enabled ? 'engine on, ' : ''}${voip.hint}`}`
         : '• Asli WhatsApp call uthana: engine attached nahi (setup: `bash scripts/observer.sh voice call-engine`)',
+      `• Scheduled call (/callat): ${nextCall ? `agli ${tools.formatDateTime(nextCall.dueTs, tz)} — "${nextCall.text.slice(0, 60)}"` : 'koi nahi — /callat at 18:30 /brief lagao, JARVIS khud call karega'}`,
+      `• JARVIS ki boli: *English only*${config.jarvisEnglishOnly === false ? ' (off hai — JARVIS_ENGLISH_ONLY)' : ''} — tum Hindi/Hinglish bol sakte ho, samajhle ga`,
       '• Phone app 📞 Call tab: bolo → command execute → JARVIS jawab (koi setup nahi)',
       '• Voice note bhi bhej sakte ho — transcribe karke wahi command chalega',
     ];
@@ -444,6 +448,29 @@ export function createAgent({
     } catch (err) {
       return `⚠️ Call nahi lagi: ${err.message}`;
     }
+  }
+
+  // `/callat at 18:30 /brief` — at that time JARVIS CALLS you and speaks the
+  // update ("mere set time pe call karke update dein"). Text starting with /
+  // runs as a command at fire time; anything else is spoken as-is. Engine
+  // off/unreachable → JARVIS voice note + text instead (update never lost).
+  function callAtCommand(args) {
+    const raw = String(args ?? '').trim();
+    const list = () => {
+      const items = store.data.callSchedules ?? [];
+      if (!items.length) return '📞 Koi scheduled call nahi hai.\nLagao: /callat at 18:30 /brief\nYa: /callat in 30m Dinner ready hai, khana kha lena';
+      return ['📞 *Scheduled JARVIS calls*', ...items.map((s) => `#${s.id} · ${tools.formatDateTime(s.dueTs, tz)} — ${s.text}`), '', 'Cancel: /callat del <#>'].join('\n');
+    };
+    if (!raw || /^list$/i.test(raw)) return list();
+    const del = raw.match(/^del(?:ete)?\s+(\d+)$/i);
+    if (del) return store.deleteCallSchedule(num(del[1])) ? `🗑️ Scheduled call #${del[1]} cancelled.` : `No scheduled call #${del[1]}. See /callat`;
+    const parsed = tools.parseWhen(raw);
+    if (!parsed || !parsed.rest) {
+      return '⏰ Samay nahi samjha, Sir. Try:\n/callat in 30m <kya bolna hai>\n/callat at 18:30 /brief\n/callat tomorrow 9am Good morning bolke weather bata dena';
+    }
+    const item = store.addCallSchedule(parsed.rest, parsed.dueTs);
+    const isCmd = item.text.trimStart().startsWith('/');
+    return `📞 Done, Sir — *${tools.formatDateTime(item.dueTs, tz)}* (in ${tools.humanDuration(item.dueTs - Date.now())}) main khud call karke ${isCmd ? `\`${item.text}\` ka update bolunga` : `ye bolunga: "${item.text}"`}.\n${waVoip?.status?.().connected ? 'VoIP engine ready hai — asli call aayegi.' : '_(VoIP engine abhi ready nahi: waqt pe call na lagi to JARVIS voice note aa jayega. Asli call ke liye: `bash scripts/observer.sh voice call-engine`)_'}\nDekho/cancel: /callat`;
   }
 
   async function voiceReply(args) {
@@ -1495,6 +1522,7 @@ export function createAgent({
       case 'voicereply': return await voiceReply(args);
       case 'call': case 'voicecall': return await callCommand(args);
       case 'callme': case 'callkaro': return await callMeCommand(args);
+      case 'callat': case 'schedulecall': case 'calllater': return callAtCommand(args);
       case 'voice': case 'jarvis': return ['📞 *JARVIS Voice*', ...callStatusLines(), '', tts.ttsStatus(config)].join('\n');
       case 'learn': case 'teach': case 'alias': return learnCmd(args);
       case 'unlearn': case 'undefine': case 'forgetword': return learnCmd(`del ${args}`);
@@ -1507,8 +1535,8 @@ export function createAgent({
         if (/^memory$/i.test(args || '')) { store.data.facts = {}; store.save(); return '🧠 Memorised facts wiped.'; }
         store.clearHistory();
         return '🧹 Chat memory cleared. Fresh start!';
-      case 'model': case 'ai': if (!args) return ai.aiStatus(config); return askAI(args);
-      case 'ask': return args ? askAI(args) : '💬 Usage: /ask <question> — or just type your question normally.';
+      case 'model': case 'ai': if (!args) return ai.aiStatus(config); return askAI(args, ctx);
+      case 'ask': return args ? askAI(args, ctx) : '💬 Usage: /ask <question> — or just type your question normally.';
       case 'summarize': case 'summarise': case 'tldr': {
         if (!args) return '📄 Usage: /summarize <text or URL>';
         const body = /^https?:\/\//i.test(args.trim()) ? (await tools.fetchPageText(args.trim())).text : args;
@@ -1691,8 +1719,8 @@ export function createAgent({
     }
   }
 
-  async function askAI(text) {
-    const result = await ai.chat(config, store, text, log);
+  async function askAI(text, ctx = {}) {
+    const result = await ai.chat(config, store, text, log, { voice: Boolean(ctx?.voice) });
     if (result) return result.text;
     // No brain: still try to be useful offline for factual questions.
     const q = text.replace(/^(what is|who is|tell me about)\s+/i, '').replace(/\?$/, '').trim();
@@ -1838,7 +1866,7 @@ export function createAgent({
         // askObserver already explains failures; only fall through on timeout handled there.
         return fromObserver;
       }
-      const aiRes = await askAI(working);
+      const aiRes = await askAI(working, effCtx);
       return aiRes;
     } catch (err) {
       if (isStoppedError(err) || task.signal.aborted) {

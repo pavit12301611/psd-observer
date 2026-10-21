@@ -7,6 +7,7 @@ const EMPTY = () => ({
   notes: [],          // {id, text, ts}
   todos: [],          // {id, text, done, ts}
   reminders: [],      // {id, text, dueTs, createdTs}
+  callSchedules: [],  // {id, text, dueTs, createdTs} — JARVIS calls the owner at dueTs and speaks text (or runs it if it starts with /)
   cronJobs: [],       // {id, text, schedule, scheduleRaw, nextDueTs, createdTs, lastRunTs}
   learned: [],        // custom keywords: {id, keyword, commands: [{cmd,args,raw,inferredOpen}], rawText, createdTs}
   facts: {},          // /remember key -> value, injected into the AI prompt
@@ -129,6 +130,35 @@ export class Store {
     const due = this.data.reminders.filter((r) => r.dueTs <= now);
     if (due.length) {
       this.data.reminders = this.data.reminders.filter((r) => r.dueTs > now);
+      this.save();
+    }
+    return due;
+  }
+
+  // ── scheduled JARVIS calls (/callat) ────────────────────────────────────
+  addCallSchedule(text, dueTs) {
+    if (!Array.isArray(this.data.callSchedules)) this.data.callSchedules = [];
+    const item = { id: this._nextId(this.data.callSchedules), text: String(text ?? '').trim(), dueTs, createdTs: Date.now() };
+    this.data.callSchedules.push(item);
+    this.data.callSchedules.sort((a, b) => a.dueTs - b.dueTs);
+    this.save();
+    return item;
+  }
+
+  deleteCallSchedule(id) {
+    if (!Array.isArray(this.data.callSchedules)) return false;
+    const before = this.data.callSchedules.length;
+    this.data.callSchedules = this.data.callSchedules.filter((s) => s.id !== id);
+    this.save();
+    return this.data.callSchedules.length < before;
+  }
+
+  /** Scheduled calls whose time has come; removes and returns them. */
+  popDueCallSchedules(now = Date.now()) {
+    if (!Array.isArray(this.data.callSchedules)) return [];
+    const due = this.data.callSchedules.filter((s) => s.dueTs <= now);
+    if (due.length) {
+      this.data.callSchedules = this.data.callSchedules.filter((s) => s.dueTs > now);
       this.save();
     }
     return due;

@@ -260,6 +260,9 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     jarvisPitch: float(e.JARVIS_PITCH, 0), // 0 = natural, 0.94 = a shade deeper
     jarvisPersona: bool(e.JARVIS_PERSONA, true),
     jarvisAddress: e.JARVIS_ADDRESS || 'Sir',
+    // JARVIS speaks ENGLISH ONLY (the owner can still speak Hindi/Hinglish —
+    // he is understood; the British voice just never tries Hindi, badly).
+    jarvisEnglishOnly: bool(e.JARVIS_ENGLISH_ONLY, true),
     piperBin: e.PIPER_BIN || '',
     piperModel: e.PIPER_MODEL || '',
     piperLengthScale: float(e.PIPER_LENGTH_SCALE, 1.05), // >1 = slower, measured

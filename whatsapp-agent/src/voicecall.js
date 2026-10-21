@@ -26,6 +26,7 @@ import { parseIntent } from './nlp.js';
 import {
   jarvisGreeting, jarvisFarewell, spokenSummary, normalizeSpokenText,
   isEndCallPhrase, isStopPhrase, isRepeatPhrase, isAffirmPhrase, isDenyPhrase,
+  smalltalkReply,
 } from './jarvis.js';
 
 const CHAIN_SPLIT = /\s+(?:aur|phir|fir|uske\s+baad|iske\s+baad|and\s+then|then|aur\s+phir)\s+/i;
@@ -205,6 +206,17 @@ export function createVoiceCall({ config = {}, runText, speak = null, hasPending
       // as a fresh instruction ONLY if it clearly is one; the parked action
       // stays parked (it expires on its own). Never auto-yes by accident.
       session.awaitingConfirm = false;
+    }
+
+    // ── casual conversation: greetings/thanks/small talk, instant + offline.
+    // Real questions still fall through to the agent (and its AI brains).
+    if (!hasPending()) {
+      const chatty = smalltalkReply(heard, config);
+      if (chatty) {
+        const { fullText, spoken } = finishResult(session, { text: chatty, heard });
+        emit(session, 'reply', { text: fullText, spoken });
+        return { ...base, state: session.state, text: fullText, spoken, audio: await safeSpeak(spoken), images: [], smalltalk: true };
+      }
     }
 
     // ── multi-command chaining, then the full agent ────────────────────────

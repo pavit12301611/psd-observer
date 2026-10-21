@@ -12,8 +12,10 @@ import { EventEmitter } from 'node:events';
 
 import {
   spokenSummary, splitSentences, normalizeSpokenText, stripWakeWord,
-  isEndCallPhrase, isAffirmPhrase, jarvisGreeting,
+  isEndCallPhrase, isAffirmPhrase, jarvisGreeting, transliterateDevanagari,
+  smalltalkReply,
 } from '../src/jarvis.js';
+import { startCallScheduleLoop } from '../src/callscheduler.js';
 import * as tts from '../src/tts.js';
 import { createVoiceCall, splitSpokenCommands } from '../src/voicecall.js';
 import {
@@ -343,4 +345,193 @@ test('server: /api/call/start + /api/call/say run a real JARVIS turn', async () 
     bridge.stop();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── 3.1: English-only speech, casual conversation, pickup robustness, /callat ──
+
+test('jarvis: spoken output is English-only — Devanagari never reaches the British voice', () => {
+  assert.equal(transliterateDevanagari('क्रोम खोलो'), 'chrome kholo');
+  const spoken = spokenSummary('✅ क्रोम खोलो और स्क्रीनशॉट भेजो', { jarvisAddress: 'Sir' });
+  assert.ok(!/[ऀ-ॿ]/.test(spoken), `no Devanagari in spoken output: ${spoken}`);
+  assert.match(spoken, /chrome kholo/);
+  const hindiKept = spokenSummary('क्रोम खोलो', { jarvisAddress: 'Sir', jarvisEnglishOnly: false });
+  assert.match(hindiKept, /क्रोम/, 'JARVIS_ENGLISH_ONLY=false keeps the original script');
+});
+
+test('jarvis: smalltalk gets instant English butler replies; real questions pass through', () => {
+  assert.match(smalltalkReply('hello', { jarvisAddress: 'Sir', timezone: 'Asia/Kolkata' }), /Sir/);
+  assert.match(smalltalkReply('how are you', { jarvisAddress: 'Sir' }), /at your service/);
+  assert.match(smalltalkReply('thank you', { jarvisAddress: 'Sir' }), /pleasure/i);
+  assert.match(smalltalkReply('kaise ho', { jarvisAddress: 'Sir' }), /smoothly/);
+  assert.equal(smalltalkReply('chrome kholo', {}), null, 'commands are not small talk');
+  assert.equal(smalltalkReply('what is the capital of france', {}), null, 'real questions go to the AI');
+});
+
+test('voicecall: casual greetings answered in-call without waking the agent', async () => {
+  const { voice, state } = fakeVoicePending();
+  const hi = await voice.say('t-casual', 'hello jarvis');
+  assert.equal(hi.smalltalk, true);
+  assert.match(hi.spoken, /Sir/);
+  assert.deepEqual(state.ran, [], 'agent not invoked for greetings');
+  const how = await voice.say('t-casual', 'how are you');
+  assert.equal(how.smalltalk, true);
+  await voice.say('t-casual', 'screenshot bhej do');
+  assert.equal(state.ran.at(-1), 'screenshot bhej do', 'real instructions still execute');
+});
+
+test('wavoip: owner calling as unknown @lid is answered via live offer cross-check', async () => {
+  const dir = tempDir();
+  class FakeCall extends EventEmitter {
+    constructor(peer) { super(); this.callId = 'lid-call'; this.peerJid = peer; this.answeredWith = null; }
+    answer(opts) { this.answeredWith = opts; }
+    reject() { this.rejected = true; }
+    end() { this.emit('ended', 'hangup'); }
+    writeAudio() { return true; }
+    clearAudio() { return 1; }
+  }
+  class FakeClient extends EventEmitter {
+    constructor() { super(); FakeClient.instance = this; }
+    async connect() {}
+    disconnect() {}
+  }
+  const learned = [];
+  const wavoip = createWaVoip({
+    config: makeConfig(dir, { waCallAnswer: true }),
+    log: silent,
+    voice: {
+      start: async () => ({ greeting: 'Good evening, Sir.', spoken: 'Good evening, Sir.', audio: null }),
+      say: async () => ({ spoken: '', text: '', audio: null }),
+      interrupt() {}, end() {},
+    },
+    isOwnerJid: () => false, // the @lid is unknown to every direct check
+    learnOwnerLid: (lid) => learned.push(lid),
+    sendToOwner: async () => {},
+    decodePcm: async () => Buffer.alloc(3200),
+    loadEngine: async () => ({ mod: { VoipClient: FakeClient }, via: 'test' }),
+  });
+  await wavoip.start();
+  await sleep(20);
+
+  const cold = new FakeCall('998877@lid');
+  assert.equal(wavoip.handleIncoming(cold, { peerJid: cold.peerJid }).acted, 'ignored-not-owner',
+    'unknown LID with NO corroboration is still never answered');
+
+  const offerAt = Date.now();
+  wavoip.noteOwnerCall({ callId: 'wa-9', from: '998877@lid', callerPn: '919528923866@s.whatsapp.net' });
+  const warm = new FakeCall('998877@lid');
+  assert.equal(wavoip.handleIncoming(warm, { peerJid: warm.peerJid }).acted, 'answered',
+    'messaging socket verified callerPn a moment ago → same ringing call, picked up');
+  assert.ok(warm.answeredWith);
+  assert.deepEqual(learned, ['998877@lid'], 'owner LID learned so next call verifies directly');
+
+  warm.end();
+  await sleep(10);
+  assert.equal(wavoip.recentlyAnswered('different-id', offerAt), true,
+    'fallback stays silent for the call the engine just handled (ids differ per socket)');
+  assert.equal(wavoip.recentlyAnswered('different-id', Date.now() + 60_000), false,
+    'a FUTURE call is not mistaken for the answered one');
+  wavoip.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('wavoip: a failed first connect reconnects instead of dying forever', async () => {
+  const dir = tempDir();
+  let attempts = 0;
+  class FlakyClient extends EventEmitter {
+    async connect() { attempts += 1; if (attempts === 1) throw new Error('handshake timeout'); }
+    disconnect() {}
+  }
+  const wavoip = createWaVoip({
+    config: makeConfig(dir, { waCallAnswer: true, waVoipReconnectMs: 30 }),
+    log: silent,
+    voice: { start: async () => ({}), say: async () => ({}), interrupt() {}, end() {} },
+    isOwnerJid: () => false,
+    sendToOwner: async () => {},
+    decodePcm: async () => Buffer.alloc(0),
+    loadEngine: async () => ({ mod: { VoipClient: FlakyClient }, via: 'test' }),
+  });
+  await wavoip.start();
+  const deadline = Date.now() + 3000;
+  while (!wavoip.status().connected && Date.now() < deadline) await sleep(25);
+  assert.equal(wavoip.status().connected, true, 'reconnected after the first failure');
+  assert.ok(attempts >= 2, `connect attempted again (${attempts})`);
+  assert.equal(wavoip.status().stage, 'ready');
+  wavoip.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('whatsapp: fallback names the exact failed stage so it is fixable in one step', async () => {
+  const dir = tempDir();
+  const config = makeConfig(dir, { waCallAnswer: true });
+  const store = new Store(config.storeFile);
+  const agent = createAgent({ config, store, log: silent });
+  const whatsapp = createWhatsApp({ config, store, agent, log: silent });
+  const noted = [];
+  whatsapp.setVoipCoordinator({
+    isHandlingCalls: () => false,
+    recentlyAnswered: () => false,
+    noteOwnerCall: (o) => noted.push(o),
+    status: () => ({ stage: 'engine-missing', enabled: true, connected: false, linked: false, hint: 'install', lastError: null }),
+  });
+  await whatsapp.handleCallEvents([{ id: 'c9', from: '919528923866@s.whatsapp.net', status: 'offer' }]);
+  assert.equal(noted.length, 1, 'VoIP engine is told the owner is ringing (LID cross-check + reconnect nudge)');
+  await sleep(300);
+  const everything = JSON.stringify(whatsapp.state.simulated);
+  assert.match(everything, /install hi nahi hua/, 'the fallback message itself says WHY pickup failed');
+  assert.match(everything, /voice call-engine/, '…and the one command that fixes it');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('callscheduler: due /callat calls the owner with fresh output; engine down → voice note', async () => {
+  const dir = tempDir();
+  const config = makeConfig(dir);
+  const store = new Store(config.storeFile);
+  const sent = [];
+  const placed = [];
+  const agent = {
+    handle: async (text) => `RESULT of ${text}`,
+    spokenFor: (reply) => `SPOKEN(${reply})`,
+    jarvisAudioReply: async (text) => ({ audio: Buffer.from(text), mimetype: 'audio/ogg; codecs=opus', ptt: true, text }),
+  };
+  const whatsapp = { sendToOwner: async (r) => { sent.push(r); } };
+  const up = startCallScheduleLoop({
+    config, store, agent, whatsapp, log: silent, autoStart: false,
+    wavoip: {
+      isHandlingCalls: () => true,
+      status: () => ({ stage: 'ready' }),
+      callOwner: async (text) => { placed.push(text); return { callId: 'sched-1' }; },
+    },
+  });
+  store.addCallSchedule('/brief', Date.now() - 1000);
+  const res = await up.tick();
+  assert.equal(res[0].via, 'call');
+  assert.match(placed[0], /SPOKEN\(RESULT of \/brief\)/, 'command ran AT call time, fresh output spoken');
+  assert.equal(store.data.callSchedules.length, 0, 'one-shot schedule consumed');
+
+  const down = startCallScheduleLoop({
+    config, store, agent, whatsapp, log: silent, autoStart: false,
+    wavoip: { isHandlingCalls: () => false, status: () => ({ stage: 'not-linked', hint: 'link karo' }) },
+  });
+  store.addCallSchedule('Dinner ready hai', Date.now() - 1000);
+  const res2 = await down.tick();
+  assert.equal(res2[0].via, 'voice-note', 'engine down → JARVIS voice note instead of silence');
+  assert.ok(sent.some((r) => typeof r === 'object' && r.audio), 'voice note actually sent');
+  assert.ok(sent.some((r) => typeof r === 'string' && /Dinner ready hai/.test(r)), 'text of the update also delivered');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('commands: /callat schedules, lists and cancels JARVIS update-calls', async () => {
+  const dir = tempDir();
+  const config = makeConfig(dir);
+  const store = new Store(config.storeFile);
+  const agent = createAgent({ config, store, log: silent });
+  const reply = String(await agent.handle('/callat in 30m /brief'));
+  assert.match(reply, /khud call karke/);
+  assert.equal(store.data.callSchedules.length, 1);
+  assert.equal(store.data.callSchedules[0].text, '/brief');
+  assert.ok(store.data.callSchedules[0].dueTs > Date.now());
+  assert.match(String(await agent.handle('/callat')), /Scheduled JARVIS calls/);
+  assert.match(String(await agent.handle('/callat del 1')), /cancelled/);
+  assert.equal(store.data.callSchedules.length, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

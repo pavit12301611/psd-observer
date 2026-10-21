@@ -676,9 +676,9 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     try { await state.sock?.rejectCall?.(callId, from); } catch (err) { log.warn?.(`[wa] rejectCall failed: ${err.message}`); }
   }
 
-  async function runCallFallback(callId, from) {
+  async function runCallFallback(callId, from, offerAt = 0) {
     state.callTimers.delete(callId);
-    if (state.voipCoordinator?.recentlyAnswered?.(callId)) return; // engine took it after all
+    if (state.voipCoordinator?.recentlyAnswered?.(callId, offerAt)) return; // engine took it after all
     log.info?.('[wa] owner call not answered by VoIP engine — starting JARVIS voice session fallback');
     await rejectCallSafe(callId, from);
     if (!store.data.voiceCallMode) { store.data.voiceCallMode = true; store.save(); }
@@ -689,14 +689,24 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
       const audio = agent.jarvisAudioReply ? await agent.jarvisAudioReply(spoken) : null;
       if (audio && typeof audio !== 'string') await sendToOwner(audio);
     } catch (err) { log.warn?.(`[wa] call greeting voice failed: ${err.message}`); }
+    // Name the EXACT failed stage so the owner can fix it in one step —
+    // "call cut gaya" bina wajah ke kabhi nahi.
+    const st = state.voipCoordinator?.status?.() ?? null;
+    const reason = engineReady
+      ? 'Engine ready tha par is call ko answer nahi kar paaya (busy/timeout ho sakta hai) — ek baar dobara call karke dekho; agent phone silent/DND pe rakho taaki wahi pehle na uthaye.'
+      : st?.stage === 'engine-missing'
+        ? 'Wajah: VoIP engine *install hi nahi hua*. Fix (ek baar): `bash scripts/observer.sh voice call-engine`'
+        : st?.stage === 'not-linked'
+          ? 'Wajah: VoIP device *link nahi hua* (QR scan baaki hai). Fix: `bash scripts/observer.sh voice link-voip`'
+          : st?.stage === 'connect-failed' || st?.stage === 'connecting'
+            ? `Wajah: engine connect nahi ho pa raha${st.lastError ? ` (${String(st.lastError).slice(0, 120)})` : ''} — main khud retry kar raha hoon. Fix: \`bash scripts/observer.sh voice status\`, na bane to \`voice call-engine\` dobara.`
+            : 'Asli WhatsApp call uthane wala engine abhi ON nahi hai.';
     await sendToOwner([
       '📞 *Call received, Sir.*',
-      engineReady
-        ? 'VoIP engine ne answer nahi kiya (busy/error), isliye main yahan voice line par aa gaya hoon.'
-        : 'Asli WhatsApp call uthane wala engine abhi ON nahi hai — *Voice Call Mode chalu kar diya hai*: voice note bhejo, main sun ke command execute karke JARVIS ki awaaz me jawab dunga.',
-      engineReady ? '' : 'Ek baar ka setup chahiye asli call ke liye:\n`bash scripts/observer.sh voice call-engine`\nGuide: WHATSAPP-CALL.md',
-      'Live baat-cheet ke liye phone app ka *📞 Call tab* abhi, isi waqt kaam karta hai.',
-      'Voice mode band karna ho: /call off',
+      reason,
+      'Tab tak *Voice Call Mode ON* kar diya hai: voice note bhejo, main sun ke command execute karke JARVIS ki awaaz me jawab dunga.',
+      engineReady ? '' : 'Live baat-cheet ke liye phone app ka *📞 Call tab* abhi, isi waqt kaam karta hai. Poori guide: WHATSAPP-CALL.md',
+      'Live status: /call · Voice mode band karna ho: /call off',
     ].filter(Boolean).join('\n'));
   }
 
@@ -716,6 +726,10 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           continue;
         }
         log.info?.('📞 [wa] OWNER is calling JARVIS on WhatsApp');
+        // Tell the VoIP engine "the owner is ringing RIGHT NOW" — it may only
+        // see his anonymous @lid, while this socket just verified callerPn.
+        // Also nudges an immediate reconnect if the engine dropped earlier.
+        state.voipCoordinator?.noteOwnerCall?.({ callId, from, callerPn: event.callerPn ?? event.caller_pn ?? '' });
         if (config.waCallFallback === 'ignore') continue;
         if (config.waCallFallback === 'reject' && !state.voipCoordinator?.isHandlingCalls?.()) {
           await rejectCallSafe(callId, from);
@@ -723,12 +737,17 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           continue;
         }
         // Give the real VoIP engine first chance to pick up.
+        const offerAt = Date.now();
         const configured = Number(config.waCallFallbackDelayMs) || 12_000;
-        const delay = state.voipCoordinator?.isHandlingCalls?.()
+        const handling = Boolean(state.voipCoordinator?.isHandlingCalls?.());
+        const engineWanted = Boolean(config.waCallAnswer);
+        const delay = handling
           ? Math.max(3_000, configured)
-          : Math.min(2_500, configured);
+          : engineWanted
+            ? Math.min(6_000, configured) // reconnect-in-flight ko ek mauka
+            : Math.min(2_500, configured);
         clearCallTimer(callId);
-        const timer = setTimeout(() => { runCallFallback(callId, from).catch((err) => log.error?.(`[wa] call fallback failed: ${err.message}`)); }, delay);
+        const timer = setTimeout(() => { runCallFallback(callId, from, offerAt).catch((err) => log.error?.(`[wa] call fallback failed: ${err.message}`)); }, delay);
         timer.unref?.();
         state.callTimers.set(callId, timer);
       } catch (err) {
@@ -987,6 +1006,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
   return {
     start, stop, status, sendToOwner, simulate, runOwner, state,
     isOwnerJid, handleCallEvents,
+    learnOwnerLid: (lid) => rememberOwnerLid(lid),
     setVoipCoordinator: (coordinator) => { state.voipCoordinator = coordinator; },
   };
 }

@@ -1,4 +1,13 @@
 {
+  "3.1.0": {
+    "title": "Asli call pickup pakka + JARVIS khud call karega + English-only awaaz ☎️🇬🇧",
+    "bullets": [
+      "Call *kaat ke voice note* wala masla fix: engine ab khud reconnect karta hai, owner ki call @lid me aaye to bhi cross-check se *asli pickup* hota hai, aur kabhi call na uthe to message me *exact wajah + ek-command fix* likha aayega. Installer ka peer-deps wala chhupa fail bhi fix — bas `bash observer.sh voice call-engine` dobara chala do",
+      "`/callat at 18:30 /brief` — set time pe *JARVIS khud tumhe WhatsApp call karke update bolega*! Call me bolke bhi laga sakte ho: \"Jarvis, call me at 6 with the update\". Engine off ho to voice note aa jayega — update kabhi miss nahi",
+      "JARVIS ab *sirf English* bolta hai (tum Hindi/Hinglish bolo, woh samajh lega) — kharab Hindi pronunciation khatm. `JARVIS_ENGLISH_ONLY=false` se kabhi bhi ulta kar sakte ho",
+      "Call me *casual baat-cheet + sawalon ke jawab*: \"hello\", \"kaise ho\", \"thank you\" pe instant butler jawab (offline bhi), aur asli sawal AI short spoken English me jawab dega. Call ke baad chat me chhota transcript bhi milega"
+    ]
+  },
   "3.0.0": {
     "title": "JARVIS Voice Call — seedha WhatsApp call karo, JARVIS uthayega ☎️🎩",
     "bullets": [

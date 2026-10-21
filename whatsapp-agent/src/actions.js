@@ -92,6 +92,23 @@ export function createActions({ config, store, log = console, journal = null, no
         return `🔊 ${clean}`;
       },
     },
+    {
+      name: 'schedule_jarvis_call', level: 'standard', label: 'Schedule a JARVIS call',
+      description: 'Schedule JARVIS to CALL the owner on WhatsApp at a set time and speak an update — use when the owner says things like "call me at 6pm and tell me", "shaam ko call karke update dena", "remind me by call at 9". `when` uses the reminder grammar: "in 30m", "at 18:30", "tomorrow 9am". `message` is what JARVIS should say; if the update should be live data, make message a slash command like "/brief" or "/system" — it runs at call time and the result is spoken. One-shot (not recurring).',
+      params: {
+        when: { type: 'string', description: 'When to call: "in 30m" | "at 18:30" | "tomorrow 9am"', required: true },
+        message: { type: 'string', description: 'What to speak on the call, or a /command whose fresh output should be spoken', required: true },
+      },
+      confirmText: ({ when, message }) => `Schedule a JARVIS call (${when}) to say: “${String(message).slice(0, 80)}”`,
+      run: async ({ when, message }) => {
+        const whenStr = String(when ?? '').trim();
+        // parseWhen clock forms ("at 18:30") need trailing text — supply a dummy.
+        const parsed = tools.parseWhen(whenStr) ?? tools.parseWhen(`${whenStr} scheduled call`);
+        if (!parsed) return `⏰ I couldn't understand the time "${when}". Try "in 30m", "at 18:30" or "tomorrow 9am".`;
+        const item = store.addCallSchedule(String(message ?? '').trim() || 'You asked me to call you now, Sir.', parsed.dueTs);
+        return `📞 Scheduled, Sir — I shall call you on ${new Date(item.dueTs).toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} and ${item.text.startsWith('/') ? `report the fresh output of ${item.text}` : `say: "${item.text.slice(0, 120)}"`}. (See or cancel: /callat)`;
+      },
+    },
 
     // ── apps & windows ──────────────────────────────────────────────────────
     {

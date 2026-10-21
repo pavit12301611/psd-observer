@@ -138,6 +138,8 @@ export function spokenSummary(reply, config = {}) {
     .replace(/(?:^|\s)#(\w+)/g, ' $1')
     .replace(/\s+/g, ' ')
     .trim();
+  // English-only speech (default): never hand Devanagari to a British voice.
+  if (config.jarvisEnglishOnly !== false) spoken = transliterateDevanagari(spoken).replace(/\s+/g, ' ').trim();
   if (!spoken) return `Done, ${addressOf(config)}.`;
 
   // Confirmation prompts must survive intact — the owner has to hear the question.
@@ -260,6 +262,24 @@ export function stripWakeWord(text) {
 }
 
 /**
+ * Devanagari → Roman for the known command vocabulary (digits too). Used on
+ * SPOKEN OUTPUT when JARVIS speaks English-only: an en_GB voice must never
+ * be handed Devanagari script (it spells/mangles it). Unmapped words pass
+ * through untouched.
+ */
+export function transliterateDevanagari(text) {
+  let out = String(text ?? '');
+  if (!/[ऀ-ॿ]/.test(out)) return out;
+  out = out.replace(/[०-९]/g, (d) => DEVA_DIGITS[d] ?? d);
+  return out.split(/(\s+)/).map((token) => {
+    const trailing = token.match(/[।,!?;:]+$/u)?.[0] ?? '';
+    const cleanToken = trailing ? token.slice(0, -trailing.length) : token;
+    const mapped = DEVANAGARI_WORDS[token] ?? DEVANAGARI_WORDS[cleanToken];
+    return mapped ? mapped + trailing.replace(/।/g, '.') : token.replace(/।/g, '.');
+  }).join('');
+}
+
+/**
  * Full pipeline for one recognised utterance: wake word → Devanagari →
  * mis-hearings → digits → tidy spacing. The result is what every command
  * layer (intents, AI tool loop, DeepSeek Harness) receives.
@@ -304,6 +324,37 @@ export function isAffirmPhrase(text) {
 
 export function isDenyPhrase(text) {
   return /^(?:no|nope|nahi|nahin|nah|mat karo|ruk jao|cancel|don'?t|do not|ना|नहीं|रद्द)$/.test(cleanPhrase(text));
+}
+
+/**
+ * Casual conversation for live calls — greetings, thanks, "how are you".
+ * Instant + offline (no brain needed), always answered in English with
+ * butler polish. Returns null for everything else (real questions go to
+ * the agent/AI as usual). Input should already be normalizeSpokenText-ed.
+ */
+export function smalltalkReply(text, config = {}, now = new Date()) {
+  const clean = cleanPhrase(text);
+  if (!clean) return null;
+  const address = addressOf(config);
+  if (/^(hello|hi+|hey|namaste|namaskar|good (?:morning|afternoon|evening|night)|namaskar jarvis|ram ram)$/.test(clean)) {
+    return jarvisGreeting(config, now);
+  }
+  if (/^(how are you|how r u|kaise ho|kaisi ho|kaisa hai|how is it going|how'?s it going|what'?s up|aur batao|sab theek)$/.test(clean)) {
+    return `All systems are running smoothly, ${address} — I am quite well, and entirely at your service. What would you like me to do?`;
+  }
+  if (/^(thank you|thanks|thank u|thanks a lot|shukriya|dhanyavaad|bahut shukriya|bahut dhanyavaad|great|nice|awesome|perfect|good job|well done|badia|badiya|shandaar)$/.test(clean)) {
+    return `Always a pleasure, ${address}.`;
+  }
+  if (/^(who are you|your name|what is your name|tum kaun ho|tumhara naam kya hai|tera naam kya hai|aap kaun ho)$/.test(clean)) {
+    return `I am JARVIS — your personal assistant, running right here on your own computer, ${address}. Commands, questions or conversation: simply ask.`;
+  }
+  if (/^(what can you do|what do you do|tum kya kar sakte ho|kya kya kar sakte ho|kaise kaam karte ho)$/.test(clean)) {
+    return `Quite a lot, ${address}. I can open apps, take screenshots, find and send files, control volume, Wi-Fi and music, download links, answer questions — and even call you at a set time with updates. Just tell me what you need.`;
+  }
+  if (/^(you are (?:great|awesome|amazing|the best)|i love you|mast ho tum|tum bahut acche ho)$/.test(clean)) {
+    return `You are most kind, ${address}. I shall endeavour to be worthy of it.`;
+  }
+  return null;
 }
 
 // ── the JARVIS audio sheen (ffmpeg) ──────────────────────────────────────────

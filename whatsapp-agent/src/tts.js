@@ -27,7 +27,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { jarvisFxFilter, splitSentences } from './jarvis.js';
+import { jarvisFxFilter, splitSentences, transliterateDevanagari } from './jarvis.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -347,7 +347,10 @@ export async function synthesize(text, config = {}, log = console) {
     config = { ...config, ttsVoice: voicePrefix[1].toLowerCase() };
     cleanRaw = voicePrefix[2];
   }
-  const clean = sanitizeForTTS(cleanRaw);
+  // JARVIS speaks English only (default): Devanagari becomes Roman so the
+  // British neural voice is never forced to mangle Hindi script, and Hindi
+  // TTS routing below is skipped entirely.
+  const clean = sanitizeForTTS(config.jarvisEnglishOnly === false ? cleanRaw : transliterateDevanagari(cleanRaw));
   if (!clean) throw new Error('Kuch likho toh voice banau — e.g. /voicereply hello sir');
 
   const engines = listTTSEngines(config);
