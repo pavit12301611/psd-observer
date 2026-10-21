@@ -1954,12 +1954,15 @@ DONE
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
-      if grep -q "observer-patch: join-ongoing-call v2" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+      if grep -q "observer-patch: claim-offer-first v3" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+         || grep -q "observer-patch: claim-offer-first v3" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
+        ok "engine patch    : v3 applied (claim-first + CallOfferReceived fix + join fallback — bina iske call pickup nahi hoti)"
+      elif grep -q "observer-patch: join-ongoing-call v2" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: join-ongoing-call v2" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
-        ok "engine patch    : v2 applied (checkOngoingCalls + lobby-join — bina inke call active hi nahi banti)"
+        warn "engine patch    : sirf v2 hai (call rejoin mode me phansegi + 0s me kat jayegi) — bash observer.sh voice call-engine (v3 lag jayega)"
       elif grep -q "observer-patch: check-ongoing-calls v1" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: check-ongoing-calls v1" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
-        warn "engine patch    : sirf v1 hai (lobby tak jayega, join nahi hoga) — bash observer.sh voice call-engine (v2 lag jayega)"
+        warn "engine patch    : sirf v1 hai — bash observer.sh voice call-engine (v3 lag jayega)"
       else
         warn "engine patch    : MISSING — bash observer.sh voice call-engine (bina iske har call accept_timeout hogi)"
       fi

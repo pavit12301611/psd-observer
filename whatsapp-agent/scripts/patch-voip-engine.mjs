@@ -3,33 +3,34 @@
  * patch-voip-engine.mjs — make the experimental baileys-caller engine answer
  * inbound WhatsApp calls at all.
  *
- * The problem (proven from a real machine's journal + sandbox WASM runs):
- * the WhatsApp Web VoIP WASM *buffers* an inbound offer as a "pending call"
- * ("Recording call offer received") and waits for the host to report which
- * calls are ongoing via `checkOngoingCalls(callIds, callCreatorJids)`. Only
- * then does it engage: it sends `<lobby>` to `<callId>@call`, the server
- * promotes the call to a *joinable ongoing call* (WASM event 93,
- * UpdateJoinableCallLog), and the host must then `joinVoipOngoingCall(...)`
- * to create the ACTIVE call — which is what the library's deferred
- * `acceptCall()` polls for. baileys-caller (upstream main 574f666) does
- * neither step, so every inbound call rings out with `accept_timeout` /
- * WASM status 670007 and the caller's RelayLatency stanzas are dropped as
- * "no active call".
+ * What the real machine's journal + sandbox WASM runs + WhatsApp Web's own
+ * extracted JS proved, step by step:
  *
- * This patcher applies small, guarded text patches to the installed
- * engine's dist files. Every part is individually idempotent (needle
- * check), so it is safe on fresh installs, on v1-patched installs (only the
- * new parts land) and on every update. Patched files are syntax-verified;
- * originals are restored on any failure. If upstream's dist layout changes
- * so an anchor is missing, it reports that and changes nothing for that part.
+ *  1. The VoIP WASM *buffers* an inbound offer as a "pending call"
+ *     ("Recording call offer received") unless the host claims the call via
+ *     `checkOngoingCalls(callIds, callCreatorJids)`. Claiming it only AFTER
+ *     feeding the offer made the stack treat its own call as a missed one
+ *     to REJOIN through the server lobby (which nacks 1:1 calls, error 404).
+ *     WhatsApp Web's socket layer claims first, then delivers. (v3 moves the
+ *     claim before the offer feed; v1 had it after.)
+ *  2. If a call still goes the buffered route, the lobby promotes it to a
+ *     *joinable ongoing call* (WASM event 93, UpdateJoinableCallLog) and the
+ *     host must `joinVoipOngoingCall(...)` to create the ACTIVE call the
+ *     library's deferred `acceptCall()` polls for. (v2)
+ *  3. WASM event **2 is `CallOfferReceived`** — the stack RINGING — per
+ *     WhatsApp Web's own CallEvent enum. Upstream treats it as a remote
+ *     hangup (`_forceEnd("remote_end")`), killing every inbound call at the
+ *     exact moment the WASM engages it. (v3)
+ *  4. Stanzas the WASM addresses to the call room (`<callId>@call`, e.g.
+ *     `<lobby>`) must keep that address; the bridge rewrote them to the
+ *     peer's bare JID (`<callId>@s.whatsapp.net`). (v1)
  *
- * v1: checkOngoingCalls wrapper + call on inbound offer + keep `<callId>@call`
- *     stanza addressing (bridge rewrote it to a bare JID, misrouting <lobby>).
- * v2: on WASM event 93 (call became joinable) join it via joinOngoingCall
- *     with joinAndAccept=false (the existing answer() poll performs the one
- *     real accept), stash caller PN at offer time for the join params, and
- *     widen the WASM log keyword filter (lobby|buffered|ongoing|join|ack) so
- *     `voice doctor` journals show the promotion chain at the default level.
+ * Every part is individually idempotent (needle check), so it is safe on
+ * fresh installs, on older patched installs (only missing parts land; the
+ * superseded v1 after-feed claim is removed) and on every update. Patched
+ * files are syntax-verified; originals are restored on any failure. If
+ * upstream's dist layout changes so an anchor is missing, it reports that
+ * and changes nothing for that part.
  *
  * Usage: node scripts/patch-voip-engine.mjs <engineDir> [<engineDir> ...]
  * Exit codes: 0 ok (patched/already), 2 anchor missing somewhere, 1 hard error.
@@ -41,6 +42,20 @@ import { fileURLToPath } from 'node:url';
 
 const M1 = 'observer-patch: check-ongoing-calls v1';
 const M2 = 'observer-patch: join-ongoing-call v2';
+const M3 = 'observer-patch: claim-offer-first v3';
+
+// Remove the superseded v1/v2 after-feed claim block from index.mjs, whatever
+// comment wording the patcher version that wrote it used. The block sits
+// immediately before the `incoming` emit line.
+function removeLegacyAfterFeedClaim(src) {
+  const emitAnchor = '        this.emit("incoming", call, { isVideo, isGroup, peerJid });';
+  const emitAt = src.indexOf(emitAnchor);
+  if (emitAt < 0) return src;
+  const commentAt = src.lastIndexOf('/* observer-patch: check-ongoing-calls v1', emitAt);
+  if (commentAt < 0 || emitAt - commentAt > 900) return src;
+  if (!src.slice(commentAt, emitAt).includes('checkOngoingCalls?.([callId], [peerJid])')) return src;
+  return src.slice(0, commentAt) + src.slice(emitAt);
+}
 
 // Each part: { needle } = text present when the part is applied;
 // apply(src) returns patched src, or null when its anchor is missing.
@@ -72,20 +87,45 @@ const PARTS = {
   ],
   'index.mjs': [
     {
-      needle: 'checkOngoingCalls?.([callId], [peerJid])',
+      needle: 'claim the call BEFORE feeding',
       apply: (src) => {
-        const anchor = '        this.emit("incoming", call, { isVideo, isGroup, peerJid });';
+        const anchor = '            const delivered = this.#signaling.processIncomingCall(node, this.#engine, this.#activeCall?.callId ?? "");';
         if (!src.includes(anchor)) return null;
-        const insertion = `        /* ${M1} — the WASM buffers the offer as a pending call and only
-           engages it (lobby -> joinable -> active) once the host reports the
-           call as ongoing. Without this, answer() polls an offer that never
-           promotes and every inbound call dies with accept_timeout. */
-        try {
-            this.#engine?.checkOngoingCalls?.([callId], [peerJid]);
-        }
-        catch { }
+        let out = removeLegacyAfterFeedClaim(src);
+        const insertion = `            /* ${M3} — claim the call BEFORE feeding the offer stanza, the
+               order WhatsApp Web's socket layer uses. Claiming only after
+               delivery made the stack treat its own fresh call as a missed
+               one to rejoin via the server lobby (which 404s for 1:1). With
+               the claim first, the offer rings live (CallOfferReceived). */
+            try {
+                const offerChild = this.#baileys?.getBinaryNodeChild?.(node, "offer");
+                const claimId = String(offerChild?.attrs?.["call-id"] ?? "");
+                if (claimId) {
+                    const claimCreator = String(offerChild?.attrs?.["call-creator"] ?? node.attrs?.from ?? "");
+                    this.#engine?.checkOngoingCalls?.([claimId], [claimCreator]);
+                }
+            }
+            catch { }
 `;
-        return src.replace(anchor, insertion + anchor);
+        out = out.replace(anchor, insertion + anchor);
+        return out;
+      },
+    },
+    {
+      needle: 'CallOfferReceived (ringing)',
+      apply: (src) => {
+        const anchor = `        else if (eventType === 2) {
+            this.#activeCall?._forceEnd("remote_end");
+        }`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `        else if (eventType === 2) {
+            /* ${M3} — WA_CALL_EVENT 2 is CallOfferReceived (WhatsApp Web's
+               own CallEvent enum): the stack is RINGING, not hanging up.
+               Upstream force-ended the call here, killing every inbound call
+               at the exact moment the WASM engaged it. Real hangups still
+               land via <terminate>/<reject> stanzas and event 10. */
+            console.log(\`[baileys-caller] WASM event CallOfferReceived (ringing) for \${this.#activeCall?.callId ?? "?"}\`);
+        }`);
       },
     },
     {
@@ -140,6 +180,18 @@ const PARTS = {
         }
 `;
         return src.replace(anchor, insertion + anchor);
+      },
+    },
+    {
+      // v3 guard: never join a call that is already ringing/active/accepted —
+      // on the claim-first live path event 93 may exist as pure telemetry.
+      needle: '!call._accepted && !_active93',
+      apply: (src) => {
+        const anchor = '            if (call?.incoming && !call._joinedLobby && (!evCallId || evCallId === call.callId)) {';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `            const _info93 = (() => { try { return this.#engine.getCallInfo(); } catch { return null; } })();
+            const _active93 = typeof _info93 === "string" ? _info93.trim().length > 0 && !_info93.startsWith("getCallInfo threw") : !!_info93;
+            if (call?.incoming && !call._joinedLobby && !call._accepted && !_active93 && (!evCallId || evCallId === call.callId)) {`);
       },
     },
     {

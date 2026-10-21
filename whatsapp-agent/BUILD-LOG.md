@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.5 — Claim pehle: offer se pehle claim, varna rejoin+404; upstream event-2 = CallOfferReceived
+
+3.1.4 ki asli test call (`0065B9DE…`) ka poora WASM transcript mila: `wa_call_join_ongoing_call` chala, state `None -> Rejoining` hui, dusri `<lobby>` gayi — phir `handle_lobby_ack: error code: 404` aur event **94 = `LobbyNacked`**. Sabse zaroori signal: `is_rejoin: 1`. Matlab claim (v1/v2 me offer FEED HONE KE BAAD) itni der se aaya ki WASM ne apni hi ringing call ko "ongoing/missed" mankar rejoin join kiya — live 1:1 call ke liye galat raasta.
+
+Doosri khoj WA Web ke `WAWebVoipWaCallEnums` se: event **2 = `CallOfferReceived`** — ringing signal. Upstream dist ispar `#activeCall?._forceEnd("remote_end")` maarta hai! Yahi wajah thi ki call engine engage hote hi "0s me kat gayi" (diary me jhootha `remote_end`) aur deferred accept kabhi chala hi nahi.
+
+Patch **v3**: (1) claim `CB:call` me `processIncomingCall` se pehle; v1/v2 ka after-feed claim upgrade par auto-remove. (2) event-2 forceEnd → sirf log line; asli hangup `<terminate>`/`<reject>`/event-10 se saare. (3) event-93 join sirf safety-net, accepted/active call par kabhi nahi. RelayLatency to respond hua (`Peer …:0@lid not found` — nacked state me peer register hi nahi tha; live claim ke saath ye bhi theek hona chahiye — agar phir aaya to device-specific JIDs join me daalne honge, ye agla suspect hai).
+
+
 ## v3.1.4 — Lobby paar, ab JOIN bhi karna tha (event 93 = UpdateJoinableCallLog)
 
 > 3.1.3 ki test call: journal me pehli baar `WASM -> sending <lobby>`

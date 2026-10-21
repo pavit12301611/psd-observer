@@ -1,8 +1,9 @@
-// Tests for scripts/patch-voip-engine.mjs — the inbound-pickup patch applied
-// to the installed baileys-caller engine. Fixture dist files carry the exact
-// anchor lines of upstream's real dist; the patcher must patch them once,
-// stay idempotent, report missing anchors without touching files, and never
-// leave syntactically broken JS behind.
+// Tests for scripts/patch-voip-engine.mjs — the inbound-pickup patches
+// applied to the installed baileys-caller engine. Fixture dist files carry
+// the exact anchor lines of upstream's real dist; the patcher must apply
+// every part once, stay idempotent, upgrade older patched installs (incl.
+// removing the superseded v1 after-feed claim), report missing anchors, and
+// never leave syntactically broken JS behind.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,10 +29,22 @@ const INDEX = [
   'const WASM_EVENT_CALL_REJECTED = 92;',
   'export class VoipClient extends EventEmitter {',
   '    #engine = null;',
+  '    #signaling = null;',
+  '    #baileys = null;',
+  '    #sock = null;',
   '    #activeCall = null;',
   '    #registerCall(call) {}',
-  '    setupLog() {',
+  '    #endActiveCallOnPeerTerminate(node) {}',
+  '    #handleIncomingOffer(node) {}',
+  '    wireCalls() {',
   '        const CALL_LOG_RE = /offer|reject|reason|preprocess|pending|contact|accept|missed|expired|silence|terminat|relay|call.?state|not.?authoriz|privacy/i;',
+  '        this.#sock.ws.on("CB:call", (node) => {',
+  '            this.#endActiveCallOnPeerTerminate(node);',
+  '            const delivered = this.#signaling.processIncomingCall(node, this.#engine, this.#activeCall?.callId ?? "");',
+  '            void delivered',
+  '                .then(() => this.#handleIncomingOffer(node))',
+  '                .catch((err) => this.emit("error", err));',
+  '        });',
   '        return CALL_LOG_RE;',
   '    }',
   '    handleOffer(offer, call, callId, peerJid, isVideo, isGroup) {',
@@ -45,10 +58,26 @@ const INDEX = [
   '    #handleCallEvent = (eventType, eventData) => {',
   '        if (eventType === 16) {',
   '        }',
+  '        else if (eventType === 2) {',
+  '            this.#activeCall?._forceEnd("remote_end");',
+  '        }',
   '        else if (eventType === WASM_EVENT_CALL_REJECTED) {',
   '        }',
   '    };',
   '}',
+  '',
+].join('\n');
+
+// Exactly what the 3.1.3 patcher inserted (note the older comment wording).
+const LEGACY_V1_BLOCK = [
+  '        /* observer-patch: check-ongoing-calls v1 — the WASM buffers the offer as a pending call and only',
+  '           engages it (lobby -> preaccept -> active) once the host reports the',
+  '           call as ongoing. Without this, answer() polls an offer that never',
+  '           promotes and every inbound call dies with accept_timeout. */',
+  '        try {',
+  '            this.#engine?.checkOngoingCalls?.([callId], [peerJid]);',
+  '        }',
+  '        catch { }',
   '',
 ].join('\n');
 
@@ -85,21 +114,26 @@ function makeFixture(overrides = {}) {
 }
 
 const quiet = () => {};
+const readIdx = (dir) => fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8');
 
-test('engine patch: applies to all three dist files, once', async () => {
+test('engine patch: all parts apply once on a fresh engine', async () => {
   const dir = makeFixture();
   const r1 = patchEngineDir(dir, quiet);
   assert.equal(r1.state, 'patched');
   const wasm = fs.readFileSync(path.join(dir, 'dist/wasm-engine.mjs'), 'utf8');
-  const idx = fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8');
+  const idx = readIdx(dir);
   const sig = fs.readFileSync(path.join(dir, 'dist/signaling.mjs'), 'utf8');
   assert.match(wasm, /checkOngoingCalls = \(callIds, callCreatorJids\)/);
-  assert.match(idx, /this\.#engine\?\.checkOngoingCalls\?\.\(\[callId\], \[peerJid\]\)/);
-  assert.match(idx, /call\._callerPn =/, 'v2: caller PN stashed at offer time');
-  assert.match(idx, /joining lobby call/, 'v2: event-93 lobby join');
-  assert.match(idx, /joinOngoingCall\(\{/, 'v2: join invoked');
-  assert.match(idx, /joinAndAccept: false/, 'v2: single accept stays with answer() poll');
-  assert.match(idx, /relay\|lobby\|buffered\|ongoing\|join\|ack\|/, 'v2: widened WASM log filter');
+  assert.match(idx, /claim the call BEFORE feeding/, 'v3: claim inserted');
+  assert.ok(idx.indexOf('checkOngoingCalls?.([claimId], [claimCreator])') < idx.indexOf('processIncomingCall(node'),
+    'v3: claim really is BEFORE the offer feed');
+  assert.doesNotMatch(idx, /checkOngoingCalls\?\.\(\[callId\], \[peerJid\]\)/, 'no after-feed claim');
+  assert.doesNotMatch(idx, /_forceEnd\("remote_end"\)/, 'v3: event-2 remote_end bug gone');
+  assert.match(idx, /CallOfferReceived \(ringing\)/, 'v3: event 2 treated as ringing');
+  assert.match(idx, /call\._callerPn =/, 'v2: caller PN stashed');
+  assert.match(idx, /joining lobby call/, 'v2: event-93 join');
+  assert.match(idx, /!call\._accepted && !_active93/, 'v3: join guard never touches live calls');
+  assert.match(idx, /relay\|lobby\|buffered\|ongoing\|join\|ack\|/, 'v2: widened log filter');
   assert.match(sig, /isCallRoomPeer/);
   // patched wasm-engine imports and the wrapper is a safe no-op pre-init
   const mod = await import(path.join(dir, 'dist/wasm-engine.mjs'));
@@ -108,32 +142,32 @@ test('engine patch: applies to all three dist files, once', async () => {
 
   const r2 = patchEngineDir(dir, quiet);
   assert.equal(r2.state, 'already');
-  const wasm2 = fs.readFileSync(path.join(dir, 'dist/wasm-engine.mjs'), 'utf8');
-  assert.equal((wasm2.match(/observer-patch: check-ongoing-calls v1/g) || []).length, 1, 'marker exactly once');
+});
+
+test('engine patch: v1/v2 install upgrades — legacy claim removed, nothing duplicated', () => {
+  // Simulate a 3.1.3/3.1.4 install: legacy after-feed claim present.
+  const legacyIndex = INDEX.replace(
+    '        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
+    LEGACY_V1_BLOCK + '        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
+  );
+  const dir = makeFixture({ index: legacyIndex });
+  const r = patchEngineDir(dir, quiet);
+  assert.equal(r.state, 'patched');
+  const idx = readIdx(dir);
+  assert.doesNotMatch(idx, /checkOngoingCalls\?\.\(\[callId\], \[peerJid\]\)/, 'legacy after-feed claim removed');
+  assert.equal((idx.match(/checkOngoingCalls\?\.\(\[claimId\]/g) || []).length, 1, 'claim present exactly once');
+  assert.match(idx, /this\.emit\("incoming"/, 'emit line intact');
+  const r2 = patchEngineDir(dir, quiet);
+  assert.equal(r2.state, 'already');
 });
 
 test('engine patch: missing anchor is reported, that part skipped', () => {
-  const mangled = INDEX.replace('this.emit("incoming"', 'this.emit("renamed"');
+  const mangled = INDEX.replace('processIncomingCall(node', 'renamedFeed(node');
   const dir = makeFixture({ index: mangled });
   const r = patchEngineDir(dir, quiet);
   assert.equal(r.state, 'anchor-missing');
-  const after = fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8');
-  assert.match(after, /this\.emit\("renamed"/, 'mangled line itself untouched');
-  assert.doesNotMatch(after, /checkOngoingCalls\?\./, 'skipped part not inserted');
-});
-
-test('engine patch: v1-patched install gets only the v2 parts', () => {
-  // Simulate a 3.1.3 (v1) install: v1 needles present, v2 parts absent.
-  const v1Index = INDEX.replace(
-    '        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
-    '        try {\n            this.#engine?.checkOngoingCalls?.([callId], [peerJid]);\n        }\n        catch { }\n        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
-  );
-  const dir = makeFixture({ index: v1Index });
-  const r = patchEngineDir(dir, quiet);
-  assert.equal(r.state, 'patched');
-  const idx = fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8');
-  assert.equal((idx.match(/checkOngoingCalls\?\.\(\[callId\]/g) || []).length, 1, 'v1 part not duplicated');
-  assert.match(idx, /joining lobby call/, 'v2 part added');
+  const after = readIdx(dir);
+  assert.doesNotMatch(after, /claim the call BEFORE feeding/, 'skipped part not inserted');
 });
 
 test('engine patch: absent engine dir is a clean skip', () => {

@@ -1,4 +1,14 @@
 {
+  "3.1.5": {
+    "title": "Claim pehle, offer baad me — rejoin-404 ka asli ilaaj 📞",
+    "bullets": [
+      "3.1.4 ki test call ne do aur gahri cheezein pakdi (WA Web ke asli enum se decode): claim abhi offer ke BAAD ja raha tha, isliye engine apni hi bajti-hui call ko 'missed/rejoin' samajhta tha — join to hua, par Rejoining mode me, aur server ne lobby ko 404 se nack kar diya (event 94 = LobbyNacked)",
+      "Engine patch **v3**: claim ab offer feed hone se PEHLE hota hai (CB:call handler me) — call live ring karegi, rejoin nahi. Purana after-feed claim upgrade par khud hat jata hai (double-claim nahi)",
+      "Upstream ki doosri landmine mili: event **2 = CallOfferReceived** (ringing), par engine usi par call ko `remote_end` bolke 0s me kaat deta tha — wohi 'call ended (remote_end) after 0s' wali line. v3 me ye fix hai; asli hangup usko terminate/event-10 se petta rehta hai",
+      "join wali safety-net ab accepted/active call ko kabhi nahi chhooti. `voice doctor` ab v3 report karta hai",
+      "`bash observer.sh update` karna hai — patch v2 se v3 khud lag jayega. Phir ek normal test call hi faisla karegi. Honest status wahi: jab tak ek real call end-to-end prove na ho, pickup experimental hai; voice-note fallback hamesha ka guaranteed floor hai"
+    ]
+  },
   "3.1.4": {
     "title": "Lobby ke aage ka kadam bhi mila — call ko JOIN bhi karna padta hai 🤝📞",
     "bullets": [
