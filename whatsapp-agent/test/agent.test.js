@@ -14,6 +14,10 @@ import { Mailbox } from '../src/mailbox.js';
 import * as pcctl from '../src/pccontrol.js';
 import * as files from '../src/files.js';
 import * as finder from '../src/elementfinder.js';
+import * as reach from '../src/reach.js';
+import * as grounding from '../src/grounding.js';
+import * as hands from '../src/hands.js';
+import * as nlp from '../src/nlp.js';
 import { archiveDeadAuthDir } from '../src/whatsapp.js';
 
 const OWNER = '919528923866';
@@ -427,5 +431,161 @@ test('PSD_Ai identity + turbo offline power (multi-command chains, Hinglish math
   assert.match(await agent.handle('time kya hua hai?'), /\d/);
   assert.match(await agent.handle('aaj kya date hai?'), /20\d\d/);
 });
+
+test('Agent-Reach: URL normalization, SSRF blocking, anti-bot detection, VTT/RSS/DDG parsers & multi-channel routing', async () => {
+  // Public URL normalization + SSRF protection
+  assert.equal(reach.normalizePublicHttpUrl('example.com/docs'), 'https://example.com/docs');
+  assert.throws(() => reach.normalizePublicHttpUrl('http://127.0.0.1:8080/secret'), /Refusing private\/local host/);
+  assert.throws(() => reach.normalizePublicHttpUrl('http://192.168.1.1/admin'), /Refusing private\/local host/);
+  assert.throws(() => reach.normalizePublicHttpUrl('https://user:pass@example.com/'), /embedded username\/password/);
+
+  // Credential scrubbing
+  assert.equal(
+    reach.scrubUrlCredentials('https://alice:secret123@example.com/api?api_key=xyz987'),
+    'https://***:***@example.com/api?api_key=***',
+  );
+
+  // Anti-bot challenge page detection
+  assert.equal(reach.isAntibotPage('Title: Just a moment...\nWarning: target page requiring captcha\n## Performing security verification'), true);
+  assert.equal(reach.isAntibotPage('# Real Article Title\nHere is normal markdown content.'), false);
+
+  // Platform detection across 16 channels
+  assert.equal(reach.detectPlatform('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'youtube');
+  assert.equal(reach.detectPlatform('https://youtu.be/dQw4w9WgXcQ'), 'youtube');
+  assert.equal(reach.detectPlatform('https://github.com/pavit12301611/psd-observer'), 'github');
+  assert.equal(reach.detectPlatform('https://x.com/elonmusk/status/1234567890'), 'twitter');
+  assert.equal(reach.detectPlatform('https://www.reddit.com/r/LocalLLaMA/comments/abc/test'), 'reddit');
+  assert.equal(reach.detectPlatform('https://news.ycombinator.com/item?id=1'), 'hackernews');
+  assert.equal(reach.detectPlatform('https://example.com/feed.xml'), 'rss');
+  assert.equal(reach.detectPlatform('https://example.com/blog/post'), 'web');
+
+  // YouTube VTT rolling subtitle deduplication
+  const vtt = [
+    'WEBVTT',
+    'Kind: captions',
+    'Language: en',
+    '',
+    '00:00:01.000 --> 00:00:03.000',
+    '<c>Hello</c> world',
+    '',
+    '00:00:03.000 --> 00:00:05.000',
+    'Hello world from PSD_Ai',
+    '',
+    '00:00:05.000 --> 00:00:07.000',
+    'Deterministic computer control!',
+  ].join('\n');
+  assert.equal(reach.parseVttTranscript(vtt), 'Hello world from PSD_Ai Deterministic computer control!');
+  assert.equal(reach.extractYoutubeId('https://youtu.be/dQw4w9WgXcQ?t=10'), 'dQw4w9WgXcQ');
+
+  // DuckDuckGo HTML parser & RSS parser
+  const ddgHtml = `<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fpavit12301611%2Fpsd-observer">PSD Observer Repo</a><a class="result__snippet">Full Linux control</a>`;
+  const ddgItems = reach.parseDuckDuckGoHtml(ddgHtml);
+  assert.equal(ddgItems.length, 1);
+  assert.equal(ddgItems[0].url, 'https://github.com/pavit12301611/psd-observer');
+
+  const rssXml = `<rss><channel><item><title>Release 3.2.0</title><link>https://example.com/r32</link><description>Agent-Reach + Agent-S</description></item></channel></rss>`;
+  const rssItems = reach.parseRssXml(rssXml);
+  assert.equal(rssItems.length, 1);
+  assert.equal(rssItems[0].title, 'Release 3.2.0');
+
+  // Offline mock fetch test for readWebUrl & twitterLookup (FxTwitter)
+  const mockFetch = async (url) => {
+    if (String(url).includes('api.fxtwitter.com')) {
+      return {
+        ok: true,
+        json: async () => ({
+          tweet: {
+            text: 'Agent-Reach + Agent-S gives PSD_Ai real deterministic control!',
+            likes: 420,
+            retweets: 69,
+            replies: 12,
+            views: 9000,
+            author: { name: 'Pavit', screen_name: 'pavit' },
+          },
+        }),
+      };
+    }
+    return {
+      ok: true,
+      headers: { get: () => 'text/markdown' },
+      text: async () => '# Clean Page Title\n\nThis is clean structured content read via Agent-Reach without opening a browser.',
+    };
+  };
+
+  const page = await reach.readWebUrl('https://example.com/article', { fetchImpl: mockFetch });
+  assert.equal(page.ok, true);
+  assert.match(page.content, /Clean Page Title/);
+
+  const tweet = await reach.twitterLookup('https://x.com/pavit/status/1234567890', { fetchImpl: mockFetch });
+  assert.equal(tweet.ok, true);
+  assert.equal(tweet.backend, 'FxTwitter API');
+  assert.match(tweet.text, /real deterministic control/);
+
+  const doc = await reach.reachDoctor();
+  assert.equal(doc.ok, true);
+  assert.match(doc.text, /Agent-Reach Doctor/);
+});
+
+test('Agent-S Grounding: AT-SPI widget tree, phrase alignment, Set-of-Marks (SoM), and deterministic Hands resolution', async () => {
+  const sampleAtspi = [
+    { id: 0, role: 'push button', name: 'Sign in', description: '', left: 800, top: 40, width: 100, height: 36, x: 850, y: 58, focused: false },
+    { id: 1, role: 'entry', name: 'Search or type URL', description: '', left: 200, top: 40, width: 400, height: 36, x: 400, y: 58, focused: true },
+  ];
+  const sampleWords = [
+    { id: 0, text: 'Submit', left: 300, top: 400, width: 80, height: 24, conf: 95, lineKey: '1/1/1', wordNum: 1 },
+  ];
+  const size = { width: 1920, height: 1080 };
+
+  // 1. AT-SPI widget matching hits exact widget center (even when query says "the sign in button")
+  const hit = grounding.findElementInTree(sampleAtspi, 'the Sign in button');
+  assert.ok(hit);
+  assert.equal(hit.source, 'atspi');
+  assert.equal(hit.x, 850);
+  assert.equal(hit.y, 58);
+
+  // 2. Phrase-aligned coordinates (start / center / end) like Agent-S generate_text_coords
+  assert.deepEqual(grounding.alignTargetCoords(hit, 'center'), { x: 850, y: 58 });
+  assert.deepEqual(grounding.alignTargetCoords(hit, 'start'), { x: 806, y: 58 });
+  assert.deepEqual(grounding.alignTargetCoords(hit, 'end'), { x: 894, y: 58 });
+
+  // 3. Set-of-Marks combines AT-SPI + OCR without duplicates
+  const marks = grounding.buildSetOfMarks({ atspiElements: sampleAtspi, ocrWords: sampleWords, size });
+  assert.equal(marks.length, 3);
+  assert.equal(marks[0].source, 'atspi');
+  assert.equal(marks[2].source, 'ocr');
+
+  // 4. Hands action parser & target resolver supports `mark`, AT-SPI `target`, `align`, `overwrite`, and `hotkey`
+  const markClick = hands.parseHandsAction('{"action":"click","mark":0}');
+  assert.equal(markClick.ok, true);
+  assert.equal(markClick.action.mark, 0);
+
+  const ctx = { size, words: sampleWords, atspi: sampleAtspi, marks, config: {}, log: console };
+  const resolvedMark = await hands.resolveTarget(markClick.action, ctx);
+  assert.equal(resolvedMark.x, 850);
+  assert.equal(resolvedMark.y, 58);
+  assert.match(resolvedMark.how, /AT-SPI #0 "Sign in"/);
+
+  const resolvedNamed = await hands.resolveTarget({ target: 'Search or type URL', align: 'start' }, ctx);
+  assert.equal(resolvedNamed.x, 206);
+  assert.equal(resolvedNamed.y, 58);
+  assert.match(resolvedNamed.how, /AT-SPI \[entry\]/);
+
+  const hotkeyAct = hands.parseHandsAction('{"action":"hotkey","keys":"ctrl+l"}');
+  assert.equal(hotkeyAct.ok, true);
+  assert.equal(hotkeyAct.action.action, 'key');
+  assert.equal(hotkeyAct.action.keys, 'ctrl+l');
+
+  const overwriteType = hands.parseHandsAction('{"action":"type","target":"Search or type URL","text":"psd-observer","overwrite":true,"submit":true}');
+  assert.equal(overwriteType.ok, true);
+  assert.equal(overwriteType.action.overwrite, true);
+  assert.equal(overwriteType.action.target, 'Search or type URL');
+
+  // 5. NLP intents for Agent-Reach & Agent-S
+  assert.deepEqual(nlp.parseIntent('reach doctor'), { cmd: 'reach', args: 'doctor' });
+  assert.deepEqual(nlp.parseIntent('ui elements'), { cmd: 'ui', args: '' });
+  assert.deepEqual(nlp.parseIntent('deep research linux accessibility'), { cmd: 'reach', args: 'research linux accessibility' });
+  assert.deepEqual(nlp.parseIntent('youtube pe kesariya play karo'), { cmd: 'yt', args: 'play kesariya' });
+});
+
 
 

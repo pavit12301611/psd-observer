@@ -187,29 +187,65 @@ export function parseVisionPoint(text) {
 export const TESSERACT_HINT = 'sudo dnf install tesseract';
 
 /**
- * Locate `query` on the current screen.
- * Returns { x, y, width, height, source: 'ocr'|'vision', matched, confidence, screenshot }.
- * Throws with a user-facing message when nothing plausible is found.
+ * Locate `query` on the current screen using Agent-S 3-layer grounding:
+ *   1. Linux AT-SPI accessibility widget tree (100% exact OS widget bounding box)
+ *   2. Tesseract OCR word/phrase bounding box (`start` | `center` | `end` alignment)
+ *   3. Set-of-Marks (SoM) + coordinate grid vision model fallback
+ * Returns { x, y, width, height, source: 'atspi'|'ocr'|'vision', matched, confidence, screenshot }.
  */
-export async function locateOnScreen(config, query, log = console) {
+export async function locateOnScreen(config, query, log = console, { alignment = 'center' } = {}) {
   const label = String(query ?? '').trim();
   if (!label) throw new Error('usage: /pc tap <PIN> <button or field label, e.g. Login>');
   const screenshot = await pc.captureScreenshot({ portalTimeoutMs: config?.portalTimeoutMs });
   const size = pngSize(screenshot);
   if (!size) throw new Error('Screenshot captured but its size could not be read (not a PNG?) — cannot map click coordinates.');
 
-  let ocrMissing = false;
+  // Layer 1: Linux AT-SPI Accessibility Tree (exact widget coordinates, zero guessing)
   try {
-    const words = await ocrScreenshot(screenshot);
-    const hit = findTextTarget(words, label);
-    if (hit) return { ...hit, ...size, source: 'ocr', screenshot };
-    log.info?.(`[pc] locate "${label}": OCR miss (${words.length} words), trying vision model`);
+    const { inspectDesktopElements, findElementInTree, alignTargetCoords } = await import('./grounding.js');
+    const desktop = await inspectDesktopElements({ timeoutMs: 2000 });
+    const atspiHit = findElementInTree(desktop.elements, label);
+    if (atspiHit) {
+      const aligned = alignTargetCoords(atspiHit, alignment) ?? { x: atspiHit.x, y: atspiHit.y };
+      return {
+        ...atspiHit,
+        ...aligned,
+        ...size,
+        source: 'atspi',
+        screenshot,
+      };
+    }
+  } catch { /* AT-SPI optional — continue to OCR */ }
+
+  // Layer 2: Local Tesseract OCR phrase match
+  let ocrMissing = false;
+  let ocrWords = [];
+  try {
+    ocrWords = await ocrScreenshot(screenshot);
+    const hit = findTextTarget(ocrWords, label);
+    if (hit) {
+      if (alignment && alignment !== 'center') {
+        const { alignTargetCoords } = await import('./grounding.js');
+        const aligned = alignTargetCoords(hit, alignment);
+        if (aligned) Object.assign(hit, aligned);
+      }
+      return { ...hit, ...size, source: 'ocr', screenshot };
+    }
+    log.info?.(`[pc] locate "${label}": OCR miss (${ocrWords.length} words), trying vision model`);
   } catch (err) {
     if (err.code === 'ENOENT') ocrMissing = true;
     else log.warn?.(`[pc] OCR failed (${err.message}), trying vision model`);
   }
 
-  const raw = await ai.locateInImage(config, screenshot.toString('base64'), label, log);
+  // Layer 3: Vision model with Set-of-Marks + coordinate ruler overlay
+  let visionShot = screenshot;
+  try {
+    const { buildSetOfMarks, annotateSetOfMarks } = await import('./grounding.js');
+    const marks = buildSetOfMarks({ ocrWords, size });
+    visionShot = await annotateSetOfMarks(screenshot, marks, size);
+  } catch { /* raw screenshot fallback */ }
+
+  const raw = await ai.locateInImage(config, visionShot.toString('base64'), label, log);
   const point = raw ? parseVisionPoint(raw) : null;
   if (point) {
     return {

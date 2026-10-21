@@ -1,5 +1,19 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.2.0 — Agent-Reach × Agent-S: Deterministic Internet & Computer Control (Zero Guessing!)
+
+User ki maang: *"bro maine na ek zip file daali hai agent reach naam se use study kar aur hamare ai ko best banade use actual control miljaaye computer ka rather than guessing"*.
+`Agent-Reach-main.zip` (`agent_reach/core.py`, `doctor.py`, `probe.py`, `backends/opencli.py`, `cookie_extract.py`, `channels/*`, `skill/SKILL.md`) aur `Agent-S-main.zip` (`gui_agents/s3/agents/grounding.py`, `code_agent.py`, `procedural_memory.py`) dono ko deep study karke `PSD_Ai` me 2 bade engines jode gaye:
+1. **`src/reach.js` (Agent-Reach 16-Channel Internet Capability Router)**:
+   - **Zero-Guesswork Internet Channels**: Webpage reading (`Jina Reader r.jina.ai` + anti-bot detection + local HTML-to-Markdown fallback), Web Search (`Exa MCP` via `mcporter` → `DuckDuckGo HTML` → `Wikipedia + HN Algolia`), YouTube (`yt-dlp` metadata, `ytsearchN:`, `.vtt` rolling-caption deduplicator, `OpenCLI` fallback, `captionTracks` JSON fallback, aur direct video URL play), GitHub (`gh` CLI + zero-config GitHub REST API), Reddit (`OpenCLI` → `rdt-cli` → Reddit JSON / PullPush API), Twitter/X (`twitter-cli` → `OpenCLI` → `FxTwitter` zero-config JSON API), HackerNews, V2EX, StackOverflow, aur RSS/Atom feeds.
+   - **OpenCLI & Browser Session Bridge + `/reach doctor`**: Side-effect-free `probeOpenCli()` (`127.0.0.1:19825/status`), `probeBrowserCdp()` (`127.0.0.1:9222/json/version`), local browser profile discovery, SSRF protection (`normalizePublicHttpUrl`), aur credential scrubbing (`scrubUrlCredentials`).
+2. **`src/grounding.js` (Agent-S Deterministic Desktop Grounding & ACI Engine)**:
+   - **Layer 1 — Linux AT-SPI Accessibility Tree (`inspectDesktopElements`, `findElementInTree`)**: Active desktop window ke asli OS widgets (`button`, `entry`, `link`, `tab`, `menu item`, etc.) aur unke exact screen coordinates `(x, y, left, top, width, height)` nikalta hai.
+   - **Layer 2 — Phrase-Aligned OCR Grounding (`alignTargetCoords`)**: Agent-S `generate_text_coords` ki tarah `start` / `center` / `end` alignment support karta hai.
+   - **Layer 3 — Set-of-Marks (SoM) Visual Badges + Coordinate Ruler Grid (`buildSetOfMarks`, `annotateSetOfMarks`)**: Screenshot par `#0`, `#1`, `#2` badges aur 0..1000 ruler ticks draw karta hai taaki vision model coordinate guess karne ke bajay seedha `{"action":"click","mark":0}` bole!
+   - **Upgraded `hands.js`, `elementfinder.js`, `actions.js`, `agentloop.js`, `mcp-server.js`, `commands.js`, `nlp.js`**: Naye tools (`web_search`, `read_url`, `youtube_info`, `github_lookup`, `social_lookup`, `reach_research`, `reach_doctor`, `inspect_ui`) aur commands (`/reach`, `/yt`, `/gh`, `/reddit`, `/hn`, `/ui`). Tests **228/228** pass.
+
+
 ## v3.1.13 — PSD_Ai Identity + Turbo Speed & Power Upgrade
 
 User ki maang: *"bhai iska naam change karke 'PSD_Ai' rakh aur na ise na aur powerful aur fast bana"*.

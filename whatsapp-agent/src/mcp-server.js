@@ -22,6 +22,8 @@ import * as apps from './apps.js';
 import * as systemx from './systemx.js';
 import * as ocr from './ocr.js';
 import * as finder from './elementfinder.js';
+import * as reach from './reach.js';
+import * as grounding from './grounding.js';
 
 const BRIDGE_HOST = process.env.OBSERVER_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.OBSERVER_BRIDGE_PORT || process.env.PORT || 8787);
@@ -176,6 +178,31 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'agent_reach',
+    description: 'Zero-guesswork Agent-Reach internet router: read any URL cleanly as Markdown (`op="read"`), search the web (`op="search"`), run multi-platform research (`op="research"`), extract YouTube video transcripts or play directly (`op="youtube"`), query GitHub repos/issues/PRs (`op="github"`), query Reddit/Twitter/HN/StackOverflow/RSS (`op="social"`), or run `op="doctor"`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        op: {
+          type: 'string',
+          enum: ['read', 'search', 'research', 'youtube', 'github', 'reddit', 'twitter', 'hackernews', 'stackoverflow', 'rss', 'doctor'],
+          description: 'Agent-Reach operation.',
+        },
+        query: { type: 'string', description: 'URL, search query, topic, or owner/repo.' },
+        mode: { type: 'string', description: 'Optional sub-mode (e.g. "play" or "transcript" for youtube).' },
+      },
+      required: ['op'],
+    },
+  },
+  {
+    name: 'pc_inspect_ui',
+    description: 'Agent-S Desktop Grounding Inspector: inspect the active Linux desktop window and list interactive UI widgets from the AT-SPI accessibility tree + OCR text bounding boxes with exact pixel coordinates (no coordinate guessing).',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
 const expandHome = (p) => (String(p || '').startsWith('~/')
@@ -308,6 +335,41 @@ async function handleToolCall(name, args = {}) {
       }
       const data = await callBridge('/api/solve', payload);
       return [{ type: 'text', text: data.text || JSON.stringify(data) }];
+    }
+
+    case 'agent_reach': {
+      const op = String(args.op || 'doctor').toLowerCase();
+      const q = String(args.query || '').trim();
+      if (op === 'doctor') return [{ type: 'text', text: (await reach.reachDoctor()).text }];
+      if (op === 'read') return [{ type: 'text', text: (await reach.reachUrl(q)).text }];
+      if (op === 'search') return [{ type: 'text', text: (await reach.webSearch(q)).text }];
+      if (op === 'research') return [{ type: 'text', text: (await reach.reachResearch(q)).text }];
+      if (op === 'github') return [{ type: 'text', text: (await reach.githubLookup(q, { mode: args.mode || 'auto' })).text }];
+      if (op === 'reddit') return [{ type: 'text', text: (await reach.redditLookup(q)).text }];
+      if (op === 'twitter') return [{ type: 'text', text: (await reach.twitterLookup(q)).text }];
+      if (op === 'hackernews') return [{ type: 'text', text: (await reach.hackerNewsLookup(q)).text }];
+      if (op === 'stackoverflow') return [{ type: 'text', text: (await reach.stackOverflowLookup(q)).text }];
+      if (op === 'rss') return [{ type: 'text', text: (await reach.rssLookup(q)).text }];
+      if (op === 'youtube') {
+        if (args.mode === 'play') {
+          const s = await reach.youtubeSearch(q, { limit: 1 });
+          const top = s.videos?.[0];
+          if (!top) throw new Error(`No YouTube video found for "${q}"`);
+          await pc.openTarget(top.url);
+          return [{ type: 'text', text: `Playing YouTube video: ${top.title} (${top.url})` }];
+        }
+        if (args.mode === 'transcript' || /^https?:\/\//i.test(q) || reach.extractYoutubeId(q)) {
+          return [{ type: 'text', text: (await reach.reachUrl(q)).text }];
+        }
+        const s = await reach.youtubeSearch(q, { limit: 5 });
+        return [{ type: 'text', text: JSON.stringify(s, null, 2) }];
+      }
+      throw new Error(`Unsupported agent_reach op: ${op}`);
+    }
+
+    case 'pc_inspect_ui': {
+      const desktop = await grounding.inspectDesktopElements({ timeoutMs: 2500 });
+      return [{ type: 'text', text: JSON.stringify(desktop, null, 2) }];
     }
 
     case 'observer_action': {

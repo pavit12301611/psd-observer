@@ -21,6 +21,13 @@ import * as apps from './apps.js';
 import { findTextTarget, pngSize, ocrScreenshot } from './elementfinder.js';
 import { imageSignature, screenChanged } from './imaging.js';
 import { StoppedError, throwIfStopped, sleepWith } from './cancel.js';
+import {
+  inspectDesktopElements,
+  findElementInTree,
+  alignTargetCoords,
+  buildSetOfMarks,
+  annotateSetOfMarks,
+} from './grounding.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -112,6 +119,7 @@ export function parseHandsAction(raw) {
   }
   if (!name) name = data.type ?? data.name;
   name = String(name ?? '').trim().toLowerCase();
+  if (name === 'hotkey' || name === 'shortcut') name = 'key';
   if (!HANDS_ACTIONS.has(name)) return { ok: false, error: `unknown action "${name || '(missing)'}"` };
 
   const action = { action: name };
@@ -119,15 +127,20 @@ export function parseHandsAction(raw) {
   if (thought) action.thought = thought.slice(0, 300);
 
   if (CLICK_ACTIONS.has(name)) {
+    if (body.mark != null && Number.isFinite(Number(body.mark))) action.mark = Math.trunc(Number(body.mark));
     if (body.word != null && Number.isFinite(Number(body.word))) action.word = Math.trunc(Number(body.word));
     const point = normalizePoint(body.x, body.y);
     if (point) Object.assign(action, point);
     const target = String(body.target ?? body.element ?? '').trim();
     if (target) action.target = target.slice(0, 120);
+    if (body.align || body.alignment) {
+      const al = String(body.align ?? body.alignment).toLowerCase();
+      if (['start', 'center', 'end', 'left', 'right'].includes(al)) action.align = al;
+    }
     if (body.button && ['left', 'right', 'middle'].includes(String(body.button).toLowerCase())) {
       action.button = String(body.button).toLowerCase();
     }
-    if (action.word == null && action.x == null && !action.target) {
+    if (action.mark == null && action.word == null && action.x == null && !action.target) {
       return { ok: false, error: `${name} ke liye word id, x/y, ya target chahiye` };
     }
     return { ok: true, action };
@@ -138,6 +151,9 @@ export function parseHandsAction(raw) {
     if (!text) return { ok: false, error: 'type ke liye text chahiye' };
     action.text = text.slice(0, 2000);
     action.submit = Boolean(body.submit ?? body.enter);
+    if (body.overwrite != null) action.overwrite = Boolean(body.overwrite);
+    const target = String(body.target ?? body.element ?? '').trim();
+    if (target) action.target = target.slice(0, 120);
     return { ok: true, action };
   }
 
@@ -211,7 +227,13 @@ export function summarizeAction(action) {
     case 'double_click':
     case 'right_click': {
       const verb = action.action === 'click' ? 'click' : action.action === 'double_click' ? 'double-click' : 'right-click';
-      const aim = action.target ? `"${clip(action.target, 42)}"` : action.word != null ? `word ${action.word}` : `${action.x ?? '?'},${action.y ?? '?'}`;
+      const aim = action.target
+        ? `"${clip(action.target, 42)}"`
+        : action.mark != null
+        ? `mark #${action.mark}`
+        : action.word != null
+        ? `word ${action.word}`
+        : `${action.x ?? '?'},${action.y ?? '?'}`;
       return `${verb} ${aim}`;
     }
     case 'type': return `type "${clip(action.text, 40)}"${action.submit ? ' + Enter' : ''}`;
@@ -230,7 +252,7 @@ export function summarizeAction(action) {
 /** Identical action + identical screen = stuck. Used for cycle detection. */
 export function actionSignature(action) {
   return [
-    action?.action, action?.word ?? '', action?.x ?? '', action?.y ?? '', action?.target ?? '',
+    action?.action, action?.mark ?? '', action?.word ?? '', action?.x ?? '', action?.y ?? '', action?.target ?? '',
     action?.text ?? '', action?.keys ?? '', action?.direction ?? '', action?.amount ?? '',
     action?.x1 ?? '', action?.y1 ?? '', action?.x2 ?? '', action?.y2 ?? '',
   ].join('|');
@@ -245,7 +267,7 @@ const MAX_WORDS = 140;
  * aim at, and what already happened. Kept deliberately short — free vision
  * models get worse as prompts grow.
  */
-export function buildHandsPrompt({ task, step, maxSteps, size, words = [], history = [], lastResult = '', lastChange = null, visionFirst = true }) {
+export function buildHandsPrompt({ task, step, maxSteps, size, words = [], atspi = [], windowInfo = null, history = [], lastResult = '', lastChange = null, visionFirst = true }) {
   const relevant = words
     .filter((w) => String(w.text ?? '').trim().length >= 2)
     .slice(0, MAX_WORDS);
@@ -254,6 +276,17 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
     const y = Math.round(((w.top + w.height / 2) / (size?.height || 1)) * 1000);
     return `${w.id} | ${String(w.text).replace(/\s+/g, ' ').slice(0, 40)} | ${x},${y}`;
   }).join('\n');
+
+  const uiTreeTable = (atspi || [])
+    .filter((el) => String(el.name || el.description || '').trim().length >= 1)
+    .slice(0, 50)
+    .map((el) => {
+      const rx = Math.round((el.x / (size?.width || 1)) * 1000);
+      const ry = Math.round((el.y / (size?.height || 1)) * 1000);
+      const label = String(el.name || el.description).replace(/\s+/g, ' ').slice(0, 40);
+      return `[${el.role}] "${label}" @ ${rx},${ry}${el.focused ? ' (FOCUSED)' : ''}`;
+    })
+    .join('\n');
 
   const hist = history.slice(-6)
     .map((h) => `${h.step}. ${h.summary} → ${h.detail}${h.changed === true ? ' · screen changed' : h.changed === false ? ' · screen NOT changed (do not repeat this blindly)' : ''}`)
@@ -264,6 +297,7 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
     `TASK: ${task}`,
     `STEP: ${step} of ${maxSteps} (one action per step)`,
     `SCREEN: ${size?.width ?? 0}x${size?.height ?? 0} pixels (the screenshot may be scaled — your coordinates are relative)`,
+    windowInfo?.title ? `ACTIVE WINDOW: "${windowInfo.title}"${windowInfo.app ? ` (${windowInfo.app})` : ''}` : '',
     '',
     'RULES',
     '1. Reply with ONE JSON object and nothing else. No markdown, no explanation outside the JSON.',
@@ -271,7 +305,7 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
       '2. Look at the screenshot yourself (no text extraction happens). Click exactly where you see the thing:',
       '   {"action":"click","target":"Search box","x":500,"y":120} — target is your one-line description, x/y is where it is.',
       '3. If the element has visible text you can read, the target text alone is enough: {"action":"click","target":"Sign in"}.',
-      '   It is snapped to the exact pixels of that word when possible, so prefer it for text buttons.',
+      '   It is snapped to the exact OS accessibility widget (AT-SPI) or OCR pixels of that word when possible, so prefer it for text buttons.',
       '4. x and y are 0-1000 relative to the screen (0=left/top, 500=middle, 1000=right/bottom). Estimate carefully from the image.',
     ] : [
       '2. Prefer a text target id from the TEXT LIST — it is pixel-exact: {"action":"click","word":42}.',
@@ -285,6 +319,7 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
     '9. When the TASK is complete: {"action":"done","answer":"short answer for the owner (what they asked for)"}.',
     '10. If it truly cannot be done: {"action":"fail","reason":"one line why"}.',
     '',
+    uiTreeTable ? `ACCESSIBILITY WIDGETS (exact OS coordinates):\n${uiTreeTable}` : '',
     table ? `TEXT LIST (id | text | x,y):\n${table}` : 'TEXT LIST: (OCR found no text — use coordinates)',
     '',
     hist ? `HISTORY:\n${hist}` : 'HISTORY: (nothing yet)',
@@ -297,7 +332,7 @@ export function buildHandsPrompt({ task, step, maxSteps, size, words = [], histo
 // ── screen work ───────────────────────────────────────────────────────────────
 
 /**
- * Screenshot + size + OCR words + a cheap signature (for change detection).
+ * Screenshot + size + AT-SPI accessibility widgets + OCR words + a cheap signature (for change detection).
  * OCR is local and free; when tesseract is missing we simply lose the word list.
  */
 export async function observeScreen(config, log = console, { useOcr = false, signal } = {}) {
@@ -306,7 +341,10 @@ export async function observeScreen(config, log = console, { useOcr = false, sig
   // whole run, so each capture gets at most 25s (PORTAL_TIMEOUT_MS still wins
   // when it is smaller).
   const cap = Math.min(Number(config?.portalTimeoutMs ?? 60_000) || 60_000, 25_000);
-  const image = await pc.captureScreenshot({ portalTimeoutMs: cap });
+  const [image, desktop] = await Promise.all([
+    pc.captureScreenshot({ portalTimeoutMs: cap }),
+    inspectDesktopElements({ timeoutMs: 1800 }).catch(() => ({ ok: false, window: null, elements: [] })),
+  ]);
   const size = pngSize(image) ?? { width: 0, height: 0 };
   let words = [];
   // Vision-first (default): the model reads the screenshot itself. tesseract is
@@ -322,7 +360,17 @@ export async function observeScreen(config, log = console, { useOcr = false, sig
   // Re-number so the ids in the prompt match this array exactly: a stale id
   // must never end up clicking a random word.
   words = words.map((w, i) => ({ ...w, id: i }));
-  return { image, size, words, signature: imageSignature(image) };
+  const atspi = desktop?.elements ?? [];
+  const marks = buildSetOfMarks({ atspiElements: atspi, ocrWords: words, size });
+  return {
+    image,
+    size,
+    words,
+    atspi,
+    windowInfo: desktop?.window ?? null,
+    marks,
+    signature: imageSignature(image),
+  };
 }
 
 /** OCR words for a screenshot we already have (no second capture). */
@@ -364,33 +412,59 @@ function parseVisionPointLoose(text) {
 }
 
 /**
- * Resolve where a click should land.
- * word id → OCR box (exact) · x,y → scaled · target → OCR phrase → local vision.
+ * Resolve where a click should land (Agent-S Multi-Layer Grounding):
+ *   0. mark id → Set-of-Marks exact bounding box
+ *   1. word id → OCR box (exact)
+ *   2. target → AT-SPI widget tree (exact) → OCR phrase (`start`/`center`/`end`) → x,y → local vision
+ *   3. x,y → scaled
  */
 export async function resolveTarget(action, ctx) {
   const { size, config, log } = ctx;
   let words = ctx.words ?? [];
+  const atspi = ctx.atspi ?? [];
+  const marks = ctx.marks ?? [];
+
+  // 0. Set-of-Marks (SoM) mark id
+  if (action.mark != null) {
+    const m = marks.find((item) => item.mark === action.mark);
+    if (!m) return { error: `mark #${action.mark} screen pe nahi mila` };
+    return {
+      x: m.x,
+      y: m.y,
+      how: `${m.source === 'atspi' ? 'AT-SPI' : 'SoM'} #${m.mark} "${m.text}"`,
+    };
+  }
 
   // 1. A word id from a prompt WITH a text list is already pixel-exact.
   if (action.word != null) {
     const word = words.find((w) => w.id === action.word);
     if (!word) return { error: `word id ${action.word} screen pe nahi mila` };
+    const box = { left: word.left, top: word.top, width: word.width, height: word.height };
+    const aligned = action.align ? alignTargetCoords({ box, x: Math.round(word.left + word.width / 2), y: Math.round(word.top + word.height / 2) }, action.align) : null;
     return {
-      x: Math.round(word.left + word.width / 2),
-      y: Math.round(word.top + word.height / 2),
+      x: aligned ? aligned.x : Math.round(word.left + word.width / 2),
+      y: aligned ? aligned.y : Math.round(word.top + word.height / 2),
       how: `OCR "${word.text}"`,
     };
   }
 
-  // 2. Vision-first: a named target is the most reliable thing a vision model
-  //    gives us, so snap it to real text pixels if we can (one lazy OCR pass,
-  //    only for this click). Coordinates alone are the fallback.
+  // 2. Named target: check AT-SPI accessibility tree FIRST, then OCR phrase, then coordinates / local vision.
   if (action.target) {
+    if (atspi.length) {
+      const atspiHit = findElementInTree(atspi, action.target);
+      if (atspiHit) {
+        const coords = action.align ? alignTargetCoords(atspiHit, action.align) : { x: atspiHit.x, y: atspiHit.y };
+        return { x: coords.x, y: coords.y, how: `AT-SPI [${atspiHit.role}] "${atspiHit.matched}"` };
+      }
+    }
     if (!words.length && ctx.ensureWords) {
       try { words = await ctx.ensureWords(); } catch { words = []; }
     }
     const hit = words.length ? findTextTarget(words, action.target) : null;
-    if (hit) return { x: hit.x, y: hit.y, how: `OCR "${hit.matched}"` };
+    if (hit) {
+      const coords = action.align ? alignTargetCoords(hit, action.align) : { x: hit.x, y: hit.y };
+      return { x: coords.x, y: coords.y, how: `OCR "${hit.matched}"` };
+    }
     if (action.x != null && action.y != null) {
       const point = scalePoint({ x: action.x, y: action.y }, size);
       if (point) return { ...point, how: `vision (${action.target})` };
@@ -399,7 +473,7 @@ export async function resolveTarget(action, ctx) {
     const rel = raw ? parseVisionPointLoose(raw) : null;
     const point = rel ? scalePoint(rel, size) : null;
     if (point) return { ...point, how: 'local vision' };
-    return { error: `"${action.target}" screen pe nahi mila (OCR + local vision dono fail)` };
+    return { error: `"${action.target}" screen pe nahi mila (AT-SPI + OCR + local vision sab fail)` };
   }
 
   // 3. Pure coordinates.
@@ -439,6 +513,20 @@ export async function executeHandsAction(action, ctx) {
       return { detail: `🖱️ dragged ${from.x},${from.y} → ${to.x},${to.y}` };
     }
     case 'type': {
+      // Optional target click before typing (Agent-S `agent.type(element_description, text, overwrite, enter)`)
+      if (action.target) {
+        const point = await resolveTarget({ target: action.target, x: action.x, y: action.y }, ctx);
+        if (!point.error) {
+          await pc.click(point.x, point.y, 'left', 1);
+          await sleep(180);
+        }
+      }
+      if (action.overwrite) {
+        await pc.keyCombo('ctrl+a');
+        await sleep(80);
+        await pc.keyCombo('BackSpace');
+        await sleep(80);
+      }
       try {
         await pc.pasteText(action.text);
       } catch (err) {
@@ -579,9 +667,13 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
       }
     }
 
-    const { image: modelImage, mime } = await shrinkForModel(shot.image, config.handsImageWidth ?? 1024, config.handsJpegQuality ?? 70);
+    const annotatedRaw = (shot.marks?.length && config.handsAnnotateMarks !== false)
+      ? await annotateSetOfMarks(shot.image, shot.marks, shot.size)
+      : shot.image;
+    const { image: modelImage, mime } = await shrinkForModel(annotatedRaw, config.handsImageWidth ?? 1024, config.handsJpegQuality ?? 70);
     const prompt = buildHandsPrompt({
       task, step, maxSteps: budgetSteps, size: shot.size, words: shot.words,
+      atspi: shot.atspi, windowInfo: shot.windowInfo,
       history, lastResult, lastChange, visionFirst,
     });
 
@@ -644,6 +736,7 @@ export async function runHands(task, { config = {}, log = console, maxSteps, onS
     try {
       const result = await act(action, {
         config, log, size: shot.size, words: shot.words,
+        atspi: shot.atspi ?? [], marks: shot.marks ?? [],
         imageBase64: modelImage.toString('base64'),
         // Lazy OCR on the ORIGINAL screenshot: only when a named target needs
         // snapping to exact pixels. Never on the normal coordinate path.

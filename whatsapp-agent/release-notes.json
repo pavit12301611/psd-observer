@@ -1,4 +1,12 @@
 {
+  "3.2.0": {
+    "title": "Agent-Reach × Agent-S: Deterministic Internet & Computer Control (Zero Guessing!) 🌐🎯🖥️",
+    "bullets": [
+      "**Agent-Reach 16-Channel Internet Router (`src/reach.js`)**: Ab `PSD_Ai` kisi webpage ko padhne, web search karne, YouTube transcript nikalne, GitHub repo/issue/PR dekhne, ya Reddit / Twitter(X) / HackerNews / V2EX / StackOverflow / RSS padhne ke liye browser khol kar andhe clicks nahi maarta — seedha structured CLI/API channels (`Jina Reader`, `yt-dlp`, `gh`, `OpenCLI`, `FxTwitter`, `Reddit JSON/PullPush`, `HN Algolia`, `DuckDuckGo`) use karta hai.",
+      "**Agent-S 4-Layer Desktop Grounding (`src/grounding.js`)**: GUI control (`/use`, `/tap`, `/pc locate`, `computer_use`) ab coordinates guess karne ke bajay pehle **Linux AT-SPI Accessibility Tree** (`gi.repository.Atspi` + `xdotool`/`wmctrl`) se OS widgets ke 100% exact bounding boxes leta hai, phir **Phrase-Aligned OCR (`start` / `center` / `end`)**, aur phir **Set-of-Marks (`#0`, `#1`, ...) + Coordinate Ruler Grid** overlay use karta hai.",
+      "**Direct YouTube Video Play & Multi-Platform Research**: Bolo *\"youtube pe <gaana> play karo\"* ya `/yt play <query>` — `PSD_Ai` exact video ID dhoondh kar seedha video play karta hai (no blind search-box clicking!). Naye commands: `/reach [doctor|search|research|read]`, `/yt`, `/gh`, `/reddit`, `/hn`, aur `/ui` (live desktop widget inspector)."
+    ]
+  },
   "3.1.13": {
     "title": "PSD_Ai Identity + Turbo Speed & Power Upgrade ⚡🤖",
     "bullets": [
