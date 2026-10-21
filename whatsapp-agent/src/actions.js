@@ -28,6 +28,8 @@ import * as tools from './tools.js';
 import * as autopilot from './autopilot.js';
 import * as hands from './hands.js';
 import * as mem from './memory.js';
+import * as reach from './reach.js';
+import * as grounding from './grounding.js';
 import { StoppedError, isStoppedError } from './cancel.js';
 import * as tts from './tts.js';
 import { runDoctor } from './doctor.js';
@@ -787,6 +789,152 @@ export function createActions({ config, store, log = console, journal = null, no
         const res = await solver.solveQuestionText(config, question, { log, signal: ctx?.signal ?? null });
         if (!res.ok) throw new Error(res.error || 'Could not solve question');
         return res.text;
+      },
+    },
+
+    // ── Agent-Reach × Agent-S Deterministic Internet & Desktop Grounding ─────
+    {
+      name: 'web_search',
+      level: 'safe',
+      label: 'Web Search (Agent-Reach)',
+      description: 'Search the web deterministically via Agent-Reach (Exa MCP / DuckDuckGo / Wikipedia / HackerNews) and return structured results with titles, URLs, and snippets. Always prefer this over opening a browser and guessing clicks.',
+      params: {
+        query: { type: 'string', description: 'Search query', required: true },
+        limit: { type: 'integer', description: 'Max results (default 6)' },
+      },
+      run: async ({ query, limit }) => (await reach.webSearch(query, { limit: limit ?? 6 })).text,
+    },
+    {
+      name: 'read_url',
+      level: 'safe',
+      label: 'Read URL (Agent-Reach)',
+      description: 'Read any public URL cleanly as Markdown via Agent-Reach (Jina Reader + YouTube transcript + GitHub repo/issue + Twitter/X + Reddit + RSS). Never open a browser just to read a webpage.',
+      params: {
+        url: { type: 'string', description: 'Public http(s) URL to read', required: true },
+      },
+      run: async ({ url }) => (await reach.reachUrl(url)).text,
+    },
+    {
+      name: 'youtube_info',
+      level: 'safe',
+      label: 'YouTube Search / Transcript / Direct Play',
+      description: 'Search YouTube videos, extract full subtitle transcripts/metadata via yt-dlp/Agent-Reach, or play a video directly in the browser without blind UI clicking (`mode="play"`).',
+      params: {
+        query: { type: 'string', description: 'YouTube URL, video ID, or search query', required: true },
+        mode: { type: 'string', enum: ['search', 'transcript', 'play'], description: 'search = list videos, transcript = extract subtitles/details, play = open top video directly in browser' },
+      },
+      run: async ({ query, mode = 'search' }) => {
+        const q = String(query ?? '').trim();
+        const isUrl = /^https?:\/\//i.test(q) || Boolean(reach.extractYoutubeId(q));
+        if (mode === 'play') {
+          if (isUrl) {
+            const id = reach.extractYoutubeId(q);
+            const url = id ? `https://www.youtube.com/watch?v=${id}` : q;
+            await pc.openTarget(url);
+            return `🎬 Opened YouTube video directly: ${url}`;
+          }
+          const s = await reach.youtubeSearch(q, { limit: 1 });
+          const top = s.videos?.[0];
+          if (!top) throw new Error(`No YouTube video found for "${q}"`);
+          await pc.openTarget(top.url);
+          return `🎬 *Playing on YouTube:* *${top.title}*\n🔗 ${top.url}\n_(Opened exact video URL directly — zero coordinate guessing)_`;
+        }
+        if (mode === 'transcript' || isUrl) {
+          const r = await reach.reachUrl(isUrl && !/^https?:\/\//i.test(q) ? `https://www.youtube.com/watch?v=${q}` : q);
+          return r.text;
+        }
+        const s = await reach.youtubeSearch(q, { limit: 5 });
+        if (!s.videos.length) return `🎬 YouTube pe "${q}" ke liye koi video nahi mila.`;
+        const lines = s.videos.map((v, i) => (
+          `${i + 1}. *${v.title}*${v.duration ? ` (${v.duration})` : ''}${v.channel ? ` — _${v.channel}_` : ''}\n   🔗 ${v.url}`
+        ));
+        return `🎬 *YouTube Search: "${q}"* _(${s.backend})_\n\n${lines.join('\n\n')}`;
+      },
+    },
+    {
+      name: 'github_lookup',
+      level: 'safe',
+      label: 'GitHub Lookup (Agent-Reach)',
+      description: 'Search GitHub repositories, inspect an owner/repo (stars, description, README), or read an issue/PR via gh CLI or GitHub REST API.',
+      params: {
+        query: { type: 'string', description: 'Search query, owner/repo slug, or GitHub URL', required: true },
+        mode: { type: 'string', enum: ['auto', 'search', 'repo', 'issue', 'pr'], description: 'Lookup mode (default auto)' },
+      },
+      run: async ({ query, mode = 'auto' }) => (await reach.githubLookup(query, { mode })).text,
+    },
+    {
+      name: 'social_lookup',
+      level: 'safe',
+      label: 'Community & Social Lookup (Agent-Reach)',
+      description: 'Search or read discussions on Reddit, Twitter/X, HackerNews, V2EX, StackOverflow, or RSS feeds via Agent-Reach.',
+      params: {
+        platform: { type: 'string', enum: ['reddit', 'twitter', 'hackernews', 'v2ex', 'stackoverflow', 'rss'], required: true },
+        query: { type: 'string', description: 'Search query or URL', required: true },
+      },
+      run: async ({ platform, query }) => {
+        const p = String(platform ?? '').toLowerCase();
+        if (p === 'reddit') return (await reach.redditLookup(query)).text;
+        if (p === 'twitter') return (await reach.twitterLookup(query)).text;
+        if (p === 'hackernews') return (await reach.hackerNewsLookup(query)).text;
+        if (p === 'v2ex') return (await reach.v2exLookup(query)).text;
+        if (p === 'stackoverflow') return (await reach.stackOverflowLookup(query)).text;
+        if (p === 'rss') return (await reach.rssLookup(query)).text;
+        throw new Error(`Unsupported platform: ${platform}`);
+      },
+    },
+    {
+      name: 'reach_research',
+      level: 'safe',
+      label: 'Deep Multi-Platform Research (Agent-Reach)',
+      description: 'Research any topic in parallel across Web Search, GitHub, HackerNews, Reddit, and StackOverflow and return a synthesized report with real URLs.',
+      params: {
+        topic: { type: 'string', description: 'Topic or question to research across platforms', required: true },
+      },
+      run: async ({ topic }) => (await reach.reachResearch(topic)).text,
+    },
+    {
+      name: 'reach_doctor',
+      level: 'safe',
+      label: 'Agent-Reach Channel Doctor',
+      description: 'Check the live status and active backends of all Agent-Reach internet channels and Agent-S desktop grounding tools.',
+      params: {},
+      run: async () => (await reach.reachDoctor()).text,
+    },
+    {
+      name: 'inspect_ui',
+      level: 'safe',
+      label: 'Inspect Desktop UI Elements (Agent-S Grounding)',
+      description: 'Inspect the active window and list clickable UI elements on the desktop with exact coordinates from the Linux AT-SPI accessibility tree and OCR (no pixel guessing).',
+      params: {},
+      run: async () => {
+        const desktop = await grounding.inspectDesktopElements({ timeoutMs: 2500 });
+        let ocrWords = [];
+        try {
+          const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(config?.portalTimeoutMs ?? 15_000, 15_000) });
+          ocrWords = await finder.ocrScreenshot(shot);
+        } catch { /* optional */ }
+        const winLine = desktop.window?.title
+          ? `🪟 *Active Window:* ${desktop.window.title}${desktop.window.app ? ` (${desktop.window.app})` : ''}`
+          : '🪟 *Active Window:* (unknown / Wayland)';
+        const atspiLines = (desktop.elements || []).slice(0, 35).map((el, i) => (
+          `• #${i} [${el.role}] *"${el.name || el.description}"* @ \`${el.x},${el.y}\`${el.focused ? ' 🎯' : ''}`
+        ));
+        const ocrLines = ocrWords.slice(0, 30).map((w, i) => (
+          `• W${i} *"${w.text}"* @ \`${Math.round(w.left + w.width / 2)},${Math.round(w.top + w.height / 2)}\``
+        ));
+        return [
+          '🧭 *Agent-S Desktop UI Grounding Inspector*',
+          winLine,
+          '',
+          atspiLines.length
+            ? `*AT-SPI Accessibility Widgets (${desktop.elements.length}):*\n${atspiLines.join('\n')}`
+            : '_AT-SPI widget tree empty or unavailable — using OCR boxes_',
+          ocrLines.length
+            ? `\n*OCR Text Boxes (${ocrWords.length}):*\n${ocrLines.join('\n')}`
+            : '',
+          '',
+          '_Click any element deterministically: `/tap <label>` or `/tap <x> <y>`_',
+        ].filter(Boolean).join('\n');
       },
     },
   ];

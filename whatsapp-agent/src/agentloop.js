@@ -77,6 +77,9 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     'search_files', 'read_file', 'write_file', 'download_url', 'notify',
     'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
     'remember_fact',
+    // Agent-Reach × Agent-S deterministic tools — always available so the AI
+    // never opens a browser to guess clicks when a structured channel exists.
+    'web_search', 'read_url', 'youtube_info', 'github_lookup', 'inspect_ui',
     // The "hands" loop is the one tool that can finish visual tasks, so it is
     // always offered — even to a small local model with a tight tool budget.
     'computer_use',
@@ -108,7 +111,11 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
       `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
       'You can actually DO things on the owner\'s computer: open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
-      'For anything that needs the GUI (a website, a video, an app setting, a dialog), call computer_use with a clear task: it looks at the screen, clicks/types like a human, and looks again. Do not describe how the owner could do it — do it.',
+      'AGENT-REACH & AGENT-S ZERO-GUESSWORK RULES:',
+      '- NEVER open a browser and guess pixel clicks when a deterministic tool can do the job directly!',
+      '- For web search / research / reading URLs / YouTube transcripts / GitHub repos / Reddit / Twitter / HN: ALWAYS use `web_search`, `read_url`, `youtube_info`, `github_lookup`, `social_lookup`, or `reach_research`.',
+      '- When the owner says "play X on YouTube", call `youtube_info` with `mode="play"` so the exact video URL opens directly without blind UI clicking.',
+      '- For anything that genuinely needs the desktop GUI (an app dialog, visual interaction, desktop settings), use `inspect_ui` to see exact AT-SPI accessibility widget coordinates or call `computer_use` which grounds actions via AT-SPI + OCR + Set-of-Marks.',
       'Rules:',
       '1. When the owner asks you to DO something, call the tool instead of explaining how to do it.',
       '2. You may call several tools in a row; check each result before deciding the next step.',

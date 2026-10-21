@@ -40,6 +40,8 @@ import * as solver from './solver.js';
 import { createVoiceCall } from './voicecall.js';
 import { jarvisGreeting, spokenSummary } from './jarvis.js';
 import * as mem from './memory.js';
+import * as reach from './reach.js';
+import * as grounding from './grounding.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -73,6 +75,14 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /ls [path] · /read <path> · /write <path> | <text> · /send <path>
 • /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
+*🌐 Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)*
+• /reach [doctor] — 16+ internet channels + AT-SPI desktop grounding health report
+• /reach <url> — Read any webpage, YouTube transcript, GitHub repo, Tweet, or Reddit post
+• /reach search <query> · /reach research <topic> — Multi-platform parallel research
+• /yt [play|transcript] <query or url> — YouTube search, full transcript, or direct video play
+• /gh <query or owner/repo> · /reddit <query> · /hn [query]
+• /ui — Inspect live AT-SPI desktop widgets + OCR bounding boxes (zero coordinate guessing)
+
 *🧠 Ultra-Accuracy Question Image Solver (2.10.0 — 100% Verified)*
 • Bas WhatsApp pe *question photo / screenshot / PDF* bhej do — auto-detect + solve!
 • /solve [instructions] — attached ya pichli photo ke saare questions 100% verify karke solve karo
@@ -726,11 +736,18 @@ export function createAgent({
         const hit = await finder.locateOnScreen(config, rest, log);
         const image = await finder.annotateScreenshot(hit.screenshot, hit.x, hit.y, hit.width, hit.height);
         const pinPrefix = config.controlPin ? '<PIN> ' : '';
+        const sourceDesc = hit.source === 'atspi'
+          ? `AT-SPI widget [${hit.role || 'widget'}], ${hit.confidence ?? 100}% exact`
+          : hit.source === 'ocr'
+          ? `OCR text match, ${hit.confidence}% sure`
+          : 'vision model';
         return {
           image,
-          text: `🎯 Found "${hit.matched}" at *${hit.x}, ${hit.y}* (${hit.source === 'ocr' ? `OCR text match, ${hit.confidence}% sure` : 'vision model'}).\nClick it: /pc tap ${pinPrefix}${rest} — or raw: /pc click ${pinPrefix}${hit.x} ${hit.y}`,
+          text: `🎯 Found "${hit.matched}" at *${hit.x}, ${hit.y}* (${sourceDesc}).\nClick it: /pc tap ${pinPrefix}${rest} — or raw: /pc click ${pinPrefix}${hit.x} ${hit.y}`,
         };
       }
+      case 'elements': case 'ui': case 'ground':
+        return act('inspect_ui');
       // ── tier 2: input + power ──────────────────────────────────────────
       case 'tap': case 'clicktext': case 'taptext': {
         const gate = tier2Gate(rest);
@@ -1481,6 +1498,78 @@ export function createAgent({
     ].join('\n');
   }
 
+  async function handleReach(args = '') {
+    const raw = String(args ?? '').trim();
+    const [subRaw, ...restParts] = raw.split(/\s+/);
+    const sub = (subRaw || '').toLowerCase();
+    const rest = raw.slice(subRaw ? subRaw.length : 0).trim();
+
+    if (!raw || sub === 'doctor' || sub === 'status' || sub === 'check') {
+      return (await reach.reachDoctor()).text;
+    }
+    if (sub === 'search' || sub === 's' || sub === 'web') {
+      if (!rest) return '🔎 Usage: `/reach search <query>`';
+      return (await reach.webSearch(rest)).text;
+    }
+    if (sub === 'research' || sub === 'deep') {
+      if (!rest) return '🧭 Usage: `/reach research <topic>` — searches Web + GitHub + HN + Reddit + StackOverflow in parallel.';
+      return (await reach.reachResearch(rest)).text;
+    }
+    if (sub === 'read' || sub === 'url') {
+      if (!rest) return '🌐 Usage: `/reach read <https://url>`';
+      return (await reach.reachUrl(rest)).text;
+    }
+    if (sub === 'yt' || sub === 'youtube') {
+      if (!rest) return '🎬 Usage: `/yt <search query or YouTube URL>` · `/yt play <song/video>` · `/yt transcript <url>`';
+      const ytSub = (restParts[0] || '').toLowerCase();
+      const ytArg = restParts.slice(1).join(' ').trim();
+      if ((ytSub === 'play' || ytSub === 'chalao') && ytArg) {
+        try {
+          return await act('youtube_info', { query: ytArg, mode: 'play' });
+        } catch {
+          return act('open_app', { app: `https://www.youtube.com/results?search_query=${encodeURIComponent(ytArg)}` });
+        }
+      }
+      if ((ytSub === 'transcript' || ytSub === 'sub' || ytSub === 'subtitles') && ytArg) {
+        return act('youtube_info', { query: ytArg, mode: 'transcript' });
+      }
+      const isUrl = /^https?:\/\//i.test(rest) || Boolean(reach.extractYoutubeId(rest));
+      return act('youtube_info', { query: rest, mode: isUrl ? 'transcript' : 'search' });
+    }
+    if (sub === 'gh' || sub === 'github') {
+      if (!rest) return '🐙 Usage: `/gh <search query or owner/repo or GitHub URL>`';
+      return (await reach.githubLookup(rest)).text;
+    }
+    if (sub === 'reddit' || sub === 'rdt') {
+      if (!rest) return '👽 Usage: `/reddit <search query or Reddit URL>`';
+      return (await reach.redditLookup(rest)).text;
+    }
+    if (sub === 'x' || sub === 'twitter' || sub === 'tweet') {
+      if (!rest) return '🐦 Usage: `/reach x <Tweet URL or search query>`';
+      return (await reach.twitterLookup(rest)).text;
+    }
+    if (sub === 'hn' || sub === 'hackernews') {
+      return (await reach.hackerNewsLookup(rest)).text;
+    }
+    if (sub === 'v2ex') {
+      return (await reach.v2exLookup(rest)).text;
+    }
+    if (sub === 'so' || sub === 'stackoverflow') {
+      if (!rest) return '📚 Usage: `/reach so <programming question>`';
+      return (await reach.stackOverflowLookup(rest)).text;
+    }
+    if (sub === 'rss' || sub === 'feed') {
+      if (!rest) return '📰 Usage: `/reach rss <feed URL>`';
+      return (await reach.rssLookup(rest)).text;
+    }
+
+    // Auto-detect URL vs general search query
+    if (/^https?:\/\//i.test(raw) || /^[a-z0-9-]+(\.[a-z0-9-]+)+\/\S*/i.test(raw)) {
+      return (await reach.reachUrl(raw)).text;
+    }
+    return (await reach.webSearch(raw)).text;
+  }
+
   function remoteCommand() {
     const port = config.port ?? 8787;
     const nets = Object.values(os.networkInterfaces()).flat()
@@ -1681,6 +1770,12 @@ export function createAgent({
       case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
       case 'dsh': case 'harness': case 'deepseek': return handleDsh(args, ctx);
       case 'solve': case 'ans': case 'answer': case 'q': return handleSolve(args, ctx);
+      case 'reach': case 'agentreach': return handleReach(args);
+      case 'yt': case 'youtube': return handleReach(`yt ${args || ''}`.trim());
+      case 'gh': case 'github': return handleReach(`gh ${args || ''}`.trim());
+      case 'reddit': case 'rdt': return handleReach(`reddit ${args || ''}`.trim());
+      case 'hn': case 'hackernews': return handleReach(`hn ${args || ''}`.trim());
+      case 'ui': case 'ground': case 'elements': return act('inspect_ui');
       case 'doctor': case 'diag': case 'diagnose': return runDoctor({ config, ctx, log });
       case 'access': {
         const r = actions.accessReport();

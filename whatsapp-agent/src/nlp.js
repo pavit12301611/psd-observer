@@ -243,9 +243,21 @@ export function parseIntent(input) {
   if (/^(?:(?:mere\s+)?reminders?\s+(?:dikhao|batao|list)|show\s+(?:my\s+)?reminders?)\??$/i.test(low)) return asCmd('reminders');
   if (/^(?:(?:aaj\s+ka\s+)?brief(?:\s+do|\s+batao)?|morning\s+brief|daily\s+brief|daily\s+summary)$/i.test(low)) return asCmd('brief');
   if (/^(?:undo(?:\s+kar(?:o|do))?|pichla\s+kaam\s+(?:wapas\s+lo|undo\s+karo))$/i.test(low)) return asCmd('undo');
+  if (/^(?:reach|agent[- ]?reach)\s*(?:doctor|status|check)?\??$/i.test(text)) return asCmd('reach', 'doctor');
+  if (/^(?:ui\s+elements?|screen\s+elements?|inspect\s+ui|desktop\s+elements?|screen\s+ke\s+buttons?\s+dikhao)$/i.test(low)) {
+    return asCmd('ui', '');
+  }
+  if ((m = text.match(/^(?:deep\s+research|research\s+karo|research\s+on|full\s+research)\s+(.+)$/i))
+    || (m = text.match(/^(.+?)\s+(?:pe|par)\s+(?:deep\s+)?research\s+kar(?:o|do)$/i))) {
+    return asCmd('reach', `research ${clean(m[1])}`);
+  }
+  if ((m = text.match(/^(?:youtube\s+transcript|yt\s+transcript|transcript\s+of)\s+(https?:\/\/\S+|[A-Za-z0-9_-]{11})$/i))
+    || (m = text.match(/^(https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/\S+|youtu\.be\/\S+))\s+(?:ka\s+)?(?:transcript|subtitles?|captions?)(?:\s+(?:nikalo|batao|dikhao|padho))?$/i))) {
+    return asCmd('reach', `yt ${clean(m[1])}`);
+  }
   if ((m = text.match(/^(?:youtube\s+(?:pe|par)\s+(.+?)\s+(?:chalao|bajao|play\s+kar(?:o|do)|lagao)|play\s+(.+?)\s+on\s+youtube)$/i))) {
     const q = clean(m[1] || m[2]);
-    if (q) return asCmd('open', `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`);
+    if (q) return asCmd('yt', `play ${q}`);
   }
 
   // ── meta ──────────────────────────────────────────────────────────────────
