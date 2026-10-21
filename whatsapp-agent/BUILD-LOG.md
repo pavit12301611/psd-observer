@@ -1,5 +1,28 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.4 — Lobby paar, ab JOIN bhi karna tha (event 93 = UpdateJoinableCallLog)
+
+> 3.1.3 ki test call: journal me pehli baar `WASM -> sending <lobby>`
+> aaya — patch v1 kaam kar gaya, WASM jag gaya. Par call phir bhi active
+> nahi bani; uske badle do naye WASM event aaye: 93 aur 96. WA Web ke
+> nikale hue asli JS (`vinikjkkj/wa-diff`: WAWebVoipWaCallEnums) se decode
+> kiya: **93 = UpdateJoinableCallLog**, 96 = telemetry. Matlab lobby ke
+> baad call *joinable ongoing call* banti hai aur host ko use
+> **`joinVoipOngoingCall`** karke join karna padta hai — tab jaake active
+> call banti hai jiska deferred acceptCall intezaar karta hai. Engine ke
+> paas iska wrapper pehle se tha, bas kabhi wire nahi hua.
+>
+> Patch **v2** (per-part idempotent — v1 installs par sirf naye hisse):
+> offer ke waqt caller PN/LID stash, event 93 par join (call-id match +
+> ek-baar guard), `joinAndAccept=false` taaki asli accept engine ke
+> maujooda poll se hi ho (double-accept = event 92 = call mar sakti hai),
+> aur WASM log filter me `lobby|buffered|ongoing|join|ack` taaki promotion
+> chain default level par dikhe. Doctor ab patch ka version batata hai.
+> Sandbox: v2-patched engine fresh + v1-upgrade dono path par verify,
+> WASM lobby-send regression saaf. Tests **218/218**.
+
+---
+
 ## v3.1.3 — WASM so raha tha: `checkOngoingCalls` wala kadam hi gayab tha
 
 > User ki saaf 3.1.2 machine par do test call, dono `accept_timeout`.

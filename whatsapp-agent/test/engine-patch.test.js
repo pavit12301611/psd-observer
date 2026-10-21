@@ -25,16 +25,29 @@ const WASM_ENGINE = [
 
 const INDEX = [
   "import { EventEmitter } from 'node:events';",
+  'const WASM_EVENT_CALL_REJECTED = 92;',
   'export class VoipClient extends EventEmitter {',
   '    #engine = null;',
+  '    #activeCall = null;',
   '    #registerCall(call) {}',
-  '    handleOffer(call, callId, peerJid, isVideo, isGroup) {',
+  '    setupLog() {',
+  '        const CALL_LOG_RE = /offer|reject|reason|preprocess|pending|contact|accept|missed|expired|silence|terminat|relay|call.?state|not.?authoriz|privacy/i;',
+  '        return CALL_LOG_RE;',
+  '    }',
+  '    handleOffer(offer, call, callId, peerJid, isVideo, isGroup) {',
+  '        call.peerJid = peerJid;',
   '        this.#registerCall(call);',
   '        if (this.listenerCount("incoming") === 0) {',
   '            return;',
   '        }',
   '        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
   '    }',
+  '    #handleCallEvent = (eventType, eventData) => {',
+  '        if (eventType === 16) {',
+  '        }',
+  '        else if (eventType === WASM_EVENT_CALL_REJECTED) {',
+  '        }',
+  '    };',
   '}',
   '',
 ].join('\n');
@@ -82,6 +95,11 @@ test('engine patch: applies to all three dist files, once', async () => {
   const sig = fs.readFileSync(path.join(dir, 'dist/signaling.mjs'), 'utf8');
   assert.match(wasm, /checkOngoingCalls = \(callIds, callCreatorJids\)/);
   assert.match(idx, /this\.#engine\?\.checkOngoingCalls\?\.\(\[callId\], \[peerJid\]\)/);
+  assert.match(idx, /call\._callerPn =/, 'v2: caller PN stashed at offer time');
+  assert.match(idx, /joining lobby call/, 'v2: event-93 lobby join');
+  assert.match(idx, /joinOngoingCall\(\{/, 'v2: join invoked');
+  assert.match(idx, /joinAndAccept: false/, 'v2: single accept stays with answer() poll');
+  assert.match(idx, /relay\|lobby\|buffered\|ongoing\|join\|ack\|/, 'v2: widened WASM log filter');
   assert.match(sig, /isCallRoomPeer/);
   // patched wasm-engine imports and the wrapper is a safe no-op pre-init
   const mod = await import(path.join(dir, 'dist/wasm-engine.mjs'));
@@ -94,12 +112,28 @@ test('engine patch: applies to all three dist files, once', async () => {
   assert.equal((wasm2.match(/observer-patch: check-ongoing-calls v1/g) || []).length, 1, 'marker exactly once');
 });
 
-test('engine patch: missing anchor is reported, file untouched', () => {
+test('engine patch: missing anchor is reported, that part skipped', () => {
   const mangled = INDEX.replace('this.emit("incoming"', 'this.emit("renamed"');
   const dir = makeFixture({ index: mangled });
   const r = patchEngineDir(dir, quiet);
   assert.equal(r.state, 'anchor-missing');
-  assert.equal(fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8'), mangled);
+  const after = fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8');
+  assert.match(after, /this\.emit\("renamed"/, 'mangled line itself untouched');
+  assert.doesNotMatch(after, /checkOngoingCalls\?\./, 'skipped part not inserted');
+});
+
+test('engine patch: v1-patched install gets only the v2 parts', () => {
+  // Simulate a 3.1.3 (v1) install: v1 needles present, v2 parts absent.
+  const v1Index = INDEX.replace(
+    '        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
+    '        try {\n            this.#engine?.checkOngoingCalls?.([callId], [peerJid]);\n        }\n        catch { }\n        this.emit("incoming", call, { isVideo, isGroup, peerJid });',
+  );
+  const dir = makeFixture({ index: v1Index });
+  const r = patchEngineDir(dir, quiet);
+  assert.equal(r.state, 'patched');
+  const idx = fs.readFileSync(path.join(dir, 'dist/index.mjs'), 'utf8');
+  assert.equal((idx.match(/checkOngoingCalls\?\.\(\[callId\]/g) || []).length, 1, 'v1 part not duplicated');
+  assert.match(idx, /joining lobby call/, 'v2 part added');
 });
 
 test('engine patch: absent engine dir is a clean skip', () => {

@@ -1,4 +1,13 @@
 {
+  "3.1.4": {
+    "title": "Lobby ke aage ka kadam bhi mila — call ko JOIN bhi karna padta hai 🤝📞",
+    "bullets": [
+      "3.1.3 ke baad journal me pehli baar `WASM -> sending <lobby>` dikha — WASM jag gaya! Phir do naye signal aaye (event 93/96). WA Web ke asli enum se decode kiye: 93 = *UpdateJoinableCallLog* — matlab call ab *joinable ongoing call* ban gayi hai. Use active banane ke liye host ko `joinVoipOngoingCall` bulana padta hai — engine ke paas ye function tha, par wired hi nahi tha",
+      "Engine patch **v2**: event 93 aate hi lobby-call join hoti hai (caller ka PN/LID offer se leke), `joinAndAccept=false` ke saath taaki asli accept engine ka maujooda answer-flow hi kare — double-accept ka koi khatra nahi. v1-wale installs par sirf naye hisse lagte hain (per-part idempotent)",
+      "WASM log filter me `lobby|buffered|ongoing|join|ack` shabd jude — ab promotion ki poori chain default level par hi `voice doctor` ke journal me dikhegi",
+      "Doctor ab batata hai patch *v1 hai ya v2* — v1 dikhe to bas `voice call-engine` dobara chalao, v2 lag jayega"
+    ]
+  },
   "3.1.3": {
     "title": "Call na uthne ki ASLI jad mili — WASM ko jagane wala kadam hi gayab tha 🔓📞",
     "bullets": [
