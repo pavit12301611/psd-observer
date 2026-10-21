@@ -207,6 +207,9 @@ test('engine patch: all parts apply once on a fresh engine', async () => {
   assert.match(idx, /_lobbySentBytes/, 'v5: byte-wise lobby sniff');
   assert.doesNotMatch(idx, /String\(xmlPayload\)\.includes\("<lobby"\)/, 'v5: impossible text sniff gone');
   assert.match(idx, /_gateLogged/, 'v5: gate diagnostics logged');
+  assert.match(idx, /lobby-ack-reset v6 \(join\)/, 'v6: join forgets the claim ack');
+  assert.match(idx, /lobby-ack-reset v6 \(send\)/, 'v6: every lobby send forgets earlier acks');
+  assert.equal((idx.match(/_lobbyAckCallId = "";+?/g) || []).length, 2, 'v6: exactly two ack resets');
   assert.match(sig, /isCallRoomPeer/);
   assert.match(sig, /lobby-ack-gate v4 \(stanza\)/, 'v4: lobby ack stanza sniffed');
   assert.match(sig, /_lobbyAckCallId = String\(callIdForRouting/, 'v4: stanza feeds the gate');

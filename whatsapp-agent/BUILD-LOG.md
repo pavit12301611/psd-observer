@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.8 — Do lobby, do ack: gate claim-ack par khul gaya tha, join-ack chahiye tha (patch v6)
+
+3.1.7 (`00A789A6…`) ka 100-line journal poora sequence dikha gaya: offer record (transaction_id -1) → claim ka lobby → **LobbyAck #1** ("updating call log from LobbyAck message" + event 93) → hamaara join → `Handle MESSAGE Offer` + `None -> Rejoining` → **join ka lobby #2** → gate line: `lobbySent=00A7… lobbyAck=00A7… pending=false` → accept → phone terminate + **LobbyAck #2 (post-mortem)** → Accept 404.
+
+Matlab claim-lobby ka ack sirf joinable call-log banata hai; server ki nazar me room-entry JOIN-wale lobby se hoti hai, aur WASM ka `joinable_accept_before_lobby_ack` usi doosre ack ki baat karta hai. Mera gate pehle ack ko final samajh baitha (v4 design me "first ack wins" jaan-boojh ke chhoda tha — galat saabit hua).
+
+Patch **v6**: lobby nikalte hi `_lobbyAckCallId = ""` — do jagah (join-flag site par braced block me, aur byte-sniff ke hit par). Gate ab hamesha sabse taaze lobby ke ack ka intezaar karega; LobbyAck #2 pichhli baar ~1s me aa raha tha, poll window 20s ka hai.
+
+
 ## v3.1.7 — Gate ka signal andha tha: xmlPayload XML nahi, WABinary bytes hain (patch v5)
 
 3.1.6 ki call (`00CB7BCF…`) bilkul 3.1.5 jaisi mari — `joinable_accept_before_lobby_ack: 1`, Accept 404. Matlab v4 gate engage hi nahi hua. Sandbox probe (`/tmp/probe-lobby.mjs`, asal WasmEngine + `checkOngoingCalls`) ne pakda: `onSignalingXmpp` ka teesra argument `typeof=object` hai — **Uint8Array WABinary bytes**, jisme tag ka naam ASCII codes me baitha hai (`0,248,7,252,5,108,111,98,98,121,…` = "lobby"). v4 ka sniff `String(xmlPayload).includes("<lobby")` numbers-ki-comma-string par kabhi match hi nahi kar sakta tha. `_lobbySentCallId` kabhi set nahi hua → `lobbyPending=false` → accept turant.

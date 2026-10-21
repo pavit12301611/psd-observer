@@ -1954,9 +1954,12 @@ DONE
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
-      if grep -q "observer-patch: lobby-sent-flags v5" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+      if grep -q "observer-patch: lobby-ack-reset v6" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+         || grep -q "observer-patch: lobby-ack-reset v6" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
+        ok "engine patch    : v6 applied (claim-first + LobbyAck gate + har naye lobby par purana ack reset — accept JOIN ke ack ke baad hi, bina iske pickup nahi hoti)"
+      elif grep -q "observer-patch: lobby-sent-flags v5" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: lobby-sent-flags v5" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
-        ok "engine patch    : v5 applied (claim-first + LobbyAck gate + lobby-sent flags — accept server-ack ke baad hi jata hai, bina iske pickup nahi hoti)"
+        warn "engine patch    : sirf v5 hai (gate claim-wale lobby ke ack par khul jata hai, join-wale ack se pehle accept race karega) — bash observer.sh voice call-engine (v6 lag jayega)"
       elif grep -q "observer-patch: lobby-ack-gate v4" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: lobby-ack-gate v4" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
         warn "engine patch    : sirf v4 hai (gate hai par uska lobby-sent signal bytes-bug se kabhi set nahi hota) — bash observer.sh voice call-engine (v5 lag jayega)"

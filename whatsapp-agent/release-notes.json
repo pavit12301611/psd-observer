@@ -1,4 +1,13 @@
 {
+  "3.1.8": {
+    "title": "Do lobby, do ack — gate ab JOIN wale ack ka intezaar karta hai 🚪",
+    "bullets": [
+      "3.1.7 ka journal sabse saaf tha — gate ki apni diagnostic line boli: `lobbyAck=<call id> pending=false`, phir bhi accept 404 kha gaya. Wajah journal me hi thi: ek call me **do lobby** jaate hain. Pehla claim-wala — uska ack sirf 'call log' update karta hai (usi se joinable banti hai). Doosra **join-wala** — wahi asal room-entry hai, aur `joinable_accept_before_lobby_ack` usi ke ack ki baat karta hai. Mera gate pehle ack par khul gaya",
+      "Engine patch **v6**: naya lobby jaate hi purana ack bhool jao (join par bhi, aur bytes nikalte hi bhi) — gate ab hamesha **aakhri lobby ke ack** ka intezaar karta hai. Join-wala LobbyAck pichhli baar bhi aaya tha, bas call marne ke baad; is baar gate use zinda pakdega",
+      "`bash observer.sh update` — patch v6 khud lagega. Doctor me `engine patch : v6 applied`. Phir ek test call: is baar sequence aisi honi chahiye — `accept gate … pending=true` → `waiting for LobbyAck` → `LobbyAck from …` → `accepting now` → **Accept ACK 404 nahi**",
+      "Har version me chain ka ek aur pakka saboot milta hai aur wahi fix hota hai — ye wala saboot gate ne khud apni line me diya tha. Voice-note fallback guaranteed floor bana rahega"
+    ]
+  },
   "3.1.7": {
     "title": "Gate ka signal hi andha tha — bytes wala bug pakda gaya 🔬",
     "bullets": [

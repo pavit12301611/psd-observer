@@ -37,6 +37,13 @@
  *     out (the claim and the join — both emit <lobby>, sandbox-proven),
  *     byte-decodes the sniff as a backup, and logs the gate's decision once
  *     per call so the next journal is self-explaining. (v5)
+ *  7. TWO lobbies go out per call: the claim's (its ack only updates the
+ *     call LOG — that's what produces event 93) and the join's (the actual
+ *     room entry; `joinable_accept_before_lobby_ack` refers to THIS one).
+ *     In 3.1.7 the gate read the claim-lobby's ack as "acked" and let the
+ *     accept race the join-lobby's ack. v6 forgets any earlier ack whenever
+ *     a lobby goes out (reset at the join and at the byte sniff), so the
+ *     gate always waits for the LATEST lobby's ack. (v6)
  *
  * Every part is individually idempotent (needle check), so it is safe on
  * fresh installs, on older patched installs (only missing parts land; the
@@ -58,6 +65,7 @@ const M2 = 'observer-patch: join-ongoing-call v2';
 const M3 = 'observer-patch: claim-offer-first v3';
 const M4 = 'observer-patch: lobby-ack-gate v4';
 const M5 = 'observer-patch: lobby-sent-flags v5';
+const M6 = 'observer-patch: lobby-ack-reset v6';
 
 // Remove the superseded v1/v2 after-feed claim block from index.mjs, whatever
 // comment wording the patcher version that wrote it used. The block sits
@@ -349,6 +357,37 @@ const PARTS = {
                         if (!call._gateLogged) {
                             call._gateLogged = true;
                             console.log(\`[baileys-caller] accept gate for \${call.callId}: lobbySent=\${this.#engine?._lobbySentCallId ?? "-"} lobbyAck=\${this.#engine?._lobbyAckCallId ?? "-"} pending=\${lobbyPending}\`);
+                        }`);
+      },
+    },
+    {
+      // v6: the JOIN's lobby is the room entry — forget the claim-lobby's ack.
+      needle: 'lobby-ack-reset v6 (join)',
+      apply: (src) => {
+        const anchor = `                if (this.#engine)
+                    this.#engine._lobbySentCallId = call.callId;`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                if (this.#engine) {
+                    this.#engine._lobbySentCallId = call.callId;
+                    /* ${M6} (join) — THIS lobby is the room entry; the
+                       claim-lobby's earlier ack only updated the call log.
+                       Forget it so the gate waits for the join's own ack. */
+                    this.#engine._lobbyAckCallId = "";
+                }`);
+      },
+    },
+    {
+      // v6: same reset at the actual byte emission (covers every lobby send).
+      needle: 'lobby-ack-reset v6 (send)',
+      apply: (src) => {
+        const anchor = `                        if (this.#engine && _lobbySentBytes.includes("lobby"))
+                            this.#engine._lobbySentCallId = String(callId ?? "");`;
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                        if (this.#engine && _lobbySentBytes.includes("lobby")) {
+                            this.#engine._lobbySentCallId = String(callId ?? "");
+                            /* ${M6} (send) — a lobby just went out; any earlier
+                               ack belonged to a previous lobby. */
+                            this.#engine._lobbyAckCallId = "";
                         }`);
       },
     },
