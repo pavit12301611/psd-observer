@@ -542,7 +542,10 @@ export function createWaVoip({
       // ([voip-wasm:…] lines, keyword-filtered by the library). Without
       // this an inbound offer can be silently dropped by preprocess_offer
       // (privacy/expiry) and nobody can tell why. WA_VOIP_DEBUG=false → off.
-      if (config.waVoipDebug !== false && !process.env.VOIP_WASM_LOG) process.env.VOIP_WASM_LOG = '1';
+      if (!process.env.VOIP_WASM_LOG) {
+        if (config.waVoipLogLevel === '2') process.env.VOIP_WASM_LOG = '2';
+        else if (config.waVoipDebug !== false) process.env.VOIP_WASM_LOG = '1';
+      }
       const client = new state.engineMod.VoipClient({ authDir: config.voipAuthDir });
       state.client = client;
       client.on?.('incoming', (call, meta) => {

@@ -349,6 +349,9 @@ cmd_update() {
     rm -rf "$parked"
     if [ -d "$dest/node_modules/baileys-caller" ]; then ok "VoIP engine wapas jagah par ✓"
     else warn "⚠️ VoIP engine wapas nahi lag paya — ek baar chala do: bash scripts/observer.sh voice call-engine"; fi
+    # Keep the inbound-pickup patch applied across updates too (idempotent).
+    ( cd "$dest" && node scripts/patch-voip-engine.mjs node_modules/baileys-caller "${VOIP_DIR:-$HOME/.local/share/observer-voip}/baileys-caller" ) \
+      || warn "engine patch refresh nahi hua — chala do: bash scripts/observer.sh voice call-engine"
   fi
   printf '%s\n' "$BRANCH" > "$dest/.observer-branch" 2>/dev/null || true   # sticky: future updates track THIS branch
   info "update branch: ${BRANCH} (yaad rakh liya — .observer-branch)"
@@ -1817,6 +1820,13 @@ DONE
               || die "baileys-caller deps install fail (@roamhq/wrtc native build dekho)"
           }
       fi
+      # Inbound-pickup patch: upstream baileys-caller never calls the WASM's
+      # checkOngoingCalls(), so inbound offers stay buffered as "pending
+      # calls" forever and every answer dies with accept_timeout (proven on a
+      # real machine + in sandbox WASM runs). Idempotent — safe on re-runs.
+      info "inbound-pickup patch (checkOngoingCalls) lag raha hai…"
+      node scripts/patch-voip-engine.mjs node_modules/baileys-caller "$VOIP_DIR/baileys-caller" \
+        || warn "engine patch poora nahi laga (exit $?) — call pickup phir bhi atak sakta hai; upar wala message note karke batao"
       # Prove the engine actually loads (files on disk ≠ importable module).
       if node --input-type=module -e "
         const { loadConfig } = await import('./src/config.js');
@@ -1944,6 +1954,12 @@ DONE
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
+      if grep -q "observer-patch: check-ongoing-calls v1" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+         || grep -q "observer-patch: check-ongoing-calls v1" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
+        ok "engine patch    : applied (checkOngoingCalls — bina iske call active hi nahi banti)"
+      else
+        warn "engine patch    : MISSING — bash observer.sh voice call-engine (bina iske har call accept_timeout hogi)"
+      fi
       [ -f "$dir/auth_info_voip/creds.json" ] && ok "voip login      : linked (creds.json)" || warn "voip login      : NOT linked — bash observer.sh voice link-voip"
       grep -q "^WA_CALL_ANSWER=true" "$envfile" 2>/dev/null && ok "WA_CALL_ANSWER  : true" || warn "WA_CALL_ANSWER  : false/off — bash observer.sh voice answer on"
       systemctl --user is-active "$SERVICE" >/dev/null 2>&1 && ok "service         : active" || warn "service         : NOT active — systemctl --user start $SERVICE"
@@ -1968,9 +1984,10 @@ DONE
         warn "token/curl nahi mila — diary skip (journal neeche hai)"
       fi
       echo "── 3) Journal: aakhri call ka safar ────────────────────────────"
-      journalctl --user -u "$SERVICE" -n 600 --no-pager 2>/dev/null \
+      journalctl --user -u "$SERVICE" -n 4000 --no-pager 2>/dev/null \
         | grep -E "\[wavoip\]|\[baileys-caller\]|\[voip-wasm|OWNER is calling|call fallback|wa call|connect failed|VoIP device connected" \
-        | tail -45 || warn "journal nahi mila (systemd service?)"
+        | grep -v "status: 670007" \
+        | tail -60 || warn "journal nahi mila (systemd service?)"
       echo "────────────────────────────────────────────────────────────────"
       info "Padho: 'incoming WhatsApp call' aaya? → 'answering' → 'call connected'?"
       info "Jahan chain tooti, wajah wahi hai. [voip-wasm] wali line sabse sachhi hoti hai."

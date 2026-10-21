@@ -1,4 +1,13 @@
 {
+  "3.1.3": {
+    "title": "Call na uthne ki ASLI jad mili — WASM ko jagane wala kadam hi gayab tha 🔓📞",
+    "bullets": [
+      "Asli machine ke journal ne pakad kar diya: offer WASM tak pahunchta tha, hum answer bhi karte the — par WASM call ko *buffer me park* karke baitha rehta tha aur 20s baad `accept_timeout`. Sandbox me WASM chala ke prove kiya: WhatsApp Web ka host har offer ke baad `checkOngoingCalls()` bulata hai, tabhi WASM `<lobby>` bhej ke call ko active banata hai. Engine (baileys-caller) yeh kadam *kabhi karta hi nahi tha*",
+      "Naya `scripts/patch-voip-engine.mjs`: installed engine par teen chhote, guarded patch — checkOngoingCalls wrapper + har inbound offer par call + `<callId>@call` wale stanzas ki addressing bachana. `voice call-engine` aur har `update` par khud lagta hai; `voice doctor` me 'engine patch' stage bhi dikhta hai",
+      "Sandbox verification: patched engine se `checkOngoingCalls` dabate hi WASM ne `<lobby>` stanza bheja — wahi pehla kadam jo real machine par kabhi hua hi nahi tha",
+      "Doctor ka journal ab `status: 670007` wali spam-line (har 250ms ek!) filter karta hai — asal wajah wali lines ab doobti nahi. Saath me `WA_VOIP_LOG_LEVEL=2` forensic knob"
+    ]
+  },
   "3.1.2": {
     "title": "Update wala khamosh katil band: galat branch + engine-prune fix 🩹",
     "bullets": [

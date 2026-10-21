@@ -1,5 +1,35 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.3 — WASM so raha tha: `checkOngoingCalls` wala kadam hi gayab tha
+
+> User ki saaf 3.1.2 machine par do test call, dono `accept_timeout`.
+> Spam-filtered journal ne poori kahani di: offer WASM tak gaya
+> ("Recording call offer received", status 0), humne answer kiya, caller's
+> RelayLatency bhi aaya — par WASM ne sab "no active call, IGNORED" karke
+> phenk diya. `<preaccept>` kabhi bheja hi nahi.
+>
+> Sandbox me engine ka WASM khud chalaya (synthetic offers, level-4 logs,
+> strings-dive) aur jad mili: WA Web ka host har inbound offer ke baad
+> **`checkOngoingCalls([callId],[creatorJid])`** bulata hai — tabhi WASM
+> buffered "pending call" ko engage karta hai: `<lobby>` → `<preaccept>` →
+> relaylatency → ACTIVE → tab acceptCall chalta hai. baileys-caller yeh
+> call kabhi karta hi nahi (upstream ke apne commits is event-92/670007 se
+> ladai dikhate hain; unka deferred-accept usi promotion ka intezaar karta
+> hai jo bina checkOngoingCalls ke kabhi aati nahi). Sandbox proof:
+> patched wrapper dabate hi WASM ne `<lobby>` stanza `<callId>@call` ko
+> bheja. Saath me dusri chhupi galti: signaling bridge `@call` addressing
+> ko bare-JID me badal kar lobby stanza ko misroute kar deta.
+>
+> Fix: `scripts/patch-voip-engine.mjs` — installed engine ke dist par 3
+> chhote text-patch (wrapper, offer-par call, @call addressing), marker se
+> idempotent, `node --check` verify + failure par restore. `voice
+> call-engine` aur har `update` par auto-apply; `voice doctor` me stage;
+> doctor journal se 670007-spam filter; `WA_VOIP_LOG_LEVEL=2` knob.
+> Tests **217/217** (3 naye patcher tests). Aakhri saboot ab bhi user ki
+> real test call degi — par is baar har kadam journal me dikhega.
+
+---
+
 ## v3.1.2 — "unknown command: voice": update khud install ko kha raha tha
 
 > User ne 3.1.1 ke liye `update` chalaya — aur `voice` command hi gayab ho

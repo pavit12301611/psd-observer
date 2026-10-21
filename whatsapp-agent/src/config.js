@@ -299,6 +299,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // WASM call-setup logs in the journal ([voip-wasm:…], keyword-filtered by
     // the engine) — THIS is where a silently-dropped call explains itself.
     waVoipDebug: bool(e.WA_VOIP_DEBUG, true),
+    waVoipLogLevel: String(e.WA_VOIP_LOG_LEVEL ?? '').trim(), // '2' = unfiltered WASM firehose (forensics)
     waCallFallback: (e.WA_CALL_FALLBACK || 'voice-session').toLowerCase(), // voice-session|ignore|reject
     waCallFallbackDelayMs: int(e.WA_CALL_FALLBACK_DELAY_MS, 12_000),
     waCallUnknown: (e.WA_CALL_UNKNOWN || 'ignore').toLowerCase(), // ignore|reject
