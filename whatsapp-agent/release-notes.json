@@ -1,4 +1,14 @@
 {
+  "3.1.10": {
+    "title": "Ek comma ki galti thi — devices CSV string me jaane the 📋",
+    "bullets": [
+      "3.1.9 me device-discovery **kaam kar gayi** — journal me: `peer devices: [\"12223644725256@lid\",\"…:30@lid\",\"…:32@lid\"]`. Lekin maine wo devices alag-alag list me bhej diye, aur native engine ne join wahi rok diya: **`Mismatch in participant arrays sizes`** — call active hi nahi bani, 20s timeout. Param ka naam hi ishara tha: `deviceJidsCsv` = har participant ke liye **ek CSV string**",
+      "Engine patch **v8**: devices ab `join(\",\")` karke ek hi string me jaate hain — bilkul waisa jaisa library ka khud ka `resolveGroupParticipant` banata hai. Sizes ab 1/1/1 match karenge, join chalega, aur phir asli imtihaan hoga: server is baar lobby ko kya kehta hai",
+      "Saath me har call par `<call>` node ke raw attrs bhi journal me aayenge (epoch/platform wali baaki khoj ke liye — WASM `platform NaN` bol raha tha)",
+      "`bash observer.sh update` → `engine patch : v8 applied` → ek test call. Journal me `Mismatch` ki jagah `wa_call_join_ongoing_call begin` aana chahiye — wahi se chain aage badhengi",
+      "Sach ye hai ki ye lambi khoj hai — har galti journal me naam-lekar milti hai aur ek-ek karke khatam ho rahi hai. Voice-note fallback hamesha ki tarah chalu hai"
+    ]
+  },
   "3.1.9": {
     "title": "Join me ab asli device JIDs + fast-callee — lobby 404 par seedha vaar 🎯",
     "bullets": [

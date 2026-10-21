@@ -56,6 +56,14 @@
  *     LobbyAck *nack* also produces the "LobbyAck from" log line that
  *     fooled the gate in 3.1.8); and logs a glimpse of `getCallInfo()`. (v7)
  *
+ *  9. `deviceJidsCsv` is ONE comma-joined string PER PARTICIPANT (parallel
+ *     to the pn/lid lists), as upstream's own `resolveGroupParticipant`
+ *     builds it (`devices.join(",")`). v7 passed one element per device and
+ *     the native bridge refused the join outright: "Mismatch in participant
+ *     arrays sizes" (3.1.9 journal) → call never activated → accept_timeout.
+ *     v8 joins them into the single CSV string, and logs the raw <call> node
+ *     attrs once per offer (epoch/platform forensics). (v8)
+ *
  * Every part is individually idempotent (needle check), so it is safe on
  * fresh installs, on older patched installs (only missing parts land; the
  * superseded v1 after-feed claim is removed) and on every update. Patched
@@ -78,6 +86,7 @@ const M4 = 'observer-patch: lobby-ack-gate v4';
 const M5 = 'observer-patch: lobby-sent-flags v5';
 const M6 = 'observer-patch: lobby-ack-reset v6';
 const M7 = 'observer-patch: real-join v7';
+const M8 = 'observer-patch: device-csv v8';
 
 // Remove the superseded v1/v2 after-feed claim block from index.mjs, whatever
 // comment wording the patcher version that wrote it used. The block sits
@@ -547,6 +556,34 @@ const PARTS = {
         const anchor = '                            console.log(`[baileys-caller] accept gate for ${call.callId}: lobbySent=${this.#engine?._lobbySentCallId ?? "-"} lobbyAck=${this.#engine?._lobbyAckCallId ?? "-"} pending=${lobbyPending}`);';
         if (!src.includes(anchor)) return null;
         return src.replace(anchor, '                            console.log(`[baileys-caller] accept gate for ${call.callId}: lobbySent=${this.#engine?._lobbySentCallId ?? "-"} lobbyAck=${this.#engine?._lobbyAckCallId ?? "-"} pending=${lobbyPending} getCallInfo=${JSON.stringify(String(info ?? "")).slice(0, 220)}`);');
+      },
+    },
+    {
+      // v8: deviceJidsCsv must be ONE comma-joined string per participant.
+      needle: '_peerDevices.join(",")',
+      apply: (src) => {
+        const anchor = '                    const deviceJidsCsv = Array.isArray(_peerDevices) && _peerDevices.length ? _peerDevices : [call.peerJid];';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, `                    /* ${M8} — deviceJidsCsv is ONE comma-joined string per
+                       participant (parallel to the pn/lid lists), exactly as
+                       upstream's resolveGroupParticipant builds it. v7 passed
+                       one element per device and the native bridge refused
+                       the join ("Mismatch in participant arrays sizes"). */
+                    const deviceJidsCsv = [Array.isArray(_peerDevices) && _peerDevices.length ? _peerDevices.join(",") : call.peerJid];`);
+      },
+    },
+    {
+      // v8: forensics — the raw <call> node attrs (epoch/platform/offline
+      // live here, not on the offer child; WASM logs "platform NaN").
+      needle: 'call node attrs for',
+      apply: (src) => {
+        const anchor = '                        this.#engine._lobbySentCallId = claimId;';
+        if (!src.includes(anchor)) return null;
+        return src.replace(anchor, anchor + `
+                    try {
+                        console.log(\`[baileys-caller] call node attrs for \${claimId}: \${JSON.stringify(node.attrs ?? {})}\`);
+                    }
+                    catch { }`);
       },
     },
   ],

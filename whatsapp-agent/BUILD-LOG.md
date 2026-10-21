@@ -1,5 +1,12 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.1.10 — Ek comma ki galti: deviceJidsCsv ek CSV string hoti hai, list nahi (patch v8)
+
+3.1.9 ki call (`00A45326…`): discovery kaam kar gayi — `peer devices: ["12223644725256@lid","12223644725256:30@lid","12223644725256:32@lid"]` (bare = primary device 0 implicit; 30/32 companions). Lekin join native par hi ruk gaya: `WaCallWebCallingBridge.cpp:390 Mismatch in participant arrays sizes` → call kabhi active nahi bani → `accept_timeout` 20s. Wajah: `joinVoipOngoingCall` ki teeno lists PARALLEL hoti hain (per participant ek entry); `deviceJidsCsv[i]` us participant ke saare devices ki **ek comma-joined string** hai — upstream ka `resolveGroupParticipant` bilkul yahi banata hai (`devices.join(",")`) aur index ka group-join wahi push karta hai. Mera v7 teen alag elements bhej raha tha (pn=1, lid=1, dev=3).
+
+Patch **v8**: `deviceJidsCsv = [_peerDevices.join(",")]` + har offer par raw `<call>` node attrs ka log (epoch/platform — WASM "platform NaN" bol raha hai kyunki platform attr numeric nahi mil raha; agla forensic point). Fast-callee prop se buffering par koi fark nahi pada (transaction_id ab bhi -1) — prop on rehne diya, nuqsaan nahi.
+
+
 ## v3.1.9 — Akela blocker bacha: join-lobby 404 NACK (patch v7: asli device JIDs + fast-callee)
 
 3.1.8 (patch v6) ki call `0027DA7E…` me gate pehli baar 100% sahi chala: `lobbyAck= pending=true` → "waiting for LobbyAck" → LobbyAck aaya — aur wo **404 NACK** tha (`handle_lobby_ack: error code: 404`, event 94, `lobby_exit_nack_code: 404`). `joinable_accept_before_lobby_ack` is baar fieldstats se ghayab — timing theek; ab server join ko hi mana kar raha hai. (Ek chhoti galti bhi pakdi: onLog sniff nack wali "LobbyAck from" line par bhi ack-flag set kar deta tha — gate nack par khul gaya.)

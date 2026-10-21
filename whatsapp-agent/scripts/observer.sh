@@ -1954,9 +1954,12 @@ DONE
       fi
       have ffmpeg && ok "ffmpeg          : installed" || warn "ffmpeg          : MISSING — sudo dnf install ffmpeg"
       if [ -d "$dir/node_modules/baileys-caller/dist" ] || [ -x "$VOIP_DIR/baileys-caller/dist/index.mjs" ]; then ok "voip engine     : installed"; else warn "voip engine     : MISSING — bash observer.sh voice call-engine"; fi
-      if grep -q "observer-patch: real-join v7" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+      if grep -q "observer-patch: device-csv v8" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
+         || grep -q "observer-patch: device-csv v8" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
+        ok "engine patch    : v8 applied (claim-first + LobbyAck gate + join me asli device JIDs sahi CSV format me + fast-callee — bina iske join server se 404 khaata hai)"
+      elif grep -q "observer-patch: real-join v7" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: real-join v7" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
-        ok "engine patch    : v7 applied (claim-first + LobbyAck gate + join me asli device JIDs + fast-callee prop — bina iske server lobby ko 404 karta hai)"
+        warn "engine patch    : sirf v7 hai (devices galat format me ja rahe hain — native join 'Mismatch in participant arrays sizes' dega) — bash observer.sh voice call-engine (v8 lag jayega)"
       elif grep -q "observer-patch: lobby-ack-reset v6" "$dir/node_modules/baileys-caller/dist/index.mjs" 2>/dev/null \
          || grep -q "observer-patch: lobby-ack-reset v6" "$VOIP_DIR/baileys-caller/dist/index.mjs" 2>/dev/null; then
         warn "engine patch    : sirf v6 hai (gate sahi hai par join me bare JID ja raha hai — server lobby 404 NACK karega) — bash observer.sh voice call-engine (v7 lag jayega)"

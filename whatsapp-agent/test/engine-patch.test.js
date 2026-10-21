@@ -225,6 +225,9 @@ test('engine patch: all parts apply once on a fresh engine', async () => {
   assert.match(idx, /nack-aware-gate v7/, 'v7: lobby nack tracked');
   assert.match(idx, /const lobbyNacked =/, 'v7: gate consults the nack flag');
   assert.match(idx, /getCallInfo=\$\{JSON/, 'v7: gate logs a getCallInfo glimpse');
+  assert.match(idx, /_peerDevices\.join\(","\)/, 'v8: devices as ONE csv string per participant');
+  assert.doesNotMatch(idx, /deviceJidsCsv = Array\.isArray\(_peerDevices\) && _peerDevices\.length \? _peerDevices :/, 'v8: per-device array shape gone');
+  assert.match(idx, /call node attrs for/, 'v8: raw call-node attrs logged');
   assert.match(sig, /isCallRoomPeer/);
   assert.match(sig, /lobby-ack-gate v4 \(stanza\)/, 'v4: lobby ack stanza sniffed');
   assert.match(sig, /_lobbyAckCallId = String\(callIdForRouting/, 'v4: stanza feeds the gate');
