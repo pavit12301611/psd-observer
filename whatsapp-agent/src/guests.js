@@ -792,17 +792,24 @@ export function enqueueGuestApproval(store, config = {}, item = {}) {
     second: '2-digit',
     hour12: true,
   });
+  const senderNum = normalizeNumber(item.senderNumber || '');
+  const senderName = clean(item.senderName || '');
+  const incomingText = String(item.incomingText ?? '').trim();
+  const isSaved = Boolean(findContactByNumber(store, senderNum));
+  const urgency = classifyGuestMessageUrgency(incomingText, senderName, isSaved);
   const entry = {
     id: nextId,
     ts,
     formattedTime: `${formattedTime} (${tz})`,
-    senderNumber: normalizeNumber(item.senderNumber || ''),
-    senderName: clean(item.senderName || ''),
+    senderNumber: senderNum,
+    senderName,
     senderJid: item.senderJid || '',
-    incomingText: String(item.incomingText ?? '').trim(),
+    incomingText,
     proposedReply: String(item.proposedReply ?? '').trim(),
     blockedCommand: item.blockedCommand || '',
     blockedCategory: item.blockedCategory || '',
+    priority: urgency.priority,
+    priorityBadge: urgency.badge,
     status: 'pending', // 'pending' | 'approved' | 'rejected' | 'custom' | 'blocked'
   };
   data.pendingGuestApprovals.push(entry);
@@ -886,6 +893,20 @@ export function parseOwnerApprovalDecision(rawText) {
   return null;
 }
 
+const URGENT_GUEST_RE = /\b(?:urgent|emergency|asap|jaldi|turant|hospital|accident|doctor|police|otp|bank|exam|deadline|interview|call\s+(?:uthao|pick|back)|bahut\s+zaruri|bohot\s+zaruri|important|help\s+needed)\b/i;
+const VIP_NAME_RE = /\b(?:mom|maa|mummy|dad|papa|pitaji|brother|bhai|sister|didi|boss|prof|professor|dean|hod)\b/i;
+
+export function classifyGuestMessageUrgency(text, senderName = '', isSavedContact = false) {
+  const s = String(text ?? '').trim();
+  const name = String(senderName ?? '').trim();
+  const isUrgent = URGENT_GUEST_RE.test(s);
+  const isVip = VIP_NAME_RE.test(name) || isSavedContact;
+  if (isUrgent && isVip) return { priority: 'critical', badge: '🚨⭐ *URGENT + VIP CONTACT*', score: 100 };
+  if (isUrgent) return { priority: 'urgent', badge: '🚨 *URGENT PRIORITY*', score: 80 };
+  if (isVip) return { priority: 'vip', badge: '⭐ *VIP / SAVED CONTACT*', score: 50 };
+  return { priority: 'normal', badge: '', score: 10 };
+}
+
 export function formatApprovalCardForOwner(entry, config = {}) {
   const who = entry.senderName
     ? `*${entry.senderName}* (\`+${entry.senderNumber}\`)`
@@ -893,9 +914,11 @@ export function formatApprovalCardForOwner(entry, config = {}) {
   const cmdAlert = entry.blockedCommand
     ? `\n🚨 *Command Attempt Blocked:* \`${entry.blockedCommand}\` _(Non-owners cannot run commands 🔒)_`
     : '';
+  const priorityLine = entry.priorityBadge ? `🏷️ *Triage:* ${entry.priorityBadge}` : '';
 
   return [
     `📨 *Incoming Message — Waiting for Your Approval* (#${entry.id})`,
+    priorityLine,
     `👤 *Who Sent:* ${who}`,
     `🕐 *Time:* ${entry.formattedTime}`,
     `💬 *Their Message:* "${entry.incomingText}"${cmdAlert}`,
@@ -908,7 +931,7 @@ export function formatApprovalCardForOwner(entry, config = {}) {
     `• Reply *no* (ya *nahi*) — Don't send anything`,
     `• Reply *no send this instead: <your message>* (ya *nahi yeh bhejo: <message>*) — Send your custom message instead!`,
     `• Reply *no block* — Ignore & block this number`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 export function formatPendingApprovalsList(store, config = {}) {

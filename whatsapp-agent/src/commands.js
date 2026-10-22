@@ -122,6 +122,23 @@ import {
   runBilingualMasteryBenchmark,
   BILINGUAL_CORPUS,
 } from './bilingual.js';
+import {
+  recordTurnOutcome,
+  resolveFollowUpQuery,
+  runInstantCodeSandbox,
+  answerFromDocuments,
+  verifyLiveFact,
+  detectRequestedFormat,
+  applyAnswerFormat,
+  scanTextForScreenErrors,
+  parseConditionalWorkflow,
+  evaluateConditionalWorkflow,
+  WORKSPACES,
+  summarizeVoiceOrText,
+  buildBriefing2Addons,
+  recallEverything,
+  runSelfDoctorRepair,
+} from './quality15.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -1408,6 +1425,20 @@ export function createAgent({
   }
 
   function watchCommand(args) {
+    const rawWatch = String(args ?? '').trim();
+    if (/^(?:error|errors|crash|build\s+error)$/i.test(rawWatch)) {
+      const watcher = watch.addWatcher(store, {
+        condition: 'Screen/Terminal Error or Crash (SyntaxError / TypeError / Traceback / Build failed)',
+        everyMs: 30_000,
+        once: false,
+      });
+      return [
+        '🚨 *Live Screen Error Auto-Watcher: ON*',
+        `• Watching for: _${watcher.condition}_`,
+        '• Har 30s screen/terminal check karunga — koi bhi error ya crash aate hi screenshot + fix bhejunga.',
+        `Stop: \`/watch stop ${watcher.id}\``,
+      ].join('\n');
+    }
     const parsed = watch.parseWatchArgs(args);
     if (parsed.action === 'list') {
       const all = watch.watchers(store);
@@ -1562,7 +1593,11 @@ export function createAgent({
 
   async function briefCommand(args) {
     const raw = String(args ?? '').trim();
-    if (!raw) return brief.buildBrief({ store, config });
+    if (!raw) {
+      const baseBrief = await brief.buildBrief({ store, config });
+      const addons = buildBriefing2Addons(store);
+      return addons ? `${baseBrief}\n\n${addons}` : baseBrief;
+    }
     if (/^(off|band|stop)$/i.test(raw)) {
       return brief.unscheduleBrief(store) ? '🌅 Morning brief band kar diya.' : 'Morning brief already band tha.';
     }
@@ -2643,13 +2678,91 @@ export function createAgent({
       case 'solve': case 'ans': case 'answer': case 'q': return handleSolve(args, ctx);
       case 'accuracy': return handleAccuracy(args);
       case 'verify': case 'factcheck': return handleVerify(args, ctx);
+      case 'livefact': return await verifyLiveFact(args, store);
+      case 'runjs': case 'js': return await runInstantCodeSandbox('javascript', args);
+      case 'runpy': case 'py': case 'python': return await runInstantCodeSandbox('python', args);
+      case 'sql': case 'sqlite': return await runInstantCodeSandbox('sql', args);
+      case 'docqa': case 'pdfqa': return answerFromDocuments(store, config, args);
+      case 'recall': case 'searchmemory': return recallEverything(store, args);
+      case 'voicesummary': case 'vsummary': return summarizeVoiceOrText(args).formatted;
+      case 'clip': case 'clipboard': {
+        const sub = String(args || '').trim();
+        if (!sub || /^(?:get|read|show)$/i.test(sub)) return handlePc('clipboard');
+        const cleanSet = sub.replace(/^(?:set|copy)\s+/i, '').trim();
+        return handlePc(`clipset ${cleanSet}`);
+      }
+      case 'workspace': case 'mode': {
+        const key = String(args || '').trim().toLowerCase();
+        const ws = WORKSPACES[key];
+        if (!ws) {
+          return [
+            '🖥️ *Instant Workspaces — Usage:* `/workspace <coding|study|focus|meeting|chill>`',
+            ...Object.entries(WORKSPACES).map(([k, v]) => `• \`/workspace ${k}\` — *${v.name}*: ${v.description}`),
+          ].join('\n');
+        }
+        const results = [];
+        for (const step of ws.steps) {
+          const m = step.match(/^\/([a-zA-Z]+)\s*(.*)$/);
+          if (m) {
+            try {
+              const out = await handleCommand(m[1].toLowerCase(), m[2].trim(), ctx);
+              results.push(typeof out === 'string' ? out : (out?.text ?? `✅ ${step}`));
+            } catch {
+              results.push(`✅ Applied preset: \`${step}\``);
+            }
+          }
+        }
+        return [
+          `🚀 *${ws.name} Activated!*`,
+          `_${ws.description}_`,
+          '',
+          ...results.map((r) => `• ${r}`),
+        ].join('\n');
+      }
+      case 'if': case 'cond': {
+        const parsedCond = parseConditionalWorkflow(args);
+        if (!parsedCond) {
+          return '🔀 *Conditional Workflow Usage*: `/if battery < 25 then /pc brightness 30 else /pc brightness 80`';
+        }
+        const liveMetrics = {
+          battery: Number(ctx?.liveMetrics?.battery ?? 20),
+          volume: Number(ctx?.liveMetrics?.volume ?? 50),
+          brightness: Number(ctx?.liveMetrics?.brightness ?? 70),
+          hour: new Date().getHours(),
+        };
+        try {
+          const batStr = await tools.battery();
+          const bm = String(batStr).match(/(\d{1,3})\s*%/);
+          if (bm && ctx?.liveMetrics?.battery == null) liveMetrics.battery = Number(bm[1]);
+        } catch { /* fallback to default */ }
+        const evalRes = evaluateConditionalWorkflow(parsedCond, liveMetrics);
+        if (!evalRes.chosenBranch) {
+          return `🔀 Condition \`${evalRes.metric} (${evalRes.actual}) ${evalRes.op} ${evalRes.threshold}\` is *FALSE* (no else branch).`;
+        }
+        const branch = evalRes.chosenBranch.trim();
+        const sl = branch.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+        let branchOut;
+        if (sl) {
+          branchOut = await handleCommand(sl[1].toLowerCase(), sl[2].trim(), ctx);
+        } else {
+          const pi = parseIntent(branch);
+          branchOut = pi ? await handleCommand(pi.cmd, pi.args ?? '', ctx) : branch;
+        }
+        const outText = typeof branchOut === 'string' ? branchOut : (branchOut?.text ?? '✅ Done');
+        return `🔀 *Condition (${evalRes.metric}=${evalRes.actual} ${evalRes.op} ${evalRes.threshold} → ${evalRes.conditionMet ? 'TRUE' : 'FALSE'})*\n↳ Executed: \`${branch}\`\n${outText}`;
+      }
       case 'reach': case 'agentreach': return handleReach(args);
       case 'yt': case 'youtube': return handleReach(`yt ${args || ''}`.trim());
       case 'gh': case 'github': return handleReach(`gh ${args || ''}`.trim());
       case 'reddit': case 'rdt': return handleReach(`reddit ${args || ''}`.trim());
       case 'hn': case 'hackernews': return handleReach(`hn ${args || ''}`.trim());
       case 'ui': case 'ground': case 'elements': return act('inspect_ui');
-      case 'doctor': case 'diag': case 'diagnose': return runDoctor({ config, ctx, log });
+      case 'doctor': case 'diag': case 'diagnose': {
+        if (/^(?:fix|repair|heal|auto)$/i.test(String(args || '').trim())) {
+          return runSelfDoctorRepair(config, store, log);
+        }
+        return runDoctor({ config, ctx, log });
+      }
       case 'access': {
         const r = actions.accessReport();
         return [
@@ -2919,39 +3032,64 @@ export function createAgent({
     if (memReply !== undefined) return memReply;
     if ((m = text.match(/^(?:what(?:'s| is) the )?weather\s+(?:in|at)\s+([\s\S]+?)\??$/i))) return tools.weather(m[1]);
     if ((m = text.match(/^([\s\S]+?)\s+ka\s+mausam\??$/i))) return tools.weather(m[1]);
-    if ((m = text.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))) {
-      return `🧮 ${m[1]}% of ${m[2]} = *${(Number(m[1]) / 100) * Number(m[2])}*`;
+    const followUp = resolveFollowUpQuery(store, text);
+    if (followUp) {
+      return followUp.reply;
     }
-    if ((m = text.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pratishat)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
-      return `🧮 ${m[2]}% of ${m[1]} = *${(Number(m[2]) / 100) * Number(m[1])}*`;
+    const { format: reqFormat, cleanQuery } = detectRequestedFormat(text);
+    const effectiveText = reqFormat ? cleanQuery : text;
+
+    if ((m = effectiveText.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))) {
+      const out = `🧮 ${m[1]}% of ${m[2]} = *${(Number(m[1]) / 100) * Number(m[2])}*`;
+      recordTurnOutcome(store, text, out);
+      return applyAnswerFormat(out, reqFormat);
+    }
+    if ((m = effectiveText.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent|pratishat)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      const out = `🧮 ${m[2]}% of ${m[1]} = *${(Number(m[2]) / 100) * Number(m[1])}*`;
+      recordTurnOutcome(store, text, out);
+      return applyAnswerFormat(out, reqFormat);
     }
     // Hinglish spoken math ("45 guna 12", "100 plus 250", "500 minus 120", "100 bhaag 4")
-    if (/^\d+(?:\.\d+)?\s+(?:guna|into|times|multiply(?:\s+by)?|plus|jod|minus|ghata|bhaag|divide(?:\s+by)?)\s+\d+/i.test(text)) {
-      const expr = text
+    if (/^\d+(?:\.\d+)?\s+(?:guna|into|times|multiply(?:\s+by)?|plus|jod|minus|ghata|bhaag|divide(?:\s+by)?)\s+\d+/i.test(effectiveText)) {
+      const expr = effectiveText
         .replace(/\b(?:kitna\s*(?:hota\s*hai|hai)?|kya\s*hai|equals?)\??$/i, '')
         .replace(/\b(?:guna|into|times|multiply(?:\s+by)?)\b/gi, '*')
         .replace(/\b(?:plus|jod)\b/gi, '+')
         .replace(/\b(?:minus|ghata)\b/gi, '-')
         .replace(/\b(?:bhaag|divide(?:\s+by)?)\b/gi, '/')
         .trim();
-      try { return `🧮 ${expr} = *${tools.calc(expr)}*`; } catch { /* fall through */ }
+      try {
+        const out = `🧮 ${expr} = *${tools.calc(expr)}*`;
+        recordTurnOutcome(store, text, out);
+        return applyAnswerFormat(out, reqFormat);
+      } catch { /* fall through */ }
     }
-    if ((m = text.match(/^(-?\d+(?:\.\d+)?)\s*([a-zA-Z°]+)\s+(?:in|to|into|me|mein)\s+([a-zA-Z°]+)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
-      try { return `📏 ${tools.convertUnit(Number(m[1]), m[2], m[3])}`; } catch { /* not a known unit pair */ }
+    if ((m = effectiveText.match(/^(-?\d+(?:\.\d+)?)\s*([a-zA-Z°]+)\s+(?:in|to|into|me|mein)\s+([a-zA-Z°]+)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      try {
+        const out = `📏 ${tools.convertUnit(Number(m[1]), m[2], m[3])}`;
+        recordTurnOutcome(store, text, out);
+        return applyAnswerFormat(out, reqFormat);
+      } catch { /* not a known unit pair */ }
     }
-    if (tools.looksLikeCalc(text)) {
-      try { return `🧮 ${text.trim()} = *${tools.calc(text)}*`; } catch { /* not maths after all */ }
+    if (tools.looksLikeCalc(effectiveText)) {
+      try {
+        const out = `🧮 ${effectiveText.trim()} = *${tools.calc(effectiveText)}*`;
+        recordTurnOutcome(store, text, out);
+        return applyAnswerFormat(out, reqFormat);
+      } catch { /* not maths after all */ }
     }
     // 100% Deterministic Ground-Truth Solver (< 1ms offline: Equations, GCD/LCM, Factorials, nCr/nPr, Primes, Stats, SI/CI, Base/Roman, Calendar, Science Constants & Capitals)
-    const det = solveDeterministicQuery(text);
+    const det = solveDeterministicQuery(effectiveText);
     if (det) {
       bumpAccuracyStat(config, 'deterministicHits');
-      return det.reply;
+      recordTurnOutcome(store, text, det.reply);
+      return applyAnswerFormat(det.reply, reqFormat);
     }
     // Instant Bilingual (Hinglish + English) Corpus Lookup (< 1ms offline: natural Hinglish & impeccable English Q&A)
-    const bilingualHit = lookupBilingualCorpus(text, store);
+    const bilingualHit = lookupBilingualCorpus(effectiveText, store);
     if (bilingualHit) {
-      return bilingualHit.reply;
+      recordTurnOutcome(store, text, bilingualHit.reply);
+      return applyAnswerFormat(bilingualHit.reply, reqFormat);
     }
     if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
       const ownerName = mem.getOwnerName(store);

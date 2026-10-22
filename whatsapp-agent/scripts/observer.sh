@@ -39,7 +39,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 if [ -z "${BRANCH:-}" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/../.observer-branch" ]; then
   BRANCH="$(tr -d '[:space:]' < "$SELF_DIR/../.observer-branch" 2>/dev/null || echo "")"
 fi
-BRANCH="${BRANCH:-arena/b421364e-psd-observer}"
+BRANCH="${BRANCH:-arena/bc31653e-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 API="https://api.github.com/repos/${REPO}/contents"

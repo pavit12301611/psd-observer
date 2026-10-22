@@ -284,9 +284,39 @@ export function parseIntent(input) {
     if (command && !/^(?:app|karo)$/i.test(command)) return asCmd('run', command);
   }
 
-  // ── troubleshooting ───────────────────────────────────────────────────────
+  // ── troubleshooting & auto-repair ─────────────────────────────────────────
+  if (/^(?:doctor\s+(?:fix|repair|heal|theek)(?:\s+kar(?:o|do|de)?)?|auto\s*repair(?:\s+kar(?:o|do|de)?)?|self\s*heal(?:\s+kar(?:o|do|de)?)?|khud\s+ko\s+(?:theek|fix|repair)\s+kar(?:o|do|de)?)$/i.test(text)) {
+    return asCmd('doctor', 'fix');
+  }
   if (/^(?:doctor|diagnose|diagnostics|health|healthcheck|sab\s+theek|kya\s+kaam\s+nahi|kya\s+theek\s+nahi|screenshot\s+(?:kaam\s+nahi|black|kaala)|why\s+(?:is|are)\s+(?:my\s+)?screenshot)\b/i.test(text)) {
     return asCmd('doctor');
+  }
+
+  // ── 15-feature quality intents: Workspace, Code Sandbox, DocQA, Recall, Clipboard Bridge, Conditional Workflow ──
+  if ((m = text.match(/^(coding|study|focus|meeting|chill)\s+(?:mode|workspace)\s+(?:chalu\s+kar(?:o|do|de)?|on\s+kar(?:o|do|de)?|start\s+kar(?:o|do)?|lagao)$/i))
+    || (m = text.match(/^(?:start|enable|activate|switch\s+to)\s+(coding|study|focus|meeting|chill)\s+(?:mode|workspace)$/i))) {
+    return asCmd('workspace', m[1].toLowerCase());
+  }
+  if ((m = original.match(/^(?:(?:ye|yeh|is|this)\s+(?:(js|javascript|node|py|python|sql)\s+)?code\s+(?:chala\s+ke\s+(?:output\s+)?(?:dikha(?:o)?|bata(?:o)?)|run\s+kar(?:o|do|de)?)|run\s+this\s+(?:(js|javascript|node|py|python|sql)\s+)?code)\s*[:\-]?\s*([\s\S]+)$/i))) {
+    const langHint = (m[1] || m[2] || '').toLowerCase();
+    const codeBody = m[3].trim();
+    const cmdName = /py/.test(langHint) ? 'runpy' : /sql/.test(langHint) ? 'sql' : 'runjs';
+    return asCmd(cmdName, codeBody);
+  }
+  if ((m = text.match(/^(?:is\s+(?:pdf|doc|document|file|note|notes)\s+me(?:in)?\s+(?:se\s+)?|according\s+to\s+my\s+(?:notes?|docs?|documents?)[,\s]+|mere\s+notes?\s+me(?:in)?\s+(?:se\s+)?)([\s\S]+?)(?:\s+bata(?:o|de)?|\s+kya\s+hai|\s+dhundo)?\??$/i))) {
+    return asCmd('docqa', clean(m[1]));
+  }
+  if ((m = text.match(/^(?:maine\s+(?:pichle\s+hafte\s+|pehle\s+)?(.+?)\s+ke\s+baare\s+me(?:in)?\s+kya\s+(?:bataya|bola|likha)\s+tha|recall\s+everything\s+about\s+(.+?)|search\s+my\s+memory\s+for\s+(.+?))\??$/i))) {
+    return asCmd('recall', clean(m[1] || m[2] || m[3]));
+  }
+  if ((m = original.match(/^(?:pc\s+(?:pe|par|ke\s+clipboard\s+me)\s+copy\s+kar(?:\s*do|\s*de|\s*o)?|copy\s+(?:this\s+)?to\s+pc(?:\s+clipboard)?)\s*[:\-]?\s*([\s\S]+)$/i))) {
+    return asCmd('pc', `clipset ${m[1].trim()}`);
+  }
+  if (/^(?:pc\s+(?:pe|par)\s+jo\s+copy\s+hai\s+(?:wo\s+)?bhej(?:o|do|de)?|send\s+pc\s+clipboard|pc\s+clipboard\s+bhej(?:o|do|de)?|get\s+pc\s+clipboard)[?!.]*$/i.test(text)) {
+    return asCmd('pc', 'clipboard');
+  }
+  if (/^(?:if|agar|jab)\s+(?:battery|volume|brightness|hour|time)\s*(?:<=|>=|<|>|==|=|\s+se\s+kam|\s+se\s+zyada)\s*\d+/i.test(text)) {
+    return asCmd('if', text);
   }
 
   // ── productivity & quick actions ─────────────────────────────────────────
