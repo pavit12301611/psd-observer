@@ -16,7 +16,9 @@ const EMPTY = () => ({
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
   pending: null,      // destructive action waiting for "haan"/"yes"
-  stats: { received: 0, replied: 0, ignoredNonOwner: 0, startedAt: Date.now() },
+  offlineNotify: null,// null = follow OFFLINE_NOTIFY env (default true), boolean = owner override
+  offlineMessage: '', // custom sleeping/offline message override
+  stats: { received: 0, replied: 0, ignoredNonOwner: 0, startedAt: Date.now(), sleeping: false, lastOfflineNotify: 0, lastOfflineReason: '' },
 });
 
 export class Store {

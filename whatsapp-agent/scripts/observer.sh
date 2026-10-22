@@ -39,7 +39,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 if [ -z "${BRANCH:-}" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/../.observer-branch" ]; then
   BRANCH="$(tr -d '[:space:]' < "$SELF_DIR/../.observer-branch" 2>/dev/null || echo "")"
 fi
-BRANCH="${BRANCH:-arena/31b34815-psd-observer}"
+BRANCH="${BRANCH:-arena/e4a32b35-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 API="https://api.github.com/repos/${REPO}/contents"
@@ -47,6 +47,13 @@ DEFAULT_DIR="${DEFAULT_DIR:-$HOME/observer-agent}"
 SERVICE="observer-whatsapp-agent"
 MODEL_SERVICE="observer-model"
 SELF_URL="${RAW}/whatsapp-agent/scripts/observer.sh"
+
+set_branch() {
+  BRANCH="${1:-$BRANCH}"
+  ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
+  RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+  SELF_URL="${RAW}/whatsapp-agent/scripts/observer.sh"
+}
 
 # ── pretty output ────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -167,6 +174,13 @@ service_enabled() { systemctl --user is-enabled "$SERVICE" >/dev/null 2>&1; }
 
 restart_agent() {
   local dir="$1"
+  local unit_file="$HOME/.config/systemd/user/${SERVICE}.service"
+  if [ -f "$unit_file" ] && [ -f "$dir/systemd/observer-whatsapp-agent.service" ]; then
+    local node_bin; node_bin=$(command -v node || echo "/usr/bin/node")
+    sed -e "s|__WORKDIR__|${dir}|g" -e "s|__NODE__|${node_bin}|g" \
+      "$dir/systemd/observer-whatsapp-agent.service" > "$unit_file" 2>/dev/null || true
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
   if service_enabled; then
     systemctl --user restart "$SERVICE" && sleep 1
     if service_active; then ok "service ${SERVICE} restarted with the new code"
@@ -186,6 +200,8 @@ cmd_install() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir)       dest="${2:-}"; [ -n "$dest" ] || die "--dir needs a path"; shift 2 ;;
+      --branch|-b) [ -n "${2:-}" ] || die "--branch needs a branch name"; set_branch "$2"; shift 2 ;;
+      --branch=*)  set_branch "${1#--branch=}"; shift ;;
       --force)     force=1; shift ;;
       --fedora)    fedora=1; shift ;;
       --model)     model="${2:-}"; shift 2 ;;
@@ -263,9 +279,11 @@ cmd_update() {
   local dir="" check=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir)   dir="${2:-}"; [ -n "$dir" ] || die "--dir needs a path"; shift 2 ;;
-      --check) check=1; shift ;;
-      -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+      --dir)       dir="${2:-}"; [ -n "$dir" ] || die "--dir needs a path"; shift 2 ;;
+      --branch|-b) [ -n "${2:-}" ] || die "--branch needs a branch name"; set_branch "$2"; shift 2 ;;
+      --branch=*)  set_branch "${1#--branch=}"; shift ;;
+      --check)     check=1; shift ;;
+      -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
       *) die "update: unknown option $1 (try --help)" ;;
     esac
   done

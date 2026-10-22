@@ -13,10 +13,11 @@ import { announceUpdate, brainSummary } from './updates.js';
 import { startWatchLoop } from './watch.js';
 import { startShotJanitor } from './screenshots.js';
 import { distroPrettyName } from './tools.js';
-import { sessionInfo, inputDiagnostics } from './pccontrol.js';
+import { sessionInfo, inputDiagnostics, setPowerHook } from './pccontrol.js';
 import { routerFor } from './router.js';
 import { createWaVoip } from './wavoip.js';
 import { startCallScheduleLoop } from './callscheduler.js';
+import { startPowerLifecycleWatcher, isOfflineNotifyEnabled } from './lifecycle.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -109,6 +110,21 @@ const stopWatch = startWatchLoop({
   send: (message) => whatsapp.sendToOwner(message),
   log: console,
 });
+// Automatic "😴 Agent is sleeping" notification before PC shutdown, reboot,
+// suspend/sleep, or service stop: hooks both `/pc shutdown|reboot|suspend`
+// and Linux systemd-logind (`PrepareForShutdown` / `PrepareForSleep` + delay inhibit).
+setPowerHook((action) => whatsapp.announceOffline({ reason: action }));
+const powerWatcher = startPowerLifecycleWatcher({
+  config,
+  log: console,
+  onGoingOffline: (kind) => whatsapp.announceOffline({ reason: kind }),
+  onWakeUp: () => {
+    const t = setTimeout(() => {
+      whatsapp.announceOnline({ reason: 'wakeup' }).catch(() => {});
+    }, 2_500);
+    t.unref?.();
+  },
+});
 
 console.info(`👁️  ${config.agentName || 'PSD_Ai'} (Observer WhatsApp Agent) — free, native WhatsApp + phone app`);
 console.info(`   Owner (only listener): +${config.ownerNumber}`);
@@ -124,6 +140,7 @@ console.info(`   AI: ${config.aiProvider} (Ollama ${config.ollamaModel} @ ${conf
 console.info(`   Access level: ${config.accessLevel} · full PC control (Observer app optional)`);
 console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHELL=false)'}`);
 console.info(`   Cron jobs: ${store.listCronJobs().length} recurring · TTS: ${config.ttsEngine}`);
+console.info(`   😴 Sleep notify: ${isOfflineNotifyEnabled(config, store) ? 'ACTIVE (auto "Agent is sleeping" on PC shutdown/sleep/stop)' : 'off (/sleepnotify on)'}`);
 console.info(`   📞 JARVIS voice call: ${config.voiceCall === false ? 'off (VOICE_CALL=false)' : 'on — phone-app Call tab + WhatsApp voice notes'} · asli WhatsApp call pickup: ${config.waCallAnswer ? 'EXPERIMENTAL engine ON' : `off → fallback "${config.waCallFallback}" (setup: bash scripts/observer.sh voice call-engine)`}`);
 const distroLine = distroPrettyName();
 if (distroLine) console.info(`   OS: ${distroLine}`);
@@ -172,15 +189,27 @@ if (config.dshAutoStartWeb && agent.harness) {
 await wavoip.start().catch((err) => console.warn(`[wavoip] start failed: ${err.message}`));
 await whatsapp.start();
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-async function shutdown() {
-  console.info('\n[agent] shutting down…');
+let shuttingDown = false;
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGHUP', () => shutdown('SIGHUP'));
+async function shutdown(signal = 'SIGTERM') {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.info(`\n[agent] shutting down (${signal})…`);
   stopReminders();
   callScheduleLoop.stop();
   stopCron();
   stopWatch();
   stopShots();
+  powerWatcher.stop();
+  // Send "😴 Agent is sleeping" while the WhatsApp socket is still open,
+  // before whatsapp.stop() tears it down.
+  try {
+    await whatsapp.announceOffline({ reason: signal });
+  } catch (err) {
+    console.warn(`[agent] offline notify skipped: ${err.message}`);
+  }
   try { wavoip.stop(); } catch { /* already down */ }
   whatsapp.stop();
   bridge.stop();

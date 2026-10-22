@@ -29,6 +29,9 @@ EnvironmentFile=-__AGENT_DIR__/.env
 ExecStart=__NODE__ src/index.js
 Restart=on-failure
 RestartSec=5
+# Give the SIGTERM handler time to send the "😴 Agent is sleeping" WhatsApp
+# notification over the open socket and flush store.json before stopping.
+TimeoutStopSec=10
 # Headless under systemd: no desktop to pop the QR into (it is printed in the
 # journal and served on the dashboard instead).
 Environment=OPEN_QR=false

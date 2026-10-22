@@ -1,4 +1,12 @@
 {
+  "3.2.1": {
+    "title": "Auto Offline / Sleeping Notification — PC ya Agent band hone se pehle turant WhatsApp message 😴📲",
+    "bullets": [
+      "**Automatic \"Agent is sleeping\" Alert (`src/lifecycle.js`)**: Jab bhi PC shutdown, reboot, suspend/sleep ho ya agent service stop ho (`SIGTERM` / `SIGINT` / `SIGHUP`), `PSD_Ai` bina puche turant WhatsApp pe *\"😴 Agent is sleeping — ...\"* message bhejta hai.",
+      "**Linux `systemd-logind` + Delay Inhibitor Lock**: `systemd-inhibit --what=shutdown:sleep --mode=delay` aur D-Bus (`PrepareForShutdown` / `PrepareForSleep`) ke zariye OS network/Wi-Fi band karne se pehle 2–5 second rukta hai taaki WhatsApp message 100% deliver ho jaye — chahe power button dabaya ho ya lid close kiya ho.",
+      "**Instant Wake-Up Online Alert + `/sleepnotify` Control**: Sleep ya shutdown ke baad jab PC wapas on/wake hota hai, agent 6-hour cooldown ka wait kiye bina turant *\"🤖 Observer agent is online\"* bhejta hai. Control ya custom message ke liye `/sleepnotify [on|off|test|set <msg>|reset]` (ya Hinglish: *\"sleep message test karo\"*) use karein."
+    ]
+  },
   "3.2.0": {
     "title": "Agent-Reach × Agent-S: Deterministic Internet & Computer Control (Zero Guessing!) 🌐🎯🖥️",
     "bullets": [
