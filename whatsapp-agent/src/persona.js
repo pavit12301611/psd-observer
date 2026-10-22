@@ -272,8 +272,16 @@ export function extractBehavioralSignals(rawText) {
     signals.lessons.push('When explaining concepts or plans, give thorough step-by-step clarity.');
   }
 
-  // 3. Language preference feedback
-  if (/\b(hinglish\s+me(?:in)?\s+(?:bol|baat\s+kar|likh|reply\s+kar)|hindi\s+me(?:in)?\s+baat\s+kar)\b/i.test(low)) {
+  // 2b. Strict Question-Scope Precision ("jo maine pucha uska hi answer mile", "proper bana ki perfect ho")
+  if (/\b(jo\s+(?:maine\s+)?pucha\s+uska\s+hi\s+(?:answer|jawab)|sirf\s+jo\s+pucha|only\s+what\s+i\s+asked|proper\s+bana|perfect\s+ho|faltu\s+extra\s+mat)\b/i.test(low)) {
+    signals.lessons.push('Strictly answer ONLY what the owner asked ("jo pucha uska hi proper & perfect answer") — zero unasked extra metrics, filler intros, or debug footers.');
+  }
+
+  // 3. Language preference & Bilingual Mastery feedback
+  if (/\b(hinglish\s+(?:ki\s+practice|bhi\s+at\s+it'?s\s+best|aur\s+english)|english\s+bhi\s+perfect)\b/i.test(low)) {
+    signals.lessons.push('Deliver Hinglish at its absolute best (authentic, witty, street-smart + tech-sharp) AND impeccable, articulate English — matching the language of each turn.');
+    signals.traits.push('Expects top-tier bilingual mastery in both natural Hinglish and flawless English');
+  } else if (/\b(hinglish\s+me(?:in)?\s+(?:bol|baat\s+kar|likh|reply\s+kar)|hindi\s+me(?:in)?\s+baat\s+kar)\b/i.test(low)) {
     signals.lessons.push('Always reply in natural Hinglish unless explicitly asked for pure English.');
   } else if (/\b(english\s+me(?:in)?\s+(?:bol|baat\s+kar|likh|reply\s+kar)|reply\s+in\s+english)\b/i.test(low)) {
     signals.lessons.push('Owner requested replies in English.');
@@ -598,6 +606,14 @@ export function trainFromHistory(store) {
   }
   if (topTopics.some(([k, v]) => k === 'academics_exams' && v >= 2)) {
     addTrait(profile, 'Focused learner preparing for exams/interviews with high accuracy');
+  }
+
+  // 4. Seed core Bilingual Mastery (Hinglish + English) & Question-Scope Precision lessons
+  if (addLesson(profile, 'Answer strictly ONLY what was asked ("jo pucha uska hi proper & perfect answer") — no unasked dumps, filler intros, or robotic footers.', 'bilingual_training')) {
+    learnedCount++;
+  }
+  if (addLesson(profile, 'Speak Hinglish at its best (natural, sharp, authentic) when addressed in Hinglish, and impeccable, articulate English when addressed in English.', 'bilingual_training')) {
+    learnedCount++;
   }
 
   profile.lastTrainedAt = Date.now();
