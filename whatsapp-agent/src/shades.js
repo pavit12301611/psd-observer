@@ -1,0 +1,222 @@
+// shades.js — 🕶️ SHADES: physical screen blackout for privacy.
+//
+// When the owner says /shades the PANEL goes black for anyone physically near
+// the screen — but screenshots stay CLEAR, because the bot's capture pipeline
+// reads the compositor framebuffer and we never touch that. The darkening is
+// applied AFTER the pixels are composed:
+//
+//   method A  brightnessctl  — hardware backlight level 0 (laptops, Fedora)
+//   method B  xrandr         — output gamma ramp 0 (desktop monitors, X11)
+//
+// Both leave the framebuffer untouched → /screenshot, /look, OCR and the
+// vision brain keep seeing the real screen. Only human eyes are locked out.
+//
+// SAFETY: the screen cannot stay black forever by accident — an auto-restore
+// timer (default 30 min) turns it back on, and /shades off from WhatsApp
+// works even while the screen is black. If the state file is ever lost while
+// the backlight sits at 0, shadesOff recovers to 50% instead of leaving the
+// owner staring at a dead panel.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const DEFAULT_STATE_FILE = path.join(ROOT, 'data', 'shades-state.json');
+export const DEFAULT_TIMEOUT_MIN = 30;
+
+// ── tiny injectable shell runner (tests pass a fake) ─────────────────────────
+async function defaultRun(bin, args = []) {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  return promisify(execFile)(bin, args, { timeout: 8000 }).then((r) => r.stdout ?? '');
+}
+
+function stateOpts(opts = {}) {
+  return {
+    run: opts.run ?? defaultRun,
+    stateFile: opts.stateFile ?? DEFAULT_STATE_FILE,
+    timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MIN * 60_000,
+    now: opts.now ?? Date.now,
+  };
+}
+
+// ── state persistence (survives restarts and crashes) ────────────────────────
+export function loadShadeState(stateFile = DEFAULT_STATE_FILE) {
+  try {
+    return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function saveShadeState(state, stateFile) {
+  try {
+    fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearShadeState(stateFile) {
+  try { fs.rmSync(stateFile, { force: true }); } catch { /* noop */ }
+}
+
+// ── method A: hardware backlight (works on Wayland + X11 laptops) ────────────
+async function backlightOn(run) {
+  const machine = await run('brightnessctl', ['-m']).catch((err) => {
+    if (err?.code === 'ENOENT') return null;
+    throw err;
+  });
+  if (!machine) return null;
+  const line = String(machine).trim().split('\n')[0] ?? '';
+  const parts = line.split(',');
+  const pct = Number.parseInt((parts[3] ?? '').replace('%', ''), 10);
+  const raw = parts[2]; // raw device value — restore exactly, percent rounds
+  await run('brightnessctl', ['set', '0']);
+  return { method: 'backlight', savedPct: Number.isFinite(pct) ? pct : null, savedRaw: raw ?? null };
+}
+
+async function backlightOff(run, state) {
+  const restore = state.savedRaw != null ? String(state.savedRaw) : `${state.savedPct ?? 50}%`;
+  await run('brightnessctl', ['set', restore]);
+}
+
+// ── method B: gamma ramp via xrandr (desktop monitors, X11) ──────────────────
+// xrandr --brightness scales the OUTPUT LUT — the X framebuffer (what
+// screenshots read) stays untouched.
+async function gammaOn(run) {
+  const query = await run('xrandr', ['--query']).catch((err) => {
+    if (err?.code === 'ENOENT') return null;
+    throw err;
+  });
+  if (!query) return null;
+  const outputs = String(query).split('\n')
+    .map((l) => l.match(/^(\S+)\s+connected\b/))
+    .filter(Boolean)
+    .map((m) => m[1]);
+  if (!outputs.length) return null;
+  for (const out of outputs) await run('xrandr', ['--output', out, '--brightness', '0']);
+  return { method: 'gamma', outputs };
+}
+
+async function gammaOff(run, state) {
+  for (const out of state.outputs ?? []) {
+    await run('xrandr', ['--output', out, '--brightness', '1']).catch(() => {});
+  }
+}
+
+// ── public API ───────────────────────────────────────────────────────────────
+
+/** Turn the shades ON — panel black, screenshots clear. */
+export async function shadesOn(opts = {}) {
+  const { run, stateFile, timeoutMs, now } = stateOpts(opts);
+  const prev = loadShadeState(stateFile);
+  if (prev?.enabled) {
+    return '🕶️ *SHADES already ON* — screen is physically black (screenshots still clear).\nScreen wapas chahiye? `/shades off` bolo.';
+  }
+
+  let applied = null;
+  try {
+    applied = await backlightOn(run);
+    if (!applied) applied = await gammaOn(run);
+  } catch (err) {
+    return `🕶️ Shades failed: ${err?.message ?? err}\n_Tip: brightnessctl (sudo dnf install brightnessctl) ya X11 pe xrandr chahiye._`;
+  }
+  if (!applied) {
+    return '🕶️ Shades nahi chale — na `brightnessctl` mila (sudo dnf install brightnessctl) na `xrandr` (X11 session).';
+  }
+
+  const state = {
+    enabled: true,
+    at: now(),
+    timeoutMs,
+    ...applied,
+  };
+  saveShadeState(state, stateFile);
+
+  // Failsafe: auto-restore even if nobody says /shades off.
+  if (timeoutMs > 0) {
+    const timer = setTimeout(() => {
+      shadesOff({ run, stateFile, now }).catch(() => {});
+    }, timeoutMs);
+    timer.unref?.(); // never keep the process alive just for the failsafe
+  }
+
+  const how = applied.method === 'backlight'
+    ? `hardware backlight 0${applied.savedPct != null ? ` (saved: ${applied.savedPct}%)` : ''}`
+    : `gamma ramp 0 on ${applied.outputs.join(', ')}`;
+  return [
+    '🕶️ *SHADES ON* — screen physically *BLACK* for everyone nearby.',
+    `✅ Screenshots *clear* — sirf panel dark hai (${how}), framebuffer safe.`,
+    timeoutMs > 0
+      ? `⏱️ Auto-restore: ${Math.round(timeoutMs / 60000)} min · turant wapas: \`/shades off\``
+      : '⏱️ Auto-restore off · wapas: `/shades off`',
+  ].join('\n');
+}
+
+/** Turn the shades OFF — panel back to the saved brightness. */
+export async function shadesOff(opts = {}) {
+  const { run, stateFile } = stateOpts(opts);
+  const state = loadShadeState(stateFile);
+  if (!state?.enabled) {
+    // Recovery path: state lost but someone dimmed us to 0 earlier.
+    try {
+      const machine = await run('brightnessctl', ['-m']).catch(() => null);
+      const pct = machine ? Number.parseInt(String(machine).split(',')[3]?.replace('%', ''), 10) : null;
+      if (pct === 0) {
+        await run('brightnessctl', ['set', '50%']);
+        return '🕶️ Shades tha nahi, par backlight *0%* pe thi — *50%* kar di (recovery mode).';
+      }
+    } catch { /* fall through */ }
+    return '🕶️ Shades already *OFF* hai. On karo: `/shades`';
+  }
+
+  try {
+    if (state.method === 'backlight') await backlightOff(run, state);
+    else await gammaOff(run, state);
+  } catch (err) {
+    return `🕶️ Shades off karte waqt error: ${err?.message ?? err}\nRecovery: \`brightnessctl set 50%\``;
+  }
+  clearShadeState(stateFile);
+  const how = state.method === 'backlight'
+    ? `backlight → ${state.savedPct ?? 50}%`
+    : `gamma → normal on ${state.outputs?.join(', ') ?? 'outputs'}`;
+  return `🕶️ *SHADES OFF* — screen normal (${how}). Kisi ne kuch nahi dekha 😎`;
+}
+
+/** What's happening right now? */
+export async function shadesStatus(opts = {}) {
+  const { run, stateFile, now } = stateOpts(opts);
+  await maybeAutoRestore({ run, stateFile, now });
+  const state = loadShadeState(stateFile);
+  if (!state?.enabled) return '🕶️ Shades: *OFF* — screen normal. On: `/shades`';
+  const mins = Math.max(0, Math.round((state.timeoutMs - (now() - state.at)) / 60000));
+  return `🕶️ Shades: *ON* (${state.method}) · auto-restore in ~${mins} min · off: \`/shades off\``;
+}
+
+/**
+ * Restore if the auto-restore deadline passed (called on status/commands and
+ * at startup). Returns true when it actually restored.
+ */
+export async function maybeAutoRestore(opts = {}) {
+  const { run, stateFile, timeoutMs, now } = stateOpts(opts);
+  const state = loadShadeState(stateFile);
+  if (!state?.enabled) return false;
+  const deadline = state.timeoutMs ?? timeoutMs;
+  if (deadline <= 0) return false;
+  if (now() - state.at < deadline) return false;
+  await shadesOff({ run, stateFile, now });
+  return true;
+}
+
+/** Startup hook — a stale black screen from a crash must never persist. */
+export async function initShades(opts = {}) {
+  try {
+    return await maybeAutoRestore(opts);
+  } catch {
+    return false;
+  }
+}

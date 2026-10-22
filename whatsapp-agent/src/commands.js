@@ -22,6 +22,7 @@ import * as hands from './hands.js';
 import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
+import { shadesOn, shadesOff, shadesStatus, initShades } from './shades.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -163,6 +164,11 @@ import {
 } from './quality30.js';
 
 const execAsync = promisify(exec);
+// Shades' injectable runner (execFile-based; tests pass their own fake).
+async function execAsyncFile(bin, args = []) {
+  const { execFile } = await import('node:child_process');
+  return promisify(execFile)(bin, args ?? [], { timeout: 8000 }).then((r) => r.stdout ?? '');
+}
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
 
@@ -181,6 +187,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 *PC control*
 • /screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top
 • /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
+• /shades [off|status] — 🕶️ screen physically BLACK (privacy) but screenshots CLEAR
 • /pc type <text> · /pc paste <long text> · /pc key ctrl+l · /pc click [x y] [double]
 • /pc mousemove <x> <y> · /pc scroll [up|down] [steps] · /pc lock
 • /stop — chal raha kaam turant roko (browser/app khula rahega; stacked kaam bhi)
@@ -2898,6 +2905,19 @@ export function createAgent({
         return toReply(await actions.runPending(ctx));
       }
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
+      case 'shades': case 'privacy': {
+        // 🕶️ SHADES — panel physically black (privacy from bystanders), but
+        // screenshots stay CLEAR (backlight/gamma, never the framebuffer).
+        const sub = String(args || '').trim().toLowerCase();
+        const shared = {
+          run: (bin, a) => execAsyncFile(bin, a),
+          stateFile: undefined,
+          timeoutMs: Math.max(0, Number(config?.shadesTimeoutMin ?? 30) * 60_000),
+        };
+        if (sub === 'off' || sub === 'disable' || sub === '0' || sub === 'down') return shadesOff(shared);
+        if (sub === 'status') return shadesStatus(shared);
+        return shadesOn(shared);
+      }
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
       default: {
         const learnedRes = await runLearned(cmd, ctx, args);

@@ -1895,6 +1895,32 @@ entering the train fold, same split), MatchNet val P 90.0 / R 73.0.
 p50 < 5ms across the bank, classify < 5ms cold / < 500µs warm). `npm run bench` prints the
 full speed + accuracy snapshot any time.
 
+## Part 6 — 🕶️ Shades (privacy screen)
+
+User ask: *"/shades makes the screen black but screenshots are clear — the screen is
+invisible physically to other people"*. New `src/shades.js` + `/shades [off|status]` command.
+
+**The trick:** never touch the framebuffer — that's what screenshots read. Darken only what
+happens AFTER the pixels are composed:
+- **method A** `brightnessctl set 0` — hardware backlight (laptops, Fedora default; Wayland + X11)
+- **method B** `xrandr --output X --brightness 0` — output gamma ramp (desktop monitors, X11)
+
+Both leave the compositor output intact → `/screenshot`, `/look`, OCR and the vision brain
+keep seeing the real screen while human eyes see black. The saved level is restored exactly
+(raw device value, not a rounded percent).
+
+**Failsafes (a black screen must never be a trap):**
+1. `/shades off` from WhatsApp works even when the panel is black (phone is the remote);
+2. auto-restore timer (default 30 min, `SHADES_TIMEOUT_MIN=0` disables);
+3. startup `initShades()` restores a stale blackout left by a crash;
+4. lost state + backlight stuck at 0 → recovery to 50% instead of a dead panel.
+
+**Result:** 303 → **314/314 tests green** (11 new: backlight save/restore roundtrip, idempotent
+on/off, xrandr gamma fallback with multi-output restore, clear error when no panel tool exists,
+auto-restore fires after deadline / not before, crash-recovery on startup, state-lost recovery,
+status countdown, and an invariant that ONLY brightnessctl/xrandr are ever invoked — capture
+tools are never touched).
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

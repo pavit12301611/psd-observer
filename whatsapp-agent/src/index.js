@@ -20,6 +20,7 @@ import { routerFor } from './router.js';
 import { createWaVoip } from './wavoip.js';
 import { startCallScheduleLoop } from './callscheduler.js';
 import { startPowerLifecycleWatcher, isOfflineNotifyEnabled } from './lifecycle.js';
+import { initShades } from './shades.js';
 import os from 'node:os';
 
 // Set by systemd for every service (user services included on Fedora).
@@ -154,6 +155,11 @@ console.info(`   Shell: ${config.allowShell ? 'enabled (PIN)' : 'off (ALLOW_SHEL
 console.info(`   Cron jobs: ${store.listCronJobs().length} recurring · TTS: ${config.ttsEngine}`);
 console.info(`   😴 Sleep notify: ${isOfflineNotifyEnabled(config, store) ? 'ACTIVE (auto "Agent is sleeping" on PC shutdown/sleep/stop)' : 'off (/sleepnotify on)'}`);
 console.info(`   📞 JARVIS voice call: ${config.voiceCall === false ? 'off (VOICE_CALL=false)' : 'on — phone-app Call tab + WhatsApp voice notes'} · asli WhatsApp call pickup: ${config.waCallAnswer ? 'EXPERIMENTAL engine ON' : `off → fallback "${config.waCallFallback}" (setup: bash scripts/observer.sh voice call-engine)`}`);
+// 🕶️ Shades failsafe: if a crash left the panel black past its timeout,
+// restore it at startup so the owner is never stuck on a dead screen.
+initShades().then((restored) => {
+  if (restored) console.info('   🕶️ Shades: stale blackout detected → screen restored (failsafe)');
+}).catch(() => {});
 const distroLine = distroPrettyName();
 if (distroLine) console.info(`   OS: ${distroLine}`);
 // Say up-front whether screen control can work at all in this session — this
