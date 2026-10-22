@@ -6,8 +6,8 @@ quantized checkpoint and upgrade every part of the agent: intent routing,
 semantic knowledge matching, tone control, and continuous learning.
 
 ```
-IntentNet   [406 → 32 → 12]  softmax   trained: val 83.3% (held-out handwritten Hinglish)
-MatchNet    [ 13 → 16 → 1]   sigmoid   trained: val P 92.6% / R 75.8%
+IntentNet   [406 → 32 → 12]  softmax   trained: val 86.0% (held-out handwritten Hinglish)
+MatchNet    [ 13 → 16 → 1]   sigmoid   trained: val P 90.0% / R 73.0%
 checkpoint  src/neural/weights.json     43 KB int8, auto-loaded at runtime
 ```
 
@@ -68,21 +68,51 @@ npm run train:neural   # train both nets, validate, save checkpoint (20s)
 npm run train          # neural + Wikipedia training
 ```
 
+## The multi-agent fleet 🤖🤝🤖
+
+The trained IntentNet is the **dispatcher**: work is divided among specialist bots,
+each with its own mission and tools. Compound messages spawn a **squad**:
+
+| Bot | Owns | Tools |
+|---|---|---|
+| 🔬 ResearchBot | factual, comparison | knowledge + wiki |
+| 👩‍🏫 TeacherBot | explain, howto | knowledge + wiki |
+| 🧑‍💻 CodeBot | code | code runner |
+| 🧮 MathBot | math | solver engine |
+| ✍️ CreativeBot | poems, stories, captions | — |
+| 🫂 DostiBot | emotional, greetings, thanks | — |
+| 🤖 DeskBot | personal, misc chat | knowledge |
+| 👁️ VisionBot | images & questions | vision + solver |
+
+```
+you:  "explain photosynthesis and likho ek poem barish pe"
+fleet: 👩‍🏫 TeacherBot:
+       <steps of photosynthesis>
+
+       ✍️ CreativeBot:
+       <the poem>
+```
+
+Single replies are signed (`— 🧑‍💻 CodeBot`, `AGENT_TAG=off` to disable). `/agents`
+shows fleet status. Squad detection is conservative — "what is light and sound"
+stays one research question; only real compound requests ("…and likho…") split.
+
 ## Architecture map
 
 ```
 src/neural/
 ├── nn.js        MLP engine — init/forward/backprop/Adam/quantize (XOR-proven)
 ├── text.js      406-dim featurizer + bilingual lexicon + 13-dim pair features
-├── dataset.js   300+ labelled examples, 12 classes, templates, paraphrases
+├── dataset.js   371 labelled examples, 12 classes, templates, 42 paraphrase groups
 ├── train.js     stratified split → augment → train → honest validation metrics
 ├── index.js     runtime API: classifyIntent / matchScore / rankMatches / learnExample
 └── weights.json trained checkpoint (shipped, auto-loaded)
+src/agents.js    multi-agent fleet — dispatcher, missions, squad merge
 ```
 
 Retraining is honest: validation examples are **never** augmented or templated,
 the held-out split is fixed (seed 42), and the trainer reports per-class weak
-spots. The honest number: **83.3%** on genuinely unseen handwritten Hinglish —
+spots. The honest number: **86.0%** on genuinely unseen handwritten Hinglish —
 the remaining misses are ambiguous short strings ("gn", "ok bye") where even a
 human needs context.
 

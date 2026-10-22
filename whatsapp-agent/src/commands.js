@@ -125,6 +125,7 @@ import {
 } from './bilingual.js';
 import { lookupKnowledge } from './knowledge.js';
 import { classifyIntent, learnExample } from './neural/index.js';
+import { orchestrate, missionDirective, agentTag, taskBrief, mergeSquadAnswers, fleetStatus, AGENTS } from './agents.js';
 import { wikiCommand, wikiFallback } from './wiki.js';
 import {
   recordTurnOutcome,
@@ -2874,6 +2875,12 @@ export function createAgent({
       case 'agent': return runAgentTask(args, ctx);
       case 'use': case 'hands': return runUseTask(args, ctx.signal);
       case 'arena': return runArenaPrompt(args, ctx.signal);
+      case 'agents': case 'fleet': {
+        const head = `🤖🤖 *Multi-Agent Fleet* — kaam bots me divide hota hai (IntentNet dispatcher):`;
+        let brain = '🧠 IntentNet: trained checkpoint loaded';
+        try { brain = `🧠 IntentNet: ${classifyIntent('hello').source} · conf ${classifyIntent('hello').confidence.toFixed(2)}`; } catch { /* optional */ }
+        return `${head}\n${fleetStatus()}\n\n${brain}\n👁️ VisionBot — images/questions (vision pipeline)\n\nHar bot ka apna mission + tools hai. Compound messages me squad ban jaata hai. ✅`;
+      }
       case 'brains': case 'models': case 'router': {
         if (args && /^(why|explain|route)\b/i.test(args)) {
           return router.explainText(args.replace(/^(why|explain|route)\s+/i, '').trim() || 'hello');
@@ -3007,16 +3014,46 @@ export function createAgent({
       store?.pushHistory?.('assistant', kh.reply);
       return kh.reply;
     }
-    // Trained IntentNet: tone/routing signal for the chat brain + a chance to
-    // learn from real owner conversations (retrain: npm run train:neural).
-    let intentLabel = null;
+    // ── Multi-agent dispatcher: trained IntentNet splits the work ──
+    // One bot for single-intent messages, a SQUAD for compound ones
+    // ("explain X and likho ek poem" → 🔬 + ✍️ answering together).
+    let classified = null;
     try {
-      const classified = classifyIntent(text);
-      intentLabel = classified.label;
-      if (classified.confidence >= 0.85) learnExample(text, intentLabel);
+      classified = classifyIntent(text);
+      if (classified.confidence >= 0.85) learnExample(text, classified.label);
     } catch { /* brain optional */ }
-    const result = await ai.chat(config, store, text, log, { voice: Boolean(ctx?.voice), intent: intentLabel });
-    if (result) return result.text;
+    const plan = orchestrate(text, classified || { label: 'misc_chat', scores: {} });
+
+    if (plan.multi && plan.squad.length > 1) {
+      const parts = [];
+      for (const entry of plan.squad) {
+        const result = await ai.chat(config, store, text, log, {
+          voice: Boolean(ctx?.voice),
+          intent: entry.intent,
+          agent: entry.agent,
+          squadName: entry.agent.name,
+          taskBrief: taskBrief(entry),
+        });
+        if (result?.text) parts.push({ agent: entry.agent, text: result.text });
+      }
+      const merged = mergeSquadAnswers(parts);
+      if (merged) {
+        store?.pushHistory?.('user', text);
+        store?.pushHistory?.('assistant', merged);
+        return merged;
+      }
+    }
+
+    const result = await ai.chat(config, store, text, log, {
+      voice: Boolean(ctx?.voice),
+      intent: classified?.label,
+      agent: plan.primary,
+      taskBrief: taskBrief({ agent: plan.primary, intent: classified?.label }),
+    });
+    if (result?.text) {
+      const tagged = config?.agentTag === false ? result.text : `${result.text}\n\n${agentTag(plan.primary)}`;
+      return tagged;
+    }
     // No brain: still try to be useful offline for factual questions.
     try {
       const fb = await wikiFallback(text, config, store);

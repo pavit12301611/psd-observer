@@ -1830,6 +1830,35 @@ learnExample persistence, graceful heuristics). Docs: `NEURAL.md`. Honest 83% he
 accuracy on unseen handwritten Hinglish; remaining misses are ambiguous 2-3 word strings
 where even humans need context.
 
+## Part 4 — More training + the multi-agent fleet
+
+User ask: *"ise aur train kar aur na work ko bots mein divide kar — multiple agents apne aap
+ko divide karke bots mein divide karke work karein"*.
+
+**More training:** +90 labelled examples (weak-class boost: greeting/gratitude/howto/explain
++ variety) → **371 total**, +12 MatchNet paraphrase groups (42 groups). Retrained:
+**IntentNet val 83.3% → 86.0%** (held-out grew 42 → 57 handwritten — still rising), MatchNet
+val P 90.0% / R 73.0%. Checkpoint refreshed (41 KB int8).
+
+**Multi-agent fleet (`src/agents.js`):** work is now divided among 8 specialist bots and the
+trained IntentNet is the DISPATCHER. 🔬 ResearchBot (factual/comparison, knowledge+wiki) ·
+👩‍🏫 TeacherBot (explain/howto, knowledge+wiki) · 🧑‍💻 CodeBot (code) · 🧮 MathBot (math,
+solver tool) · ✍️ CreativeBot (creative writing) · 🫂 DostiBot (emotional/greetings) ·
+🤖 DeskBot (personal/misc) · 👁️ VisionBot (image pipeline). Each bot has its own mission
+injected into the system prompt (CreativeBot never fact-dumps, DostiBot never lectures,
+CodeBot leads with working code, MathBot double-checks arithmetic).
+
+**Squad mode:** compound messages ("explain photosynthesis and likho ek poem") split into a
+2-bot squad — each answers its share, merged with visible headers (🔬 ResearchBot: … / ✍️
+CreativeBot: …). Detection is conservative: connector + task-verb only ("what is light and
+sound" stays one research question — tested). Single replies are signed `— 🧑‍💻 CodeBot`
+(`AGENT_TAG=off` to disable), `/agents` shows fleet status. Cache keys are agent-scoped so
+squad calls never collide. Vision/STEM/MCQ pipelines keep their specialised solvers.
+
+**Result:** 287 → **301/301 tests green** (14 new: fleet registry coverage, no double-owned
+intent, missions Namaste-free, dispatcher solo/squad/fallback routing, prompt integration,
+squad merge shape, status line). Docs: `NEURAL.md` fleet section.
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

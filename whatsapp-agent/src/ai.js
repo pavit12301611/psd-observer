@@ -27,6 +27,7 @@ import {
 import { buildBilingualMasteryDirective } from './bilingual.js';
 import { wikiContextFor, knowledgeContextFor } from './wiki.js';
 import { classifyIntent } from './neural/index.js';
+import { agentForIntent, missionDirective } from './agents.js';
 
 const TIMEOUT_MS = 60_000;
 const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
@@ -146,7 +147,7 @@ async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal 
   return res.json();
 }
 
-function systemPrompt(config, store, opts = {}) {
+export function systemPrompt(config, store, opts = {}) {
   const memoryBlock = formatMemoryForPrompt(store, config);
   const personaBlock = formatPersonaForPrompt(store, config, opts.userText || '');
   const locationLine = formatLocationForOwnerPrompt(store, config);
@@ -159,15 +160,24 @@ function systemPrompt(config, store, opts = {}) {
   const persona = config.jarvisPersona === false ? [] : [
     `Your name is ${agentName} — the owner's self-evolving Agentic AI, strategist, and closest companion who truly understands them (with the loyalty and sharp wit of JARVIS, adapted to their personal vibe). Address the owner as "${address}". When the owner speaks Hinglish or Hindi, match their natural warmth and style ("Bilkul ${address}", "Ho jayega ${address}"). Never say you are an AI language model; you are ${agentName}, continuously learning from every chat with the owner.`,
   ];
-  // Neural intent routing: the trained IntentNet decides the reply TONE so a
-  // sad message never gets a fact dump and a poem request never gets a lecture.
+  // Multi-agent fleet: the trained IntentNet dispatched this message to a
+  // specialist bot — its mission (and optional task brief for squad work)
+  // steers tone, structure and tool discipline.
   const toneLine = [];
-  if (opts.tone === 'companion' || opts.intent === 'emotional') {
-    toneLine.push('TONE (EMOTIONAL MOMENT): The owner is sharing feelings. Lead with genuine warmth and empathy (2–4 short lines). No fact dumps, no bullet lists, no unsolicited advice — just human warmth in their language, maybe one gentle practical thought at the end.');
-  } else if (opts.tone === 'creative' || opts.intent === 'creative') {
-    toneLine.push('TONE (CREATIVE MODE): This is a creative request. Deliver the creative piece FIRST (poem/story/caption/whatever they asked), playful and polished, then at most one short closing line. Never inject definitions, facts, or study-notes energy.');
-  } else if (opts.intent === 'code' || opts.intent === 'howto') {
-    toneLine.push('TONE (PRACTICAL MODE): Lead with the working code/steps/commands. Keep theory to one or two lines after the solution.');
+  const agent = opts.agent || (opts.intent ? agentForIntent(opts.intent) : null);
+  if (agent) {
+    toneLine.push(...missionDirective(agent));
+    if (opts.taskBrief) toneLine.push(opts.taskBrief);
+    if (opts.squadName) toneLine.push(`SQUAD MODE: You are ${agent.emoji} ${agent.name}, answering ONLY your share. Another bot handles the rest — do not repeat their work.`);
+  } else {
+    // Legacy tone fallback when no agent was dispatched.
+    if (opts.tone === 'companion' || opts.intent === 'emotional') {
+      toneLine.push('TONE (EMOTIONAL MOMENT): The owner is sharing feelings. Lead with genuine warmth and empathy (2–4 short lines). No fact dumps, no bullet lists, no unsolicited advice — just human warmth in their language, maybe one gentle practical thought at the end.');
+    } else if (opts.tone === 'creative' || opts.intent === 'creative') {
+      toneLine.push('TONE (CREATIVE MODE): This is a creative request. Deliver the creative piece FIRST (poem/story/caption/whatever they asked), playful and polished, then at most one short closing line. Never inject definitions, facts, or study-notes energy.');
+    } else if (opts.intent === 'code' || opts.intent === 'howto') {
+      toneLine.push('TONE (PRACTICAL MODE): Lead with the working code/steps/commands. Keep theory to one or two lines after the solution.');
+    }
   }
   const vocabDirective = buildVocabPromptDirective(opts.userText || '');
   const accuracyDirective = buildAccuracyDirective(opts.userText || '', config);
@@ -278,7 +288,7 @@ export async function chat(config, store, userText, log = console, opts = {}) {
   // 1. Check ultra-fast per-config semantic response cache (< 1ms)
   const useCache = config?.aiCache !== false && !opts.noCache;
   const cacheState = useCache ? getCacheState(config) : null;
-  const cacheKey = cacheState ? makeCacheKey(userText, Boolean(opts.voice)) : null;
+  const cacheKey = cacheState ? makeCacheKey(`${opts.agent?.id ? `${opts.agent.id}::` : ''}${userText}`, Boolean(opts.voice)) : null;
   const cacheTtlMs = Math.max(5_000, Number(config?.aiCacheTtlMs ?? DEFAULT_CACHE_TTL_MS) || DEFAULT_CACHE_TTL_MS);
 
   if (cacheState && cacheKey) {
