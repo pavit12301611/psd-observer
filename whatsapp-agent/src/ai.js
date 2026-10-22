@@ -24,6 +24,7 @@ import {
   selectOptimalTemperature,
   postProcessAiAnswer,
 } from './accuracy.js';
+import { buildBilingualMasteryDirective } from './bilingual.js';
 
 const TIMEOUT_MS = 60_000;
 const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
@@ -158,6 +159,7 @@ function systemPrompt(config, store, opts = {}) {
   ];
   const vocabDirective = buildVocabPromptDirective(opts.userText || '');
   const accuracyDirective = buildAccuracyDirective(opts.userText || '', config);
+  const bilingualDirective = buildBilingualMasteryDirective(opts.userText || '', store);
   return [
     `You are ${agentName}, the owner's personal Agentic AI & companion, running for free on their own computer as part of Observer.`,
     ...persona,
@@ -165,6 +167,7 @@ function systemPrompt(config, store, opts = {}) {
     personaBlock,
     vocabDirective,
     accuracyDirective,
+    bilingualDirective,
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
     locationLine,
@@ -319,11 +322,13 @@ function guestSystemPrompt(config, store, opts = {}) {
     ? `${opts.senderName} (+${opts.senderNumber || 'guest'})`
     : `+${opts.senderNumber || 'guest'}`;
   const accuracyDirective = buildAccuracyDirective(opts.userText || '', config);
+  const bilingualDirective = buildBilingualMasteryDirective(opts.userText || '', store);
   return [
     `You are ${agentName}, a smart, friendly, and helpful AI assistant on WhatsApp (+${config.agentNumber}).`,
     `You are currently chatting with a guest/contact (${guestLabel}), NOT the owner of the system.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone || 'Asia/Kolkata' })} (${config.timezone || 'Asia/Kolkata'}).`,
     accuracyDirective,
+    bilingualDirective,
     'STRICT SECURITY & COMMAND-BLOCK RULES (NEVER VIOLATE):',
     '1. ALL commands — both `/` slash commands and natural-language commands (opening/closing apps, taking screenshots, controlling PC/volume/wifi/power, reading/writing/sending files, running shell/code, setting reminders/todos/notes, accessing owner memory, or sending messages to others) — are 100% LOCKED to the owner only.',
     '2. You have ZERO access to the owner\'s computer, files, screen, or private data in this guest chat. Never claim to execute any command or PC action for a guest.',

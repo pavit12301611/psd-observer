@@ -26,6 +26,7 @@ import { getAgentName, formatMemoryForPrompt } from './memory.js';
 import { formatPersonaForPrompt, observeOwnerTurn } from './persona.js';
 import { buildVocabPromptDirective } from './vocab.js';
 import { buildAccuracyDirective } from './accuracy.js';
+import { buildBilingualMasteryDirective } from './bilingual.js';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
@@ -111,6 +112,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     const personaBlock = formatPersonaForPrompt(store, config, userText);
     const vocabDirective = buildVocabPromptDirective(userText);
     const accuracyDirective = buildAccuracyDirective(userText, config);
+    const bilingualDirective = buildBilingualMasteryDirective(userText, store);
     const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
     const customCmds = (store?.data?.learned ?? []).map((l) => `/${l.keyword} (${l.rawText || l.commands?.map((c) => `/${c.cmd} ${c.args || ''}`).join(' | ')})`).join(', ');
     return [
@@ -120,6 +122,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       personaBlock,
       vocabDirective,
       accuracyDirective,
+      bilingualDirective,
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
       `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
       'You are an Autonomous Agentic AI who deeply understands the owner AND can actually DO things on their computer and the internet: research, reason, plan, remember behavioral insights (`update_owner_profile` / `remember_fact`), create reusable custom `/commands` (`create_custom_command`), open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',

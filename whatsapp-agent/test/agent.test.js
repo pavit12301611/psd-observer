@@ -23,6 +23,7 @@ import * as location from '../src/location.js';
 import * as actionrecorder from '../src/actionrecorder.js';
 import * as vocab from '../src/vocab.js';
 import * as accuracy from '../src/accuracy.js';
+import * as bilingual from '../src/bilingual.js';
 import * as ai from '../src/ai.js';
 import { createModelRouter } from '../src/router.js';
 import { archiveDeadAuthDir, createWhatsApp } from '../src/whatsapp.js';
@@ -1387,6 +1388,82 @@ test('100% Answer Accuracy Engine: Deterministic Algebra/Systems/NumberTheory/St
   assert.match(verifyOut, /x₁ = 4/);
   assert.match(verifyOut, /x₂ = 3/);
 });
+
+test('34. Strict Question-Scope Precision ("Jo Pucha Uska Hi Answer") + Deep Hinglish & Impeccable English Mastery', async () => {
+  const { agent } = makeAgent();
+
+  // 1. Strict Question-Scope Precision: return ONLY what was asked, zero unasked extra dumps
+  // Asking for GCD/HCF only -> must NOT dump LCM
+  const gcdOnly = await agent.handle('bhai यार mujhe ek baat bata gcd of 48 and 180');
+  assert.match(gcdOnly, /\*12\*/);
+  assert.doesNotMatch(gcdOnly, /LCM/i);
+
+  // Asking for LCM only -> must NOT dump GCD
+  const lcmOnly = await agent.handle('hey bro can you tell me lcm of 12 and 18');
+  assert.match(lcmOnly, /\*36\*/);
+  assert.doesNotMatch(lcmOnly, /GCD/i);
+
+  // Asking for Mean only -> must NOT dump Median / Mode / Variance / StdDev
+  const meanOnly = await agent.handle('mean of 10, 20, 30, 40');
+  assert.match(meanOnly, /\*25\*/);
+  assert.doesNotMatch(meanOnly, /Median|Variance|Std Dev/i);
+
+  // Asking for Binary only -> must NOT dump Hex / Octal
+  const binOnly = await agent.handle('42 in binary');
+  assert.match(binOnly, /101010/);
+  assert.doesNotMatch(binOnly, /Hex:|Octal:/i);
+
+  // Asking for Synonyms only -> must NOT dump full dictionary card with Antonyms/Examples
+  const synOnly = await agent.handle('synonyms of resilient');
+  assert.match(synOnly, /Synonyms of resilient/i);
+  assert.doesNotMatch(synOnly, /Antonyms \(Vilom\)/i);
+
+  // 2. Bilingual Language Classifier & Core Question Preamble Stripping
+  assert.equal(bilingual.detectBilingualMode('bhai == aur === me kya farak hai?'), 'hinglish');
+  assert.equal(bilingual.detectBilingualMode('What is the difference between == and === in JavaScript?'), 'english');
+  assert.equal(
+    bilingual.extractCoreQuestion('bhai yaar mujhe ek baat bata what is the speed of light?'),
+    'what is the speed of light?',
+  );
+
+  // 3. Instant Hinglish vs English Corpus Mastery (language-mirrored answers in <1ms)
+  const hinglishJs = await agent.handle('== aur === me kya farak hai');
+  assert.match(hinglishJs, /type coercion/i);
+  assert.match(hinglishJs, /dono check karta hai/i);
+
+  const englishJs = await agent.handle('What is the difference between == and === in JavaScript?');
+  assert.match(englishJs, /Loose Equality/);
+  assert.match(englishJs, /Strict Equality/);
+
+  const hinglishTcp = await agent.handle('TCP aur UDP me kya farak hai');
+  assert.match(hinglishTcp, /connection-oriented/i);
+  assert.match(hinglishTcp, /gaming/i);
+
+  const englishTcp = await agent.handle('difference between TCP and UDP');
+  assert.match(englishTcp, /Transmission Control Protocol/);
+  assert.match(englishTcp, /User Datagram Protocol/);
+
+  const hinglishCheckin = await agent.handle('kya haal hai bhai');
+  assert.match(hinglishCheckin, /mast|set|bata/i);
+
+  const englishCheckin = await agent.handle("how's it going?");
+  assert.match(englishCheckin, /All systems are running smoothly/i);
+
+  // 4. Bilingual Mastery Benchmark & `/train`, `/hinglish`, `/english` commands
+  const biBench = bilingual.runBilingualMasteryBenchmark();
+  assert.equal(biBench.pct, 100);
+
+  const hinglishCmd = await agent.handle('/hinglish');
+  assert.match(hinglishCmd, /Hinglish Mastery Mode: AT ITS BEST/);
+
+  const englishCmd = await agent.handle('/english');
+  assert.match(englishCmd, /Impeccable English Mastery Mode: ACTIVE/);
+
+  const trainOut = await agent.handle('hinglish ki practice kar aur english bhi perfect kar');
+  assert.match(trainOut, /Self-Training Complete! \(Bilingual Mastery Active\)/);
+  assert.match(trainOut, /100%/);
+});
+
 
 
 

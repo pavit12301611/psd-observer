@@ -101,7 +101,7 @@ export function parseIntent(input) {
   if (/^(?:persona|my\s+persona|my\s+profile|owner\s+profile|mera\s+(?:behaviour|behavior|swabhav|profile|persona)(?:\s+(?:kaisa\s+hai|batao|dikhao))?|(?:tu|tum)\s+mujhe\s+kitna\s+(?:jaant[ae]|samajht[ae])\s+h(?:o|ai)|mere\s+baare\s+me(?:in)?\s+kya\s+samjha|how\s+well\s+do\s+you\s+know\s+me)[?!.।]*$/i.test(text)) {
     return asCmd('persona', 'status');
   }
-  if (/\b(?:meri\s+chats?\s+se\s+(?:train|seekh)|khud\s+ko\s+train\s+kar|train\s+(?:yourself|from\s+my\s+chats?))\b/i.test(text)) {
+  if (/\b(?:meri\s+chats?\s+se\s+(?:train|seekh)|khud\s+ko\s+train\s+kar|train\s+(?:yourself|from\s+my\s+chats?)|hinglish\s+(?:ki\s+)?practice\s+kar|english\s+(?:bhi\s+)?perfect\s+kar|hinglish\s+aur\s+english\s+train\s+kar)\b/i.test(text)) {
     return asCmd('train', text);
   }
 
@@ -156,14 +156,14 @@ export function parseIntent(input) {
   }
 
   // ── sound / brightness / media ────────────────────────────────────────────
-  if ((m = text.match(/^(?:volume|awaaz|aawaz|sound|वॉल्यूम)\s*(\d{1,3})\s*%?$/i))) return asCmd('pc', `volume ${m[1]}`);
+  if ((m = text.match(/^(?:set\s+)?(?:volume|awaaz|aawaz|sound|वॉल्यूम)\s*(?:to|pe|par|ko)?\s*(\d{1,3})\s*%?(?:\s*(?:pe|par)?\s*(?:kar(?:\s*do|\s*o)?|set\s*kar(?:\s*do|\s*o)?))?$/i))) return asCmd('pc', `volume ${m[1]}`);
   if (/^(?:volume|awaaz|aawaz|sound)\s+(?:up|badhao|increase|raise|badha\s+do)$/i.test(text)
     || /^(?:volume|awaaz|aawaz)\s+(?:ko\s+)?(?:up|badhao|increase)$/i.test(text)) return asCmd('pc', 'volume up');
   if (/^(?:volume|awaaz|aawaz|sound)\s+(?:down|kam|decrease|lower)\b/i.test(text)
     || /^(?:volume|awaaz|aawaz)\s+(?:ko\s+)?(?:kam|down)\s+kar(?:o|do)$/i.test(text)) return asCmd('pc', 'volume down');
   if (/^(?:mute|unmute|silent\s+kar(?:o|do)?)$/i.test(text)) return asCmd('pc', 'volume mute');
   if (/^(?:volume|awaaz|aawaz)\s*(?:kya|kitni|status|batao)?\s*(?:hai)?\??$/i.test(low)) return asCmd('pc', 'volume');
-  if ((m = text.match(/^(?:brightness|screen\s+brightness|chamak)\s*(\d{1,3})\s*%?$/i))) return asCmd('pc', `brightness ${m[1]}`);
+  if ((m = text.match(/^(?:set\s+)?(?:brightness|screen\s+brightness|screen\s+ki\s+brightness|chamak)\s*(?:to|pe|par|ko)?\s*(\d{1,3})\s*%?(?:\s*(?:pe|par)?\s*(?:kar(?:\s*do|\s*o)?|set\s*kar(?:\s*do|\s*o)?))?$/i))) return asCmd('pc', `brightness ${m[1]}`);
   if (/^(?:brightness|chamak)\s+(?:up|badhao|increase)$/i.test(text)) return asCmd('pc', 'brightness up');
   if (/^(?:brightness|chamak)\s+(?:down|kam|decrease)$/i.test(text)) return asCmd('pc', 'brightness down');
   if (/^(?:brightness|chamak)\s*(?:kya|kitni|status)?\s*(?:hai)?\??$/i.test(low)) return asCmd('pc', 'brightness');
@@ -192,7 +192,7 @@ export function parseIntent(input) {
   if (/^(?:ip|ip\s+address|mera\s+ip|my\s+ip|lan\s+ip)\s*(?:kya|address|batao)?\s*(?:hai)?\??$/i.test(low)) return asCmd('pc', 'ip');
 
   // ── system ────────────────────────────────────────────────────────────────
-  if (/^(?:battery|charge|charging)\s*(?:(?:kya|kitni|kitna|status|batao|hai)\s*){0,2}\??$/i.test(low)) return asCmd('pc', 'battery');
+  if (/^(?:(?:pc\s+ki\s+|laptop\s+ki\s+)?(?:battery|charge|charging)\s*(?:(?:kya|kitni|kitna|bachi|status|batao|hai)\s*){0,3}|laptop\s+kitna\s+charge\s+hai|how\s+much\s+battery\s+is\s+left)\??$/i.test(low)) return asCmd('pc', 'battery');
   if (/^(?:disk|storage|jagah|space)\s*(?:kya|kitni|status|batao|free)?\s*(?:hai)?\??$/i.test(low)) return asCmd('pc', 'disk');
   if (/^(?:(?:ram|memory\s+usage|cpu|cpu\s+usage|cpu\s+load|system\s+load|pc\s+ka\s+haal|system\s+ka\s+haal)\s*(?:kya|kitni|kitna|status|batao|hai)?\??|uptime\??)$/i.test(low)) return asCmd('system');
   if (/^(?:time\s+kya\s+(?:hua|hai)|abhi\s+kitne\s+baje\s+hain|kitne\s+baje\s+hain|what\s+time\s+is\s+it|current\s+time|samay\s+kya\s+hua\s+hai)\??$/i.test(low)) return asCmd('time');

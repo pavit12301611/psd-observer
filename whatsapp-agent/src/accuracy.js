@@ -24,6 +24,7 @@
 //   • Layer 5: Deep Multi-Tool & Adversarial Verification (`/verify` & `/accuracy`).
 
 import { calc, convertUnit } from './tools.js';
+import { extractCoreQuestion } from './bilingual.js';
 
 // Per-config accuracy telemetry
 const ACCURACY_STATS = new WeakMap();
@@ -666,8 +667,9 @@ function parseFlexibleDate(str) {
  * calendar, or verified scientific/GK constant query; otherwise returns `null`.
  */
 export function solveDeterministicQuery(rawInput) {
-  const raw = String(rawInput ?? '').trim();
-  if (!raw || raw.length > 360 || raw.startsWith('/')) return null;
+  const orig = String(rawInput ?? '').trim();
+  if (!orig || orig.length > 360 || orig.startsWith('/')) return null;
+  const raw = extractCoreQuestion(orig);
 
   // Do not hijack multi-command chains or system/desktop commands
   if (/\b(?:open|close|screenshot|remind|todo|note|remember|watchme|record|whatsapp|message|bhejo|kholo)\b/i.test(raw)) {
@@ -694,7 +696,7 @@ export function solveDeterministicQuery(rawInput) {
     if (lin) return lin;
   }
 
-  // 4. GCD / HCF & LCM
+  // 4. GCD / HCF & LCM (Returns ONLY what was asked: LCM if asked for LCM, GCD if asked for GCD)
   if ((m = raw.match(/^(?:what\s+is\s+(?:the\s+)?|find\s+(?:the\s+)?|calculate\s+)?(gcd|hcf|lcm)\s+(?:of\s+)?([\d\s,andur]+?)(?:\s+ka\s+(?:gcd|hcf|lcm))?(?:\s+kitna\s+(?:hota\s+hai|hai))?\??$/i))
     || (m = raw.match(/^([\d\s,andur]+?)\s+ka\s+(gcd|hcf|lcm)(?:\s+kitna\s+(?:hota\s+hai|hai)|(?:\s+kya\s+hai)|\s+batao)?\??$/i))) {
     const isSuffix = /\s+ka\s+/i.test(raw) && !/^(?:gcd|hcf|lcm)/i.test(raw);
@@ -710,12 +712,9 @@ export function solveDeterministicQuery(rawInput) {
         kind: op === 'lcm' ? 'lcm' : 'gcd',
         value: primary.toString(),
         summary: `${label}(${nums.join(', ')}) = ${primary}`,
-        reply: [
-          `🎯 *100% Verified Number Theory (${label})*`,
-          `• *Numbers*: \`${nums.join(', ')}\``,
-          `• *${label}*: *${primary.toString()}*`,
-          `• *Both*: GCD/HCF = \`${gcdVal.toString()}\` · LCM = \`${lcmVal.toString()}\``,
-        ].join('\n'),
+        reply: isSuffix
+          ? `🎯 \`${nums.join(', ')}\` ka *${label}* = *${primary.toString()}*`
+          : `🎯 *${label}(${nums.join(', ')})* = *${primary.toString()}*`,
       };
     }
   }
@@ -841,23 +840,36 @@ export function solveDeterministicQuery(rawInput) {
               ? fmtNum(popStd)
               : fmtNum(mean);
 
+      const isFullStats = /^stat/i.test(statKind);
+      const focusedLine = statKind.includes('median')
+        ? `🎯 *Median* of \`${nums.join(', ')}\` = *${fmtNum(median)}*`
+        : statKind.includes('mode')
+          ? `🎯 *Mode* of \`${nums.join(', ')}\` = *${modes.length ? modes.map((x) => fmtNum(x)).join(', ') : 'None (all values unique)'}*`
+          : statKind.includes('var')
+            ? `🎯 *Variance (σ²)* of \`${nums.join(', ')}\` = *${fmtNum(popVar)}* (Sample \`s² = ${fmtNum(sampVar)}\`)`
+            : statKind.includes('std') || statKind.includes('standard')
+              ? `🎯 *Standard Deviation (σ)* of \`${nums.join(', ')}\` = *${fmtNum(popStd)}* (Sample \`s = ${fmtNum(sampStd)}\`)`
+              : `🎯 *Mean (Average)* of \`${nums.join(', ')}\` = *${fmtNum(mean)}*`;
+
       return {
         kind: 'statistics',
         value: primaryVal,
         summary: `Mean=${fmtNum(mean)}, Median=${fmtNum(median)}, Mode=${modes.length ? modes.join(',') : 'none'}, StdDev(σ)=${fmtNum(popStd)}`,
-        reply: [
-          `🎯 *100% Verified Statistical Analysis (n = ${count})*`,
-          `• *Data (Sorted)*: \`${sorted.join(', ')}\``,
-          `• *Sum*: \`${fmtNum(sum)}\` · *Mean (Average)*: *${fmtNum(mean)}*`,
-          `• *Median*: *${fmtNum(median)}* · *Mode*: *${modes.length ? modes.join(', ') : 'None (all values occur once)'}*`,
-          `• *Standard Deviation*: Population \`σ = ${fmtNum(popStd)}\` · Sample \`s = ${fmtNum(sampStd)}\``,
-          `• *Variance*: \`σ² = ${fmtNum(popVar)}\` · \`s² = ${fmtNum(sampVar)}\``,
-        ].join('\n'),
+        reply: isFullStats
+          ? [
+              `🎯 *100% Verified Statistical Analysis (n = ${count})*`,
+              `• *Data (Sorted)*: \`${sorted.join(', ')}\``,
+              `• *Sum*: \`${fmtNum(sum)}\` · *Mean (Average)*: *${fmtNum(mean)}*`,
+              `• *Median*: *${fmtNum(median)}* · *Mode*: *${modes.length ? modes.join(', ') : 'None (all values occur once)'}*`,
+              `• *Standard Deviation*: Population \`σ = ${fmtNum(popStd)}\` · Sample \`s = ${fmtNum(sampStd)}\``,
+              `• *Variance*: \`σ² = ${fmtNum(popVar)}\` · \`s² = ${fmtNum(sampVar)}\``,
+            ].join('\n')
+          : focusedLine,
       };
     }
   }
 
-  // 10. Compound Interest & Simple Interest
+  // 10. Compound Interest & Simple Interest (Returns ONLY CI when asked for CI, ONLY SI when asked for SI)
   if ((m = raw.match(/^(?:find\s+|calculate\s+|what\s+is\s+(?:the\s+)?)?(compound\s+interest|simple\s+interest|\bci\b|\bsi\b)\s+(?:on\s+)?(?:rs\.?\s*|₹\s*)?(\d+(?:\.\d+)?)\s+(?:at\s+)?(\d+(?:\.\d+)?)\s*%?\s*(?:per\s+annum|p\.?a\.?)?\s+(?:for\s+)(\d+(?:\.\d+)?)\s*(?:years?|yrs?|saal)\??$/i))) {
     const isCI = /^c/i.test(m[1].trim());
     const P = Number(m[2]);
@@ -867,16 +879,12 @@ export function solveDeterministicQuery(rawInput) {
     const totalCI = P * ((1 + R / 100) ** T);
     const ci = totalCI - P;
     const primary = isCI ? ci : si;
+    const total = isCI ? totalCI : P + si;
     return {
       kind: isCI ? 'compound_interest' : 'simple_interest',
       value: fmtNum(primary, 4),
-      summary: `${isCI ? 'CI' : 'SI'} = ${fmtNum(primary, 2)} (Total Amount = ${fmtNum(isCI ? totalCI : P + si, 2)})`,
-      reply: [
-        `🎯 *100% Verified Interest Calculation*`,
-        `• *Principal (P)*: \`${fmtNum(P)}\` · *Rate (R)*: \`${fmtNum(R)}%\` · *Time (T)*: \`${fmtNum(T)} yr\``,
-        `• *Simple Interest (SI)*: *${fmtNum(si, 2)}* (Total = \`${fmtNum(P + si, 2)}\`)`,
-        `• *Compound Interest (CI, annual)*: *${fmtNum(ci, 2)}* (Total = \`${fmtNum(totalCI, 2)}\`)`,
-      ].join('\n'),
+      summary: `${isCI ? 'CI' : 'SI'} = ${fmtNum(primary, 2)} (Total Amount = ${fmtNum(total, 2)})`,
+      reply: `🎯 *${isCI ? 'Compound Interest (CI)' : 'Simple Interest (SI)'}*: *${fmtNum(primary, 2)}* (Total Amount = \`${fmtNum(total, 2)}\` for P = \`${fmtNum(P)}\`, R = \`${fmtNum(R)}%\`, T = \`${fmtNum(T)} yr\`)`,
     };
   }
 
@@ -927,17 +935,19 @@ export function solveDeterministicQuery(rawInput) {
       const bin = n.toString(2);
       const hex = n.toString(16).toUpperCase();
       const oct = n.toString(8);
-      const picked = target.startsWith('bin') ? `0b${bin} (${bin})` : target.startsWith('hex') ? `0x${hex} (${hex})` : `0o${oct} (${oct})`;
+      const isBin = target.startsWith('bin');
+      const isHex = target.startsWith('hex');
+      const picked = isBin ? `0b${bin} (${bin})` : isHex ? `0x${hex} (${hex})` : `0o${oct} (${oct})`;
+      const singleLine = isBin
+        ? `🎯 *${n} in Binary (Base 2)*: *${bin}* (\`0b${bin}\`)`
+        : isHex
+          ? `🎯 *${n} in Hexadecimal (Base 16)*: *${hex}* (\`0x${hex}\`)`
+          : `🎯 *${n} in Octal (Base 8)*: *${oct}* (\`0o${oct}\`)`;
       return {
         kind: 'base_conversion',
         value: picked,
         summary: `Decimal ${n} -> Binary: ${bin}, Hex: ${hex}, Octal: ${oct}`,
-        reply: [
-          `🎯 *100% Verified Base Conversion (Decimal ${n})*`,
-          `• *Binary (Base 2)*: *${bin}* (\`0b${bin}\`)`,
-          `• *Hexadecimal (Base 16)*: *${hex}* (\`0x${hex}\`)`,
-          `• *Octal (Base 8)*: *${oct}* (\`0o${oct}\`)`,
-        ].join('\n'),
+        reply: singleLine,
       };
     }
   }
@@ -1270,12 +1280,17 @@ export function buildAccuracyDirective(userText = '', config = null) {
 }
 
 /**
- * Post-process an AI model response to strip `<think>` blocks and ensure consistency
- * with deterministic ground-truth facts.
+ * Post-process an AI model response to strip `<think>` blocks, remove robotic
+ * filler preambles, and ensure consistency with deterministic ground-truth facts.
  */
 export function postProcessAiAnswer(rawText, { userText = '', config = null } = {}) {
   let clean = String(rawText ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   if (!clean) return clean;
+
+  // Strip robotic boilerplate intros so the user gets the direct answer immediately
+  clean = clean
+    .replace(/^(?:As an AI(?: language model| assistant)?[,.\s]*|Certainly!?\s+Here(?:'s| is)\s+(?:the\s+answer|your\s+answer|what\s+you\s+asked\s+for)\s*[:\-–—]?\s*|Sure!?\s+I(?:'d|\s+would)\s+be\s+happy\s+to\s+help(?:\s+you\s+with\s+that)?[!.]?\s*)/i, '')
+    .trim();
 
   const { facts, primaryValue } = extractDeterministicGrounding(userText);
   if (primaryValue != null && facts.length > 0) {
@@ -1302,7 +1317,7 @@ export function runAccuracySelfTest() {
     { name: 'Quadratic Roots (x² - 5x + 6 = 0)', q: 'solve x^2 - 5x + 6 = 0', check: (r) => r?.summary?.includes('3') && r?.summary?.includes('2') },
     { name: 'Linear Equation (3x + 7 = 22)', q: 'solve 3x + 7 = 22', check: (r) => r?.value === 5 },
     { name: '2×2 Linear System (2x+3y=12, x-y=1)', q: 'solve 2x + 3y = 12 and x - y = 1', check: (r) => r?.x === 3 && r?.y === 2 },
-    { name: 'Number Theory (GCD & LCM of 48, 180)', q: 'gcd of 48 and 180', check: (r) => r?.value === '12' && r?.reply?.includes('720') },
+    { name: 'Number Theory (GCD of 48, 180)', q: 'gcd of 48 and 180', check: (r) => r?.value === '12' },
     { name: 'Combinatorics (10C3)', q: '10C3', check: (r) => r?.value === '120' },
     { name: 'Prime Factorization (360)', q: 'prime factors of 360', check: (r) => r?.value === '2^3 × 3^2 × 5' },
     { name: 'Statistics (Mean/Median/StdDev)', q: 'stats of 10, 20, 20, 40, 50', check: (r) => r?.summary?.includes('Mean=28') && r?.summary?.includes('Median=20') },

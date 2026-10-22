@@ -117,6 +117,11 @@ import {
   runAccuracySelfTest,
   bumpAccuracyStat,
 } from './accuracy.js';
+import {
+  lookupBilingualCorpus,
+  runBilingualMasteryBenchmark,
+  BILINGUAL_CORPUS,
+} from './bilingual.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -1973,15 +1978,17 @@ export function createAgent({
         }
       }
       const { learnedCount } = trainFromHistory(store);
+      const biBench = runBilingualMasteryBenchmark();
       let aiReflected = false;
       if (config.aiProvider !== 'none') {
         const ref = await ai.reflectOwnerProfile(config, store, log);
         aiReflected = Boolean(ref?.updated);
       }
       const header = [
-        `⚡ *Self-Training Complete!*`,
+        `⚡ *Self-Training Complete! (Bilingual Mastery Active)*`,
         `• Analyzed all your past chats, notes, todos & facts (${learnedCount} new signals + ${aiReflected ? 'deep AI reflection updated ✨' : 'instant behavioral analysis active'})`,
-        `• Main har message se aapka behaviour, tone, mood, goals aur preferences lagataar seekh raha hoon — as your *Agentic AI & closest companion*.`,
+        `• *Hinglish + English Mastery Corpus*: Trained on *${BILINGUAL_CORPUS.length}* bilingual patterns · Benchmark: *${biBench.passed}/${biBench.total} (${biBench.pct}%)* in \`${biBench.ms}ms\``,
+        `• *Strict Question-Scope Alignment*: Active — jo aap puchoge uska hi seedha, proper aur perfect answer milega.`,
         '',
       ].join('\n');
       return header + formatPersonaReport(store, config);
@@ -2378,6 +2385,22 @@ export function createAgent({
       case 'sleepnotify': case 'offlinenotify': case 'sleepmsg': return sleepNotifyCommand(args);
       case 'persona': case 'profile': case 'twin': case 'behaviour': case 'behavior': return await personaCommand(args);
       case 'train': return await personaCommand(args, { forceTrain: true });
+      case 'hinglish': {
+        const profile = ensureProfile(store);
+        profile.style.dominantLanguage = 'hinglish';
+        addLesson(profile, 'Speak natural, witty, street-smart + tech-sharp Hinglish ("at its best") when chatting with the owner.', 'owner_command');
+        store.save();
+        const biBench = runBilingualMasteryBenchmark();
+        return `🔥 *Hinglish Mastery Mode: AT ITS BEST* ✅\n• Trained on *${BILINGUAL_CORPUS.length}* bilingual patterns (${biBench.passed}/${biBench.total} benchmark checks passed in \`${biBench.ms}ms\`).\n• Ab har Hinglish sawal ka ekdam natural, seedha aur proper jawab milega!`;
+      }
+      case 'english': {
+        const profile = ensureProfile(store);
+        profile.style.dominantLanguage = 'english';
+        addLesson(profile, 'Deliver impeccable, articulate, crystal-clear English when chatting in English.', 'owner_command');
+        store.save();
+        const biBench = runBilingualMasteryBenchmark();
+        return `🇬🇧 *Impeccable English Mastery Mode: ACTIVE* ✅\n• Trained on *${BILINGUAL_CORPUS.length}* bilingual patterns (${biBench.passed}/${biBench.total} benchmark checks passed in \`${biBench.ms}ms\`).\n• Every English query will receive a crisp, articulate, and strictly scoped response.`;
+      }
       case 'undo': case 'journal': return await undoCommand(args);
       case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
@@ -2494,9 +2517,19 @@ export function createAgent({
           );
           return done ? `🌐 *${targetLang} Translation*\n\n${done.text}` : `🌐 No AI brain reachable right now for full translation. Normalized text:\n${normalizeVocabText(bodyText)}`;
         }
+        const wantsSynonymsOnly = cmd === 'synonym' || cmd === 'synonyms' || /^synonyms?\s+/i.test(rawArg);
+        const wantsAntonymsOnly = cmd === 'antonym' || cmd === 'antonyms' || /^antonyms?\s+/i.test(rawArg);
         const cleanWord = rawArg.replace(/^(?:synonyms?|antonyms?|define|meaning)\s+/i, '').trim();
         const entry = await lookupWordPower(cleanWord);
-        if (entry) return formatVocabCard(entry);
+        if (entry) {
+          if (wantsSynonymsOnly && entry.synonyms?.length) {
+            return `📖 *Synonyms of ${entry.word}*: \`${entry.synonyms.join('`, `')}\``;
+          }
+          if (wantsAntonymsOnly && entry.antonyms?.length) {
+            return `📖 *Antonyms of ${entry.word}*: \`${entry.antonyms.join('`, `')}\``;
+          }
+          return formatVocabCard(entry);
+        }
         const aiDef = await ai.complete(
           config,
           `Explain the word or phrase "${cleanWord}" concisely for WhatsApp with:\n• English meaning\n• Hindi & Hinglish meaning\n• 4 Synonyms\n• 2 Antonyms\n• 1 short example sentence`,
@@ -2776,6 +2809,12 @@ export function createAgent({
       bumpAccuracyStat(config, 'deterministicHits');
       return det.reply;
     }
+    const bilingualHit = lookupBilingualCorpus(text, store);
+    if (bilingualHit) {
+      store?.pushHistory?.('user', text);
+      store?.pushHistory?.('assistant', bilingualHit.reply);
+      return bilingualHit.reply;
+    }
     if (store.data.accuracyStrict !== false && looksLikeComplexStemOrMcq(text)) {
       const solved = await solver.solveQuestionText(config, text, {
         harness,
@@ -2908,6 +2947,11 @@ export function createAgent({
     if (det) {
       bumpAccuracyStat(config, 'deterministicHits');
       return det.reply;
+    }
+    // Instant Bilingual (Hinglish + English) Corpus Lookup (< 1ms offline: natural Hinglish & impeccable English Q&A)
+    const bilingualHit = lookupBilingualCorpus(text, store);
+    if (bilingualHit) {
+      return bilingualHit.reply;
     }
     if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
       const ownerName = mem.getOwnerName(store);
