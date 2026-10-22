@@ -1577,6 +1577,117 @@ test('35. All 15 Next-Gen Quality Features: Multi-Turn Follow-Up, Code Sandbox, 
   assert.ok(store.data.turnContext);
 });
 
+test('36. All 15 Additional Quality Features (#16–#30): Expense Tracker, Habit & Streak Coach, Git Autopilot, Smart Grabber, Converter, Live Scribe, NetCheck, USB Guard, Vault, Tone Rewriter, Pomodoro, Ports, Guardian, Quizzer & Time-Machine Backup', async () => {
+  const { agent } = makeAgent();
+
+  // Feature 16: Smart Expense & UPI/Bill Tracker (`/expense` + Hinglish `"aaj 250 Zomato pe kharch hue"`)
+  await agent.handle('/expense budget 1000');
+  const exp1 = await agent.handle('aaj 250 Zomato pe kharch hue');
+  assert.match(exp1, /Expense Recorded/);
+  assert.match(exp1, /Food & Dining/);
+  const exp2 = await agent.handle('80 rs auto me lage');
+  assert.match(exp2, /Transport & Travel/);
+  const expSum = await agent.handle('mera kharcha kitna hua');
+  assert.match(expSum, /Total Spent\*: \*₹330/);
+  assert.match(expSum, /Within Budget/);
+
+  // Feature 17: Intelligent Habit & Streak Coach (`/habit`, `"gym done"`, `"meri habits dikhao"`)
+  await agent.handle('/habit add Gym');
+  const habDone = await agent.handle('aaj gym kar liya');
+  assert.match(habDone, /Habit Completed Today\*: \*Gym\*/i);
+  assert.match(habDone, /1 day\(s\)/);
+  const habList = await agent.handle('meri habits dikhao');
+  assert.match(habList, /Daily Habit & Streak Tracker/);
+
+  // Feature 18: Git & Dev Repo Autopilot (`/gitstatus`, `"mera git status dikhao"`)
+  const gitSt = await agent.handle('mera git status dikhao');
+  assert.match(gitSt, /Git & Dev Repo Autopilot/);
+  assert.match(gitSt, /Recent Commits/);
+
+  // Feature 19: Smart Download & Media Grabber (SSRF guard verification)
+  const grabLocal = await agent.handle('/grab http://127.0.0.1:8080/secret');
+  assert.match(grabLocal, /SSRF Guard Blocked/);
+
+  // Feature 20: Automated File / Data / Doc Converter (`/convert json2csv`, `/convert md2html`)
+  const csvOut = await agent.handle('/convert json2csv [{"name":"Pavit","score":100},{"name":"Observer","score":99}]');
+  assert.match(csvOut, /name,score/);
+  assert.match(csvOut, /Pavit,100/);
+  const htmlOut = await agent.handle('/convert md2html # PSD_Ai Heading');
+  assert.match(htmlOut, /<h1>PSD_Ai Heading<\/h1>/);
+
+  // Feature 21: Smart Meeting / Lecture Live Scribe (`/scribe start|note|stop`)
+  await agent.handle('/scribe start DBMS Lecture');
+  await agent.handle('/scribe note ACID stands for Atomicity, Consistency, Isolation, Durability');
+  await agent.handle('/scribe note Todo: Submit B-Tree indexing assignment by Friday');
+  const scribeSum = await agent.handle('/scribe stop');
+  assert.match(scribeSum, /Live Scribe Summary — DBMS Lecture/);
+  assert.match(scribeSum, /Atomicity, Consistency/);
+  assert.match(scribeSum, /Revision Questions/);
+
+  // Feature 22: Wi-Fi & Network Health Optimizer (`/netcheck`, `"wifi slow chal raha hai"`)
+  const netOut = await agent.handle('wifi slow chal raha hai');
+  assert.match(netOut, /Wi-Fi & Network Health Optimizer/);
+
+  // Feature 23: USB & External Device Intrusion Guard (`/usbguard`, `"kaunse usb connected hain"`)
+  const usbOut = await agent.handle('kaunse usb connected hain');
+  assert.match(usbOut, /USB & External Device Intrusion Guard/);
+  assert.match(usbOut, /All devices match trusted baseline/);
+
+  // Feature 24: Encrypted Secret Vault & Masked Auto-Typer (`/vault set|list|get|type`)
+  const vSet = await agent.handle('/vault set github_pat ghp_SuperSecretToken98765');
+  assert.match(vSet, /Secret Stored in AES-256 Vault/);
+  assert.doesNotMatch(vSet, /SuperSecretToken/);
+  const vList = await agent.handle('/vault list');
+  assert.match(vList, /github_pat/);
+  assert.doesNotMatch(vList, /SuperSecretToken/);
+  const vType = await agent.handle('/vault type github_pat');
+  assert.match(vType, /Auto-Typed Masked Vault Secret/);
+  const vGet = await agent.handle('/vault get github_pat');
+  assert.match(vGet, /ghp_SuperSecretToken98765/);
+
+  // Feature 25: Multi-Language Instant Translator & Tone Rewriter (`"isko professional email bana de: ..."`)
+  const emailOut = await agent.handle('isko professional email bana de: bhai kal chutti chahiye tabiyat kharab hai');
+  assert.match(emailOut, /Leave Application/);
+  assert.match(emailOut, /Dear Sir\/Madam/);
+
+  // Feature 26: Smart Pomodoro & Deep-Work Timer (`/pomo`, `"45 min pomo lagao DSA ke liye"`)
+  const pomoStart = await agent.handle('45 min pomo lagao DSA ke liye');
+  assert.match(pomoStart, /Pomodoro Timer Started\*: \*45 mins\*/);
+  const pomoDone = await agent.handle('/pomo done');
+  assert.match(pomoDone, /Pomodoro Session Completed\*: \*DSA\*/);
+  assert.match(pomoDone, /Total: \*45 mins\*/);
+
+  // Feature 27: Local Port & Dev-Server Manager (`/ports`, `"port 3000 pe kya chal raha hai"`)
+  const portCheck = await agent.handle('port 59999 pe kya chal raha hai');
+  assert.match(portCheck, /Port 59999/);
+
+  // Feature 28: Smart Battery & Thermal Guardian (`/guardian`, `"battery aur temp check karo"`)
+  const guardOut = await agent.handle('battery aur temp check karo');
+  assert.match(guardOut, /Smart Battery & Thermal Guardian/);
+  assert.match(guardOut, /CPU Thermal/);
+
+  // Feature 29: Flashcard & Spaced-Repetition Quizzer (`/quiz`, `"mere notes se quiz puch"`)
+  await agent.handle('/note Server cluster port is 8787');
+  const quizQ = await agent.handle('mere notes se quiz puch');
+  assert.match(quizQ, /Flashcard & Spaced-Repetition Quizzer/);
+  assert.match(quizQ, /8787/);
+  const quizAns = await agent.handle('quiz answer A');
+  assert.match(quizAns, /Correct Answer \(A\)!/);
+
+  // Feature 30: Time-Machine File Backup & Instant Undo (`/backup`, `"undo file <path>"`)
+  const tmpFile = path.join(os.tmpdir(), `psd-timemachine-${Date.now()}.txt`);
+  fs.writeFileSync(tmpFile, 'Original Safe Content v1', 'utf8');
+  const bkSnap = await agent.handle(`/backup ${tmpFile}`);
+  assert.match(bkSnap, /Time-Machine Snapshot #1 Created/);
+  fs.writeFileSync(tmpFile, 'Corrupted Accidental Edit v2', 'utf8');
+  assert.equal(fs.readFileSync(tmpFile, 'utf8'), 'Corrupted Accidental Edit v2');
+  const undoFileRes = await agent.handle(`undo file ${tmpFile}`);
+  assert.match(undoFileRes, /Time-Machine Restore Complete/);
+  assert.equal(fs.readFileSync(tmpFile, 'utf8'), 'Original Safe Content v1');
+  fs.unlinkSync(tmpFile);
+});
+
+
 
 
 

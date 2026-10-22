@@ -139,6 +139,23 @@ import {
   recallEverything,
   runSelfDoctorRepair,
 } from './quality15.js';
+import {
+  handleExpenseCommand,
+  handleHabitCommand,
+  runGitAutopilot,
+  grabMediaOrFile,
+  runSmartConverter,
+  handleScribeCommand,
+  runNetworkHealthCheck,
+  handleUsbGuardCommand,
+  handleVaultCommand,
+  deterministicToneRewrite,
+  handlePomodoroCommand,
+  handlePortsCommand,
+  handleGuardianCommand,
+  handleQuizCommand,
+  handleBackupCommand,
+} from './quality30.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -2436,7 +2453,12 @@ export function createAgent({
         const biBench = runBilingualMasteryBenchmark();
         return `🇬🇧 *Impeccable English Mastery Mode: ACTIVE* ✅\n• Trained on *${BILINGUAL_CORPUS.length}* bilingual patterns (${biBench.passed}/${biBench.total} benchmark checks passed in \`${biBench.ms}ms\`).\n• Every English query will receive a crisp, articulate, and strictly scoped response.`;
       }
-      case 'undo': case 'journal': return await undoCommand(args);
+      case 'undo': case 'journal': {
+        if (/^file\s+/i.test(String(args || '').trim())) {
+          return handleBackupCommand(store, `restore ${String(args).replace(/^file\s+/i, '').trim()}`);
+        }
+        return await undoCommand(args);
+      }
       case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
       case 'watch': return watchCommand(args);
@@ -2512,10 +2534,18 @@ export function createAgent({
         const done = await ai.complete(config, `Summarise this in a short WhatsApp-friendly way with bullet points:\n\n${body.slice(0, 8000)}`, log);
         return done ? `📄 *Summary*\n\n${done.text}` : `${body.slice(0, 1500)}\n\n_(No AI brain reachable for a summary — showing the start instead. See /model)_`;
       }
-      case 'improve': case 'rewrite': {
-        if (!args) return '✍️ Usage: /improve <your text>';
+      case 'improve': case 'rewrite': case 'tone': {
+        if (!args) return '✍️ Usage: `/rewrite professional | bhai kal chutti chahiye tabiyat kharab hai` or `/improve <text>`';
+        const styleMatch = String(args).match(/^(professional(?:\s+email)?|email|formal|polite|concise|short)\s*(?:\||:)\s*([\s\S]+)$/i)
+          || String(args).match(/^(professional(?:\s+email)?|email|formal|polite|concise|short)\s+([\s\S]+)$/i);
+        if (styleMatch || cmd === 'tone') {
+          const style = styleMatch ? styleMatch[1] : 'professional';
+          const body = styleMatch ? styleMatch[2] : args;
+          const done = await ai.complete(config, `Rewrite the following text in a ${style} tone. Reply with only the rewritten text:\n\n${body}`, log);
+          return done ? done.text : deterministicToneRewrite(style, body);
+        }
         const done = await ai.complete(config, `Improve this text (clearer, polite, same language, keep it short). Reply with only the improved text:\n\n${args}`, log);
-        return done ? done.text : '✍️ No AI brain reachable right now (see /model). Your text was:\n' + args;
+        return done ? done.text : deterministicToneRewrite('professional', args);
       }
       case 'weather': {
         if (args) return tools.weather(args);
@@ -2592,9 +2622,15 @@ export function createAgent({
         if (percentOf) return `🧮 ${percentOf[1]}% of ${percentOf[2]} = *${(Number(percentOf[1]) / 100) * Number(percentOf[2])}*`;
         return `🧮 ${args} = *${tools.calc(args)}*`;
       }
-      case 'unit': case 'convert': {
+      case 'unit': case 'convert': case 'fileconvert': {
         const m = (args || '').match(/^(-?[\d.]+)\s*([a-zA-Z°]+)\s+(?:to|in|->)\s*([a-zA-Z°]+)$/);
-        return m ? `🔁 ${tools.convertUnit(Number(m[1]), m[2], m[3])}` : '🔁 Usage: /unit 10 km to mi';
+        if (m && cmd !== 'fileconvert') {
+          return `🔁 ${tools.convertUnit(Number(m[1]), m[2], m[3])}`;
+        }
+        if (cmd === 'convert' || cmd === 'fileconvert') {
+          return await runSmartConverter(args);
+        }
+        return '🔁 Usage: /unit 10 km to mi (or `/convert json2csv [...]`, `/convert md2html ...`)';
       }
       case 'currency': case 'fx': {
         const m = (args || '').match(/^([\d.]+)\s*([A-Za-z]{3})\s+(?:to|in)\s+([A-Za-z]{3})$/);
@@ -2685,6 +2721,24 @@ export function createAgent({
       case 'docqa': case 'pdfqa': return answerFromDocuments(store, config, args);
       case 'recall': case 'searchmemory': return recallEverything(store, args);
       case 'voicesummary': case 'vsummary': return summarizeVoiceOrText(args).formatted;
+      case 'expense': case 'expenses': case 'kharcha': return handleExpenseCommand(store, args);
+      case 'habit': case 'habits': case 'streak': return handleHabitCommand(store, args);
+      case 'gitstatus': case 'git': return await runGitAutopilot(args || 'status');
+      case 'gitdiff': return await runGitAutopilot('diff');
+      case 'grab': return await grabMediaOrFile(args, config?.downloadsDir || path.join(os.homedir(), 'Downloads'));
+      case 'scribe': return handleScribeCommand(store, args);
+      case 'netcheck': case 'netopt': return await runNetworkHealthCheck();
+      case 'usbguard': case 'usb': return await handleUsbGuardCommand(store, args);
+      case 'vault': return await handleVaultCommand(store, config, args, async (secretText) => {
+        try {
+          await handlePc(`type ${secretText}`);
+        } catch { /* ignore headless typing errors */ }
+      });
+      case 'pomo': case 'pomodoro': return handlePomodoroCommand(store, args, notify);
+      case 'ports': case 'port': return await handlePortsCommand(args);
+      case 'guardian': case 'thermal': return handleGuardianCommand(store, args);
+      case 'quiz': case 'flashcard': return handleQuizCommand(store, args);
+      case 'backup': case 'timemachine': return handleBackupCommand(store, args);
       case 'clip': case 'clipboard': {
         const sub = String(args || '').trim();
         if (!sub || /^(?:get|read|show)$/i.test(sub)) return handlePc('clipboard');
