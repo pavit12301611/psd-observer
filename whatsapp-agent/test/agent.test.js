@@ -1060,6 +1060,178 @@ test('Live PC Action Recorder, Learner & Replayer: "mere actions record karo", d
   }
 });
 
+test('High-Precision Micro-Action & Button-Click Recognition: widget hit-testing, XI2 stream, sensor fusion, double-click, right-click, drag, scroll & Backspace', async () => {
+  const { store } = makeAgent();
+
+  // 1. Widget bounding-box hit-testing resolves the smallest inner button inside a parent container
+  const widgets = [
+    { role: 'panel', name: 'Main Toolbar', x: 0, y: 0, w: 1200, h: 80, cx: 600, cy: 40 },
+    { role: 'push button', name: 'Save File', x: 120, y: 15, w: 90, h: 36, cx: 165, cy: 33 },
+    { role: 'check box', name: 'Auto Format', x: 240, y: 18, w: 110, h: 30, cx: 295, cy: 33 },
+  ];
+  const hitSave = actionrecorder.matchWidgetAtPoint(150, 30, widgets);
+  assert.ok(hitSave);
+  assert.equal(hitSave.label, 'Save File');
+  assert.equal(hitSave.role, 'push button');
+
+  const hitCheck = actionrecorder.matchWidgetAtPoint(260, 28, widgets);
+  assert.ok(hitCheck);
+  assert.equal(hitCheck.label, 'Auto Format');
+  assert.equal(hitCheck.role, 'check box');
+
+  // 2. XInput2 (XI2) raw event block parser recognizes ButtonPress, ButtonRelease, wheel scroll & KeyPress
+  const xi2LeftPress = actionrecorder.parseXi2EventBlock(
+    'EVENT type 15 (RawButtonPress)\n    detail: 1\n    root: 420.00/310.00\n',
+    { mouseX: 0, mouseY: 0 },
+  );
+  assert.equal(xi2LeftPress.kind, 'button_press');
+  assert.equal(xi2LeftPress.button, 'left');
+  assert.equal(xi2LeftPress.x, 420);
+  assert.equal(xi2LeftPress.y, 310);
+
+  const xi2RightPress = actionrecorder.parseXi2EventBlock(
+    'EVENT type 4 (ButtonPress)\n    detail: 3\n    root: 500.00/220.00\n',
+    { mouseX: 0, mouseY: 0 },
+  );
+  assert.equal(xi2RightPress.kind, 'button_press');
+  assert.equal(xi2RightPress.button, 'right');
+
+  const xi2ScrollDown = actionrecorder.parseXi2EventBlock(
+    'EVENT type 4 (ButtonPress)\n    detail: 5\n    root: 500.00/220.00\n',
+    { mouseX: 500, mouseY: 220 },
+  );
+  assert.equal(xi2ScrollDown.kind, 'scroll');
+  assert.equal(xi2ScrollDown.direction, 'down');
+
+  const xi2Backspace = actionrecorder.parseXi2EventBlock(
+    'EVENT type 2 (KeyPress)\n    detail: 22\n',
+    {},
+  );
+  assert.equal(xi2Backspace.kind, 'key_press');
+  assert.equal(xi2Backspace.key, 'BackSpace');
+
+  // 3. Start recording and test sensor fusion + micro-actions
+  await actionrecorder.startActionRecording(store, { name: 'micro_flow' });
+  const t0 = 1_700_000_000_000;
+
+  // 3a. Raw X11 left click at (420, 310) followed 120ms later by AT-SPI push-button event -> fuses into 1 labeled button click
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'click',
+    button: 'left',
+    clicks: 1,
+    x: 420,
+    y: 310,
+    ts: t0,
+  });
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'click',
+    button: 'left',
+    clicks: 1,
+    label: 'Submit Order',
+    role: 'push button',
+    app: 'Firefox',
+    ts: t0 + 120,
+  });
+  let evs = actionrecorder.getActiveRecording(store).events;
+  assert.equal(evs.length, 1, 'Raw coordinate click + AT-SPI button press should fuse into 1 event');
+  assert.equal(evs[0].label, 'Submit Order');
+  assert.equal(evs[0].role, 'push button');
+  assert.equal(evs[0].x, 420);
+  assert.equal(evs[0].y, 310);
+
+  // 3b. Rapid second left click at (800, 500) within 300ms upgrades to `double_click`
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'click',
+    button: 'left',
+    clicks: 1,
+    x: 800,
+    y: 500,
+    label: 'Project Folder',
+    role: 'icon',
+    ts: t0 + 1000,
+  });
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'click',
+    button: 'left',
+    clicks: 1,
+    x: 802,
+    y: 499,
+    label: 'Project Folder',
+    role: 'icon',
+    ts: t0 + 1250,
+  });
+  evs = actionrecorder.getActiveRecording(store).events;
+  assert.equal(evs.length, 2);
+  assert.equal(evs[1].type, 'double_click');
+  assert.equal(evs[1].clicks, 2);
+  assert.equal(evs[1].label, 'Project Folder');
+
+  // 3c. Right-click, middle-click, drag, coalesced scroll, Backspace text editing, and shortcut key
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'right_click',
+    x: 610,
+    y: 410,
+    label: 'index.js',
+    role: 'tree item',
+    ts: t0 + 2000,
+  });
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'drag',
+    fromX: 100,
+    fromY: 120,
+    toX: 340,
+    toY: 280,
+    ts: t0 + 3000,
+  });
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'scroll',
+    direction: 'down',
+    amount: 3,
+    ts: t0 + 4000,
+  });
+  actionrecorder.recordDesktopEvent(store, {
+    type: 'scroll',
+    direction: 'down',
+    amount: 4,
+    ts: t0 + 4300,
+  });
+  // Typing with Backspace correction: "git stats" + Backspace + "us" => "git status"
+  actionrecorder.recordDesktopEvent(store, { type: 'type', text: 'git stats', ts: t0 + 5000 });
+  actionrecorder.recordDesktopEvent(store, { type: 'backspace', count: 1, ts: t0 + 5200 });
+  actionrecorder.recordDesktopEvent(store, { type: 'type', text: 'us', ts: t0 + 5400 });
+  actionrecorder.recordDesktopEvent(store, { type: 'key', key: 'Return', ts: t0 + 5700 });
+
+  evs = actionrecorder.getActiveRecording(store).events;
+  const scrollEv = evs.find((e) => e.type === 'scroll');
+  assert.equal(scrollEv.amount, 7, 'Consecutive scrolls in the same direction should coalesce');
+  const typeEv = evs.find((e) => e.type === 'type');
+  assert.equal(typeEv.text, 'git status', 'Backspace should edit the active typed text buffer');
+
+  // 4. Stop recording and verify compiled steps preserve every micro-action
+  const saved = await actionrecorder.stopActionRecording(store, { name: 'micro_flow', saveAsCommand: true });
+  assert.equal(saved.ok, true);
+  const types = saved.steps.map((s) => s.actionType);
+  assert.deepEqual(types, [
+    'click',
+    'double_click',
+    'right_click',
+    'drag',
+    'scroll',
+    'type',
+    'key',
+  ]);
+  assert.equal(saved.steps[0].target, 'Submit Order');
+  assert.match(saved.steps[0].label, /Submit Order/);
+  assert.equal(saved.steps[0].x, 420);
+  assert.equal(saved.steps[1].clicks, 2);
+  assert.equal(saved.steps[2].button, 'right');
+  assert.equal(saved.steps[3].args, 'drag 100 120 340 280');
+  assert.equal(saved.steps[4].args, 'scroll down 7');
+  assert.equal(saved.steps[5].text, 'git status');
+  assert.equal(saved.steps[6].key, 'Return');
+});
+
+
 
 
 

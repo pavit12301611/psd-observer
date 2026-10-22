@@ -98,6 +98,7 @@ import {
   recordDesktopEvent,
   formatActionRecorderStatus,
   saveLastRecordingAsCommand,
+  executeRecordedStep,
   replayRecordedActions,
   parseActionRecorderIntent,
 } from './actionrecorder.js';
@@ -664,6 +665,10 @@ export function createAgent({
       if (step.cmd === '__natural__') {
         const naturalText = extraArgs ? `${step.args} ${extraArgs}`.trim() : step.args;
         r = await runNaturalStep(naturalText, stepCtx);
+      } else if (step.actionType && ['click', 'double_click', 'right_click', 'middle_click', 'drag', 'scroll', 'type', 'key'].includes(step.actionType)) {
+        r = await executeRecordedStep(step, {
+          runCommand: (c, a) => handleCommand(c, a, stepCtx),
+        });
       } else {
         const cmd = step.inferredOpen ? 'open' : step.cmd;
         const baseArgs = step.args ?? '';
@@ -968,6 +973,13 @@ export function createAgent({
         const dir = /up|upar|oopar/i.test(gate.text) ? 'up' : 'down';
         const amount = gate.text.match(/(\d+)/)?.[1] ?? 3;
         return pc.scrollMouse(dir, amount);
+      }
+      case 'drag': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        const nums = gate.text.match(/-?\d+/g)?.map(Number) ?? [];
+        if (nums.length < 4) return '🖱️ Usage: /pc drag <x1> <y1> <x2> <y2>';
+        return pc.dragMouse(nums[0], nums[1], nums[2], nums[3]);
       }
       case 'shutdown': case 'poweroff': case 'reboot': case 'restart': case 'suspend': case 'sleep': {
         const gate = tier2Gate(rest);
