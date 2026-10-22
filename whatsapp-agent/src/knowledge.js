@@ -16,8 +16,8 @@
 // Facts are stable, evergreen ones (speed of light, capitals, history). For
 // current people/numbers the live Wikipedia layer is the source of truth.
 
-import { matchScore } from './neural/index.js';
-import { tokens as featureTokens } from './neural/text.js';
+import { matchScorePrepared } from './neural/index.js';
+import { preparePairSide } from './neural/text.js';
 
 // Shared-token sanity check must count CONTENT words only — "kya"/"hai" style
 // stopwords made "bhai kya haal hai" match "pravakash sanshleshan kya hai".
@@ -328,29 +328,59 @@ for (const [country, capital] of Object.entries(CAPITALS)) {
 
 // ── 3. Matching ─────────────────────────────────────────────────────────────
 
-function scoreEntry(normQuery, item) {
+// Key sides (normalized text, token sets, feature vectors) are precomputed ONCE
+// per key and reused — the old code rebuilt them for every key on every lookup
+// (that was the 22ms bottleneck). Query side is prepared once per call.
+const KEY_CACHE = new Map();
+function keySide(key) {
+  if (!KEY_CACHE.has(key)) KEY_CACHE.set(key, preparePairSide(normalize(key)));
+  return KEY_CACHE.get(key);
+}
+
+// Per-item key data (normalized key, content tokens) computed ONCE at module
+// load. The old code rebuilt Sets per key per lookup — the real bottleneck.
+const ITEM_KEYS = new Map();
+function itemKeys(item) {
+  if (!ITEM_KEYS.has(item)) {
+    ITEM_KEYS.set(item, item.keys.map((key) => {
+      const k = normalize(key);
+      return {
+        k,
+        len: k.length,
+        words: k.split(' '),
+        content: [...preparePairSide(k).toks].filter((w) => !MATCH_STOP.has(w)),
+        side: keySide(k),
+      };
+    }).filter((d) => d.k));
+  }
+  return ITEM_KEYS.get(item);
+}
+
+function scoreEntry(qSide, normQuery, queryWords, queryContent, item) {
   let best = 0;
-  for (const key of item.keys) {
-    const k = normalize(key);
-    if (!k) continue;
-    if (normQuery.includes(k)) best = Math.max(best, k.length);
-    else if (k.includes(normQuery) && normQuery.length >= 5) best = Math.max(best, normQuery.length);
+  for (const { k, len, words, content, side } of itemKeys(item)) {
+    let lexical = 0;
+    if (normQuery.includes(k)) lexical = len;
+    else if (k.includes(normQuery) && normQuery.length >= 5) lexical = normQuery.length;
     else {
       // token overlap fallback ("batao india ki capital kya hai" — key "india ki capital")
-      const kt = k.split(' ');
-      const qt = new Set(normQuery.split(' '));
-      const hit = kt.filter((w) => qt.has(w)).length;
-      if (kt.length >= 2 && hit === kt.length) best = Math.max(best, k.length - 1);
+      if (words.length >= 2 && words.every((w) => queryWords.has(w))) lexical = len - 1;
     }
+    if (lexical > best) best = lexical;
+    // Strong lexical hit already — skip the net entirely.
+    if (best >= 8 && lexical >= 8) continue;
     // MatchNet semantic score — paraphrase-proof ("bharat ki rajdhani" →
-    // "capital of india"). Two guards stop OOD false positives: a high score
-    // bar AND at least one shared word after bilingual feature expansion
-    // (the expansion makes cross-lingual pairs share words too).
+    // "capital of india"). Guards stop OOD false positives: cheap shared
+    // content-word prefilter FIRST (the net only runs when plausible), then
+    // the high score bar.
     try {
-      const keySet = new Set(featureTokens(k).filter((w) => !MATCH_STOP.has(w)));
-      const shared = featureTokens(normQuery).some((w) => !MATCH_STOP.has(w) && keySet.has(w));
-      const sem = matchScore(normQuery, k);
-      if (sem >= 0.9 && shared) best = Math.max(best, sem * 14);
+      let shared = false;
+      for (let i = 0; i < content.length; i++) {
+        if (queryContent.has(content[i])) { shared = true; break; }
+      }
+      if (!shared) continue;
+      const sem = matchScorePrepared(qSide, side);
+      if (sem >= 0.9 && sem * 14 > best) best = sem * 14;
     } catch { /* neural brain unavailable — lexical scores still work */ }
   }
   return best;
@@ -366,13 +396,17 @@ export function lookupKnowledge(rawText, store = null) {
   const normQuery = normalize(s.replace(/^(?:please|plz|bhai|bro|yaar|hey|hi|hello|suno|arre|arey|batao|bata|tell me|what is|who is|kya hai|kaun hai|kab hua|kahan hai)\s+/i, '').replace(/[?!.]+$/, ''));
   if (normQuery.length < 3) return null;
 
+  const qSide = preparePairSide(normQuery);
+  const queryWords = new Set(normQuery.split(' '));
+  const queryContent = new Set([...qSide.toks].filter((w) => !MATCH_STOP.has(w)));
   let bestItem = null;
   let bestScore = 0;
   for (const item of BUILTIN_KNOWLEDGE) {
-    const sc = scoreEntry(normQuery, item);
+    const sc = scoreEntry(qSide, normQuery, queryWords, queryContent, item);
     if (sc > bestScore) {
       bestScore = sc;
       bestItem = item;
+      if (bestScore >= 25) break; // decisive long-key hit — stop scanning
     }
   }
   if (!bestItem || bestScore < 4) return null;

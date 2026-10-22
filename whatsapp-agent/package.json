@@ -27,7 +27,8 @@
     "train:neural": "node scripts/train-neural.mjs",
     "train": "node scripts/train-neural.mjs && node scripts/train-wiki.mjs --common",
     "harness": "bash scripts/observer.sh harness",
-    "build:bundle": "bash scripts/build-bundle.sh"
+    "build:bundle": "bash scripts/build-bundle.sh",
+    "bench": "node scripts/bench.mjs"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {

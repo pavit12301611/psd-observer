@@ -74,7 +74,34 @@ const BILINGUAL = {
   fauj: 'army', yuddh: 'war', shanti: 'peace', kranti: 'revolution',
 };
 
-export function normalizeText(s) {
+// ── Memoization ────────────────────────────────────────────────────────────
+// normalizeText/textFeatures/tokens run on every match, classify and knowledge
+// lookup. Bounded LRU keeps the hot paths allocation-free on repeats. Text
+// features are deterministic, so caching is always safe.
+const LRU_CAP = 4000;
+function makeLRU() {
+  const map = new Map();
+  return {
+    get(k) {
+      if (!map.has(k)) return undefined;
+      const v = map.get(k);
+      map.delete(k);
+      map.set(k, v); // refresh recency
+      return v;
+    },
+    set(k, v) {
+      if (map.has(k)) map.delete(k);
+      map.set(k, v);
+      if (map.size > LRU_CAP) map.delete(map.keys().next().value);
+      return v;
+    },
+  };
+}
+const normLRU = makeLRU();
+const featLRU = makeLRU();
+const tokLRU = makeLRU();
+
+function normalizeTextRaw(s) {
   return String(s ?? '')
     .toLowerCase()
     .replace(/\bu\b/g, 'you')
@@ -93,12 +120,19 @@ export function normalizeText(s) {
     .join(' ');
 }
 
+export function normalizeText(s) {
+  const key = String(s ?? '');
+  const hit = normLRU.get(key);
+  if (hit !== undefined) return hit;
+  return normLRU.set(key, normalizeTextRaw(key));
+}
+
 export function tokens(s) {
   return normalizeText(s).split(' ').filter(Boolean);
 }
 
 /** Hash text into a fixed-dim L2-normalized feature vector (plain Array). */
-export function textFeatures(text, dim = DEFAULT_DIM) {
+function textFeaturesRaw(text, dim = DEFAULT_DIM) {
   const raw = String(text ?? '').toLowerCase().trim();
   const vec = new Array(dim).fill(0);
   const toks = tokens(text);
@@ -127,42 +161,65 @@ export function textFeatures(text, dim = DEFAULT_DIM) {
   return vec;
 }
 
+export function textFeatures(text, dim = DEFAULT_DIM) {
+  const key = dim === DEFAULT_DIM ? String(text ?? '') : `d${dim}:${text ?? ''}`;
+  const hit = featLRU.get(key);
+  if (hit) return hit;
+  return featLRU.set(key, textFeaturesRaw(text, dim));
+}
+
+// ── Prepared pair sides ────────────────────────────────────────────────────
+// pairFeatures used to compute BOTH sides from scratch every call. For a
+// knowledge scan (query × hundreds of keys) the sides repeat constantly —
+// compute each side once, then only the 13 cheap scalars per pair.
+const sideLRU = makeLRU();
+
+export function preparePairSide(s) {
+  const raw = String(s ?? '');
+  const hit = sideLRU.get(raw);
+  if (hit) return hit;
+  const norm = normalizeText(raw);
+  const toks = new Set(norm.split(' ').filter(Boolean));
+  return sideLRU.set(raw, { raw, norm, toks, vec: textFeatures(raw), len: norm.length });
+}
+
+export function pairFeaturesPrepared(q, c) {
+  const qt = q.toks;
+  const ct = c.toks;
+  let inter = 0;
+  for (const t of qt) if (ct.has(t)) inter += 1;
+  const union = qt.size + ct.size - inter || 1;
+  const jaccard = inter / union;
+
+  const qv = q.vec;
+  const cv = c.vec;
+  let cos = 0;
+  for (let i = 0; i < qv.length; i++) cos += qv[i] * cv[i];
+
+  const lenRatio = Math.min(q.len, c.len) / Math.max(1, Math.max(q.len, c.len));
+  const qInC = c.norm.includes(q.norm) && q.norm.length >= 4 ? 1 : 0;
+  const cInQ = q.norm.includes(c.norm) && c.norm.length >= 4 ? 1 : 0;
+
+  const ed = editDistance(q.norm.slice(0, 40), c.norm.slice(0, 40));
+  const edRatio = 1 - ed / Math.max(1, Math.max(Math.min(q.len, 40), Math.min(c.len, 40)));
+
+  return [
+    jaccard, cos, lenRatio, qInC, cInQ, edRatio,
+    inter / Math.max(1, qt.size),
+    inter / Math.max(1, ct.size),
+    q.len / 100, c.len / 100,
+    qt.size / 10, ct.size / 10,
+    1, // bias
+  ];
+}
+
 /**
  * Hand-crafted pair features for MatchNet — the signals a good matcher needs
  * (linear thresholds on any single one of these are weak; the net learns the
  * nonlinear combination).
  */
 export function pairFeatures(query, candidate) {
-  const q = normalizeText(query);
-  const c = normalizeText(candidate);
-  const qt = new Set(q.split(' ').filter(Boolean));
-  const ct = new Set(c.split(' ').filter(Boolean));
-  let inter = 0;
-  for (const t of qt) if (ct.has(t)) inter += 1;
-  const union = new Set([...qt, ...ct]).size || 1;
-  const jaccard = inter / union;
-
-  const qv = textFeatures(q);
-  const cv = textFeatures(c);
-  let cos = 0;
-  for (let i = 0; i < qv.length; i++) cos += qv[i] * cv[i];
-
-  const lenRatio = Math.min(q.length, c.length) / Math.max(1, Math.max(q.length, c.length));
-  const qInC = c.includes(q) && q.length >= 4 ? 1 : 0;
-  const cInQ = q.includes(c) && c.length >= 4 ? 1 : 0;
-
-  // cheap edit-distance ratio on the first 40 chars
-  const ed = editDistance(q.slice(0, 40), c.slice(0, 40));
-  const edRatio = 1 - ed / Math.max(1, Math.max(Math.min(q.length, 40), Math.min(c.length, 40)));
-
-  return [
-    jaccard, cos, lenRatio, qInC, cInQ, edRatio,
-    inter / Math.max(1, qt.size), // fraction of query words covered
-    inter / Math.max(1, ct.size),
-    q.length / 100, c.length / 100,
-    qt.size / 10, ct.size / 10,
-    1, // bias
-  ];
+  return pairFeaturesPrepared(preparePairSide(query), preparePairSide(candidate));
 }
 
 export function editDistance(a, b) {

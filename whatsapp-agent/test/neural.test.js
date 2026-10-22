@@ -180,6 +180,35 @@ test('neural: learnExample persists examples (and dedupes)', () => {
   }
 });
 
+// ── 6. Speed: the hot paths stay fast (regression guard) ───────────────────
+
+test('speed: lookupKnowledge p50 under 5ms across the whole bank', () => {
+  const qs = [
+    'bharat ki rajdhani batao', 'what is the speed of light', 'hi bhai kaise ho',
+    'who built the taj mahal', 'photosynthesis kya hai', 'capital of japan',
+    'hello how are you', 'explain quantum physics', 'prime number kya hai',
+  ];
+  for (const q of qs) lookupKnowledge(q); // warm
+  const t0 = process.hrtime.bigint();
+  const N = 300;
+  for (let i = 0; i < N; i++) lookupKnowledge(qs[i % qs.length]);
+  const usPerOp = Number(process.hrtime.bigint() - t0) / 1000 / N;
+  assert.ok(usPerOp < 5000, `lookupKnowledge ${usPerOp.toFixed(0)}µs/op (want < 5000µs)`);
+});
+
+test('speed: classifyIntent stays under 5ms cold, microseconds warm', () => {
+  const uniq = [];
+  for (let i = 0; i < 60; i++) uniq.push(`aur batao dost kya chal raha hai number ${i}`);
+  const t0 = process.hrtime.bigint();
+  for (const q of uniq) classifyIntent(q);
+  const coldUs = Number(process.hrtime.bigint() - t0) / 1000 / uniq.length;
+  assert.ok(coldUs < 5000, `cold classify ${coldUs.toFixed(0)}µs/op (want < 5000µs)`);
+  const t1 = process.hrtime.bigint();
+  for (let i = 0; i < 200; i++) classifyIntent(uniq[i % uniq.length]);
+  const warmUs = Number(process.hrtime.bigint() - t1) / 1000 / 200;
+  assert.ok(warmUs < 500, `warm classify ${warmUs.toFixed(2)}µs/op (want < 500µs)`);
+});
+
 test('neural: graceful degradation — heuristics cover the critical routes', () => {
   assert.equal(heuristicIntent('hello there'), 'greeting');
   assert.equal(heuristicIntent('thanks a lot'), 'gratitude');

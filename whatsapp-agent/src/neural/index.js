@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MLP } from './nn.js';
-import { textFeatures, pairFeatures, DEFAULT_DIM } from './text.js';
+import { textFeatures, pairFeatures, pairFeaturesPrepared, preparePairSide, DEFAULT_DIM } from './text.js';
 import { INTENT_LABELS, INTENT_EXAMPLES } from './dataset.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -57,17 +57,19 @@ export function loadBrain() {
       meta = { file, trainedAt: ck.trainedAt, metrics: ck.meta };
     } catch { /* corrupted checkpoint → heuristics */ }
   }
-  // k-NN memory over the handwritten + runtime training examples
+  // k-NN memory over the handwritten + runtime training examples.
+  // Float32Array: faster cosine on the hot classify path.
+  const toF32 = (arr) => Float32Array.from(arr);
   const memory = INTENT_EXAMPLES.map((ex) => ({
     label: ex.label,
-    vec: textFeatures(ex.t),
+    vec: toF32(textFeatures(ex.t)),
   }));
   try {
     const extra = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'neural-examples.json'), 'utf8'));
     if (Array.isArray(extra)) {
       for (const ex of extra) {
         if (ex?.t && ex?.label && INTENT_LABELS.includes(ex.label)) {
-          memory.push({ label: ex.label, vec: textFeatures(ex.t) });
+          memory.push({ label: ex.label, vec: toF32(textFeatures(ex.t)) });
         }
       }
     }
@@ -87,9 +89,18 @@ const cos = (a, b) => {
 export function knnClassify(text, k = 5) {
   const { memory } = loadBrain();
   const v = textFeatures(text);
-  const scored = memory.map((m) => ({ label: m.label, sim: cos(v, m.vec) }));
-  scored.sort((a, b) => b.sim - a.sim);
-  const top = scored.slice(0, k);
+  // Partial top-k selection: one pass, no sort (O(n·k) not O(n log n)).
+  const top = [];
+  for (let i = 0; i < memory.length; i++) {
+    const m = memory[i];
+    const sim = cos(v, m.vec);
+    if (top.length < k || sim > top[top.length - 1].sim) {
+      let j = top.length - 1;
+      while (j >= 0 && top[j].sim < sim) { top[j + 1] = top[j]; j -= 1; }
+      top[j + 1] = { label: m.label, sim };
+      if (top.length > k) top.pop();
+    }
+  }
   if (!top.length || top[0].sim < 0.45) return null;
   const votes = new Map();
   for (const t of top) {
@@ -105,31 +116,66 @@ export function knnClassify(text, k = 5) {
  * Classify a message's intent. Returns { label, confidence, scores, source }
  * where source is 'neural+knn', 'knn', 'neural' or 'heuristic'.
  */
-export function classifyIntent(text) {
-  const brain = loadBrain();
-  const knn = knnClassify(text);
-
-  if (brain.intent) {
-    const out = brain.intent.forward(textFeatures(text));
-    let bestIdx = 0;
-    for (let i = 1; i < out.length; i++) if (out[i] > out[bestIdx]) bestIdx = i;
-    const neural = { label: INTENT_LABELS[bestIdx], confidence: out[bestIdx] };
-
-    // Blend: a very close memory neighbour beats an uncertain net; an
-    // confident net beats a distant neighbour.
-    if (knn && knn.similarity >= 0.8) {
-      return {
-        label: knn.label,
-        confidence: Math.max(knn.similarity, neural.confidence),
-        scores: out,
-        source: 'neural+knn',
-      };
-    }
-    return { label: neural.label, confidence: neural.confidence, scores: out, source: 'neural' };
+// Small result cache — WhatsApp double-sends and template questions repeat
+// constantly; classification is deterministic so this is always safe.
+const CLS_CACHE_CAP = 1500;
+const clsCache = new Map();
+function cachedClassify(key, fn) {
+  if (clsCache.has(key)) {
+    const v = clsCache.get(key);
+    clsCache.delete(key);
+    clsCache.set(key, v);
+    return v;
   }
+  const v = fn();
+  clsCache.set(key, v);
+  if (clsCache.size > CLS_CACHE_CAP) clsCache.delete(clsCache.keys().next().value);
+  return v;
+}
 
-  if (knn) return { label: knn.label, confidence: knn.similarity, scores: null, source: 'knn' };
-  return { label: heuristicIntent(text), confidence: 0.3, scores: null, source: 'heuristic' };
+/**
+ * Classify a message's intent. Returns { label, confidence, scores, source }
+ * where source is 'neural+knn', 'knn', 'neural' or 'heuristic'.
+ *
+ * Blend rules (measured on the held-out split):
+ *   • near-duplicate memory hit (cos ≥ 0.8)  → kNN label (exact memory wins)
+ *   • uncertain net (conf < 0.65) + decent memory (sim ≥ 0.55) → kNN label
+ *     (short/ambiguous strings like "ok bye" live in memory, not the net)
+ *   • otherwise → net argmax
+ */
+export function classifyIntent(text) {
+  return cachedClassify(String(text ?? ''), () => {
+    const brain = loadBrain();
+    const knn = knnClassify(text);
+
+    if (brain.intent) {
+      const out = brain.intent.forward(textFeatures(text));
+      let bestIdx = 0;
+      for (let i = 1; i < out.length; i++) if (out[i] > out[bestIdx]) bestIdx = i;
+      const neural = { label: INTENT_LABELS[bestIdx], confidence: out[bestIdx] };
+
+      if (knn && knn.similarity >= 0.8) {
+        return {
+          label: knn.label,
+          confidence: Math.max(knn.similarity, neural.confidence),
+          scores: out,
+          source: 'neural+knn',
+        };
+      }
+      if (knn && neural.confidence < 0.65 && knn.similarity >= 0.55) {
+        return {
+          label: knn.label,
+          confidence: Math.max(knn.similarity, neural.confidence),
+          scores: out,
+          source: 'neural+knn',
+        };
+      }
+      return { label: neural.label, confidence: neural.confidence, scores: out, source: 'neural' };
+    }
+
+    if (knn) return { label: knn.label, confidence: knn.similarity, scores: null, source: 'knn' };
+    return { label: heuristicIntent(text), confidence: 0.3, scores: null, source: 'heuristic' };
+  });
 }
 
 /** Last-resort rule guess when neither checkpoint nor memory is available. */
@@ -149,13 +195,18 @@ export function heuristicIntent(text) {
   return 'misc_chat';
 }
 
-/** MatchNet pairwise score in [0, 1]. */
-export function matchScore(query, target) {
+/** MatchNet pairwise score in [0, 1] from prepared sides (hot path). */
+export function matchScorePrepared(qSide, cSide) {
   const brain = loadBrain();
-  const feats = pairFeatures(query, target);
+  const feats = pairFeaturesPrepared(qSide, cSide);
   if (brain.match) return brain.match.predict(feats);
   // heuristic blend when untrained
   return Math.min(1, Math.max(0, feats[0] * 0.5 + feats[1] * 0.5 + (feats[3] || feats[4] ? 0.25 : 0)));
+}
+
+/** MatchNet pairwise score in [0, 1]. */
+export function matchScore(query, target) {
+  return matchScorePrepared(preparePairSide(query), preparePairSide(target));
 }
 
 /** Rank candidate items against a query. Returns [{item, score}, …] sorted. */

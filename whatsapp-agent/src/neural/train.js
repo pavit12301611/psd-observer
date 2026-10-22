@@ -123,10 +123,16 @@ export function trainIntent({ epochs = 90, lr = 0.008, seed = 42, extraExamples 
     let correct = 0;
     const perClass = {};
     for (const ex of list) {
-      let pred = INTENT_LABELS[net.predict(textFeatures(ex.t))];
+      const out = net.forward(textFeatures(ex.t));
+      let bestIdx = 0;
+      for (let i = 1; i < out.length; i++) if (out[i] > out[bestIdx]) bestIdx = i;
+      let pred = INTENT_LABELS[bestIdx];
       if (hybrid) {
+        // Mirrors runtime blend in index.js: near-duplicate memory wins at
+        // sim ≥ 0.8; an uncertain net (conf < 0.65) defers to memory at
+        // sim ≥ 0.55 (short ambiguous strings live in memory).
         const near = knn(ex.t);
-        if (near && near.sim >= 0.8) pred = near.label;
+        if (near && (near.sim >= 0.8 || (out[bestIdx] < 0.65 && near.sim >= 0.55))) pred = near.label;
       }
       const ok = pred === ex.label;
       if (ok) correct += 1;
@@ -189,9 +195,8 @@ export function trainMatch({ epochs = 80, lr = 0.02, seed = 42 } = {}) {
   const train = pairs.slice(nVal);
 
   const net = new MLP([13, MATCH_HIDDEN, 1], { seed, out: 'sigmoid' });
-  net.fit(train.map((p) => pairFeatures(p.q, p.cand)), train.map((p) => p.label), {
-    epochs, lr, batchSize: 32, seed: seed + 2,
-  });
+  const xs = train.map((p) => pairFeatures(p.q, p.cand));
+  const ys = train.map((p) => p.label);
 
   const evaluate = (list) => {
     let correct = 0;
@@ -213,6 +218,27 @@ export function trainMatch({ epochs = 80, lr = 0.02, seed = 42 } = {}) {
       n: list.length,
     };
   };
+
+  // Chunked training with early stopping — val accuracy is watched every
+  // 15 epochs and the best weights are kept (stops overfitting the pairs).
+  const chunk = 15;
+  let bestNet = null;
+  let bestVal = -1;
+  for (let done = 0; done < epochs; done += chunk) {
+    net.fit(xs, ys, {
+      epochs: Math.min(chunk, epochs - done), lr, batchSize: 32, seed: seed + 2 + done,
+    });
+    const v = evaluate(val).accuracy;
+    if (v > bestVal) {
+      bestVal = v;
+      bestNet = net.toJSON();
+    }
+  }
+  if (bestNet) {
+    const restored = MLP.fromJSON(bestNet);
+    net.W = restored.W;
+    net.b = restored.b;
+  }
 
   return {
     net,

@@ -3025,17 +3025,15 @@ export function createAgent({
     const plan = orchestrate(text, classified || { label: 'misc_chat', scores: {} });
 
     if (plan.multi && plan.squad.length > 1) {
-      const parts = [];
-      for (const entry of plan.squad) {
-        const result = await ai.chat(config, store, text, log, {
-          voice: Boolean(ctx?.voice),
-          intent: entry.intent,
-          agent: entry.agent,
-          squadName: entry.agent.name,
-          taskBrief: taskBrief(entry),
-        });
-        if (result?.text) parts.push({ agent: entry.agent, text: result.text });
-      }
+      // Squad runs IN PARALLEL — 2-bot latency = max(t1, t2), not t1 + t2.
+      const results = await Promise.all(plan.squad.map((entry) => ai.chat(config, store, text, log, {
+        voice: Boolean(ctx?.voice),
+        intent: entry.intent,
+        agent: entry.agent,
+        squadName: entry.agent.name,
+        taskBrief: taskBrief(entry),
+      }).catch(() => null)));
+      const parts = plan.squad.map((entry, i) => ({ agent: entry.agent, text: results[i]?.text || '' }));
       const merged = mergeSquadAnswers(parts);
       if (merged) {
         store?.pushHistory?.('user', text);

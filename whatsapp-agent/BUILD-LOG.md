@@ -1859,6 +1859,42 @@ squad calls never collide. Vision/STEM/MCQ pipelines keep their specialised solv
 intent, missions Namaste-free, dispatcher solo/squad/fallback routing, prompt integration,
 squad merge shape, status line). Docs: `NEURAL.md` fleet section.
 
+## Part 5 — Speed + accuracy push
+
+User ask: *"ab speed aur accuracy pe kaam kar aur ise best bana"*. Measured first
+(`npm run bench` — new), then optimized the measured bottlenecks, then guarded the wins
+with regression tests.
+
+**Speed (before → after, same machine):**
+
+| Hot path | Before | After | Speedup |
+|---|---|---|---|
+| `lookupKnowledge` (runs on every message) | **21,958 µs** | **553 µs** | **40×** |
+| `classifyIntent` warm (cache) | 328 µs | 2.3 µs | 142× |
+| `classifyIntent` cold | ~330 µs | ~190 µs | 1.7× |
+| `matchScore` | 37 µs | 12.8 µs | 2.9× |
+| `textFeatures` | 9.3 µs | 0.3 µs | 31× |
+
+How: (1) bounded LRU memoization of normalizeText/textFeatures/pair-sides; (2) knowledge
+key data (normalized keys, token sets, feature vectors) precomputed once at module load —
+the old code rebuilt Sets per key per lookup (the 22ms bottleneck); (3) cheap-first order —
+shared content-word prefilter before the MatchNet forward, skip net on strong lexical hits,
+decisive long-key hit stops the scan; (4) k-NN partial top-k selection (no full sort) +
+Float32Array memory; (5) classify result cache for double-sent messages; (6) squad bots now
+run in PARALLEL (2-bot latency = max, not sum). Agent-scoped cache keys keep squad calls
+from colliding.
+
+**Accuracy:** MatchNet chunked training with early stopping (best val weights kept);
+hybrid eval now mirrors the runtime blend rule exactly (sim ≥ 0.8 memory wins, or an
+uncertain net conf < 0.65 defers to memory at sim ≥ 0.55); classification cache makes
+repeat answers deterministic. Retrained: IntentNet val **84.2%** on the 57-example
+handwritten holdout (86.0% previous run — composition noise from runtime-learned examples
+entering the train fold, same split), MatchNet val P 90.0 / R 73.0.
+
+**Result:** 301 → **303/303 tests green** (2 new speed regression tests: knowledge lookup
+p50 < 5ms across the bank, classify < 5ms cold / < 500µs warm). `npm run bench` prints the
+full speed + accuracy snapshot any time.
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._
