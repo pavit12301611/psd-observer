@@ -77,6 +77,14 @@ export function parseIntent(input) {
     return asCmd('sleepnotify', mapped);
   }
 
+  // ── Self-Evolving Persona & Behavioral Training ───────────────────────────
+  if (/^(?:persona|my\s+persona|my\s+profile|owner\s+profile|mera\s+(?:behaviour|behavior|swabhav|profile|persona)(?:\s+(?:kaisa\s+hai|batao|dikhao))?|(?:tu|tum)\s+mujhe\s+kitna\s+(?:jaant[ae]|samajht[ae])\s+h(?:o|ai)|mere\s+baare\s+me(?:in)?\s+kya\s+samjha|how\s+well\s+do\s+you\s+know\s+me)[?!.।]*$/i.test(text)) {
+    return asCmd('persona', 'status');
+  }
+  if (/\b(?:meri\s+chats?\s+se\s+(?:train|seekh)|khud\s+ko\s+train\s+kar|train\s+(?:yourself|from\s+my\s+chats?))\b/i.test(text)) {
+    return asCmd('train', text);
+  }
+
   // ── app control ───────────────────────────────────────────────────────────
   if ((m = text.match(/^(?:open|launch|khol(?:o|do|de)?|chalu\s+kar(?:o|do)?|start)\s+(?:the\s+|app\s+)?(.+)$/i))) {
     const rest = clean(m[1]).replace(/\s+(?:app|application)$/i, '').replace(/\s+(?:karo|kar do|kholo|khol do)$/i, '');

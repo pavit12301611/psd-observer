@@ -13,6 +13,7 @@ const EMPTY = () => ({
   rules: [],          // custom trigger->action overrides: {id, trigger, triggerNorm, kind, action, createdTs}
   facts: {},          // /remember key -> display value, injected into the AI prompt
   factValues: {},     // canonical slot key -> clean value (e.g. name -> "Pavit"), overwritten on updates
+  profile: null,      // continuous behavioral & personality learning profile (src/persona.js)
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
   pending: null,      // destructive action waiting for "haan"/"yes"

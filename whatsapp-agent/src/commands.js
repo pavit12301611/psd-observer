@@ -47,6 +47,14 @@ import {
   buildOfflineMessage,
   noteOfflineAnnounced,
 } from './lifecycle.js';
+import {
+  ensureProfile,
+  observeOwnerTurn,
+  trainFromHistory,
+  formatPersonaReport,
+  addLesson,
+  createEmptyProfile,
+} from './persona.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -121,6 +129,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /use <task> — *haath*: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)
 • /stop — jo chal raha hai wahi rukta hai (partial steps batata hai) · naya: update ka message khud aata hai
 • /sleepnotify [on|off|test|set <msg>] — PC band/sleep hone se pehle auto "Agent is sleeping" message (active by default)
+• /persona (ya /profile, /train) — aapki chats se seekha hua behaviour, style, goals, likes/dislikes & continuous self-training
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
@@ -1661,10 +1670,83 @@ export function createAgent({
     ].join('\n');
   }
 
+  // Bootstrap the owner behavioral profile from existing history/notes/todos/facts on startup
+  try { trainFromHistory(store); } catch { /* best-effort */ }
+
+  async function personaCommand(args = '', { forceTrain = false } = {}) {
+    const raw = String(args ?? '').trim();
+    const [subRaw] = raw.split(/\s+/);
+    const sub = (subRaw || '').toLowerCase();
+    const rest = raw.slice(subRaw ? subRaw.length : 0).trim();
+
+    if (sub === 'reset' || sub === 'clear') {
+      store.data.profile = createEmptyProfile();
+      store.save();
+      return '🧹 Behavioral profile reset kar diya. Ab main aapki nayi chats se fresh seekhunga!';
+    }
+    if ((sub === 'teach' || sub === 'rule' || sub === 'lesson') && rest) {
+      const profile = ensureProfile(store);
+      addLesson(profile, rest, 'owner_command');
+      observeOwnerTurn(store, rest);
+      return `🧠 *Behavioral Lesson Saved!* Ab main har chat me ye yaad rakhunga:\n• _${rest}_\n\n(/persona se pura profile dekhein)`;
+    }
+    if (sub === 'goal' && rest) {
+      const profile = ensureProfile(store);
+      profile.goals.push({ text: rest, ts: Date.now(), status: 'active' });
+      store.save();
+      return `🎯 *Active Goal Added:* *${rest}*\nMain aapki chats aur tasks me is goal ko dhyan me rakhunga.`;
+    }
+    if (sub === 'like' && rest) {
+      const profile = ensureProfile(store);
+      profile.preferences.push({ text: rest, ts: Date.now(), source: 'owner_command' });
+      store.save();
+      return `❤️ *Preference Saved:* *${rest}*`;
+    }
+    if (sub === 'dislike' && rest) {
+      const profile = ensureProfile(store);
+      profile.dislikes.push({ text: rest, ts: Date.now(), source: 'owner_command' });
+      store.save();
+      return `🚫 *Dislike Saved:* *${rest}*`;
+    }
+    if (forceTrain || sub === 'train' || sub === 'reflect' || sub === 'learn') {
+      const extraInstruction = forceTrain ? raw : rest;
+      if (extraInstruction) {
+        const profile = ensureProfile(store);
+        observeOwnerTurn(store, extraInstruction);
+        if (extraInstruction.length >= 6 && !/^(?:now|all|chats?|history|me)$/i.test(extraInstruction)) {
+          addLesson(profile, extraInstruction, 'owner_train');
+        }
+      }
+      const { learnedCount } = trainFromHistory(store);
+      let aiReflected = false;
+      if (config.aiProvider !== 'none') {
+        const ref = await ai.reflectOwnerProfile(config, store, log);
+        aiReflected = Boolean(ref?.updated);
+      }
+      const header = [
+        `⚡ *Self-Training Complete!*`,
+        `• Analyzed all your past chats, notes, todos & facts (${learnedCount} new signals + ${aiReflected ? 'deep AI reflection updated ✨' : 'instant behavioral analysis active'})`,
+        `• Main har message se aapka behaviour, tone, mood, goals aur preferences lagataar seekh raha hoon — as your *Agentic AI & closest companion*.`,
+        '',
+      ].join('\n');
+      return header + formatPersonaReport(store, config);
+    }
+    if (raw && !['status', 'show', 'view', 'info', 'me'].includes(sub)) {
+      // e.g. `/persona speak like a brother and keep answers practical`
+      const profile = ensureProfile(store);
+      addLesson(profile, raw, 'owner_command');
+      observeOwnerTurn(store, raw);
+      return `🧠 *Updated your behavioral profile:* _${raw}_\n\n${formatPersonaReport(store, config)}`;
+    }
+    return formatPersonaReport(store, config);
+  }
+
   async function handleCommand(cmd, args, ctx) {
     switch (cmd) {
       case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
       case 'sleepnotify': case 'offlinenotify': case 'sleepmsg': return sleepNotifyCommand(args);
+      case 'persona': case 'profile': case 'twin': case 'behaviour': case 'behavior': return await personaCommand(args);
+      case 'train': return await personaCommand(args, { forceTrain: true });
       case 'undo': case 'journal': return await undoCommand(args);
       case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
@@ -1999,6 +2081,13 @@ export function createAgent({
     if ((m = text.match(/^(?:note(?:\s+kar\s+lo)?\s*[:\-]?\s+|note that\s+)([\s\S]+)$/i))) return note(m[1]);
     if ((m = text.match(/^(?:add\s+(?:a\s+)?todo[:\s]+|todo[:\s]+)(?:add\s+)?([\s\S]+)$/i))) return todo(`add ${m[1]}`);
     if ((m = text.match(/^remember\s+(?:that\s+)?([\s\S]+)$/i))) return remember(m[1], ctx);
+    // Natural-language behavioral training & profile inspection
+    if (/\b(?:meri\s+chats?\s+se\s+(?:train|seekh)|khud\s+ko\s+train\s+kar|train\s+(?:yourself|from\s+my\s+chats?)|agentic\s+ai\s+ban(?:na|o)?.*understand\s+me)\b/i.test(text)) {
+      return personaCommand(text, { forceTrain: true });
+    }
+    if (/^(?:(?:tu|tum)\s+mujhe\s+kitna\s+(?:jaant[ae]|samajht[ae])\s+h(?:o|ai)|mera\s+(?:behaviour|behavior|swabhav|profile|persona)\s+(?:kaisa\s+hai|batao|dikhao)|mere\s+baare\s+me(?:in)?\s+kya\s+samjha|how\s+well\s+do\s+you\s+know\s+me|what\s+is\s+my\s+(?:persona|behavior\s+profile))[?!.।]*$/i.test(text.trim())) {
+      return formatPersonaReport(store, config);
+    }
     const memReply = mem.handleMemoryIntent(store, config, text, { voice: Boolean(ctx?.voice) });
     if (memReply !== undefined) return memReply;
     if ((m = text.match(/^(?:what(?:'s| is) the )?weather\s+(?:in|at)\s+([\s\S]+?)\??$/i))) return tools.weather(m[1]);
@@ -2127,6 +2216,9 @@ export function createAgent({
         if (AFFIRM.test(working)) return handlePc('confirm');
         if (DENY.test(working)) return handlePc('cancel');
       }
+
+      // Continuously learn owner's behavior, language vibe, mood, preferences, goals & lessons from every message
+      observeOwnerTurn(store, working);
 
       const quick = intent(working, effCtx);
       if (quick !== undefined) return await quick;

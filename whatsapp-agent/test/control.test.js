@@ -42,6 +42,13 @@ import {
   parseLogindSignal,
   startPowerLifecycleWatcher,
 } from '../src/lifecycle.js';
+import {
+  observeOwnerTurn,
+  detectMood,
+  recallRelevantEpisodes,
+  reflectWithAI,
+  formatPersonaForPrompt,
+} from '../src/persona.js';
 import { EventEmitter } from 'node:events';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -682,4 +689,86 @@ test('lifecycle: whatsapp.announceOffline deduplicates concurrent calls and /sle
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── continuous behavioral learning & self-evolving agentic persona ───────────
+
+test('persona: observeOwnerTurn learns Hinglish/bhai vibe, preferences, dislikes, goals, mood, lessons & episodic memories', () => {
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir);
+    const store = new Store(config.storeFile);
+
+    assert.equal(detectMood('yaar dimag kharab ho raha hai stuck hoon'), 'stressed');
+    assert.equal(detectMood('mast badiya kaam ho gaya op!'), 'excited');
+    assert.equal(detectMood('bhai ek startup idea brainstorm karte hain'), 'brainstorming');
+
+    observeOwnerTurn(store, 'bhai main abhi autonomous AI agent project bana raha hoon', 'Mast project hai bhai!');
+    observeOwnerTurn(store, 'mujhe fast aur direct Hinglish replies pasand hai', 'Done bhai!');
+    observeOwnerTurn(store, 'mujhe lamba robotic gyaan pasand nahi', 'Bilkul point pe rahunga.');
+    observeOwnerTurn(store, 'short me bata aur seedha point pe aa', 'Got it!');
+    observeOwnerTurn(store, 'mast', 'Shukriya bhai!');
+
+    const p = store.data.profile;
+    assert.equal(p.style.dominantLanguage, 'hinglish');
+    assert.equal(p.style.preferredVibe, 'bhai_companion');
+    assert.equal(p.style.verbosity, 'concise');
+    assert.ok(p.bondLevel > 15, 'bond level grows with turns and positive feedback');
+    assert.ok(p.goals.some((g) => /autonomous AI agent project/i.test(g.text)));
+    assert.ok(p.preferences.some((pref) => /fast aur direct Hinglish/i.test(pref.text)));
+    assert.ok(p.dislikes.some((d) => /lamba robotic gyaan/i.test(d.text)));
+    assert.ok(p.lessons.some((l) => /concise/i.test(l.rule)));
+    assert.ok(p.interests.ai_agents >= 1);
+
+    // Long-term episodic memory recall works even when querying later
+    const recalled = recallRelevantEpisodes(store, 'autonomous AI agent project ka kya plan hai?');
+    assert.ok(recalled.length >= 1);
+    assert.match(recalled[0].summary, /autonomous AI agent project/i);
+
+    const promptBlock = formatPersonaForPrompt(store, config, 'autonomous AI agent project');
+    assert.match(promptBlock, /AGENTIC AI & PERSONAL COMPANION/);
+    assert.match(promptBlock, /autonomous AI agent project/);
+    assert.match(promptBlock, /fast aur direct Hinglish/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('persona: /train, /persona, natural Hinglish training directive, and reflectWithAI work end-to-end', async () => {
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir);
+    const store = new Store(config.storeFile);
+    store.pushHistory('user', 'bhai mera goal full-stack AI engineer banna hai');
+    store.pushHistory('assistant', 'Zaroor bhai, saath me karenge!');
+    const agent = createAgent({ config, store, log: silent });
+
+    // Owner sends the exact natural Hinglish training directive
+    const trainReply = await agent.handle(
+      'bhai ab na esa kar ki ai na meri chats se train ho ki mera behaviour kaisa hai aur woh aur bhi jyada better banata jaaaye iska main kaam na pc control nhi agentic ai banna hai with the best person who understand me',
+    );
+    assert.match(trainReply, /Self-Training Complete/i);
+    assert.match(trainReply, /Agentic AI/i);
+    assert.match(trainReply, /full-stack AI engineer/i);
+
+    // Asking "mera behaviour kaisa hai?" or "tu mujhe kitna jaanta hai?" returns the learned profile
+    const report = await agent.handle('mera behaviour kaisa hai?');
+    assert.match(report, /Learned Owner Profile/);
+    assert.match(report, /full-stack AI engineer/);
+
+    // AI reflection synthesizes deep portrait from history
+    const ref = await reflectWithAI(config, store, async () => JSON.stringify({
+      summary: 'Ambitious builder who speaks warm Hinglish and wants an elite agentic companion.',
+      traits: ['Builder mindset', 'Direct communicator'],
+      preferences: ['Practical examples'],
+      goals: ['Build the best personal Agentic AI'],
+      lessons: ['Act as a proactive thinking partner first'],
+    }), silent);
+    assert.equal(ref.updated, true);
+    assert.match(store.data.profile.aiSummary, /Ambitious builder/);
+    assert.ok(store.data.profile.traits.includes('Builder mindset'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 
