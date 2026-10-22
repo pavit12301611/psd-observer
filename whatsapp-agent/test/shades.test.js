@@ -208,3 +208,52 @@ test('shades: never touches the framebuffer — only panel commands', async () =
     assert.ok(!/gnome-screenshot|grim|scrot|maim|import|pipewire/.test(line), 'capture tools untouched');
   }
 });
+
+// ── 5. End-to-end: "/shades" must route through the REAL WhatsApp dispatcher ──
+// (unit tests above cover shades.js itself; these prove createAgent.handle()
+// actually reaches it — the regression that matters after updates).
+
+test('shades: /shades routes end-to-end through createAgent.handle()', async () => {
+  const { createAgent } = await import('../src/commands.js');
+  const data = { history: [], memory: { facts: [], rules: [] }, todos: [], guests: {} };
+  const store = {
+    data,
+    save() {},
+    pushHistory(role, content) { data.history.push({ role, content }); },
+    listCronJobs: () => [],
+    getLearned: () => null,
+  };
+  const config = {
+    ownerNumber: '911234567890', agentNumber: '919876543210', timezone: 'Asia/Kolkata',
+    shellPin: '', dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'shades-data-')),
+  };
+  const agent = createAgent({ config, store, log: { info() {}, warn() {}, error() {} } });
+
+  // status: no exec needed when shades are off — pure routing proof
+  const status = await agent.handle('/shades status', { isOwner: true });
+  assert.match(String(status), /Shades/i, '/shades status must reach the shades module');
+
+  // bare /shades: routes into shadesOn (on a test box with no panel tools it
+  // returns the honest "nahi chale/failed" message — still proves the route)
+  const on = await agent.handle('/shades', { isOwner: true });
+  assert.match(String(on), /SHADES (ON|failed)|nahi chale/i, '/shades must reach shadesOn');
+
+  // off + alias work through the same dispatcher
+  const off = await agent.handle('/shades off', { isOwner: true });
+  assert.match(String(off), /SHADES OFF|already \*OFF\*/i);
+  const alias = await agent.handle('/privacy status', { isOwner: true });
+  assert.match(String(alias), /Shades/i, '/privacy alias routes too');
+
+  // help must advertise the feature
+  const help = await agent.handle('/help', { isOwner: true });
+  assert.match(String(help), /\/shades/, 'help lists /shades');
+});
+
+test('shades: update announcement is armed for 3.4.0 (WhatsApp what\'s-new)', async () => {
+  const u = await import('../src/updates.js');
+  assert.equal(u.packageVersion(), '3.4.0');
+  const changes = u.changesFor('3.4.0');
+  assert.ok(changes.length >= 4, `announcement has bullets (${changes.length})`);
+  assert.ok(changes.some((c) => /Neural/i.test(c)), 'mentions neural brain');
+  assert.ok(changes.some((c) => /Shades/i.test(c)), 'mentions shades');
+});
