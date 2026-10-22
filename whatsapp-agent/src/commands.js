@@ -55,6 +55,53 @@ import {
   addLesson,
   createEmptyProfile,
 } from './persona.js';
+import { isOwner, normalizeNumber, maskNumber } from './allowlist.js';
+import {
+  ensureGuestStore,
+  addContact,
+  removeContact,
+  listContacts,
+  findContactByNumber,
+  resolveRecipient,
+  parseTargetAndMessage,
+  allowGuest,
+  blockGuest,
+  unblockGuest,
+  setGuestMode,
+  detectGuestCommandAttempt,
+  buildBlockedCommandReply,
+  recordGuestChatTurn,
+  recordGuestAudit,
+  enqueueGuestApproval,
+  getActiveGuestApproval,
+  listPendingGuestApprovals,
+  resolveGuestApproval,
+  parseOwnerApprovalDecision,
+  formatApprovalCardForOwner,
+  formatPendingApprovalsList,
+  formatContactsList,
+  formatGuestStatus,
+  formatGuestLog,
+} from './guests.js';
+import {
+  ensureLocationStore,
+  resolveOwnerLocation,
+  setOwnerLocation,
+  searchNearbyPlaces,
+  formatOwnerLocationCard,
+} from './location.js';
+import {
+  getActiveRecording,
+  startActionRecording,
+  stopActionRecording,
+  cancelActionRecording,
+  recordDesktopEvent,
+  formatActionRecorderStatus,
+  saveLastRecordingAsCommand,
+  executeRecordedStep,
+  replayRecordedActions,
+  parseActionRecorderIntent,
+} from './actionrecorder.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -131,8 +178,25 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /sleepnotify [on|off|test|set <msg>] — PC band/sleep hone se pehle auto "Agent is sleeping" message (active by default)
 • /persona (ya /profile, /train) — aapki chats se seekha hua behaviour, style, goals, likes/dislikes & continuous self-training
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
-• /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
+• /weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
+*📍 Owner Location Intelligence (100% Private to You)*
+• /location — aapki current location (GPS Pin / manual / live IP geolocation)
+• /location set <city or lat,lon> — ya seedha WhatsApp 📍 Location Pin bhej do!
+• /near <cafe|atm|hospital|gym> (ya /location near <query>) — aas-paas ki jagah + distance + Google Maps
+• /weather — bina city likhe aapki current location ka live mausam
+*👥 Multi-User Messaging, Owner Approval Gate & Command Lock*
+• 🛡️ *Owner Approval Gate (Default):* Aapke alawa jo bhi message karega, agent pehle aapko batayega (*Kisne bheja* + *Kis time* + *AI kya reply soch raha hai*). Aap seedha bol sakte ho:
+  — *yes* / *haan* → AI ka socha hua reply bhej do
+  — *no* / *nahi* → kuch mat bhejo
+  — *no send this instead: <text>* (ya *nahi yeh bhejo: <text>*) → AI ke reply ki jagah aapka message bhejega!
+• /pending · /approve [id] [custom text] · /reject [id] — pending guest messages dekho/control karo
+• /msg <number|name> | <text> — kisi bhi dusre number ya saved contact ko WhatsApp message bhejo
+• /reply <text> — last guest sender ko turant reply bhejo · /broadcast <n1,n2> | <text>
+• /contact add <Name> <Number> · /contacts — contacts save/manage karo
+• /guest [approval|auto|contacts|off|status|log|clear] — guest chat policy & audit log
+• /allow <number|name> · /block <number|name> · /unblock <number|name>
+• 🔒 *Strict Command Firewall:* Non-owners ke liye sabhi \`/\` aur plain-language commands + aapki location 100% blocked hain!
 *Safety*
 • /doctor — kya kaam nahi kar raha, aur exact fix (screenshot/input/AI)
 • /access — what is allowed · /yes · /no (destructive actions ask first)
@@ -144,21 +208,31 @@ const num = (s) => Number.parseInt(String(s ?? ''), 10);
 
 export function createAgent({
   config, store, log = console, forwardToObserver = async () => null, observerOnline = () => false,
-  taskRegistry = globalTasks, notify = null,
+  taskRegistry = globalTasks, notify = null, sendToNumber = null,
 }) {
   const tz = config.timezone;
+  ensureGuestStore(store, config);
   // The signal of whatever command is running right now. Commands are
   // serialized (isProcessing), so one slot is enough; /stop does not use it.
   let activeSignal = null;
   // Unsolicited messages (live progress, watch alerts). index.js wires this to
   // WhatsApp; in tests it stays a no-op so nothing ever sends by accident.
-  const notifyOwner = typeof notify === 'function' ? notify : async () => false;
+  let notifyOwner = typeof notify === 'function' ? notify : async () => false;
+  let sendWhatsappTo = typeof sendToNumber === 'function' ? sendToNumber : null;
   const journal = createJournal({ config, log });
   // Same janitor instance the background loop uses, so /shots and the timer
   // agree on one ledger.
   const shots = createShotJanitor({ config, log });
   const harness = createHarness({ config, store, log });
-  const actions = createActions({ config, store, log, journal, notify: notifyOwner, harness });
+  const actions = createActions({
+    config,
+    store,
+    log,
+    journal,
+    notify: (msg) => notifyOwner(msg),
+    harness,
+    sendToNumber: (to, reply) => (sendWhatsappTo ? sendWhatsappTo(to, reply) : Promise.resolve(false)),
+  });
   const agentLoop = createAgentLoop({ config, store, actions, log });
   // Real WhatsApp call answering (src/wavoip.js) is attached by index.js —
   // it needs the WhatsApp layer's owner-LID knowledge, which commands.js
@@ -520,72 +594,158 @@ export function createAgent({
     }
   }
 
-  // ── learn custom keywords ──────────────────────────────────────────────
+  // ── learn & custom commands (/learn, /cmd, natural command creation) ──────
   function learnCmd(args) {
     const raw = String(args ?? '').trim();
     if (!raw || raw.toLowerCase() === 'list' || raw.toLowerCase() === 'ls') {
       const all = store.listLearned();
-      if (!all.length) return '📚 No learned keywords yet. Teach one:\n/learn work open chrome | open slack | open code\n/learn work chrome, slack, code  (shorthand: each word = app to open)\nThen just type /work';
-      return '📚 *Learned keywords*\n\n' + all.map(e => `• /${e.keyword} → ${e.commands.map(c => c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`).join(' | ')}`).join('\n');
+      if (!all.length) {
+        return [
+          '📚 *No custom commands yet.*',
+          'Aap seedha natural message me ya `/learn` se naya command bana sakte ho:',
+          '• `"create a command /study that opens chrome and sets volume to 30"`',
+          '• `"todo add revise math — create this as a command /math"`',
+          '• `"/learn work open chrome | open slack | open code"`',
+          'Phir kabhi bhi `/study` ya `study` likho aur wahi task execute hoga!',
+        ].join('\n');
+      }
+      return '📚 *Learned / Custom Commands*\n\n' + all.map(e => `• /${e.keyword} → ${e.commands.map(c => learn.formatLearnedStep ? learn.formatLearnedStep(c) : (c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`)).join(' | ')}`).join('\n');
     }
     // delete forms: del work / delete work / rm work / remove work / unlearn work
-    let m = raw.match(/^(?:del|delete|rm|remove|unlearn|forget)\s+([a-z0-9_-]+)$/i);
+    const m = raw.match(/^(?:del|delete|rm|remove|unlearn|forget)\s+\/?([a-z0-9_-]+)$/i);
     if (m) {
       const kw = learn.normalizeKeyword(m[1]);
       return store.deleteLearned(kw) ? `🗑️ /${kw} deleted.` : `No learned keyword /${kw}. See /learn list`;
     }
-    // handle "add work ..." prefix
-    let addText = raw.replace(/^add\s+/i, '');
+    // handle "add work ..." or "create work ..." prefix
+    const addText = raw.replace(/^(?:add|create|set|new)\s+/i, '');
     // split keyword from commands: first word is keyword, rest is commands
     const sp = addText.search(/\s/);
     if (sp === -1) {
-      return '📚 Usage: /learn <keyword> <commands>\nE.g. /learn work open chrome | open slack | open code\nOr shorthand: /learn work chrome slack vscode';
+      return '📚 Usage: /learn <keyword> <commands>\nE.g. /learn work open chrome | open slack | open code\nOr natural: "create a command /work that opens chrome and sets volume to 40"';
     }
     const keywordRaw = addText.slice(0, sp).trim();
-    const commandsRaw = addText.slice(sp+1).trim();
+    const commandsRaw = addText.slice(sp + 1).replace(/^(?:that|which|to|for|:|=|-)\s+/i, '').trim();
     if (!commandsRaw) return `📚 /learn ${keywordRaw} — commands kya hai? E.g. /learn ${keywordRaw} open chrome | open slack`;
     const kw = learn.normalizeKeyword(keywordRaw);
     const err = learn.validateKeyword(kw);
     if (err) return `⚠️ ${err}`;
     const cmds = learn.parseLearnCommands(commandsRaw);
     if (!cmds) return '⚠️ Commands samajh nahi aaye. Try:\n/learn work open chrome | open slack\n/learn work chrome, slack, code';
-    const entry = store.addLearned(kw, cmds, commandsRaw);
-    const steps = cmds.map(c => c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`).join(' | ');
-    return `📚 Learned /${kw} → ${steps}\nAb bas /${kw} likho aur ye saare kaam ek saath honge.`;
+    store.addLearned(kw, cmds, commandsRaw);
+    const steps = cmds.map(c => learn.formatLearnedStep ? learn.formatLearnedStep(c) : (c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`)).join(' | ');
+    return `📚 Learned /${kw} → ${steps}\nAb bas /${kw} ya \`${kw}\` likho aur ye saare kaam ek saath honge.`;
   }
 
-  async function runLearned(keyword, ctx) {
-    const entry = store.getLearned(keyword);
+  async function runNaturalStep(stepText, ctx = {}) {
+    const cleanStep = String(stepText ?? '').trim();
+    if (!cleanStep) return '✅ Done.';
+    const stepCtx = { ...ctx, bypassSaved: true };
+    const sl = cleanStep.match(/^\/([a-zA-Z0-9_-]+)\s*([\s\S]*)$/);
+    if (sl) return handleCommand(sl[1].toLowerCase(), sl[2].trim(), stepCtx);
+    const q = intent(cleanStep, stepCtx);
+    if (q !== undefined) return await q;
+    const pi = parseIntent(cleanStep);
+    if (pi) return pi.reply ? pi.reply : await handleCommand(pi.cmd, pi.args ?? '', stepCtx);
+    if (agentLoop.enabled) {
+      const ar = await agentLoop.run(cleanStep, stepCtx);
+      if (ar != null) return ar;
+    }
+    return askAI(cleanStep, stepCtx);
+  }
+
+  async function runLearned(keyword, ctx = {}, extraArgs = '') {
+    const cleanKw = learn.normalizeKeyword(keyword);
+    const entry = store.getLearned(cleanKw);
     if (!entry) return null;
     const results = [];
+    const stepCtx = { ...ctx, bypassSaved: true };
     for (const step of entry.commands) {
-      // inferredOpen → open_app, else use step.cmd/args
-      const cmd = step.inferredOpen ? 'open' : step.cmd;
-      const args = step.inferredOpen ? step.args : step.args;
-      const r = await handleCommand(cmd, args, ctx);
+      let r;
+      if (step.cmd === '__natural__') {
+        const naturalText = extraArgs ? `${step.args} ${extraArgs}`.trim() : step.args;
+        r = await runNaturalStep(naturalText, stepCtx);
+      } else if (step.actionType && ['click', 'double_click', 'right_click', 'middle_click', 'drag', 'scroll', 'type', 'key'].includes(step.actionType)) {
+        r = await executeRecordedStep(step, {
+          runCommand: (c, a) => handleCommand(c, a, stepCtx),
+        });
+      } else {
+        const cmd = step.inferredOpen ? 'open' : step.cmd;
+        const baseArgs = step.args ?? '';
+        const args = extraArgs && entry.commands.length === 1
+          ? `${baseArgs} ${extraArgs}`.trim()
+          : baseArgs;
+        r = await handleCommand(cmd, args, stepCtx);
+      }
       const out = typeof r === 'string' ? r : (r?.text ?? '');
-      // if media reply, push media handling? For now just text
       if (r && typeof r === 'object' && (r.image || r.audio || r.document || r.video)) {
-        // if media, we need to send it — but stacking text join loses media. For /work we mostly open apps (text).
-        // We'll send media immediately via a side effect? Instead collect text and if any step returns media, we will return that media reply (last media wins)
-        // For simplicity, if any step has media, return it as final; caller will handle stacking text already collected
-        // We push text part and note media
         results.push(out || '(media)');
-        // TODO: media stacking could be improved to send multiple messages; for now last media will be in final reply
-        if (r.image || r.audio || r.document || r.video) {
-          // store last media to merge into final
-          results._lastMedia = r;
-        }
+        results._lastMedia = r;
       } else {
         results.push(out);
       }
+      if (store.data.pending) break;
     }
-    const text = `📚 /${keyword} (${entry.commands.length} steps):\n\n` + results.join('\n\n---\n\n');
+    const text = `📚 /${entry.keyword} (${entry.commands.length} step${entry.commands.length === 1 ? '' : 's'}):\n\n` + results.join('\n\n---\n\n');
     const lastMedia = results._lastMedia;
     if (lastMedia) {
       return { ...lastMedia, text };
     }
     return text;
+  }
+
+  async function cmdCommand(args, ctx = {}) {
+    const raw = String(args ?? '').trim();
+    if (!raw || /^(?:list|ls|show)$/i.test(raw)) return learnCmd('list');
+    const runMatch = raw.match(/^(?:run|exec|execute|start)\s+\/?([a-zA-Z0-9_-]+)(?:\s+([\s\S]+))?$/i);
+    if (runMatch) {
+      const kw = learn.normalizeKeyword(runMatch[1]);
+      const res = await runLearned(kw, ctx, (runMatch[2] || '').trim());
+      return res ?? `⚠️ Custom command \`/${kw}\` nahi mila. (\`/learn list\` dekhein)`;
+    }
+    return learnCmd(raw);
+  }
+
+  async function executeCreateCommandIntent(parsedCmd, ctx = {}) {
+    if (!parsedCmd) return undefined;
+    if (parsedCmd.action === 'list') {
+      return learnCmd('list');
+    }
+    if (parsedCmd.action === 'delete') {
+      return learnCmd(`del ${parsedCmd.name}`);
+    }
+    if (parsedCmd.action === 'create') {
+      const kw = learn.normalizeKeyword(parsedCmd.name);
+      const err = learn.validateKeyword(kw);
+      if (err) return `⚠️ ${err}`;
+      const taskText = String(parsedCmd.task || store.getLastOwnerTask() || '').trim();
+      if (!taskText) {
+        return `⚠️ Command \`/${kw}\` me kya task save karna hai? Example:\n• \`create a command /${kw} that opens chrome and sets volume to 30\`\n• Ya pehle koi task bhejo aur phir bolo: \`create this as a command /${kw}\``;
+      }
+      const cmds = learn.parseLearnCommands(taskText);
+      if (!cmds || !cmds.length) {
+        return `⚠️ Command \`/${kw}\` ke steps samajh nahi aaye. Try: \`create a command /${kw} that opens chrome and takes a screenshot\``;
+      }
+      store.addLearned(kw, cmds, taskText);
+      const steps = cmds.map((c) => learn.formatLearnedStep(c)).join(' → ');
+      const header = [
+        `🧠 *Custom Command Created:* \`/${kw}\``,
+        `📋 *Task (${cmds.length} step${cmds.length === 1 ? '' : 's'}):* ${steps}`,
+        parsedCmd.fromLastMessage ? `↩️ _Created from your previous message: "${taskText.slice(0, 100)}"_` : '',
+        '',
+        `Ab aap kabhi bhi \`/${kw}\` ya sirf \`${kw}\` bhejoge to main yahi task execute karunga!`,
+      ].filter(Boolean).join('\n');
+
+      if (parsedCmd.runNow) {
+        const executed = await runLearned(kw, ctx);
+        if (executed && typeof executed === 'object') {
+          return { ...executed, text: `${header}\n\n---\n\n${executed.text || ''}` };
+        }
+        return `${header}\n\n---\n\n${executed || ''}`;
+      }
+      return header;
+    }
+    return undefined;
   }
 
   function todo(args) {
@@ -813,6 +973,13 @@ export function createAgent({
         const dir = /up|upar|oopar/i.test(gate.text) ? 'up' : 'down';
         const amount = gate.text.match(/(\d+)/)?.[1] ?? 3;
         return pc.scrollMouse(dir, amount);
+      }
+      case 'drag': {
+        const gate = tier2Gate(rest);
+        if (gate.reply) return gate.reply;
+        const nums = gate.text.match(/-?\d+/g)?.map(Number) ?? [];
+        if (nums.length < 4) return '🖱️ Usage: /pc drag <x1> <y1> <x2> <y2>';
+        return pc.dragMouse(nums[0], nums[1], nums[2], nums[3]);
       }
       case 'shutdown': case 'poweroff': case 'reboot': case 'restart': case 'suspend': case 'sleep': {
         const gate = tier2Gate(rest);
@@ -1300,6 +1467,79 @@ export function createAgent({
     return `📚 *Taught* (${all.length})\n\n${all.map((e) => `• /${e.keyword} — ${e.commands.length} steps`).join('\n')}`;
   }
 
+  // ── Live PC Action Recorder, Learner & Replayer (`/watchme`, `/recordactions`) ──
+  async function executeActionRecorderIntent(intentObj, ctx = {}) {
+    if (!intentObj) return undefined;
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/watchme' });
+    }
+    if (intentObj.action === 'start') {
+      const res = await startActionRecording(store, config, { name: intentObj.name || '' });
+      return res.text;
+    }
+    if (intentObj.action === 'stop') {
+      const res = await stopActionRecording(store, { name: intentObj.name || '' });
+      return res.ok ? res.text : res.reason;
+    }
+    if (intentObj.action === 'cancel') {
+      return cancelActionRecording(store).text;
+    }
+    if (intentObj.action === 'save_as') {
+      const res = saveLastRecordingAsCommand(store, intentObj.name || '');
+      return res.ok ? res.text : `⚠️ ${res.reason}`;
+    }
+    if (intentObj.action === 'replay') {
+      const res = await replayRecordedActions(store, {
+        name: intentObj.name || '',
+        times: intentObj.times || 1,
+        delayMs: 0,
+        runCommand: (cmd, args) => handleCommand(cmd, args, { ...ctx, bypassSaved: true }),
+      });
+      return res.image || res.audio || res.document || res.video ? res : res.text;
+    }
+    return formatActionRecorderStatus(store);
+  }
+
+  async function watchMeCommand(args = '', ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/watchme' });
+    }
+    const raw = String(args ?? '').trim();
+    const low = raw.toLowerCase();
+
+    if (!raw || /^(?:status|list|ls|info)$/i.test(low)) {
+      return formatActionRecorderStatus(store);
+    }
+    const startMatch = raw.match(/^(?:start|record|shuru|begin)(?:\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27}))?$/i);
+    if (startMatch) {
+      return executeActionRecorderIntent({ action: 'start', name: startMatch[1] || '' }, ctx);
+    }
+    const stopMatch = raw.match(/^(?:stop|save|done|finish|band|khatam)(?:\s+(?:as\s+)?\/?([a-zA-Z][a-zA-Z0-9_-]{1,27}))?$/i);
+    if (stopMatch) {
+      return executeActionRecorderIntent({ action: 'stop', name: stopMatch[1] || '' }, ctx);
+    }
+    if (/^(?:cancel|abort|chhodo|discard)$/i.test(low)) {
+      return executeActionRecorderIntent({ action: 'cancel' }, ctx);
+    }
+    const replayMatch = raw.match(/^(?:replay|repeat|run)(?:\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27}))?(?:\s+(\d+)\s*(?:times?|baar)?)?$/i);
+    if (replayMatch) {
+      return executeActionRecorderIntent({
+        action: 'replay',
+        name: replayMatch[1] || '',
+        times: Number(replayMatch[2] || 1),
+      }, ctx);
+    }
+    const saveAsMatch = raw.match(/^(?:name|rename|saveas|save_as)\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i);
+    if (saveAsMatch) {
+      return executeActionRecorderIntent({ action: 'save_as', name: saveAsMatch[1] }, ctx);
+    }
+    // Shortcut `/watchme morning` -> start recording as `morning`
+    if (/^\/?[a-zA-Z][a-zA-Z0-9_-]{1,27}$/.test(raw)) {
+      return executeActionRecorderIntent({ action: 'start', name: raw }, ctx);
+    }
+    return formatActionRecorderStatus(store);
+  }
+
   async function briefCommand(args) {
     const raw = String(args ?? '').trim();
     if (!raw) return brief.buildBrief({ store, config });
@@ -1741,9 +1981,385 @@ export function createAgent({
     return formatPersonaReport(store, config);
   }
 
+  // ── Controlled Multi-User Messaging, Contacts & Guest Policy Commands ────
+
+  async function msgCommand(args, ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/msg' });
+    }
+    const raw = String(args ?? '').trim();
+    if (!raw) {
+      return [
+        '📤 *Send WhatsApp Message to Another Person*',
+        'Usage:',
+        '• `/msg <phone_or_contact> | <message>`',
+        '• `/msg 9876543210 Hello bhai, 5 baje milte hain`',
+        '• `/msg Rahul | Meeting 10 min me start hogi`',
+        '• `/reply <message>` — reply to the last guest who messaged',
+        '• `/broadcast <n1, n2> | <message>` — send to up to 5 recipients',
+      ].join('\n');
+    }
+    const parsed = parseTargetAndMessage(store, config, raw);
+    if (!parsed.ok) {
+      return parsed.reason || '⚠️ Usage: `/msg <phone_number_or_contact_name> | <message>`';
+    }
+    return act('send_whatsapp', { to: parsed.recipient.number, text: parsed.text }, ctx);
+  }
+
+  async function replyCommand(args, ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/reply' });
+    }
+    const text = String(args ?? '').trim();
+    if (!text) {
+      const last = store?.data?.lastGuestSender;
+      const hint = last?.number
+        ? `Last guest: *${last.name || `+${last.number}`}* (\`+${last.number}\`)`
+        : 'No guest has messaged yet in this session.';
+      return `↩️ *Usage:* \`/reply <message>\`\n${hint}`;
+    }
+    return act('send_whatsapp', { to: 'last', text }, ctx);
+  }
+
+  async function broadcastCommand(args, ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/broadcast' });
+    }
+    const raw = String(args ?? '').trim();
+    const pipeIdx = raw.indexOf('|');
+    if (pipeIdx === -1) {
+      return '📢 *Usage:* `/broadcast <target1, target2, ...> | <message>` (max 5 recipients per broadcast)';
+    }
+    const targetsRaw = raw.slice(0, pipeIdx).split(',').map((s) => s.trim()).filter(Boolean);
+    const body = raw.slice(pipeIdx + 1).trim();
+    if (!targetsRaw.length || !body) {
+      return '📢 *Usage:* `/broadcast <target1, target2, ...> | <message>`';
+    }
+    if (targetsRaw.length > 5) {
+      return '🔒 For safety & anti-spam control, `/broadcast` is capped at 5 recipients at a time.';
+    }
+    const results = [];
+    for (const target of targetsRaw) {
+      const res = await actions.execute('send_whatsapp', { to: target, text: body }, ctx);
+      results.push(res.ok ? `✅ *${target}*: Sent` : `⚠️ *${target}*: ${res.text}`);
+    }
+    return `📢 *Broadcast Summary (${targetsRaw.length}):*\n${results.join('\n')}`;
+  }
+
+  function contactCommand(args) {
+    const raw = String(args ?? '').trim();
+    if (!raw || /^(?:list|ls|all|show)$/i.test(raw)) {
+      return formatContactsList(store, config);
+    }
+    const delMatch = raw.match(/^(?:del|delete|rm|remove)\s+(.+)$/i);
+    if (delMatch) {
+      const res = removeContact(store, delMatch[1].trim(), config);
+      return res.ok
+        ? `🗑️ Removed contact *${res.removed.name}* (\`+${res.removed.number}\`).`
+        : `⚠️ ${res.reason}`;
+    }
+    const stripped = raw.replace(/^add\s+/i, '').trim();
+    let name = '';
+    let number = '';
+    if (stripped.includes('|')) {
+      const [left, right] = stripped.split('|').map((s) => s.trim());
+      name = left;
+      number = right;
+    } else {
+      const m = stripped.match(/^(.+?)\s+(\+?\d[\d\s\-()]{6,18}\d)$/);
+      if (m) {
+        name = m[1].trim();
+        number = m[2].trim();
+      }
+    }
+    if (!name || !number) {
+      return [
+        '📇 *Contact Book Usage:*',
+        '• `/contact add <Name> <Phone>` (e.g. `/contact add Rahul 9876543210`)',
+        '• `/contact del <Name or Phone>`',
+        '• `/contacts` — list all saved contacts',
+      ].join('\n');
+    }
+    const res = addContact(store, name, number, config);
+    if (!res.ok) return `⚠️ ${res.reason}`;
+    return `📇 *Contact Saved:* *${res.contact.name}* → \`+${res.contact.number}\`\nAb aap seedha \`/msg ${res.contact.name} | Hello\` bhej sakte hain.`;
+  }
+
+  function allowCommand(args) {
+    const target = String(args ?? '').trim();
+    if (!target) return '✅ *Usage:* `/allow <phone_number_or_contact_name>`';
+    const res = allowGuest(store, config, target);
+    if (!res.ok) return `⚠️ ${res.reason}`;
+    return `✅ *Allowed Guest:* ${res.name ? `*${res.name}* ` : ''}(\`+${res.number}\`) can now chat with the AI (commands remain owner-only).`;
+  }
+
+  function blockCommand(args) {
+    const target = String(args ?? '').trim();
+    if (!target) return '🚫 *Usage:* `/block <phone_number_or_contact_name>`';
+    const res = blockGuest(store, config, target);
+    if (!res.ok) return `⚠️ ${res.reason}`;
+    return `🚫 *Blocked Number:* ${res.name ? `*${res.name}* ` : ''}(\`+${res.number}\`). All messages from this number will be ignored.`;
+  }
+
+  function unblockCommand(args) {
+    const target = String(args ?? '').trim();
+    if (!target) return '🔓 *Usage:* `/unblock <phone_number_or_contact_name>`';
+    const res = unblockGuest(store, config, target);
+    if (!res.ok) return `⚠️ ${res.reason}`;
+    return res.wasBlocked
+      ? `🔓 *Unblocked:* ${res.name ? `*${res.name}* ` : ''}(\`+${res.number}\`).`
+      : `ℹ️ \`+${res.number}\` was not in the blocklist.`;
+  }
+
+  function guestCommand(args) {
+    ensureGuestStore(store, config);
+    const raw = String(args ?? '').trim();
+    const low = raw.toLowerCase();
+    if (!raw || low === 'status' || low === 'info') {
+      return formatGuestStatus(store, config);
+    }
+    if (low === 'log' || low === 'logs' || low === 'audit' || low === 'history') {
+      return formatGuestLog(store, config);
+    }
+    if (low === 'pending' || low === 'queue') {
+      return formatPendingApprovalsList(store, config);
+    }
+    if (low === 'clear' || low === 'reset') {
+      store.data.guestChats = {};
+      store.data.guestAuditLog = [];
+      store.data.pendingGuestApprovals = [];
+      store.save();
+      return '🧹 Cleared all guest chat histories, pending approvals, and audit logs.';
+    }
+    if (/^(?:approval|approve|ask|confirm|review|hold|moderate|moderated)$/i.test(low)) {
+      setGuestMode(store, config, 'approval');
+      return '🛡️ *Guest Mode: OWNER APPROVAL (Moderated)*\nAb aapke alawa jo bhi message karega, agent pehle aapko bhejega (*Who sent* + *Time* + *What AI is thinking of replying*) taaki aap *yes*, *no*, ya *no send this instead: <text>* bol sako!';
+    }
+    if (/^(?:all|auto|on|open|public|everyone|chalu)$/i.test(low)) {
+      setGuestMode(store, config, 'all');
+      store.data.guestPolicy.requireApproval = false;
+      store.save();
+      return '🌐 *Guest Mode: AUTO-REPLY (ALL)*\nAnyone (except blocked numbers) can chat with the AI automatically. All `/` and plain-language commands remain 100% locked to you (owner).';
+    }
+    if (/^(?:contacts|allowlist|saved)$/i.test(low)) {
+      setGuestMode(store, config, 'contacts');
+      return '📇 *Guest Mode: CONTACTS ONLY*\nOnly saved contacts (`/contacts`) and `/allow`-ed numbers can chat with the AI. All commands remain 100% locked to you (owner).';
+    }
+    if (/^(?:off|disable|disabled|none|private|band)$/i.test(low)) {
+      setGuestMode(store, config, 'off');
+      return '🔒 *Guest Mode: OFF (Owner-Only)*\nIncoming messages from all non-owners will be silently ignored. You can still message anyone via `/msg <number|name> | <text>`.';
+    }
+    const approvalMatch = raw.match(/^(?:approval|ask|confirm)\s+(on|off|true|false)$/i);
+    if (approvalMatch) {
+      const enable = /^(?:on|true)$/i.test(approvalMatch[1]);
+      store.data.guestPolicy.requireApproval = enable;
+      if (enable && store.data.guestPolicy.mode === 'off') store.data.guestPolicy.mode = 'approval';
+      store.save();
+      return enable
+        ? '🛡️ *Owner Approval Gate ON:* Every guest reply will wait for your `yes` / `no` / `no send this instead: <text>`.'
+        : '🟢 *Owner Approval Gate OFF:* Allowed guests will receive automatic safe AI replies.';
+    }
+    const notifyMatch = raw.match(/^notify\s+(on|off|true|false|all|blocked)$/i);
+    if (notifyMatch) {
+      const val = notifyMatch[1].toLowerCase();
+      if (val === 'on' || val === 'true' || val === 'all') {
+        store.data.guestPolicy.notifyOwnerOnMessage = true;
+        store.data.guestPolicy.notifyOwnerOnBlockedCmd = true;
+        store.save();
+        return '🔔 Owner notifications enabled for all guest messages and blocked commands.';
+      }
+      if (val === 'blocked') {
+        store.data.guestPolicy.notifyOwnerOnMessage = false;
+        store.data.guestPolicy.notifyOwnerOnBlockedCmd = true;
+        store.save();
+        return '🔔 Owner notifications set to *blocked command attempts only*.';
+      }
+      store.data.guestPolicy.notifyOwnerOnMessage = false;
+      store.data.guestPolicy.notifyOwnerOnBlockedCmd = false;
+      store.save();
+      return '🔕 Owner notifications for guest chats turned OFF.';
+    }
+    const rateMatch = raw.match(/^(?:rate|ratelimit|limit)\s+(\d+)$/i);
+    if (rateMatch) {
+      const n = Math.max(1, Math.min(60, Number.parseInt(rateMatch[1], 10) || 6));
+      store.data.guestPolicy.rateLimitPerMinute = n;
+      store.save();
+      return `⏱️ Guest rate limit set to *${n} messages/minute* per guest.`;
+    }
+    const autoReplyMatch = raw.match(/^(?:autoreply|reply)\s+([\s\S]+)$/i);
+    if (autoReplyMatch) {
+      const text = autoReplyMatch[1].trim();
+      if (/^(?:off|clear|none|default|ai)$/i.test(text)) {
+        store.data.guestPolicy.customAutoReply = '';
+        store.save();
+        return '🤖 Custom guest auto-reply cleared — guests will receive dynamic AI chat replies.';
+      }
+      store.data.guestPolicy.customAutoReply = text;
+      store.save();
+      return `💬 Fixed guest auto-reply set to:\n"${text}"`;
+    }
+    if (low.startsWith('allow ')) return allowCommand(raw.slice(6));
+    if (low.startsWith('block ')) return blockCommand(raw.slice(6));
+    if (low.startsWith('unblock ')) return unblockCommand(raw.slice(8));
+    return formatGuestStatus(store, config);
+  }
+
+  /**
+   * Execute the owner's decision (`approve`, `reject`, `custom`, or `block`)
+   * on a pending guest message.
+   */
+  async function executeOwnerApprovalDecision(decision, targetId = null, ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/approve' });
+    }
+    const entry = getActiveGuestApproval(store, config, targetId);
+    if (!entry) {
+      return 'ℹ️ Abhi koi pending guest message approval ke liye nahi hai.';
+    }
+    const who = entry.senderName
+      ? `*${entry.senderName}* (\`+${entry.senderNumber}\`)`
+      : `\`+${entry.senderNumber}\``;
+
+    if (decision.action === 'reject') {
+      resolveGuestApproval(store, config, entry.id, 'rejected', '');
+      recordGuestAudit(store, {
+        from: entry.senderNumber,
+        name: entry.senderName,
+        kind: 'rejected_by_owner',
+        text: entry.incomingText,
+        reply: '(owner rejected — nothing sent)',
+      });
+      return `🚫 *Not Sent:* ${who} ko koi reply nahi bheja gaya (Message #${entry.id} cancelled).`;
+    }
+
+    if (decision.action === 'block') {
+      resolveGuestApproval(store, config, entry.id, 'blocked', '');
+      blockGuest(store, config, entry.senderNumber);
+      return `🚫 *Rejected & Blocked:* ${who} ko block kar diya gaya hai aur koi reply nahi bheja gaya.`;
+    }
+
+    const finalReply = decision.action === 'custom'
+      ? String(decision.text ?? '').trim()
+      : entry.proposedReply;
+    if (!finalReply) {
+      return '⚠️ Reply text khali hai.';
+    }
+
+    resolveGuestApproval(store, config, entry.id, decision.action === 'custom' ? 'custom' : 'approved', finalReply);
+    if (typeof sendWhatsappTo === 'function') {
+      await sendWhatsappTo(entry.senderJid || entry.senderNumber, finalReply);
+    } else {
+      store?.bump?.('outboundToOthers');
+    }
+    store.bump('guestRepliesOut');
+    recordGuestChatTurn(store, entry.senderNumber, 'user', entry.incomingText, { name: entry.senderName });
+    recordGuestChatTurn(store, entry.senderNumber, 'assistant', finalReply, { name: entry.senderName });
+    recordGuestAudit(store, {
+      from: entry.senderNumber,
+      name: entry.senderName,
+      kind: decision.action === 'custom' ? 'owner_custom_reply' : 'owner_approved_reply',
+      text: entry.incomingText,
+      reply: finalReply,
+    });
+
+    return decision.action === 'custom'
+      ? `📤 *Sent Your Custom Reply to ${who}:*\n"${finalReply}"`
+      : `✅ *Approved & Sent AI Reply to ${who}:*\n"${finalReply}"`;
+  }
+
+  function pendingCommand() {
+    return formatPendingApprovalsList(store, config);
+  }
+
+  async function approveCommand(args, ctx = {}) {
+    const raw = String(args ?? '').trim();
+    const idMatch = raw.match(/^#?(\d+)(?:\s+([\s\S]+))?$/);
+    if (idMatch) {
+      const id = Number(idMatch[1]);
+      const customText = (idMatch[2] || '').trim();
+      return executeOwnerApprovalDecision(
+        customText ? { action: 'custom', text: customText } : { action: 'approve' },
+        id,
+        ctx,
+      );
+    }
+    if (raw) {
+      return executeOwnerApprovalDecision({ action: 'custom', text: raw }, null, ctx);
+    }
+    return executeOwnerApprovalDecision({ action: 'approve' }, null, ctx);
+  }
+
+  async function rejectCommand(args, ctx = {}) {
+    const raw = String(args ?? '').trim();
+    const idMatch = raw.match(/^#?(\d+)$/);
+    const id = idMatch ? Number(idMatch[1]) : null;
+    return executeOwnerApprovalDecision({ action: 'reject' }, id, ctx);
+  }
+
+  // ── Owner-Only Location Intelligence Commands (`/location`, `/near`) ─────
+
+  async function locationCommand(args, ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/location' });
+    }
+    const raw = String(args ?? '').trim();
+    const low = raw.toLowerCase();
+
+    if (/^(?:off|disable|lock|band)$/i.test(low)) {
+      const loc = ensureLocationStore(store);
+      if (loc) loc.enabled = false;
+      store.save();
+      return '🔒 *Location Access Turned OFF.* (`/location on` ya `/location set <city>` se wapas chalu karein)';
+    }
+    if (/^(?:on|enable|unlock|chalu)$/i.test(low)) {
+      const loc = ensureLocationStore(store);
+      if (loc) loc.enabled = true;
+      store.save();
+      const res = await resolveOwnerLocation(store, config, { allowNetwork: true });
+      return formatOwnerLocationCard(store, config, res.location);
+    }
+    if (/^(?:refresh|detect|auto|update|ip)$/i.test(low)) {
+      const res = await resolveOwnerLocation(store, config, { forceRefresh: true, allowNetwork: true });
+      if (!res.ok) return `⚠️ ${res.reason}`;
+      return formatOwnerLocationCard(store, config, res.location);
+    }
+    const nearMatch = raw.match(/^(?:near|nearby|around|aas\s*paas)\s+([\s\S]+)$/i);
+    if (nearMatch) {
+      const res = await searchNearbyPlaces(store, config, nearMatch[1].trim());
+      return res.ok ? res.text : `⚠️ ${res.reason}`;
+    }
+    const setMatch = raw.match(/^(?:set|save|to)\s+([\s\S]+)$/i);
+    if (setMatch) {
+      const res = await setOwnerLocation(store, config, setMatch[1].trim());
+      if (!res.ok) return `⚠️ ${res.reason}`;
+      return `✅ *Location Updated!*\n\n${formatOwnerLocationCard(store, config, res.location)}`;
+    }
+    if (raw && !/^(?:status|show|get|me|current|live|kya\s+hai)$/i.test(low)) {
+      const res = await setOwnerLocation(store, config, raw);
+      if (!res.ok) return `⚠️ ${res.reason}`;
+      return `✅ *Location Updated!*\n\n${formatOwnerLocationCard(store, config, res.location)}`;
+    }
+    const res = await resolveOwnerLocation(store, config, { allowNetwork: true });
+    if (!res.ok) return `⚠️ ${res.reason}`;
+    return formatOwnerLocationCard(store, config, res.location);
+  }
+
   async function handleCommand(cmd, args, ctx) {
     switch (cmd) {
       case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
+      case 'msg': case 'dm': case 'sendto': case 'whatsapp': return await msgCommand(args, ctx);
+      case 'reply': return await replyCommand(args, ctx);
+      case 'broadcast': return await broadcastCommand(args, ctx);
+      case 'contact': case 'contacts': return contactCommand(args);
+      case 'guest': case 'guests': case 'guestmode': return guestCommand(args);
+      case 'pending': return pendingCommand();
+      case 'approve': return await approveCommand(args, ctx);
+      case 'reject': case 'deny': return await rejectCommand(args, ctx);
+      case 'allow': return allowCommand(args);
+      case 'block': return blockCommand(args);
+      case 'unblock': return unblockCommand(args);
+      case 'location': case 'loc': case 'whereami': case 'mylocation': return await locationCommand(args, ctx);
+      case 'near': case 'nearby': return await locationCommand(`near ${args}`, ctx);
       case 'sleepnotify': case 'offlinenotify': case 'sleepmsg': return sleepNotifyCommand(args);
       case 'persona': case 'profile': case 'twin': case 'behaviour': case 'behavior': return await personaCommand(args);
       case 'train': return await personaCommand(args, { forceTrain: true });
@@ -1751,6 +2367,8 @@ export function createAgent({
       case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
       case 'watch': return watchCommand(args);
+      case 'watchme': case 'recordactions': return await watchMeCommand(args, ctx);
+      case 'replayactions': return await watchMeCommand(`replay ${args}`, ctx);
       case 'teach': return teachCommand(args);
       case 'brief': return await briefCommand(args);
       case 'resume': return await resumeCommand();
@@ -1789,7 +2407,8 @@ export function createAgent({
       case 'callat': case 'schedulecall': case 'calllater': return callAtCommand(args);
       case 'voice': case 'jarvis': return ['📞 *JARVIS Voice*', ...callStatusLines(), '', tts.ttsStatus(config)].join('\n');
       case 'learn': case 'teach': case 'alias': return learnCmd(args);
-      case 'unlearn': case 'undefine': case 'forgetword': return learnCmd(`del ${args}`);
+      case 'cmd': case 'command': case 'createcmd': return await cmdCommand(args, ctx);
+      case 'unlearn': case 'undefine': case 'forgetword': case 'delcmd': return learnCmd(`del ${args}`);
       case 'todo': case 'todos': case 'task': return todo(args);
       case 'note': return note(args);
       case 'notes': return notes();
@@ -1825,7 +2444,14 @@ export function createAgent({
         const done = await ai.complete(config, `Improve this text (clearer, polite, same language, keep it short). Reply with only the improved text:\n\n${args}`, log);
         return done ? done.text : '✍️ No AI brain reachable right now (see /model). Your text was:\n' + args;
       }
-      case 'weather': return args ? tools.weather(args) : '🌤️ Usage: /weather <city> — e.g. /weather Nainital';
+      case 'weather': {
+        if (args) return tools.weather(args);
+        const locRes = await resolveOwnerLocation(store, config, { allowNetwork: true });
+        if (locRes.ok && locRes.location?.city) {
+          return tools.weather(locRes.location.city);
+        }
+        return '🌤️ Usage: /weather <city> — e.g. /weather Dehradun (or set your location with `/location set <city>`)';
+      }
       case 'wiki': return args ? tools.wiki(args) : '📚 Usage: /wiki <topic>';
       case 'define': return args ? tools.define(args) : '🔤 Usage: /define <word>';
       case 'news': return tools.news(args || '');
@@ -1998,7 +2624,7 @@ export function createAgent({
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
       default: {
-        const learnedRes = await runLearned(cmd, ctx);
+        const learnedRes = await runLearned(cmd, ctx, args);
         if (learnedRes != null) return learnedRes;
         return `🤖 I don't know /${cmd} yet.\n\n${HELP.split('\n').slice(0, 6).join('\n')}\n…full list: /help`;
       }
@@ -2032,16 +2658,21 @@ export function createAgent({
       if (steps?.length) {
         const outs = [];
         for (const step of steps) {
-          const cmd = step.inferredOpen ? 'open' : step.cmd;
-          const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
-          outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+          if (step.cmd === '__natural__') {
+            const r = await runNaturalStep(step.args ?? '', ruleCtx);
+            outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+          } else {
+            const cmd = step.inferredOpen ? 'open' : step.cmd;
+            const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
+            outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+          }
         }
         return outs.join('\n\n---\n\n');
       }
     }
 
     // Slash command ("/brief", "/open brave")
-    const slash = actionText.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+    const slash = actionText.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
     if (slash) return handleCommand(slash[1].toLowerCase(), slash[2].trim(), ruleCtx);
 
     // Natural-language intent ("brave kholo", "screenshot bhejo", "volume 40")
@@ -2131,8 +2762,208 @@ export function createAgent({
   let lastHandledTs = 0;
   let isProcessing = false;
 
+  /**
+   * Controlled Guest / Non-Owner Message Handler.
+   * Strictly blocks ALL `/` slash commands and ALL plain-language commands (`baaki bhi`)
+   * while allowing safe conversational replies (AI chat / simple greetings / math).
+   * Never touches the owner's memory, persona, todos, notes, files, or PC tools.
+   */
+  async function handleGuest(text, ctx = {}) {
+    ensureGuestStore(store, config);
+    const senderNumber = normalizeNumber(ctx.senderNumber || '');
+    const contact = findContactByNumber(store, senderNumber);
+    const senderName = String(ctx.senderName || contact?.name || '').trim();
+    const who = senderName
+      ? `*${senderName}* (\`+${senderNumber || 'guest'}\`)`
+      : `\`+${senderNumber || 'guest'}\``;
+    const cleanText = String(text ?? '').trim();
+
+    if (senderNumber) {
+      store.data.lastGuestSender = {
+        number: senderNumber,
+        jid: ctx.senderJid || '',
+        name: senderName,
+        ts: Date.now(),
+      };
+    }
+
+    // Block media/file actions from non-owners
+    if (ctx.hasMedia && !cleanText) {
+      store.bump('blockedGuestCommands');
+      const reply = buildBlockedCommandReply(config, store, { command: '/media' });
+      recordGuestAudit(store, {
+        from: senderNumber,
+        name: senderName,
+        kind: 'blocked_cmd',
+        command: 'media',
+        text: '[media attachment]',
+        reply,
+      });
+      const notifyOwnerText = store.data.guestPolicy?.notifyOwnerOnBlockedCmd
+        ? `🔒 *Blocked Guest Media/Command* from ${who}: sent a media attachment.`
+        : null;
+      return { blocked: true, category: 'files', command: 'media', reply, notifyOwnerText };
+    }
+
+    if (!cleanText) {
+      return { blocked: false, reply: null, notifyOwnerText: null };
+    }
+
+    // ── Strict Owner-Only Command Firewall (both `/` and plain-language `baaki bhi`) ──
+    const requireApproval = Boolean(
+      store.data.guestPolicy?.requireApproval || store.data.guestPolicy?.mode === 'approval',
+    );
+    const detection = detectGuestCommandAttempt(cleanText, store, config);
+    if (detection.blocked) {
+      store.bump('blockedGuestCommands');
+      recordGuestAudit(store, {
+        from: senderNumber,
+        name: senderName,
+        kind: 'blocked_cmd',
+        command: detection.command,
+        text: cleanText,
+        reply: detection.reply,
+      });
+      if (requireApproval) {
+        const entry = enqueueGuestApproval(store, config, {
+          senderNumber,
+          senderName,
+          senderJid: ctx.senderJid || '',
+          incomingText: cleanText,
+          proposedReply: detection.reply,
+          blockedCommand: detection.command || 'command',
+          blockedCategory: detection.category || 'command',
+        });
+        return {
+          blocked: true,
+          heldForApproval: true,
+          approvalId: entry.id,
+          category: detection.category,
+          command: detection.command,
+          reply: null,
+          proposedReply: detection.reply,
+          notifyOwnerText: formatApprovalCardForOwner(entry, config),
+        };
+      }
+      const notifyOwnerText = store.data.guestPolicy?.notifyOwnerOnBlockedCmd
+        ? `🔒 *Blocked Guest Command* from ${who}: tried \`${detection.command || 'command'}\` — "${cleanText.slice(0, 120)}"\n_(Reply via: \`/reply <msg>\` or block via: \`/block ${senderNumber || senderName}\`)_`
+        : null;
+      return {
+        blocked: true,
+        heldForApproval: false,
+        category: detection.category,
+        command: detection.command,
+        reply: detection.reply,
+        proposedReply: detection.reply,
+        notifyOwnerText,
+      };
+    }
+
+    // ── Safe Conversational Reply Draft for Allowed Guests ───────────────────
+    store.bump('guestMessagesIn');
+    const agentName = mem.getAgentName(store, config);
+    let replyText = '';
+    let pctMatch = null;
+    let unitMatch = null;
+
+    if (store.data.guestPolicy?.customAutoReply) {
+      replyText = store.data.guestPolicy.customAutoReply;
+    } else if (/^(hi|hello|hey|namaste|hii+|yo|hola|assalamualaikum|ram\s*ram|radhe\s*radhe|good\s*(?:morning|afternoon|evening)|kaise\s+ho|kya\s+haal\s+hai)[!.?\s]*$/i.test(cleanText)) {
+      replyText = `👋 Namaste${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aap mujhse normal baat-cheet (chat) ya koi bhi general sawal pooch sakte hain.\n_(🔒 Note: Sabhi \`/\` aur system commands sirf mere owner ke liye locked hain.)_`;
+    } else if ((pctMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))
+      || (pctMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent)\??$/i))) {
+      const isHindiOrder = /\s+ka\s+/i.test(cleanText);
+      const base = Number(isHindiOrder ? pctMatch[1] : pctMatch[2]);
+      const pct = Number(isHindiOrder ? pctMatch[2] : pctMatch[1]);
+      const ans = Number(((base * pct) / 100).toFixed(6));
+      replyText = `🧮 ${pct}% of ${base} = *${ans}*`;
+    } else if ((unitMatch = cleanText.match(/^(-?\d+(?:\.\d+)?)\s*([a-zA-Z°]+)\s+(?:in|to|into|me|mein)\s+([a-zA-Z°]+)(?:\s+kitna\s*(?:hota\s*hai|hai)?)?\??$/i))) {
+      try {
+        replyText = `📏 ${tools.convertUnit(Number(unitMatch[1]), unitMatch[2], unitMatch[3])}`;
+      } catch { /* fall through to AI */ }
+    } else if (tools.looksLikeCalc(cleanText)) {
+      try {
+        replyText = `🧮 ${cleanText} = *${tools.calc(cleanText)}*`;
+      } catch { /* fall through to AI */ }
+    }
+
+    if (!replyText) {
+      if (config.aiProvider !== 'none') {
+        const aiRes = await ai.guestChat(config, store, senderNumber, cleanText, log, { senderName });
+        if (aiRes?.text) {
+          replyText = aiRes.text;
+        }
+      }
+    }
+
+    if (!replyText) {
+      replyText = `💬 Namaste${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aapka message mil gaya ("${cleanText.slice(0, 80)}"). Main jald hi jawab dunga.`;
+    }
+
+    // ── Owner Approval Gate (`approval` mode): send to owner first for yes / no / send instead ──
+    if (requireApproval) {
+      const entry = enqueueGuestApproval(store, config, {
+        senderNumber,
+        senderName,
+        senderJid: ctx.senderJid || '',
+        incomingText: cleanText,
+        proposedReply: replyText,
+      });
+      recordGuestAudit(store, {
+        from: senderNumber,
+        name: senderName,
+        kind: 'held_for_approval',
+        text: cleanText,
+        reply: replyText,
+      });
+      return {
+        blocked: false,
+        heldForApproval: true,
+        approvalId: entry.id,
+        reply: null,
+        proposedReply: replyText,
+        notifyOwnerText: formatApprovalCardForOwner(entry, config),
+      };
+    }
+
+    recordGuestChatTurn(store, senderNumber, 'user', cleanText, { name: senderName });
+    recordGuestChatTurn(store, senderNumber, 'assistant', replyText, { name: senderName });
+    store.bump('guestRepliesOut');
+    recordGuestAudit(store, {
+      from: senderNumber,
+      name: senderName,
+      kind: 'chat',
+      text: cleanText,
+      reply: replyText,
+    });
+    const notifyOwnerText = store.data.guestPolicy?.notifyOwnerOnMessage
+      ? `💬 *Guest Message* from ${who}: "${cleanText.slice(0, 120)}"\n↳ Reply: "${replyText.slice(0, 120)}"\n_(Reply via: \`/reply <msg>\`)_`
+      : null;
+
+    return {
+      blocked: false,
+      heldForApproval: false,
+      reply: replyText,
+      proposedReply: replyText,
+      notifyOwnerText,
+    };
+  }
+
   /** Main entry: owner text → reply. `ctx` may carry { waStatus(), quotedMedia }. */
   async function handle(text, ctx = {}) {
+    // Hard security gate: if `handle()` is ever called with a non-owner context
+    // (`isOwner: false`, `guest: true`, or a non-owner `senderNumber`), route
+    // strictly through the sandboxed `handleGuest()` pipeline so NO command,
+    // PC action, or owner memory access can ever execute for a non-owner.
+    if (
+      ctx?.isOwner === false
+      || ctx?.guest === true
+      || (ctx?.senderNumber && !isOwner([ctx.senderNumber], config.ownerNumber))
+    ) {
+      const guestOut = await handleGuest(text, ctx);
+      return guestOut?.reply ?? null;
+    }
+
     const clean = String(text ?? '').trim();
     if (!clean) return '🤖 I got an empty message. Try /help';
     // /stop is checked before everything else — before the dedup window and
@@ -2172,20 +3003,31 @@ export function createAgent({
       if (isStack) {
         const results = [];
         for (const line of lines) {
-          const m = line.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+          const m = line.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
           if (!m) { results.push(`⚠️ Skip: ${line.slice(0,40)}`); continue; }
           const r = await handleCommand(m[1].toLowerCase(), m[2].trim(), effCtx);
           const out = typeof r === 'string' ? r : (r?.text ?? JSON.stringify(r).slice(0,500));
           results.push(out);
           macro.recordStep(store, m[1].toLowerCase(), m[2].trim());
         }
+        store.setLastOwnerTask?.(working);
         lastHandledText = clean; lastHandledTs = Date.now();
         return results.join('\n\n---\n\n');
       }
 
-      const cmdMatch = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+      const cmdMatch = working.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
       if (cmdMatch) {
-        const res = await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
+        // If the message is "/<name> naam ka command banao ...", treat it as command creation rather than running an unknown slash command
+        const slashCreateIntent = learn.parseCreateCommandIntent(working, store.getLastOwnerTask?.() || '');
+        if (slashCreateIntent) {
+          const createdReply = await executeCreateCommandIntent(slashCreateIntent, effCtx);
+          if (createdReply !== undefined) {
+            lastHandledText = clean; lastHandledTs = Date.now();
+            return createdReply;
+          }
+        }
+        const slashName = cmdMatch[1].toLowerCase();
+        const res = await handleCommand(slashName, cmdMatch[2].trim(), effCtx);
         lastHandledText = clean; lastHandledTs = Date.now();
         // A stopped run is reported by /stop itself; do not send a second wall of text.
         if (res && typeof res === 'object' && res.stopped) {
@@ -2196,7 +3038,13 @@ export function createAgent({
         // macro. A failed step in a macro would fail again on every replay.
         const failed = (res && typeof res === 'object' && res.ok === false)
           || (typeof res === 'string' && /^(⚠️|🔒|⏳|🤖 I don't know)/.test(res));
-        if (!failed) macro.recordStep(store, cmdMatch[1].toLowerCase(), cmdMatch[2].trim());
+        if (!failed) {
+          macro.recordStep(store, slashName, cmdMatch[2].trim());
+          if (!['learn', 'unlearn', 'cmd', 'command', 'createcmd', 'delcmd', 'watchme', 'recordactions', 'replayactions', 'teach', 'stop', 'cancel', 'yes', 'no', 'pending', 'approve', 'reject'].includes(slashName)) {
+            store.setLastOwnerTask?.(working);
+            recordDesktopEvent(store, { type: 'command', cmd: slashName, args: cmdMatch[2].trim() });
+          }
+        }
         return res;
       }
 
@@ -2217,8 +3065,35 @@ export function createAgent({
         if (DENY.test(working)) return handlePc('cancel');
       }
 
+      // Pending Guest Message Approval: "yes" / "no" / "no send this instead: <text>" / "nahi yeh bhejo: <text>"
+      if (getActiveGuestApproval(store, config)) {
+        const guestDecision = parseOwnerApprovalDecision(working);
+        if (guestDecision) {
+          return await executeOwnerApprovalDecision(guestDecision, null, effCtx);
+        }
+      }
+
       // Continuously learn owner's behavior, language vibe, mood, preferences, goals & lessons from every message
       observeOwnerTurn(store, working);
+
+      // Live PC Action Recorder, Learner & Replayer ("mere actions record karo", "stop recording", "mere actions repeat karo")
+      const actionRecIntent = parseActionRecorderIntent(working, {
+        isRecording: Boolean(getActiveRecording(store)),
+      });
+      if (actionRecIntent) {
+        const recReply = await executeActionRecorderIntent(actionRecIntent, effCtx);
+        if (recReply !== undefined) return recReply;
+      }
+
+      // Natural-Language Dynamic Command Creation ("create a command /study that ...", "create this as a command /work")
+      const createCmdIntent = learn.parseCreateCommandIntent(working, store.getLastOwnerTask?.() || '');
+      if (createCmdIntent) {
+        const createdReply = await executeCreateCommandIntent(createCmdIntent, effCtx);
+        if (createdReply !== undefined) return createdReply;
+      }
+
+      // Remember this actionable message so the owner can say "create this as a command /name" next
+      store.setLastOwnerTask?.(working);
 
       const quick = intent(working, effCtx);
       if (quick !== undefined) return await quick;
@@ -2228,7 +3103,7 @@ export function createAgent({
       if (unwrapped.bypassSaved) {
         working = unwrapped.text;
         effCtx = { ...effCtx, bypassSaved: true };
-        const innerCmd = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+        const innerCmd = working.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
         if (innerCmd) {
           return await handleCommand(innerCmd[1].toLowerCase(), innerCmd[2].trim(), effCtx);
         }
@@ -2255,7 +3130,11 @@ export function createAgent({
       const parsed = parseIntent(working);
       if (parsed) {
         if (parsed.reply) return parsed.reply;
-        return await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
+        const nlpRes = await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
+        if (!['watchme', 'recordactions', 'replayactions', 'teach', 'learn', 'unlearn', 'cmd', 'command', 'stop', 'cancel'].includes(parsed.cmd)) {
+          recordDesktopEvent(store, { type: 'command', cmd: parsed.cmd, args: parsed.args ?? '' });
+        }
+        return nlpRes;
       }
 
       // Fast offline multi-command chaining ("todo add milk aur note: wifi 1234", "volume 40 karo aur screenshot bhej do")
@@ -2345,7 +3224,16 @@ export function createAgent({
   }
 
   return {
-    handle, HELP, actions, shots, harness, voice,
+    handle, handleGuest, HELP, actions, shots, harness, voice,
+    attachWhatsApp: ({ sendToNumber: sendFn, sendToOwner: notifyFn } = {}) => {
+      if (typeof sendFn === 'function') {
+        sendWhatsappTo = sendFn;
+        actions.setSendToNumber?.(sendFn);
+      }
+      if (typeof notifyFn === 'function') {
+        notifyOwner = notifyFn;
+      }
+    },
     attachWaVoip: (engine) => { waVoip = engine; },
     waVoipStatus: () => waVoip?.status?.() ?? null,
     jarvisAudioReply,

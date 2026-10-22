@@ -238,6 +238,20 @@ export function parseIntent(input) {
   if ((m = text.match(/^(.+?\.\w{1,6})\s+(?:bhej(?:o|do)|send(?:\s+karo)?)$/i))) {
     return asCmd('send', clean(m[1]));
   }
+  // ── custom / learned commands (before generic rm / run shell rules) ───────
+  if (/^(?:(?:show|list)\s+(?:my\s+)?(?:custom|created|learned|saved)\s+commands?|(?:mere\s+)?(?:custom|naye|banaye\s+hue)\s+commands?\s*(?:dikhao|batao|list)?|learned\s+commands?)\??$/i.test(low)) {
+    return asCmd('learn', '');
+  }
+  if ((m = text.match(/^(?:run|execute|trigger)\s+(?:the\s+|my\s+)?(?:custom\s+)?command\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i))
+    || (m = text.match(/^(?:run|execute)\s+\/([a-zA-Z][a-zA-Z0-9_-]{1,27})(?:\s+command)?$/i))
+    || (m = text.match(/^\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})\s+(?:custom\s+)?command\s+(?:ko\s+)?(?:chala(?:\s*do|\s*o)?|run\s+kar(?:\s*do|\s*o)?)$/i))) {
+    return asCmd('cmd', `run ${clean(m[1])}`);
+  }
+  if ((m = text.match(/^(?:delete|remove|forget|unlearn)\s+(?:the\s+)?(?:custom\s+)?command\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i))
+    || (m = text.match(/^\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})\s+(?:custom\s+)?command\s+(?:ko\s+)?(?:delete|remove|hata(?:\s*do|\s*o)?)(?:\s+kar(?:\s*do|\s*o)?)?$/i))) {
+    return asCmd('learn', `del ${clean(m[1])}`);
+  }
+
   if ((m = text.match(/^(?:rm|remove|delete|hatao|delete\s+karo|remove\s+karo)\s+(.+)$/i))
     || (m = text.match(/^(.+?)\s+(?:delete|remove|hata\s*do|delete\s+karo)$/i))) {
     return asCmd('rm', clean(m[1]));
@@ -276,6 +290,75 @@ export function parseIntent(input) {
   if ((m = text.match(/^(?:youtube\s+(?:pe|par)\s+(.+?)\s+(?:chalao|bajao|play\s+kar(?:o|do)|lagao)|play\s+(.+?)\s+on\s+youtube)$/i))) {
     const q = clean(m[1] || m[2]);
     if (q) return asCmd('yt', `play ${q}`);
+  }
+
+  // ── multi-user messaging, contacts & guest access control ────────────────
+  if (/^(?:(?:mere\s+)?contacts?\s*(?:dikhao|batao|list)?|show\s+(?:my\s+)?contacts?|contact\s+list)\??$/i.test(low)) {
+    return asCmd('contacts', '');
+  }
+  if ((m = text.match(/^(?:save\s+contact|add\s+contact|contact\s+(?:add|save)\s+kar(?:o|do)?)\s+([a-zA-Z\u0900-\u097F][a-zA-Z0-9\u0900-\u097F\s_-]{0,30}?)\s+(\+?\d[\d\s\-]{8,16}\d)$/i))
+    || (m = text.match(/^([a-zA-Z\u0900-\u097F][a-zA-Z0-9\u0900-\u097F\s_-]{0,30}?)\s+ka\s+(?:number|no|phone|whatsapp)\s+(\+?\d[\d\s\-]{8,16}\d)\s+(?:contact\s+me(?:in)?\s+)?(?:save|add)\s+kar(?:\s*lo|\s*do|\s*o)?$/i))) {
+    return asCmd('contact', `add ${clean(m[1])} | ${clean(m[2])}`);
+  }
+  if ((m = text.match(/^(?:guest|guests|guest\s+mode|public\s+chat|multi\s*user)(?:\s+(on|off|all|auto|approval|approve|ask|pending|contacts|allowlist|status|log|history|clear|band|chalu))?(?:\s+kar(?:o|do))?\??$/i))) {
+    return asCmd('guest', (m[1] || 'status').toLowerCase());
+  }
+  if (/^(?:pending\s+(?:messages?|approvals?|guests?)|kiske\s+messages?\s+(?:aaye|pending)\s+hain|show\s+pending)\??$/i.test(low)) {
+    return asCmd('pending', '');
+  }
+  // ── owner location intelligence & local weather ──────────────────────────
+  if (/^(?:(?:meri\s+)?(?:current\s+|live\s+)?location(?:\s+(?:kya\s+hai|batao|dikhao))?|main\s+(?:abhi\s+)?kahan\s+hoon|where\s+am\s+i(?:\s+right\s+now)?|my\s+location|whereami)\??$/i.test(low)) {
+    return asCmd('location', '');
+  }
+  if ((m = text.match(/^(?:set\s+(?:my\s+)?location(?:\s+to)?|meri\s+location\s+(?:set\s+kar(?:o|do)\s+)?|location\s+set(?:\s+kar(?:o|do))?)\s+(.+?)(?:\s+set\s+kar(?:o|do))?$/i))) {
+    return asCmd('location', `set ${clean(m[1])}`);
+  }
+  if ((m = text.match(/^(?:mere\s+aas\s*paas\s+(.+?)(?:\s+(?:dhundo|batao|dikhao|search\s+karo|kahan\s+hai))?|find\s+(.+?)\s+near\s+me|nearby\s+(.+?)|(.+?)\s+near\s+me)\??$/i))) {
+    const q = clean(m[1] || m[2] || m[3] || m[4]);
+    if (q) return asCmd('location', `near ${q}`);
+  }
+  if (/^(?:(?:aaj\s+ka\s+|abhi\s+ka\s+|yahan\s+ka\s+)?mausam(?:\s+kaisa\s+hai|\s+batao)?|(?:what(?:'s|\s+is)\s+the\s+|how(?:'s|\s+is)\s+the\s+)?weather(?:\s+(?:outside|here|today|now))?)\??$/i.test(low)) {
+    return asCmd('weather', '');
+  }
+  if ((m = text.match(/^(?:block(?:\s+number|\s+contact)?)\s+(.+?)(?:\s+ko)?$/i))
+    || (m = text.match(/^(\+?\d[\d\s\-]{8,16}\d|[a-zA-Z][a-zA-Z0-9_-]{1,24})\s+ko\s+block\s+kar(?:\s*do|\s*o)?$/i))) {
+    return asCmd('block', clean(m[1]));
+  }
+  if ((m = text.match(/^(?:unblock(?:\s+number|\s+contact)?)\s+(.+?)(?:\s+ko)?$/i))
+    || (m = text.match(/^(\+?\d[\d\s\-]{8,16}\d|[a-zA-Z][a-zA-Z0-9_-]{1,24})\s+ko\s+unblock\s+kar(?:\s*do|\s*o)?$/i))) {
+    return asCmd('unblock', clean(m[1]));
+  }
+  if ((m = text.match(/^(?:allow(?:\s+number|\s+contact|\s+guest)?)\s+(.+?)(?:\s+ko)?$/i))
+    || (m = text.match(/^(\+?\d[\d\s\-]{8,16}\d|[a-zA-Z][a-zA-Z0-9_-]{1,24})\s+ko\s+allow\s+kar(?:\s*do|\s*o)?$/i))) {
+    return asCmd('allow', clean(m[1]));
+  }
+  // Outbound WhatsApp message: "<number|name> ko whatsapp/message bhejo [ki/:] <text>"
+  if ((m = text.match(/^(\+?\d[\d\s\-]{8,16}\d|[a-zA-Z\u0900-\u097F][a-zA-Z0-9\u0900-\u097F\s_-]{0,25}?)\s+(?:ko|pe|par)\s+(?:whatsapp\s+(?:message|msg)|whatsapp|message|msg|dm)\s+(?:bhej(?:\s*do|\s*o|\s*de|\s*na)?|kar(?:\s*do|\s*o|\s*de|\s*na)?|likh(?:\s*do|\s*o)?)\s*(?:ki|ke|:|-|,)?\s+([\s\S]+)$/i))) {
+    const target = clean(m[1]);
+    const body = clean(m[2]);
+    if (target && body && !/^(?:sleep(?:ing)?|offline)$/i.test(target)) {
+      return asCmd('msg', `${target} | ${body}`);
+    }
+  }
+  // "send (a) whatsapp/message/dm to <target> [:|that] <text>" or "message/whatsapp <target>: <text>"
+  if ((m = text.match(/^(?:send\s+(?:a\s+)?(?:whatsapp\s+(?:message|msg)|whatsapp|message|msg|dm)\s+to|whatsapp\s+to|message\s+to|dm\s+to)\s+(\+?\d[\d\s\-]{8,16}\d|[a-zA-Z\u0900-\u097F][a-zA-Z0-9\u0900-\u097F\s_-]{0,25}?)\s*(?:(?:\||:|that|ki|-)\s*|\s+)([\s\S]+)$/i))
+    || (m = text.match(/^(?:whatsapp|msg|dm)\s+(\+?\d[\d\s\-]{8,16}\d|[a-zA-Z][a-zA-Z0-9_-]{1,24})\s*(?::|\||-)?\s+([\s\S]+)$/i))) {
+    const target = clean(m[1]);
+    const body = clean(m[2]);
+    if (target && body) return asCmd('msg', `${target} | ${body}`);
+  }
+  if ((m = text.match(/^(?:reply(?:\s+to\s+last(?:\s+guest)?)?|last\s+guest\s+ko\s+reply(?:\s+kar(?:o|do))?)\s*(?::|-)?\s+([\s\S]+)$/i))) {
+    return asCmd('reply', clean(m[1]));
+  }
+
+  // ── custom / learned commands ─────────────────────────────────────────────
+  if (/^(?:(?:show|list)\s+(?:my\s+)?(?:custom|created|learned|saved)\s+commands?|(?:mere\s+)?(?:custom|naye|banaye\s+hue)\s+commands?\s*(?:dikhao|batao|list)?|learned\s+commands?)\??$/i.test(low)) {
+    return asCmd('learn', '');
+  }
+  if ((m = text.match(/^(?:run|execute|trigger)\s+(?:the\s+|my\s+)?(?:custom\s+)?command\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i))
+    || (m = text.match(/^(?:run|execute)\s+\/([a-zA-Z][a-zA-Z0-9_-]{1,27})(?:\s+command)?$/i))
+    || (m = text.match(/^\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})\s+(?:custom\s+)?command\s+(?:ko\s+)?(?:chala(?:\s*do|\s*o)?|run\s+kar(?:\s*do|\s*o)?)$/i))) {
+    return asCmd('cmd', `run ${clean(m[1])}`);
   }
 
   // ── meta ──────────────────────────────────────────────────────────────────

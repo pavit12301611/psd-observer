@@ -36,6 +36,34 @@ import { runDoctor } from './doctor.js';
 import { createProgress, describeHandsStep } from './progress.js';
 import { noteOfflineAnnounced } from './lifecycle.js';
 import { ensureProfile, addLesson } from './persona.js';
+import {
+  resolveRecipient,
+  addContact,
+  removeContact,
+  formatContactsList,
+  recordGuestAudit,
+  recordGuestChatTurn,
+} from './guests.js';
+import {
+  resolveOwnerLocation,
+  setOwnerLocation,
+  searchNearbyPlaces,
+  formatOwnerLocationCard,
+} from './location.js';
+import {
+  normalizeKeyword,
+  validateKeyword,
+  parseLearnCommands,
+  formatLearned,
+  formatLearnedStep,
+} from './learn.js';
+import {
+  startActionRecording,
+  stopActionRecording,
+  cancelActionRecording,
+  formatActionRecorderStatus,
+  saveLastRecordingAsCommand,
+} from './actionrecorder.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -54,7 +82,11 @@ function describe(entry, args) {
   return `${entry.label ?? entry.name} ${bits.map(([k, v]) => `${k}=${short(v)}`).join(' ')}`.trim();
 }
 
-export function createActions({ config, store, log = console, journal = null, notify = null, harness = null }) {
+export function createActions({
+  config, store, log = console, journal = null, notify = null, harness = null, sendToNumber = null,
+}) {
+  let sendWhatsappTo = typeof sendToNumber === 'function' ? sendToNumber : null;
+  let outboundStamps = [];
   const extraRoots = config.filesExtraRoots ?? [];
   const level = () => (config.accessLevel in LEVELS ? config.accessLevel : 'full');
   const audioAction = (w) => {
@@ -969,6 +1001,229 @@ export function createActions({ config, store, log = console, journal = null, no
         ].filter(Boolean).join('\n');
       },
     },
+
+    // ── Controlled Multi-User Outbound Messaging & Contacts (Owner-Only) ───
+    {
+      name: 'send_whatsapp',
+      level: 'standard',
+      label: 'Send WhatsApp message to another person',
+      description: 'Send a WhatsApp message to any phone number (e.g. 9876543210 or +919876543210), saved contact name (e.g. "Rahul"), or "last" (to reply to the last guest who messaged). Strictly owner-only and rate-limited.',
+      params: {
+        to: { type: 'string', description: 'Recipient phone number, saved contact name, or "last"', required: true },
+        text: { type: 'string', description: 'Message text to send on WhatsApp', required: true },
+      },
+      run: async ({ to, text }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can send outbound WhatsApp messages.');
+        }
+        const msgText = String(text ?? '').trim();
+        if (!msgText) throw new Error('Message text is empty.');
+        const resolved = resolveRecipient(store, config, to);
+        if (!resolved.ok) throw new Error(resolved.reason);
+
+        const now = Date.now();
+        const maxPerMin = Math.max(1, Number(config.outboundRateLimitPerMinute ?? 12) || 12);
+        outboundStamps = outboundStamps.filter((t) => now - t < 60_000);
+        if (outboundStamps.length >= maxPerMin) {
+          throw new Error(`Outbound rate limit reached (${maxPerMin} messages/min). Try again in a minute.`);
+        }
+        outboundStamps.push(now);
+
+        if (typeof sendWhatsappTo === 'function') {
+          await sendWhatsappTo(resolved.number, msgText);
+        } else {
+          store?.bump?.('outboundToOthers');
+        }
+        recordGuestChatTurn(store, resolved.number, 'assistant', msgText, { name: resolved.name });
+        recordGuestAudit(store, {
+          from: resolved.number,
+          name: resolved.name,
+          kind: 'outbound',
+          text: msgText,
+        });
+        return `📤 *WhatsApp Message Sent*\n• To: *${resolved.name}* (\`+${resolved.number}\`)\n• Message: "${msgText}"`;
+      },
+    },
+    {
+      name: 'manage_contacts',
+      level: 'safe',
+      label: 'Manage WhatsApp contacts',
+      description: 'Add, delete, or list saved WhatsApp contacts so the owner can message people by name.',
+      params: {
+        action: { type: 'string', enum: ['list', 'add', 'delete'], description: 'Operation to perform (default list)' },
+        name: { type: 'string', description: 'Contact name when adding or deleting' },
+        number: { type: 'string', description: 'Phone number when adding a contact' },
+      },
+      run: async ({ action = 'list', name = '', number = '' }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can manage contacts.');
+        }
+        const act = String(action || 'list').toLowerCase();
+        if (act === 'add') {
+          const res = addContact(store, name, number, config);
+          if (!res.ok) throw new Error(res.reason);
+          return `📇 Contact saved: *${res.contact.name}* (\`+${res.contact.number}\`).`;
+        }
+        if (act === 'delete' || act === 'del' || act === 'remove') {
+          const res = removeContact(store, name || number, config);
+          if (!res.ok) throw new Error(res.reason);
+          return `🗑️ Deleted contact *${res.removed.name}* (\`+${res.removed.number}\`).`;
+        }
+        return formatContactsList(store, config);
+      },
+    },
+    {
+      name: 'my_location',
+      level: 'safe',
+      label: 'Get or set owner location',
+      description: 'Get, refresh, or set the owner\'s current location (city, address, GPS coordinates, Google Maps link). Strictly owner-only.',
+      params: {
+        action: { type: 'string', enum: ['get', 'refresh', 'set'], description: 'get = current location, refresh = re-detect via IP, set = set city/address/coordinates' },
+        place: { type: 'string', description: 'City, address, or "lat,lon" when action="set"' },
+      },
+      run: async ({ action = 'get', place = '' }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: owner location is strictly private.');
+        }
+        const act = String(action || 'get').toLowerCase();
+        if (act === 'set' || place) {
+          const res = await setOwnerLocation(store, config, place);
+          if (!res.ok) throw new Error(res.reason);
+          return formatOwnerLocationCard(store, config, res.location);
+        }
+        const res = await resolveOwnerLocation(store, config, { forceRefresh: act === 'refresh', allowNetwork: true });
+        if (!res.ok) throw new Error(res.reason);
+        return formatOwnerLocationCard(store, config, res.location);
+      },
+    },
+    {
+      name: 'nearby_places',
+      level: 'safe',
+      label: 'Search places near owner location',
+      description: 'Find nearby cafes, restaurants, ATMs, hospitals, gyms, or any place around the owner\'s current location with distance in km and Google Maps links.',
+      params: {
+        query: { type: 'string', description: 'What to search nearby (e.g. "cafe", "hospital", "atm", "gym")', required: true },
+      },
+      run: async ({ query }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: owner location is strictly private.');
+        }
+        const res = await searchNearbyPlaces(store, config, query);
+        if (!res.ok) throw new Error(res.reason);
+        return res.text;
+      },
+    },
+    {
+      name: 'create_custom_command',
+      level: 'safe',
+      label: 'Create custom /command',
+      description: 'Create or update a persistent custom command (e.g. /study, /morning, /work) from the owner\'s natural-language instructions or slash steps so the owner can run that task anytime with `/name` or `name`.',
+      params: {
+        name: { type: 'string', description: 'Command keyword without slash (e.g. "study", "morning", "gaming")', required: true },
+        task: { type: 'string', description: 'Task description or chain of commands (e.g. "open chrome and set volume to 30 and take a screenshot" or "/open chrome | /pc volume 30")', required: true },
+      },
+      run: async ({ name, task }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can create custom commands.');
+        }
+        const keyword = normalizeKeyword(name);
+        const err = validateKeyword(keyword);
+        if (err) throw new Error(err);
+        const taskStr = String(task || store.getLastOwnerTask() || '').trim();
+        const commands = parseLearnCommands(taskStr);
+        if (!commands || !commands.length) {
+          throw new Error('Could not parse command steps. Specify what the command should do.');
+        }
+        const entry = store.addLearned(keyword, commands, taskStr);
+        const steps = entry.commands.map(formatLearnedStep).join(' → ');
+        return (
+          `🧠 *Custom Command Created:* \`/${entry.keyword}\`\n` +
+          `📋 *Task Steps:* ${steps}\n\n` +
+          `Ab aap kabhi bhi \`/${entry.keyword}\` ya sirf \`${entry.keyword}\` bhejoge to main yahi task execute karunga!`
+        );
+      },
+    },
+    {
+      name: 'list_custom_commands',
+      level: 'safe',
+      label: 'List custom commands',
+      description: 'List all custom `/commands` and trigger rules created by the owner.',
+      params: {},
+      run: async (_args, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can view custom commands.');
+        }
+        const learned = store.listLearned();
+        const rules = store.data?.rules ?? [];
+        if (!learned.length && !rules.length) {
+          return '📭 Abhi koi custom command saved nahi hai.';
+        }
+        const lines = [];
+        if (learned.length) {
+          lines.push(`🧠 *Custom Commands (${learned.length}):*`);
+          learned.forEach((l, i) => lines.push(`${i + 1}. ${formatLearned(l)}`));
+        }
+        if (rules.length) {
+          if (lines.length) lines.push('');
+          lines.push(`⚡ *Custom Trigger Rules (${rules.length}):*`);
+          rules.forEach((r, i) => lines.push(`${i + 1}. "${r.trigger}" → ${r.action}`));
+        }
+        return lines.join('\n');
+      },
+    },
+    {
+      name: 'delete_custom_command',
+      level: 'safe',
+      label: 'Delete custom command',
+      description: 'Delete a saved custom `/command` by name.',
+      params: {
+        name: { type: 'string', description: 'Command keyword to remove (e.g. "study")', required: true },
+      },
+      run: async ({ name }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can delete custom commands.');
+        }
+        const keyword = normalizeKeyword(name);
+        if (store.deleteLearned(keyword)) {
+          return `🗑️ Removed custom command \`/${keyword}\`.`;
+        }
+        return `⚠️ Custom command \`/${keyword}\` nahi mila.`;
+      },
+    },
+    {
+      name: 'record_pc_actions',
+      level: 'safe',
+      label: 'Record & learn owner PC actions',
+      description: 'Start or stop recording the actions the owner performs on their PC (opening apps, switching windows, clicking UI elements, typing, volume changes) and save them as a reusable `/command` so the agent can repeat them anytime.',
+      params: {
+        action: { type: 'string', description: '"start" | "stop" | "cancel" | "status" | "save_as"', required: true },
+        name: { type: 'string', description: 'Optional command keyword to save the recorded actions under (e.g. "morning", "setup", "work")' },
+      },
+      run: async ({ action = 'status', name = '' }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can record or replay PC actions.');
+        }
+        const act = String(action || 'status').toLowerCase();
+        if (act === 'start' || act === 'record' || act === 'begin') {
+          const res = await startActionRecording(store, config, { name });
+          return res.text;
+        }
+        if (act === 'stop' || act === 'save' || act === 'finish') {
+          const res = await stopActionRecording(store, { name });
+          if (!res.ok) return `⚠️ ${res.reason}`;
+          return res.text;
+        }
+        if (act === 'cancel' || act === 'abort') {
+          return cancelActionRecording(store).text;
+        }
+        if (act === 'save_as' && name) {
+          const res = saveLastRecordingAsCommand(store, name);
+          if (!res.ok) return `⚠️ ${res.reason}`;
+          return res.text;
+        }
+        return formatActionRecorderStatus(store);
+      },
+    },
   ];
 
   const byName = new Map(registry.map((entry) => [entry.name, entry]));
@@ -1014,6 +1269,13 @@ export function createActions({ config, store, log = console, journal = null, no
    * and never throws for expected failures.
    */
   async function execute(name, args = {}, ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest === true) {
+      return {
+        ok: false,
+        blocked: true,
+        text: '🔒 *Command Blocked:* All actions and commands are strictly reserved for the owner.',
+      };
+    }
     const entry = byName.get(name);
     if (!entry) return { ok: false, text: `🤖 I don't know the action "${name}".` };
     if (LEVELS[entry.level] > LEVELS[level()]) {
@@ -1055,6 +1317,9 @@ export function createActions({ config, store, log = console, journal = null, no
 
   /** Run a parked destructive action after the owner said yes. */
   async function runPending(ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest === true) {
+      return { ok: false, blocked: true, text: '🔒 *Command Blocked:* Only the owner can confirm actions.' };
+    }
     const pending = store.data.pending;
     if (!pending) return { ok: false, text: 'Nothing is waiting for confirmation.' };
     store.data.pending = null;
@@ -1072,5 +1337,15 @@ export function createActions({ config, store, log = console, journal = null, no
     }
   }
 
-  return { registry, toolSchemas, execute, runPending, clearPending, accessReport, describe, level };
+  return {
+    registry,
+    toolSchemas,
+    execute,
+    runPending,
+    clearPending,
+    accessReport,
+    describe,
+    level,
+    setSendToNumber: (fn) => { sendWhatsappTo = typeof fn === 'function' ? fn : null; },
+  };
 }

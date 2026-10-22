@@ -28,6 +28,7 @@ import { maskNumber, normalizeNumber } from './allowlist.js';
 import { ROOT } from './config.js';
 import { cachedIcon } from './webapp.js';
 import * as apps from './apps.js';
+import { resolveRecipient, listContacts, ensureGuestStore } from './guests.js';
 import * as files from './files.js';
 import * as pc from './pccontrol.js';
 import * as hands from './hands.js';
@@ -600,13 +601,38 @@ export function createBridgeServer({
         }
 
         // ── DeepSeek Harness IPC + Phone/Desktop Control Routes ──────────
+        case 'GET /api/guests': {
+          const policy = ensureGuestStore(store, config);
+          return json(res, 200, {
+            ok: true,
+            policy,
+            contacts: listContacts(store),
+            lastGuestSender: store.data.lastGuestSender || null,
+            auditLog: (store.data.guestAuditLog || []).slice(-30),
+          });
+        }
+
         case 'POST /api/whatsapp/send': {
           const body = await readJsonBody(req);
           const kind = String(body.kind || 'text');
+          let sendReply = (payload) => whatsapp.sendToOwner(payload);
+          let recipientInfo = { to: config.ownerNumber, name: 'owner' };
+          if (body.to) {
+            const resolved = resolveRecipient(store, config, body.to);
+            if (!resolved.ok) {
+              return json(res, 400, { ok: false, detail: resolved.reason });
+            }
+            recipientInfo = { to: resolved.number, name: resolved.name };
+            sendReply = (payload) => (
+              whatsapp.sendToNumber
+                ? whatsapp.sendToNumber(resolved.number, payload)
+                : whatsapp.sendToOwner(payload)
+            );
+          }
           if (kind === 'screenshot') {
             const shot = await pc.captureScreenshot({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 25_000) });
-            await whatsapp.sendToOwner({ image: shot, text: String(body.caption || '📸 Fedora Desktop') });
-            return json(res, 200, { ok: true, via: whatsapp.status() });
+            await sendReply({ image: shot, text: String(body.caption || '📸 Fedora Desktop') });
+            return json(res, 200, { ok: true, via: whatsapp.status(), ...recipientInfo });
           }
           if (kind === 'file') {
             const target = path.resolve(String(body.filePath || ''));
@@ -617,19 +643,19 @@ export function createBridgeServer({
             const ext = path.extname(target).toLowerCase();
             const isImg = Boolean(body.asImage) || ['.png', '.jpg', '.jpeg', '.webp'].includes(ext);
             if (isImg) {
-              await whatsapp.sendToOwner({ image: buf, text: String(body.caption || path.basename(target)) });
+              await sendReply({ image: buf, text: String(body.caption || path.basename(target)) });
             } else {
-              await whatsapp.sendToOwner({
+              await sendReply({
                 document: buf,
                 fileName: path.basename(target),
                 mimetype: files.mimeFor(target),
                 text: String(body.caption || ''),
               });
             }
-            return json(res, 200, { ok: true, via: whatsapp.status(), file: target });
+            return json(res, 200, { ok: true, via: whatsapp.status(), file: target, ...recipientInfo });
           }
-          await whatsapp.sendToOwner(String(body.text || ''));
-          return json(res, 200, { ok: true, via: whatsapp.status() });
+          await sendReply(String(body.text || ''));
+          return json(res, 200, { ok: true, via: whatsapp.status(), ...recipientInfo });
         }
 
         case 'GET /api/solve/status':

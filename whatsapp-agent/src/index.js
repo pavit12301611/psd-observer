@@ -48,6 +48,7 @@ const agent = createAgent({
   // Live "step 2/8" lines and watch alerts come out of the agent itself, not
   // as a reply — this is the only channel for unsolicited messages.
   notify: (message) => whatsapp.sendToOwner(message),
+  sendToNumber: (to, reply) => whatsapp.sendToNumber(to, reply),
 });
 
 const whatsapp = createWhatsApp({
