@@ -244,7 +244,9 @@ test('local: plain chat goes through the local server', async () => {
       const config = localConfig(dir, { localApiUrl: `http://127.0.0.1:${port}/v1` });
       const store = new Store(path.join(dir, 'c.json'));
       const result = await ai.chat(config, store, 'namaste', silent);
-      assert.match(result.text, /Namaste/);
+      // Owner hard rule: replies never contain "Namaste" — the greeting word is
+      // stripped by postProcess, the rest of the mock reply survives intact.
+      assert.equal(result.text, 'Main tumhare PC pe hi chal raha hoon.');
       assert.equal(result.provider.includes('Local'), true);
       assert.equal(requests[0].url, '/v1/chat/completions');
     });

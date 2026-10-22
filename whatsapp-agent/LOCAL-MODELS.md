@@ -60,9 +60,11 @@ Pehle apna budget dekho:
 | Tumhare paas | Model | Hugging Face | ~Size | Kyun |
 |---|---|---|---|---|
 | **24 GB+ VRAM / 32 GB RAM** | **Qwen3.8-27B** | [`unsloth/Qwen3.8-27B-GGUF`](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) | 17.9 GB | 2026 ka #1 local model — vision + agentic tool use, 256K context |
+| 24–32 GB, tool-heavy kaam | **Qwen3.6-35B-A3B** (MoE) | `Qwen/Qwen3.6-35B-A3B-GGUF` (repo naam `./scripts/observer.sh models commands` se verify karo) | ~20 GB Q4 | sirf ~3B active params — lambi tool-calls me fast, 262K ctx, vision |
 | 16–24 GB RAM, **CPU-only laptop** | **Gemma 4 26B-A4B** | [`ggml-org/gemma-4-26B-A4B-it-GGUF`](https://huggingface.co/ggml-org/gemma-4-26B-A4B-it-GGUF) | ~16 GB | MoE — sirf 4B active per token, isliye CPU pe bhi tez |
 | 20–24 GB | **gpt-oss-20b** | [`unsloth/gpt-oss-20b-GGUF`](https://huggingface.co/unsloth/gpt-oss-20b-GGUF) | 15.8 GB | strong reasoning + tool calls, MoE |
 | 12–16 GB | **Gemma 4 12B** | [`ggml-org/gemma-4-12B-it-GGUF`](https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF) | 7.4 GB | 256K ctx, screenshots padh leta hai, best all-rounder |
+| 8–16 GB GPU | **Qwen3.5-9B** | `Qwen/Qwen3.5-9B-GGUF` (command `models commands Qwen/Qwen3.5-9B-GGUF`) | ~5.6 GB | solid tool-calling (BFCL-V4 66.1), 262K ctx |
 | 16 GB | **Qwen3-14B** | [`unsloth/Qwen3-14B-GGUF`](https://huggingface.co/unsloth/Qwen3-14B-GGUF) | ~9 GB | reliable tool calling (plain text) |
 | 6–8 GB | **Qwen3.5-4B** | [`unsloth/Qwen3.5-4B-GGUF`](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF) | ~2.6 GB | everyday laptop, vision-capable |
 | 2–4 GB / sirf CPU | **Qwen3.5-0.8B** | [`unsloth/Qwen3.5-0.8B-GGUF`](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF) | ~0.6 GB | "kholo/band karo" jaise kaam, instant |

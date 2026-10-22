@@ -418,7 +418,7 @@ test('agent: /undo, /usage, /watch, /teach, /brief, /resume, /remote all answer'
     assert.ok(store.getLearned('demo'));
     assert.ok(store.getLearned('demo').commands.some((c) => c.cmd === 'usage'));
 
-    assert.match(await agent.handle('/brief'), /Disk|Kuch pending|Namaste|Subah|Shaam|Raat/);
+    assert.match(await agent.handle('/brief'), /Disk|Kuch pending|Subah|Shaam|Raat|Dopahar|Shubh/);
     assert.match(await agent.handle('/resume'), /adhoora|Koi adhoora/);
     assert.match(await agent.handle('/remote'), /Kahin se bhi control/);
     assert.match(await agent.handle('/tap'), /Tap/);

@@ -133,9 +133,9 @@ export function parseIntent(input) {
   if ((m = text.match(/^(?:focus|switch\s+to|window)\s+(.+)$/i))) return asCmd('focus', clean(m[1]));
 
   // ── screen ────────────────────────────────────────────────────────────────
-  if (/^(?:screenshot|screen\s?shot|ss)(?:\s+(?:bhej(?:o|\s*do)?|le(?:\s*lo)?|kheench(?:o)?|send|abhi|now))?$/i.test(text)
-    || /^(?:screen|screen\s*ka\s*photo)\s+(?:bhej(?:o|\s*do)?|dikhao|le\s*lo)$/i.test(text)
-    || /^(?:screenshot|screen\s?shot|ss)\s+(?:bhej(?:o|\s*do)?|le(?:\s*lo)?|kheench(?:o)?)$/i.test(text)) return asCmd('screenshot');
+  if (/^(?:screenshot|screen\s?shot|ss)(?:\s+(?:bhej(?:o|\s*do)?|le(?:\s*lo)?|lo|kheench(?:o)?|khich(?:o)?|capture(?:\s+(?:karo|kar\s*do))?|send|abhi|now))?$/i.test(text)
+    || /^(?:screen|screen\s*ka\s*photo)\s+(?:bhej(?:o|\s*do)?|dikhao|le\s*lo|lo)$/i.test(text)
+    || /^(?:screenshot|screen\s?shot|ss)\s+(?:bhej(?:o|\s*do)?|le(?:\s*lo)?|lo|kheench(?:o)?|khich(?:o)?|capture(?:\s+(?:karo|kar\s*do))?)$/i.test(text)) return asCmd('screenshot');
   if (/^(?:ocr|read\s+screen\s+text|screen\s+text|screen\s+padho)$/i.test(text)) return asCmd('ocr');
   if (/^screen\s+(?:pe|par|mein|me)\s+kya\b/i.test(text)) return asCmd('look', '');
   if (/^(?:what(?:'s| is) on (?:my |the )?screen|look at (?:my |the )?screen|screen\s+(?:pe|par|mein|me)\s+kya|screen\s+kya\s+(?:hai|dikh|chal)|screen\s+(?:dekho|batao|read\s+karo))\b/i.test(text)

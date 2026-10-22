@@ -22,6 +22,7 @@ import * as hands from './hands.js';
 import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
+import { shadesOn, shadesOff, shadesStatus, initShades } from './shades.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -119,9 +120,14 @@ import {
 } from './accuracy.js';
 import {
   lookupBilingualCorpus,
+  detectQuestionScope,
   runBilingualMasteryBenchmark,
   BILINGUAL_CORPUS,
 } from './bilingual.js';
+import { lookupKnowledge } from './knowledge.js';
+import { classifyIntent, learnExample } from './neural/index.js';
+import { orchestrate, missionDirective, agentTag, taskBrief, mergeSquadAnswers, fleetStatus, AGENTS } from './agents.js';
+import { wikiCommand, wikiFallback } from './wiki.js';
 import {
   recordTurnOutcome,
   resolveFollowUpQuery,
@@ -158,6 +164,11 @@ import {
 } from './quality30.js';
 
 const execAsync = promisify(exec);
+// Shades' injectable runner (execFile-based; tests pass their own fake).
+async function execAsyncFile(bin, args = []) {
+  const { execFile } = await import('node:child_process');
+  return promisify(execFile)(bin, args ?? [], { timeout: 8000 }).then((r) => r.stdout ?? '');
+}
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
 
@@ -176,6 +187,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 *PC control*
 • /screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top
 • /pc volume up|down|mute|50 · /pc brightness 70 · /pc media pause|next
+• /shades [off|status] — 🕶️ screen physically BLACK (privacy) but screenshots CLEAR
 • /pc type <text> · /pc paste <long text> · /pc key ctrl+l · /pc click [x y] [double]
 • /pc mousemove <x> <y> · /pc scroll [up|down] [steps] · /pc lock
 • /stop — chal raha kaam turant roko (browser/app khula rahega; stacked kaam bhi)
@@ -2555,7 +2567,7 @@ export function createAgent({
         }
         return '🌤️ Usage: /weather <city> — e.g. /weather Dehradun (or set your location with `/location set <city>`)';
       }
-      case 'wiki': return args ? tools.wiki(args) : '📚 Usage: /wiki <topic>';
+      case 'wiki': return args ? wikiCommand(args, config, store) : '📚 Usage: /wiki <topic>';
       case 'define': return args ? tools.define(args) : '🔤 Usage: /define <word>';
       case 'vocab': case 'word': case 'synonym': case 'synonyms': case 'antonym': case 'antonyms': case 'meaning': {
         const rawArg = String(args || '').trim();
@@ -2870,6 +2882,12 @@ export function createAgent({
       case 'agent': return runAgentTask(args, ctx);
       case 'use': case 'hands': return runUseTask(args, ctx.signal);
       case 'arena': return runArenaPrompt(args, ctx.signal);
+      case 'agents': case 'fleet': {
+        const head = `🤖🤖 *Multi-Agent Fleet* — kaam bots me divide hota hai (IntentNet dispatcher):`;
+        let brain = '🧠 IntentNet: trained checkpoint loaded';
+        try { brain = `🧠 IntentNet: ${classifyIntent('hello').source} · conf ${classifyIntent('hello').confidence.toFixed(2)}`; } catch { /* optional */ }
+        return `${head}\n${fleetStatus()}\n\n${brain}\n👁️ VisionBot — images/questions (vision pipeline)\n\nHar bot ka apna mission + tools hai. Compound messages me squad ban jaata hai. ✅`;
+      }
       case 'brains': case 'models': case 'router': {
         if (args && /^(why|explain|route)\b/i.test(args)) {
           return router.explainText(args.replace(/^(why|explain|route)\s+/i, '').trim() || 'hello');
@@ -2887,6 +2905,19 @@ export function createAgent({
         return toReply(await actions.runPending(ctx));
       }
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
+      case 'shades': case 'privacy': {
+        // 🕶️ SHADES — panel physically black (privacy from bystanders), but
+        // screenshots stay CLEAR (backlight/gamma, never the framebuffer).
+        const sub = String(args || '').trim().toLowerCase();
+        const shared = {
+          run: (bin, a) => execAsyncFile(bin, a),
+          stateFile: undefined,
+          timeoutMs: Math.max(0, Number(config?.shadesTimeoutMin ?? 30) * 60_000),
+        };
+        if (sub === 'off' || sub === 'disable' || sub === '0' || sub === 'down') return shadesOff(shared);
+        if (sub === 'status') return shadesStatus(shared);
+        return shadesOn(shared);
+      }
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
       default: {
         const learnedRes = await runLearned(cmd, ctx, args);
@@ -2995,14 +3026,56 @@ export function createAgent({
         return solved.text;
       }
     }
-    const result = await ai.chat(config, store, text, log, { voice: Boolean(ctx?.voice) });
-    if (result) return result.text;
-    // No brain: still try to be useful offline for factual questions.
-    const q = text.replace(/^(what is|who is|tell me about)\s+/i, '').replace(/\?$/, '').trim();
+    // Instant trained knowledge (Wikipedia-derived bank + learned entries):
+    // factual one-liners answer with zero AI and zero latency.
+    const kh = lookupKnowledge(text, store);
+    if (kh && detectQuestionScope(text).scope === 'direct_fact') {
+      store?.pushHistory?.('user', text);
+      store?.pushHistory?.('assistant', kh.reply);
+      return kh.reply;
+    }
+    // ── Multi-agent dispatcher: trained IntentNet splits the work ──
+    // One bot for single-intent messages, a SQUAD for compound ones
+    // ("explain X and likho ek poem" → 🔬 + ✍️ answering together).
+    let classified = null;
     try {
-      if (q.length >= 3 && q.length <= 80 && /^(what|who|where|when)/i.test(text)) {
-        return `${await tools.wiki(q)}\n\n_(from Wikipedia — local AI is off, see /model)_`;
+      classified = classifyIntent(text);
+      if (classified.confidence >= 0.85) learnExample(text, classified.label);
+    } catch { /* brain optional */ }
+    const plan = orchestrate(text, classified || { label: 'misc_chat', scores: {} });
+
+    if (plan.multi && plan.squad.length > 1) {
+      // Squad runs IN PARALLEL — 2-bot latency = max(t1, t2), not t1 + t2.
+      const results = await Promise.all(plan.squad.map((entry) => ai.chat(config, store, text, log, {
+        voice: Boolean(ctx?.voice),
+        intent: entry.intent,
+        agent: entry.agent,
+        squadName: entry.agent.name,
+        taskBrief: taskBrief(entry),
+      }).catch(() => null)));
+      const parts = plan.squad.map((entry, i) => ({ agent: entry.agent, text: results[i]?.text || '' }));
+      const merged = mergeSquadAnswers(parts);
+      if (merged) {
+        store?.pushHistory?.('user', text);
+        store?.pushHistory?.('assistant', merged);
+        return merged;
       }
+    }
+
+    const result = await ai.chat(config, store, text, log, {
+      voice: Boolean(ctx?.voice),
+      intent: classified?.label,
+      agent: plan.primary,
+      taskBrief: taskBrief({ agent: plan.primary, intent: classified?.label }),
+    });
+    if (result?.text) {
+      const tagged = config?.agentTag === false ? result.text : `${result.text}\n\n${agentTag(plan.primary)}`;
+      return tagged;
+    }
+    // No brain: still try to be useful offline for factual questions.
+    try {
+      const fb = await wikiFallback(text, config, store);
+      if (fb) return fb;
     } catch { /* fall through to hint */ }
     return ai.NO_BRAIN_HINT;
   }
@@ -3148,7 +3221,7 @@ export function createAgent({
     if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
       const ownerName = mem.getOwnerName(store);
       const agentName = mem.getAgentName(store, config);
-      return `👋 Namaste${ownerName ? ` *${ownerName}*` : ''}! Main *${agentName}* hoon — aapka fast & powerful Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
+      return `Ji bolo${ownerName ? ` *${ownerName}*` : ''}! 👋 Main *${agentName}* hoon — aapka fast & powerful Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nSeedha bolo kya karna hai — ya try karo /help, /weather <city>, /remind in 10m <text>.`;
     }
     return undefined;
   }
@@ -3268,7 +3341,7 @@ export function createAgent({
     if (store.data.guestPolicy?.customAutoReply) {
       replyText = store.data.guestPolicy.customAutoReply;
     } else if (/^(hi|hello|hey|namaste|hii+|yo|hola|assalamualaikum|ram\s*ram|radhe\s*radhe|good\s*(?:morning|afternoon|evening)|kaise\s+ho|kya\s+haal\s+hai)[!.?\s]*$/i.test(cleanText)) {
-      replyText = `👋 Namaste${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aap mujhse normal baat-cheet (chat) ya koi bhi general sawal pooch sakte hain.\n_(🔒 Note: Sabhi \`/\` aur system commands sirf mere owner ke liye locked hain.)_`;
+      replyText = `Hello${senderName ? ` *${senderName}*` : ''}! 👋 Main *${agentName}* hoon. Aap mujhse normal baat-cheet (chat) ya koi bhi general sawal pooch sakte hain.\n_(🔒 Note: Sabhi \`/\` aur system commands sirf mere owner ke liye locked hain.)_`;
     } else if ((pctMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))
       || (pctMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent)\??$/i))) {
       const isHindiOrder = /\s+ka\s+/i.test(cleanText);
@@ -3296,7 +3369,7 @@ export function createAgent({
     }
 
     if (!replyText) {
-      replyText = `💬 Namaste${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aapka message mil gaya ("${cleanText.slice(0, 80)}"). Main jald hi jawab dunga.`;
+      replyText = `💬 Message mil gaya${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aapka text ("${cleanText.slice(0, 80)}") receive hua — jald hi jawab dunga.`;
     }
 
     // ── Owner Approval Gate (`approval` mode): send to owner first for yes / no / send instead ──

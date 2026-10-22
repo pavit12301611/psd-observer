@@ -719,8 +719,9 @@ export function solveDeterministicQuery(rawInput) {
     }
   }
 
-  // 5. Factorial (`factorial of 10`, `10! kitna hota hai`, `value of 7!`)
+  // 5. Factorial (`factorial of 10`, `10! kitna hota hai`, `value of 7!`, `5 factorial`, `5 factorial kitna`)
   if ((m = raw.match(/^(?:what\s+is\s+(?:the\s+)?|find\s+|value\s+of\s+)?factorial\s+(?:of\s+)?(\d{1,3})\??$/i))
+    || (m = raw.match(/^(?:what\s+is\s+(?:the\s+)?|find\s+|value\s+of\s+)?(\d{1,3})\s*factorial(?:\s*(?:kitna\s*(?:hota\s*hai|hai)?|kya\s*hai|hai|equals?|is))?\s*\??$/i))
     || (m = raw.match(/^(?:what\s+is\s+|value\s+of\s+)?(\d{1,3})!\s*(?:kitna\s*(?:hota\s*hai|hai)|kya\s*hai)?\??$/i))) {
     const n = Number(m[1]);
     const f = factorialBig(n);
@@ -1200,6 +1201,7 @@ export function extractDeterministicGrounding(userText) {
 // ── Layer 3: Plain-Text Complex STEM / Exam / MCQ / Code Detection ───────────
 
 const PLAIN_MCQ_RE = /(?:^|\n|\s)\(?[A-D]\)?[\s.)\-:]+\S[\s\S]*?(?:^|\n|\s)\(?[B-D]\)?[\s.)\-:]+\S/m;
+const MCQ_CUE_RE = /\bwhich\s+of\s+the\s+following\b|\b(?:choose|select|pick)\s+the\s+(?:correct|right|best)\b|\b(?:correct|right)\s+(?:option|answer|choice)\b|\boption\s*\(?[A-D]\)?/i;
 const DEEP_STEM_RE = /\b(?:integrate|integral|differentiate|derivative|dy\/dx|d\/dx|limit\s+as|eigenvalue|eigenvector|determinant|laplace|fourier|taylor\s+series|maclaurin|differential\s+equation|bayes(?:'|\s+theorem)|binomial\s+distribution|poisson|normal\s+distribution|time\s+complexity|what\s+(?:will\s+be|is)\s+the\s+output\s+of)\b|[∫∑∏]/i;
 const ACCURACY_TRIGGER_RE = /^(?:verify(?:\s+karo|\s+this)?|fact\s*check|100%\s*(?:accurate|sahi|pakka)(?:\s+answer|\s+jawab)?(?:\s+batao)?|pakka\s+(?:sahi\s+)?(?:answer|jawab)\s+batao|sahi\s+jawab\s+verify\s+karo)\s*[:\-]?\s*([\s\S]+)$/i;
 
@@ -1211,6 +1213,7 @@ export function looksLikeComplexStemOrMcq(text) {
   const s = String(text ?? '').trim();
   if (s.length < 15 || s.startsWith('/')) return false;
   if (PLAIN_MCQ_RE.test(s)) return true;
+  if (MCQ_CUE_RE.test(s)) return true;
   if (DEEP_STEM_RE.test(s)) return true;
   return false;
 }
@@ -1279,25 +1282,54 @@ export function buildAccuracyDirective(userText = '', config = null) {
   return lines.join('\n');
 }
 
+// Robotic filler preambles the model is told never to use — enforced at runtime
+// too, in English AND Hinglish/Hindi ("Namaste! Main aapki sahayata karunga").
+const FILLER_PREAMBLE_RE = /^(?:As an AI(?: language model| assistant)?[,.:\s]*|Certainly!?\s*(?:Here(?:'s| is)\s+(?:the\s+answer|your\s+answer|what\s+you\s+asked\s+for)\s*[:\-\u2013\u2014]?\s*)?|Sure!?\s*(?:I(?:'d|\s+would)\s+be\s+happy\s+to\s+help(?:\s+you\s+with\s+that)?[!.]?\s*)?|Of course!?\s*(?:I(?:'d|\s+would)\s+be\s+happy\s+to\s+help(?:\s+you\s+with\s+that)?[!.]?\s*)?|Absolutely!?\s*|Here(?:'s| is)\s+(?:the\s+answer|your\s+answer|what\s+you\s+asked\s+for)\s*[:\-\u2013\u2014]?\s*|(?:Namaste!?\s+|Ji\s+bilkul!?\s+)?Main\s+aapki\s+sahayata\s+k(?:ar(?:unga|ti\s+hoon)?|e\s+liye\s+taiyar\s+hoon)[!.]?\s*)/i;
+
+// Pure-filler sentences that may appear mid-reply ("5. Sure! I would be happy
+// to help. The value is 5.") — removed wherever they sit, content untouched.
+const FILLER_SENTENCE_RE = /(?:^|(?<=[.\n!?]))\s*(?:Sure!?\s+I(?:'d|\s+would)\s+be\s+happy\s+to\s+help(?:\s+you\s+with\s+that)?[.!]|Certainly!?\s+Here(?:'s| is)\s+(?:the\s+answer|your\s+answer)[.!]|As an AI(?: language model| assistant)?[,.]|Namaste!?\s+Main\s+aapki\s+sahayata\s+k(?:ar(?:unga|ti\s+hoon)?|e\s+liye\s+taiyar\s+hoon)[.!])\s*/gi;
+
+// THE OWNER'S HARD RULE: the bot never sends "Namaste"/"Namaskar" — ever, in
+// any reply, any language, any position. Stripped everywhere (the ban is on
+// the words going out; user input containing them still works fine).
+const NAMASTE_RE = /(?:^|(?<=[.\n!?\s(]))["'\u201c\u201d]?(?:namaste|namaskar)["'\u201c\u201d]?[!\s,.:\u2013\u2014-]*/gi;
+const GREETING_FREE_FALLBACK = 'Ji bolo! \u{1F44B}';
+
 /**
- * Post-process an AI model response to strip `<think>` blocks, remove robotic
- * filler preambles, and ensure consistency with deterministic ground-truth facts.
+ * Post-process an AI model response to strip <think> blocks, remove robotic
+ * filler preambles (English + Hinglish), and ensure consistency with
+ * deterministic ground-truth facts.
  */
 export function postProcessAiAnswer(rawText, { userText = '', config = null } = {}) {
   let clean = String(rawText ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   if (!clean) return clean;
 
-  // Strip robotic boilerplate intros so the user gets the direct answer immediately
-  clean = clean
-    .replace(/^(?:As an AI(?: language model| assistant)?[,.\s]*|Certainly!?\s+Here(?:'s| is)\s+(?:the\s+answer|your\s+answer|what\s+you\s+asked\s+for)\s*[:\-–—]?\s*|Sure!?\s+I(?:'d|\s+would)\s+be\s+happy\s+to\s+help(?:\s+you\s+with\s+that)?[!.]?\s*)/i, '')
-    .trim();
+  // Strip robotic boilerplate intros (looped, so stacked fillers all go) so the
+  // user gets the direct answer immediately.
+  for (let i = 0; i < 4; i++) {
+    const next = clean.replace(FILLER_PREAMBLE_RE, '').trim();
+    if (next === clean) break;
+    clean = next;
+  }
+  clean = clean.replace(FILLER_SENTENCE_RE, (m, ...rest) => {
+    const offset = rest[rest.length - 2];
+    return offset === 0 ? '' : ' ';
+  }).trim();
+
+  // Hard rule: "Namaste"/"Namaskar" never go out — in any position.
+  clean = clean.replace(NAMASTE_RE, (m, ...rest) => {
+    const offset = rest[rest.length - 2];
+    return offset === 0 ? '' : ' ';
+  }).replace(/ {2,}/g, ' ').trim();
+  if (!clean) clean = GREETING_FREE_FALLBACK;
 
   const { facts, primaryValue } = extractDeterministicGrounding(userText);
   if (primaryValue != null && facts.length > 0) {
     const valStr = String(primaryValue).trim();
     // If the user asked a direct deterministic question and the model's reply omitted the exact value
     // (only when the model reply is not a mock test fixture like "groq says hi" or "ok:...")
-    const looksLikeTestStub = /^(?:ok:|groq says|or says|openrouter saved|Namaste! Main tumhare PC)/i.test(clean);
+    const looksLikeTestStub = /^(?:ok:|groq says|or says|openrouter saved|(?:Namaste!\s+)?Main tumhare PC)/i.test(clean);
     if (!looksLikeTestStub && valStr.length >= 1 && valStr.length <= 40 && !clean.includes(valStr)) {
       const numVal = Number(valStr.replace(/,/g, ''));
       const formattedComma = Number.isFinite(numVal) ? numVal.toLocaleString('en-IN') : '';

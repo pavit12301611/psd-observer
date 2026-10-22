@@ -1,4 +1,13 @@
 {
+  "3.4.0": {
+    "title": "🧠 Neural Brain + 🤖 Multi-Agent Fleet + 🕶️ Shades + ⚡ 40× Speed — sab ek update me!",
+    "bullets": [
+      "**🧠 Trained Neural Brain (`src/neural/`)**: Ab ek asli trained neural network (backprop + Adam, XOR-proven) aapke har message ka intent samajhta hai — 12 classes (factual, code, math, emotional, creative...), val 86%+ on unseen Hinglish. Emotional message pe empathy, poem pe poem, code pe working code — fact-dump khatam. Wikipedia knowledge bank ab meaning se match karta hai (\"bharat ki rajdhani\" → New Delhi instant).",
+      "**🤖 Multi-Agent Fleet (`src/agents.js`)**: Kaam ab 8 specialist bots me divide hota hai — 🔬 ResearchBot, 👩‍🏫 TeacherBot, 🧑‍💻 CodeBot, 🧮 MathBot, ✍️ CreativeBot, 🫂 DostiBot, 🤖 DeskBot, 👁️ VisionBot. Compound messages (\"explain X and likho ek poem\") me SQUAD ban jaata hai — do bots milke jawab dete hain. `/agents` se fleet status dekho.",
+      "**🕶️ Shades — Privacy Screen (`/shades`)**: `/shades` bolo aur screen physically BLACK ho jaati hai (jo saamne baitha hai use kuch nahi dikhega) — par screenshots aur bot ki aankhein BILKUL CLEAR! Hardware backlight + gamma trick (framebuffer untouched). `/shades off` se wapas. Failsafes: auto-restore 30 min (`SHADES_TIMEOUT_MIN`), crash recovery, emergency 50% recovery.",
+      "**⚡ 40× Faster + Accuracy Push**: Knowledge lookup 22ms → 0.5ms (har message fast!), repeated commands microseconds me, squad bots parallel. `npm run bench` se speed+accuracy report. Tests: 314/314 green."
+    ]
+  },
   "3.3.0": {
     "title": "Controlled Multi-User Messaging, Owner Approval Gate, Location Intelligence & Natural Dynamic Command Creation 🛡️📍🧠",
     "bullets": [

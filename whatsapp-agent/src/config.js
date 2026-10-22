@@ -174,6 +174,20 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // failure (cap = MODEL_COOLDOWN_MAX_MS) so WhatsApp never waits for it.
     modelCooldownMs: int(e.MODEL_COOLDOWN_MS, 120_000),
     modelCooldownMaxMs: int(e.MODEL_COOLDOWN_MAX_MS, 1_800_000),
+    // Wikipedia grounding & training (src/wiki.js): before answering factual
+    // questions the AI chat is fed a verified Wikipedia summary, and every
+    // fetch is learned for instant offline answers (the "training" loop).
+    //   WIKI_GROUNDING=on (default) | offline (learned/built-in only) | off
+    //   WIKI_BASE_URL=…   (tests/mirrors; default https://en.wikipedia.org)
+    //   WIKI_TIMEOUT_MS=3500
+    wikiGrounding: e.WIKI_GROUNDING === 'off' ? false : e.WIKI_GROUNDING === 'offline' ? 'offline' : true,
+    wikiBaseUrl: e.WIKI_BASE_URL || '',
+    wikiTimeoutMs: int(e.WIKI_TIMEOUT_MS, 3500),
+    // 🕶️ Shades auto-restore failsafe (minutes; 0 = never auto-restore).
+    shadesTimeoutMin: int(e.SHADES_TIMEOUT_MIN, 30),
+    // Multi-agent fleet (src/agents.js): tag replies with the answering bot
+    // ("— 🧑‍💻 CodeBot"). AGENT_TAG=off for plain replies.
+    agentTag: bool(e.AGENT_TAG, true),
     // Power budget: how many "heavy" (big-model) calls are allowed per hour.
     maxHeavyPerHour: int(e.MAX_HEAVY_PER_HOUR, 12),
     heavyWindowMs: int(e.HEAVY_WINDOW_MS, 3_600_000),

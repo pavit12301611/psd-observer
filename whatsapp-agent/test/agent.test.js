@@ -729,7 +729,7 @@ test('Controlled Multi-User Messaging: Owner outbound /msg, /reply, /broadcast, 
   assert.equal(chat1.ignored, false);
   assert.equal(chat1.blocked, false);
   assert.equal(chat1.sent[0].to, RAHUL);
-  assert.match(chat1.sent[0].text, /Namaste \*Rahul\*/);
+  assert.match(chat1.sent[0].text, /Hello \*Rahul\*/);
   // Owner also received notification because guestNotifyMessages=true
   assert.equal(chat1.sent[1].to, OWNER);
   assert.match(chat1.sent[1].text, /Guest Message/);
@@ -860,7 +860,7 @@ test('Owner Approval Gate (yes / no / no send this instead) + Owner Location Acc
   const approve1 = await wa.simulate('yes', OWNER);
   assert.equal(approve1.sent.length, 2);
   assert.equal(approve1.sent[0].to, RAHUL);
-  assert.match(approve1.sent[0].text, /Namaste \*Rahul\*/);
+  assert.match(approve1.sent[0].text, /Hello \*Rahul\*/);
   assert.equal(approve1.sent[1].to, OWNER);
   assert.match(approve1.sent[1].text, /Approved & Sent AI Reply/);
 

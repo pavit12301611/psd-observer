@@ -25,6 +25,9 @@ import {
   postProcessAiAnswer,
 } from './accuracy.js';
 import { buildBilingualMasteryDirective } from './bilingual.js';
+import { wikiContextFor, knowledgeContextFor } from './wiki.js';
+import { classifyIntent } from './neural/index.js';
+import { agentForIntent, missionDirective } from './agents.js';
 
 const TIMEOUT_MS = 60_000;
 const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
@@ -144,7 +147,7 @@ async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal 
   return res.json();
 }
 
-function systemPrompt(config, store, opts = {}) {
+export function systemPrompt(config, store, opts = {}) {
   const memoryBlock = formatMemoryForPrompt(store, config);
   const personaBlock = formatPersonaForPrompt(store, config, opts.userText || '');
   const locationLine = formatLocationForOwnerPrompt(store, config);
@@ -157,6 +160,25 @@ function systemPrompt(config, store, opts = {}) {
   const persona = config.jarvisPersona === false ? [] : [
     `Your name is ${agentName} — the owner's self-evolving Agentic AI, strategist, and closest companion who truly understands them (with the loyalty and sharp wit of JARVIS, adapted to their personal vibe). Address the owner as "${address}". When the owner speaks Hinglish or Hindi, match their natural warmth and style ("Bilkul ${address}", "Ho jayega ${address}"). Never say you are an AI language model; you are ${agentName}, continuously learning from every chat with the owner.`,
   ];
+  // Multi-agent fleet: the trained IntentNet dispatched this message to a
+  // specialist bot — its mission (and optional task brief for squad work)
+  // steers tone, structure and tool discipline.
+  const toneLine = [];
+  const agent = opts.agent || (opts.intent ? agentForIntent(opts.intent) : null);
+  if (agent) {
+    toneLine.push(...missionDirective(agent));
+    if (opts.taskBrief) toneLine.push(opts.taskBrief);
+    if (opts.squadName) toneLine.push(`SQUAD MODE: You are ${agent.emoji} ${agent.name}, answering ONLY your share. Another bot handles the rest — do not repeat their work.`);
+  } else {
+    // Legacy tone fallback when no agent was dispatched.
+    if (opts.tone === 'companion' || opts.intent === 'emotional') {
+      toneLine.push('TONE (EMOTIONAL MOMENT): The owner is sharing feelings. Lead with genuine warmth and empathy (2–4 short lines). No fact dumps, no bullet lists, no unsolicited advice — just human warmth in their language, maybe one gentle practical thought at the end.');
+    } else if (opts.tone === 'creative' || opts.intent === 'creative') {
+      toneLine.push('TONE (CREATIVE MODE): This is a creative request. Deliver the creative piece FIRST (poem/story/caption/whatever they asked), playful and polished, then at most one short closing line. Never inject definitions, facts, or study-notes energy.');
+    } else if (opts.intent === 'code' || opts.intent === 'howto') {
+      toneLine.push('TONE (PRACTICAL MODE): Lead with the working code/steps/commands. Keep theory to one or two lines after the solution.');
+    }
+  }
   const vocabDirective = buildVocabPromptDirective(opts.userText || '');
   const accuracyDirective = buildAccuracyDirective(opts.userText || '', config);
   const bilingualDirective = buildBilingualMasteryDirective(opts.userText || '', store);
@@ -171,7 +193,12 @@ function systemPrompt(config, store, opts = {}) {
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
     locationLine,
+    'HARD RULE — NEVER GREET WITH "NAMASTE": The words "Namaste" and "Namaskar" are BANNED in every reply, in any language, any position. Never open with any formal greeting at all — jump straight into the answer. A natural warm opener like "Bilkul bhai!", "Haan bhai,", "Seedha jawab:" is fine, but the answer content must start immediately.',
+    'CONVERSATION MASTERY: Match the owner\'s energy and length — a casual one-liner gets a 1–2 line reply, not an essay. Never pad with "I hope this helps", "Let me know if you have any questions", or restated questions. If unsure of a number or date, say so honestly instead of guessing. When [CURATED KNOWLEDGE] or [WIKIPEDIA GROUNDING] blocks are provided below, treat them as verified facts and answer from them.',
     'Style: WhatsApp-friendly. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". Connect the dots with what you know about the owner\'s goals, preferences, location, and past conversations.',
+    ...toneLine,
+    opts.knowledgeBlock,
+    opts.wikiBlock,
     'You also have built-in tools the owner can trigger with slash commands: /accuracy /verify /solve /vocab /location /near /weather /remind /todo /note /persona /train /msg /reply /pending /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
     memoryBlock,
     openTodos ? `Open to-dos:\n${openTodos}` : '',
@@ -261,7 +288,7 @@ export async function chat(config, store, userText, log = console, opts = {}) {
   // 1. Check ultra-fast per-config semantic response cache (< 1ms)
   const useCache = config?.aiCache !== false && !opts.noCache;
   const cacheState = useCache ? getCacheState(config) : null;
-  const cacheKey = cacheState ? makeCacheKey(userText, Boolean(opts.voice)) : null;
+  const cacheKey = cacheState ? makeCacheKey(`${opts.agent?.id ? `${opts.agent.id}::` : ''}${userText}`, Boolean(opts.voice)) : null;
   const cacheTtlMs = Math.max(5_000, Number(config?.aiCacheTtlMs ?? DEFAULT_CACHE_TTL_MS) || DEFAULT_CACHE_TTL_MS);
 
   if (cacheState && cacheKey) {
@@ -278,8 +305,16 @@ export async function chat(config, store, userText, log = console, opts = {}) {
 
   // 2. Adaptive history window: shorter window for tiny/light queries = 2x faster prefill
   const historySliceCount = plan.rank <= 2 ? 8 : 16;
+  // 2b. Knowledge grounding: curated bank + (learned/live) Wikipedia context —
+  // this is what makes the chat brain factually "trained" instead of guessing.
+  let knowledgeBlock = '';
+  let wikiBlock = '';
+  let intent = opts.intent;
+  try { if (!intent) intent = classifyIntent(userText).label; } catch { /* heuristics inside chat still work */ }
+  try { knowledgeBlock = knowledgeContextFor(userText, store); } catch { /* never block chat */ }
+  try { wikiBlock = await wikiContextFor(userText, config, store, log); } catch { /* never block chat */ }
   const messages = [
-    { role: 'system', content: systemPrompt(config, store, { ...opts, userText }) },
+    { role: 'system', content: systemPrompt(config, store, { ...opts, userText, knowledgeBlock, wikiBlock, intent }) },
     ...(store?.data?.history ?? []).slice(-historySliceCount),
     { role: 'user', content: userText },
   ];
@@ -334,6 +369,9 @@ function guestSystemPrompt(config, store, opts = {}) {
     '2. You have ZERO access to the owner\'s computer, files, screen, or private data in this guest chat. Never claim to execute any command or PC action for a guest.',
     '3. If the guest asks you to run any command, control the computer, set a reminder/todo/note, or share private information about the owner, politely refuse and state that all commands and system controls are strictly reserved for the owner.',
     '4. For normal conversation, general knowledge, coding/study help, explanations, brainstorming, or casual chat, reply warmly, accurately, and concisely in the guest\'s language (Hinglish for Hinglish, Hindi for Hindi, English for English). Use WhatsApp-friendly formatting (*bold*, _italic_).',
+    '5. HARD RULE: the words "Namaste" and "Namaskar" are BANNED — never use them in any reply. Never open with a formal greeting; answer straight away.',
+    opts.knowledgeBlock,
+    opts.wikiBlock,
   ].filter(Boolean).join('\n');
 }
 
@@ -345,8 +383,12 @@ function guestSystemPrompt(config, store, opts = {}) {
 export async function guestChat(config, store, senderNumber, userText, log = console, opts = {}) {
   const router = routerFor(config, log);
   const guestHistory = getGuestHistory(store, senderNumber, 8);
+  let knowledgeBlock = '';
+  let wikiBlock = '';
+  try { knowledgeBlock = knowledgeContextFor(userText, store); } catch { /* never block chat */ }
+  try { wikiBlock = await wikiContextFor(userText, config, store, log); } catch { /* never block chat */ }
   const messages = [
-    { role: 'system', content: guestSystemPrompt(config, store, { senderNumber, senderName: opts.senderName, userText }) },
+    { role: 'system', content: guestSystemPrompt(config, store, { senderNumber, senderName: opts.senderName, userText, knowledgeBlock, wikiBlock }) },
     ...guestHistory,
     { role: 'user', content: userText },
   ];
