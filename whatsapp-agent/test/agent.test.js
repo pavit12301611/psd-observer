@@ -24,6 +24,7 @@ import * as actionrecorder from '../src/actionrecorder.js';
 import * as vocab from '../src/vocab.js';
 import * as accuracy from '../src/accuracy.js';
 import * as bilingual from '../src/bilingual.js';
+import * as quality15 from '../src/quality15.js';
 import * as ai from '../src/ai.js';
 import { createModelRouter } from '../src/router.js';
 import { archiveDeadAuthDir, createWhatsApp } from '../src/whatsapp.js';
@@ -1462,6 +1463,118 @@ test('34. Strict Question-Scope Precision ("Jo Pucha Uska Hi Answer") + Deep Hin
   const trainOut = await agent.handle('hinglish ki practice kar aur english bhi perfect kar');
   assert.match(trainOut, /Self-Training Complete! \(Bilingual Mastery Active\)/);
   assert.match(trainOut, /100%/);
+});
+
+test('35. All 15 Next-Gen Quality Features: Multi-Turn Follow-Up, Code Sandbox, DocQA, LiveFact, Format Selector, Self-Healing Macro, Error Watch, Clipboard Bridge, Conditional Workflow, Workspaces, Voice Summary, Guest Urgency/VIP Triage, Brief 2.0, Recall & Doctor Fix', async () => {
+  const { agent, store } = makeAgent();
+
+  // Feature 1: Multi-Turn Follow-Up Context Resolver ("isme 50 add karo", "usme 20% aur add kar", "iska 10% kitna hoga")
+  assert.match(await agent.handle('200 + 50'), /\*250\*/);
+  assert.match(await agent.handle('isme 50 add karo'), /\*300\*/);
+  assert.match(await agent.handle('usme 20% aur add kar'), /\*360\*/);
+  assert.match(await agent.handle('iska 10% kitna hoga'), /\*36\*/);
+  assert.match(await agent.handle('multiply that by 3'), /\*108\*/);
+
+  // Feature 2: Instant Code & Command Sandbox Runner (`/runjs`, `/runpy`, `/sql` + natural Hinglish)
+  const jsOut = await agent.handle('/runjs [1, 2, 3, 4].map(x => x * x).join(",")');
+  assert.match(jsOut, /JAVASCRIPT Sandbox Output/);
+  assert.match(jsOut, /1,4,9,16/);
+
+  const pyOut = await agent.handle('ye python code chala ke output dikha: sum([i*i for i in range(1, 6)])');
+  assert.match(pyOut, /PYTHON Sandbox Output/);
+  assert.match(pyOut, /55/);
+
+  const sqlOut = await agent.handle('/sql SELECT 12 * 15 AS total;');
+  assert.match(sqlOut, /SQL Sandbox Output/);
+  assert.match(sqlOut, /180/);
+
+  // Feature 3: Smart Document & Notes Q&A Brain (`/docqa` + natural language)
+  await agent.handle('/note Invoice Total Amount is Rs 48,500 due on 30 Nov');
+  const docAns = await agent.handle('mere notes me se Invoice Total Amount bata');
+  assert.match(docAns, /Document & Notes Q&A/);
+  assert.match(docAns, /48,500/);
+
+  // Feature 4: Hallucination-Free Live Fact Verifier (`/livefact`)
+  const factOut = await agent.handle('/livefact what is the speed of light');
+  assert.match(factOut, /299,792,458/);
+  assert.match(factOut, /Verified via Offline Deterministic Ground-Truth/);
+
+  // Feature 5: Adaptive Answer Format Selector (`1 word me bata`, `1 line me bata`)
+  const oneWord = await agent.handle('1 word me bata capital of Australia');
+  assert.equal(oneWord, '*Canberra*');
+
+  const oneLine = await agent.handle('1 line me bata TCP aur UDP me kya farak hai');
+  assert.ok(!oneLine.includes('\n'));
+
+  // Feature 6: Self-Healing PC Macro Replayer (`selfHealRecordedStep`)
+  const healed = actionrecorder.selfHealRecordedStep(
+    { type: 'click', target: 'Submit', x: 100, y: 100, args: 'click 100 100' },
+    [{ label: 'Submit Button', x: 420, y: 680 }],
+  );
+  assert.equal(healed.healed, true);
+  assert.deepEqual(healed.to, [420, 680]);
+  assert.equal(healed.step.x, 420);
+  assert.equal(healed.step.y, 680);
+
+  // Feature 7: Live Screen Error Auto-Watcher (`/watch error` + `scanTextForScreenErrors`)
+  const watchErr = await agent.handle('/watch error');
+  assert.match(watchErr, /Live Screen Error Auto-Watcher: ON/);
+  const errScan = quality15.scanTextForScreenErrors('Traceback (most recent call last):\n  File "app.py", line 4\nZeroDivisionError: division by zero');
+  assert.equal(errScan.found, true);
+  assert.match(errScan.alert, /ZeroDivisionError/);
+
+  // Feature 8: Smart Clipboard Bridge (`parseClipboardBridgeIntent`)
+  const clipSetIntent = nlp.parseIntent('pc pe copy kar de: https://github.com/pavit12301611/psd-observer');
+  assert.equal(clipSetIntent?.cmd, 'pc');
+  assert.match(clipSetIntent?.args ?? '', /^clipset https:\/\/github\.com/);
+  const clipGetIntent = nlp.parseIntent('pc pe jo copy hai bhej');
+  assert.equal(clipGetIntent?.cmd, 'pc');
+  assert.equal(clipGetIntent?.args, 'clipboard');
+
+  // Feature 9: Multi-Step Conditional Workflow Engine (`/if`, `"agar battery < 25 ..."`)
+  const condOut = await agent.handle('/if battery < 25 then /ping else /status', { liveMetrics: { battery: 18 } });
+  assert.match(condOut, /battery=18 < 25 → TRUE/);
+  assert.match(condOut, /Pong!/);
+
+  // Feature 10: Instant Workspace Switcher (`/workspace`, `"coding mode chalu kar"`)
+  const wsList = await agent.handle('/workspace');
+  assert.match(wsList, /Coding & Dev Workspace/);
+  const wsStudy = await agent.handle('study mode chalu kar');
+  assert.match(wsStudy, /Deep Study & Exam Prep Workspace Activated/);
+
+  // Feature 11: Voice Note Hinglish-to-Action & Smart Summary (`/voicesummary`)
+  const vSum = await agent.handle('/voicesummary Bhai aaj shaam 6 baje client meeting hai. Uske baad project report submit karni hai urgent.');
+  assert.match(vSum, /Smart Voice\/Text Summary/);
+  assert.match(vSum, /Action Items/);
+
+  // Feature 12: Smart Guest Auto-Triage & VIP Contact Priority (`[🚨 URGENT]` + `[⭐ VIP]`)
+  await agent.handle('/contact add Mom 919888777666');
+  await agent.handle('/guest approval');
+  const urgentGuest = await agent.handleGuest('Beta urgent hospital me call uthao jaldi', {
+    senderNumber: '919888777666',
+    senderName: 'Mom',
+  });
+  assert.equal(urgentGuest.heldForApproval, true);
+  assert.match(urgentGuest.notifyOwnerText, /URGENT \+ VIP CONTACT/);
+
+  // Feature 13: Proactive Daily Briefing 2.0 (`/brief` includes location, pending approvals & goals)
+  await agent.handle('/location set Dehradun');
+  await agent.handle('/persona goal Launch PSD_Ai v4');
+  const brief2 = await agent.handle('/brief');
+  assert.match(brief2, /Dehradun/);
+  assert.match(brief2, /Pending Guest Approvals/);
+  assert.match(brief2, /Launch PSD_Ai v4/);
+
+  // Feature 14: Offline Fuzzy Recall Search Across All Memory (`/recall`, `"maine ... ke baare me kya bataya tha"`)
+  const recallOut = await agent.handle('maine Invoice ke baare me kya bataya tha');
+  assert.match(recallOut, /Instant Memory Recall/);
+  assert.match(recallOut, /48,500/);
+
+  // Feature 15: Zero-Downtime Self-Doctor & Auto-Repair (`/doctor fix`, `"doctor fix karo"`)
+  const docFix = await agent.handle('doctor fix karo');
+  assert.match(docFix, /Zero-Downtime Self-Doctor & Auto-Repair Complete/);
+  assert.match(docFix, /AI Router Cooldowns Cleared/);
+  assert.ok(store.data.turnContext);
 });
 
 

@@ -1667,10 +1667,55 @@ export function saveLastRecordingAsCommand(store, newNameRaw) {
 }
 
 /**
+ * Self-Heal a recorded click step's (x, y) coordinates if the target UI button
+ * moved on screen (using `liveWidgets` from AT-SPI / grounding).
+ */
+export function selfHealRecordedStep(step, liveWidgets = []) {
+  if (!step || !step.target || !Array.isArray(liveWidgets) || !liveWidgets.length) {
+    return { step, healed: false };
+  }
+  const targetNorm = String(step.target).trim().toLowerCase();
+  if (!targetNorm) return { step, healed: false };
+
+  const match = liveWidgets.find((w) => {
+    const label = String(w.label || w.name || w.target || '').trim().toLowerCase();
+    return label && (label === targetNorm || label.includes(targetNorm) || targetNorm.includes(label));
+  });
+  if (!match) return { step, healed: false };
+
+  const newX = Number.isFinite(Number(match.x))
+    ? Math.round(Number(match.x))
+    : Number.isFinite(Number(match.left)) && Number.isFinite(Number(match.width))
+    ? Math.round(Number(match.left) + Number(match.width) / 2)
+    : null;
+  const newY = Number.isFinite(Number(match.y))
+    ? Math.round(Number(match.y))
+    : Number.isFinite(Number(match.top)) && Number.isFinite(Number(match.height))
+    ? Math.round(Number(match.top) + Number(match.height) / 2)
+    : null;
+  if (newX === null || newY === null) return { step, healed: false };
+
+  const moved = step.x != null && step.y != null && (Math.abs(step.x - newX) > 5 || Math.abs(step.y - newY) > 5);
+  const healedStep = {
+    ...step,
+    x: newX,
+    y: newY,
+    args: String(step.args || '').replace(/(-?\d+)\s+(-?\d+)$/, `${newX} ${newY}`),
+  };
+  return {
+    step: healedStep,
+    healed: Boolean(moved || step.x == null),
+    from: [step.x, step.y],
+    to: [newX, newY],
+  };
+}
+
+/**
  * Execute a single recorded micro-action step directly on the desktop (when a
  * graphical session is active) or through the fallback `runCommand(cmd, args)`.
  */
-export async function executeRecordedStep(step, { runCommand } = {}) {
+export async function executeRecordedStep(rawStep, { runCommand, liveWidgets = [] } = {}) {
+  const { step } = selfHealRecordedStep(rawStep, liveWidgets);
   const type = step?.type || step?.actionType || 'command';
   const hasDesktop = pc.sessionInfo(pc.displayEnv()).graphical;
 
