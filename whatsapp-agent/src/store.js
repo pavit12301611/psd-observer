@@ -22,6 +22,9 @@ const EMPTY = () => ({
   lastGuestSender: null, // { number, jid, name, ts } for quick `/reply <text>`
   ownerLocation: null, // owner's current location { enabled, city, region, country, lat, lon, address, source, updatedTs } (src/location.js)
   lastOwnerTask: '',  // owner's most recent actionable message/command (used for "create this as a command /name")
+  actionRecordings: [], // saved live PC action recordings (src/actionrecorder.js)
+  activeActionRecording: null, // currently active live PC action recording session
+  lastActionRecording: null, // most recently completed PC action recording
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
   pending: null,      // destructive action waiting for "haan"/"yes"
@@ -63,6 +66,7 @@ export class Store {
       if (!this.data.guestChats || typeof this.data.guestChats !== 'object' || Array.isArray(this.data.guestChats)) this.data.guestChats = {};
       if (!Array.isArray(this.data.guestAuditLog)) this.data.guestAuditLog = [];
       if (!Array.isArray(this.data.pendingGuestApprovals)) this.data.pendingGuestApprovals = [];
+      if (!Array.isArray(this.data.actionRecordings)) this.data.actionRecordings = [];
     } catch {
       this.data = EMPTY(); // first run, or a corrupt file: start clean rather than crash
     }

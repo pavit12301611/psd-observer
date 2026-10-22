@@ -57,6 +57,13 @@ import {
   formatLearned,
   formatLearnedStep,
 } from './learn.js';
+import {
+  startActionRecording,
+  stopActionRecording,
+  cancelActionRecording,
+  formatActionRecorderStatus,
+  saveLastRecordingAsCommand,
+} from './actionrecorder.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -1181,6 +1188,40 @@ export function createActions({
           return `🗑️ Removed custom command \`/${keyword}\`.`;
         }
         return `⚠️ Custom command \`/${keyword}\` nahi mila.`;
+      },
+    },
+    {
+      name: 'record_pc_actions',
+      level: 'safe',
+      label: 'Record & learn owner PC actions',
+      description: 'Start or stop recording the actions the owner performs on their PC (opening apps, switching windows, clicking UI elements, typing, volume changes) and save them as a reusable `/command` so the agent can repeat them anytime.',
+      params: {
+        action: { type: 'string', description: '"start" | "stop" | "cancel" | "status" | "save_as"', required: true },
+        name: { type: 'string', description: 'Optional command keyword to save the recorded actions under (e.g. "morning", "setup", "work")' },
+      },
+      run: async ({ action = 'status', name = '' }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can record or replay PC actions.');
+        }
+        const act = String(action || 'status').toLowerCase();
+        if (act === 'start' || act === 'record' || act === 'begin') {
+          const res = await startActionRecording(store, config, { name });
+          return res.text;
+        }
+        if (act === 'stop' || act === 'save' || act === 'finish') {
+          const res = await stopActionRecording(store, { name });
+          if (!res.ok) return `⚠️ ${res.reason}`;
+          return res.text;
+        }
+        if (act === 'cancel' || act === 'abort') {
+          return cancelActionRecording(store).text;
+        }
+        if (act === 'save_as' && name) {
+          const res = saveLastRecordingAsCommand(store, name);
+          if (!res.ok) return `⚠️ ${res.reason}`;
+          return res.text;
+        }
+        return formatActionRecorderStatus(store);
       },
     },
   ];

@@ -20,6 +20,7 @@ import * as hands from '../src/hands.js';
 import * as nlp from '../src/nlp.js';
 import * as guests from '../src/guests.js';
 import * as location from '../src/location.js';
+import * as actionrecorder from '../src/actionrecorder.js';
 import { archiveDeadAuthDir, createWhatsApp } from '../src/whatsapp.js';
 
 const OWNER = '919528923866';
@@ -994,6 +995,71 @@ test('Natural-Language Dynamic Command Creation: inline, Hinglish, "create this 
   assert.match(delRes, /\/calc200 deleted/);
   assert.equal(store.getLearned('calc200'), null);
 });
+
+test('Live PC Action Recorder, Learner & Replayer: "mere actions record karo", desktop events, save as command & repeat N times', async () => {
+  const { agent, store, config } = makeAgent();
+
+  // 1. Owner starts recording PC actions in Hinglish
+  const startMsg = await agent.handle('jo main computer me kar raha hoon wo record karo');
+  assert.match(startMsg, /PC Action Recording Started!/);
+  assert.ok(actionrecorder.getActiveRecording(store));
+
+  // 2. Simulate live PC actions performed by the owner on the desktop + WhatsApp commands
+  //    a) Typing keystrokes within 4s coalesces into one `type` event
+  const now = Date.now();
+  actionrecorder.recordDesktopEvent(store, { type: 'type', text: 'git ', field: 'Terminal', ts: now });
+  actionrecorder.recordDesktopEvent(store, { type: 'type', text: 'status', field: 'Terminal', ts: now + 300 });
+  assert.equal(actionrecorder.getActiveRecording(store).events.length, 1);
+  assert.equal(actionrecorder.getActiveRecording(store).events[0].text, 'git status');
+
+  //    b) Now record deterministic offline-runnable steps (todo + note) for end-to-end replay verification
+  store.data.activeActionRecording.events = []; // reset to clean deterministic steps for replay test
+  await agent.handle('/todo add review PR');
+  await agent.handle('/note build passed');
+
+  // Check status while recording
+  const statusMsg = await agent.handle('/watchme status');
+  assert.match(statusMsg, /Live PC Action Recording ON/);
+  assert.match(statusMsg, /2 step\(s\)/);
+
+  // 3. Owner stops recording in Hinglish and names it `/pr_check`
+  const stopMsg = await agent.handle('recording band karo aur /pr_check command bana do');
+  assert.match(stopMsg, /PC Actions Learned & Saved as `\/pr_check`!/);
+  assert.equal(actionrecorder.getActiveRecording(store), null);
+  assert.ok(store.getLearned('pr_check'));
+
+  // 4. Owner asks to repeat their actions ("mere actions repeat karo")
+  const repeat1 = await agent.handle('mere actions repeat karo');
+  assert.match(repeat1, /Repeated PC Actions: `\/pr_check`/);
+  assert.match(repeat1, /Added #2: review PR/);
+  assert.match(repeat1, /Saved note #2/);
+
+  // 5. Owner asks to repeat `/pr_check` 2 times ("repeat /pr_check 2 times")
+  const repeat2x = await agent.handle('repeat /pr_check 2 times');
+  assert.match(repeat2x, /× 2 times/);
+  assert.match(repeat2x, /Pass 1\/2:/);
+  assert.match(repeat2x, /Pass 2\/2:/);
+  assert.equal(store.data.todos.length, 4);
+
+  // 6. Owner can also invoke `/pr_check` directly as a learned slash command
+  const directSlash = await agent.handle('/pr_check');
+  assert.match(directSlash, /\/pr_check \(2 steps\)/);
+  assert.equal(store.data.todos.length, 5);
+
+  // 7. Non-owners are strictly blocked from recording, stopping, or repeating PC actions
+  for (const guestProbe of [
+    '/watchme start',
+    'mere actions record karo',
+    'jo main computer me kar raha hoon wo record karo',
+    'stop recording',
+    'mere actions repeat karo',
+    'repeat /pr_check 2 times',
+  ]) {
+    const det = guests.detectGuestCommandAttempt(guestProbe, store, config);
+    assert.equal(det.blocked, true, `Expected guest action-recorder attempt to be blocked: "${guestProbe}"`);
+  }
+});
+
 
 
 

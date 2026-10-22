@@ -79,7 +79,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
     'remember_fact', 'update_owner_profile', 'send_whatsapp', 'manage_contacts',
     'my_location', 'nearby_places',
-    'create_custom_command', 'list_custom_commands', 'delete_custom_command',
+    'create_custom_command', 'list_custom_commands', 'delete_custom_command', 'record_pc_actions',
     // Agent-Reach × Agent-S deterministic tools — always available so the AI
     // never opens a browser to guess clicks when a structured channel exists.
     'web_search', 'read_url', 'youtube_info', 'github_lookup', 'inspect_ui',

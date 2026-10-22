@@ -26,7 +26,7 @@ const RESERVED = new Set([
   'learn','teach','alias','unlearn','undefine','forgetword',
   'msg','dm','sendto','whatsapp','reply','broadcast','contact','contacts','guest','guests','guestmode',
   'pending','approve','reject','deny','allow','block','unblock','location','loc','whereami','mylocation','near','nearby',
-  'cmd','command','createcmd','delcmd',
+  'cmd','command','createcmd','delcmd','watchme','recordactions','replayactions',
 ]);
 
 export function normalizeKeyword(raw) {

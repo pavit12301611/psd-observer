@@ -90,6 +90,17 @@ import {
   searchNearbyPlaces,
   formatOwnerLocationCard,
 } from './location.js';
+import {
+  getActiveRecording,
+  startActionRecording,
+  stopActionRecording,
+  cancelActionRecording,
+  recordDesktopEvent,
+  formatActionRecorderStatus,
+  saveLastRecordingAsCommand,
+  replayRecordedActions,
+  parseActionRecorderIntent,
+} from './actionrecorder.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -1444,6 +1455,79 @@ export function createAgent({
     return `📚 *Taught* (${all.length})\n\n${all.map((e) => `• /${e.keyword} — ${e.commands.length} steps`).join('\n')}`;
   }
 
+  // ── Live PC Action Recorder, Learner & Replayer (`/watchme`, `/recordactions`) ──
+  async function executeActionRecorderIntent(intentObj, ctx = {}) {
+    if (!intentObj) return undefined;
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/watchme' });
+    }
+    if (intentObj.action === 'start') {
+      const res = await startActionRecording(store, config, { name: intentObj.name || '' });
+      return res.text;
+    }
+    if (intentObj.action === 'stop') {
+      const res = await stopActionRecording(store, { name: intentObj.name || '' });
+      return res.ok ? res.text : res.reason;
+    }
+    if (intentObj.action === 'cancel') {
+      return cancelActionRecording(store).text;
+    }
+    if (intentObj.action === 'save_as') {
+      const res = saveLastRecordingAsCommand(store, intentObj.name || '');
+      return res.ok ? res.text : `⚠️ ${res.reason}`;
+    }
+    if (intentObj.action === 'replay') {
+      const res = await replayRecordedActions(store, {
+        name: intentObj.name || '',
+        times: intentObj.times || 1,
+        delayMs: 0,
+        runCommand: (cmd, args) => handleCommand(cmd, args, { ...ctx, bypassSaved: true }),
+      });
+      return res.image || res.audio || res.document || res.video ? res : res.text;
+    }
+    return formatActionRecorderStatus(store);
+  }
+
+  async function watchMeCommand(args = '', ctx = {}) {
+    if (ctx?.isOwner === false || ctx?.guest) {
+      return buildBlockedCommandReply(config, store, { command: '/watchme' });
+    }
+    const raw = String(args ?? '').trim();
+    const low = raw.toLowerCase();
+
+    if (!raw || /^(?:status|list|ls|info)$/i.test(low)) {
+      return formatActionRecorderStatus(store);
+    }
+    const startMatch = raw.match(/^(?:start|record|shuru|begin)(?:\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27}))?$/i);
+    if (startMatch) {
+      return executeActionRecorderIntent({ action: 'start', name: startMatch[1] || '' }, ctx);
+    }
+    const stopMatch = raw.match(/^(?:stop|save|done|finish|band|khatam)(?:\s+(?:as\s+)?\/?([a-zA-Z][a-zA-Z0-9_-]{1,27}))?$/i);
+    if (stopMatch) {
+      return executeActionRecorderIntent({ action: 'stop', name: stopMatch[1] || '' }, ctx);
+    }
+    if (/^(?:cancel|abort|chhodo|discard)$/i.test(low)) {
+      return executeActionRecorderIntent({ action: 'cancel' }, ctx);
+    }
+    const replayMatch = raw.match(/^(?:replay|repeat|run)(?:\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27}))?(?:\s+(\d+)\s*(?:times?|baar)?)?$/i);
+    if (replayMatch) {
+      return executeActionRecorderIntent({
+        action: 'replay',
+        name: replayMatch[1] || '',
+        times: Number(replayMatch[2] || 1),
+      }, ctx);
+    }
+    const saveAsMatch = raw.match(/^(?:name|rename|saveas|save_as)\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i);
+    if (saveAsMatch) {
+      return executeActionRecorderIntent({ action: 'save_as', name: saveAsMatch[1] }, ctx);
+    }
+    // Shortcut `/watchme morning` -> start recording as `morning`
+    if (/^\/?[a-zA-Z][a-zA-Z0-9_-]{1,27}$/.test(raw)) {
+      return executeActionRecorderIntent({ action: 'start', name: raw }, ctx);
+    }
+    return formatActionRecorderStatus(store);
+  }
+
   async function briefCommand(args) {
     const raw = String(args ?? '').trim();
     if (!raw) return brief.buildBrief({ store, config });
@@ -2271,6 +2355,8 @@ export function createAgent({
       case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
       case 'watch': return watchCommand(args);
+      case 'watchme': case 'recordactions': return await watchMeCommand(args, ctx);
+      case 'replayactions': return await watchMeCommand(`replay ${args}`, ctx);
       case 'teach': return teachCommand(args);
       case 'brief': return await briefCommand(args);
       case 'resume': return await resumeCommand();
@@ -2942,8 +3028,9 @@ export function createAgent({
           || (typeof res === 'string' && /^(⚠️|🔒|⏳|🤖 I don't know)/.test(res));
         if (!failed) {
           macro.recordStep(store, slashName, cmdMatch[2].trim());
-          if (!['learn', 'unlearn', 'cmd', 'command', 'createcmd', 'delcmd', 'stop', 'cancel', 'yes', 'no', 'pending', 'approve', 'reject'].includes(slashName)) {
+          if (!['learn', 'unlearn', 'cmd', 'command', 'createcmd', 'delcmd', 'watchme', 'recordactions', 'replayactions', 'teach', 'stop', 'cancel', 'yes', 'no', 'pending', 'approve', 'reject'].includes(slashName)) {
             store.setLastOwnerTask?.(working);
+            recordDesktopEvent(store, { type: 'command', cmd: slashName, args: cmdMatch[2].trim() });
           }
         }
         return res;
@@ -2976,6 +3063,15 @@ export function createAgent({
 
       // Continuously learn owner's behavior, language vibe, mood, preferences, goals & lessons from every message
       observeOwnerTurn(store, working);
+
+      // Live PC Action Recorder, Learner & Replayer ("mere actions record karo", "stop recording", "mere actions repeat karo")
+      const actionRecIntent = parseActionRecorderIntent(working, {
+        isRecording: Boolean(getActiveRecording(store)),
+      });
+      if (actionRecIntent) {
+        const recReply = await executeActionRecorderIntent(actionRecIntent, effCtx);
+        if (recReply !== undefined) return recReply;
+      }
 
       // Natural-Language Dynamic Command Creation ("create a command /study that ...", "create this as a command /work")
       const createCmdIntent = learn.parseCreateCommandIntent(working, store.getLastOwnerTask?.() || '');
@@ -3022,7 +3118,11 @@ export function createAgent({
       const parsed = parseIntent(working);
       if (parsed) {
         if (parsed.reply) return parsed.reply;
-        return await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
+        const nlpRes = await handleCommand(parsed.cmd, parsed.args ?? '', effCtx);
+        if (!['watchme', 'recordactions', 'replayactions', 'teach', 'learn', 'unlearn', 'cmd', 'command', 'stop', 'cancel'].includes(parsed.cmd)) {
+          recordDesktopEvent(store, { type: 'command', cmd: parsed.cmd, args: parsed.args ?? '' });
+        }
+        return nlpRes;
       }
 
       // Fast offline multi-command chaining ("todo add milk aur note: wifi 1234", "volume 40 karo aur screenshot bhej do")

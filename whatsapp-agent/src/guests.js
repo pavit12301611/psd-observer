@@ -25,6 +25,7 @@ import * as mem from './memory.js';
 import { isStopCommand } from './cancel.js';
 import * as tools from './tools.js';
 import { parseCreateCommandIntent } from './learn.js';
+import { parseActionRecorderIntent } from './actionrecorder.js';
 
 const MAX_GUEST_HISTORY = 10;
 const MAX_AUDIT_LOG = 100;
@@ -615,6 +616,9 @@ function checkSingleSegment(segment, store, config = {}) {
   }
   if (parseCreateCommandIntent(raw)) {
     return { blocked: true, category: 'owner_intent', command: '/learn', reason: 'Creating or deleting custom commands is owner-only' };
+  }
+  if (parseActionRecorderIntent(raw, { isRecording: true })) {
+    return { blocked: true, category: 'owner_intent', command: '/watchme', reason: 'Recording or replaying PC actions is owner-only' };
   }
 
   // 7. Extended natural-language command patterns (polite/longer sentences asking to control PC/files/system/owner data)
