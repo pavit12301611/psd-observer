@@ -18,8 +18,109 @@ import { getOwnerAddress, getAgentName, formatMemoryForPrompt } from './memory.j
 import { formatPersonaForPrompt, observeOwnerTurn, reflectWithAI } from './persona.js';
 import { getGuestHistory, recordGuestChatTurn } from './guests.js';
 import { formatLocationForOwnerPrompt } from './location.js';
+import { buildVocabPromptDirective } from './vocab.js';
 
 const TIMEOUT_MS = 60_000;
+const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
+const MAX_CACHE_ENTRIES = 150;
+
+// Per-config semantic response cache so repeated / identical questions return in <1ms
+const AI_CACHES = new WeakMap();
+
+function getCacheState(config) {
+  if (!config || typeof config !== 'object') return null;
+  let state = AI_CACHES.get(config);
+  if (!state) {
+    state = { map: new Map(), hits: 0, misses: 0 };
+    AI_CACHES.set(config, state);
+  }
+  return state;
+}
+
+function makeCacheKey(text, voice = false) {
+  const norm = String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!norm || norm.length < 2 || norm.length > 320) return null;
+  // Do not cache context-dependent follow-ups ("aur batao", "what about that", "iska matlab")
+  if (/^(?:and|aur|also|what\s+about|how\s+about|it|that|this|ye|yeh|iska|uska|uske|phir|fir|more|explain\s+more)\b/i.test(norm)) {
+    return null;
+  }
+  return `${voice ? 'v' : 't'}:${norm}`;
+}
+
+export function clearAiCache(config) {
+  const state = getCacheState(config);
+  if (state) {
+    state.map.clear();
+    state.hits = 0;
+    state.misses = 0;
+  }
+}
+
+export function aiCacheStats(config) {
+  const state = getCacheState(config);
+  if (!state) return { size: 0, hits: 0, misses: 0 };
+  return { size: state.map.size, hits: state.hits, misses: state.misses };
+}
+
+/**
+ * Race the primary candidate against the backup candidate after a short
+ * `hedgeDelayMs` if the primary hasn't responded yet. Whichever resolves
+ * first wins!
+ */
+export async function raceModels(candidates, invokeModel, { hedgeDelayMs = 2200 } = {}) {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+  if (candidates.length === 1 || hedgeDelayMs <= 0) {
+    const m = candidates[0];
+    const res = await invokeModel(m);
+    return { model: m, result: res };
+  }
+  const [primary, secondary] = candidates;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let errors = 0;
+    let firstErr = null;
+    let timer = null;
+
+    const finishOk = (winner) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(winner);
+    };
+    const finishErr = (err) => {
+      errors += 1;
+      if (!firstErr) firstErr = err;
+      if (!settled && errors >= 2) {
+        settled = true;
+        if (timer) clearTimeout(timer);
+        reject(firstErr);
+      }
+    };
+
+    invokeModel(primary)
+      .then((res) => finishOk({ model: primary, result: res }))
+      .catch((err) => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+          invokeModel(secondary)
+            .then((res) => finishOk({ model: secondary, result: res }))
+            .catch(finishErr);
+        } else {
+          finishErr(err);
+        }
+      });
+
+    timer = setTimeout(() => {
+      timer = null;
+      if (settled) return;
+      invokeModel(secondary)
+        .then((res) => finishOk({ model: secondary, result: res }))
+        .catch(finishErr);
+    }, hedgeDelayMs);
+    timer.unref?.();
+  });
+}
 
 async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal = null) {
   const timeout = AbortSignal.timeout(Math.max(5_000, timeoutMs));
@@ -50,16 +151,18 @@ function systemPrompt(config, store, opts = {}) {
   const persona = config.jarvisPersona === false ? [] : [
     `Your name is ${agentName} — the owner's self-evolving Agentic AI, strategist, and closest companion who truly understands them (with the loyalty and sharp wit of JARVIS, adapted to their personal vibe). Address the owner as "${address}". When the owner speaks Hinglish or Hindi, match their natural warmth and style ("Bilkul ${address}", "Ho jayega ${address}"). Never say you are an AI language model; you are ${agentName}, continuously learning from every chat with the owner.`,
   ];
+  const vocabDirective = buildVocabPromptDirective(opts.userText || '');
   return [
     `You are ${agentName}, the owner's personal Agentic AI & companion, running for free on their own computer as part of Observer.`,
     ...persona,
     ...voiceLine,
     personaBlock,
+    vocabDirective,
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
     locationLine,
     'Style: WhatsApp-friendly. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". Connect the dots with what you know about the owner\'s goals, preferences, location, and past conversations.',
-    'You also have built-in tools the owner can trigger with slash commands: /location /near /weather /remind /todo /note /persona /train /msg /reply /pending /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
+    'You also have built-in tools the owner can trigger with slash commands: /vocab /location /near /weather /remind /todo /note /persona /train /msg /reply /pending /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
     memoryBlock,
     openTodos ? `Open to-dos:\n${openTodos}` : '',
   ].filter(Boolean).join('\n\n');
@@ -85,6 +188,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
       model: model.model,
       messages,
       stream: false,
+      keep_alive: '30m',
     }, {}, timeoutMs);
     const text = data.message?.content?.trim();
     if (!text) throw new Error('empty Ollama response');
@@ -129,24 +233,47 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
 }
 
 /**
- * Chat with history. Returns { text, provider, model, tier } or null when no
- * brain is reachable.
+ * Chat with history. Returns { text, provider, model, tier, cached?, ms } or null
+ * when no brain is reachable.
  */
 export async function chat(config, store, userText, log = console, opts = {}) {
   const router = routerFor(config, log);
+  const plan = router.plan({ text: userText, needsTools: false });
+  if (!plan.candidates.length) return null;
+
+  // 1. Check ultra-fast per-config semantic response cache (< 1ms)
+  const useCache = config?.aiCache !== false && !opts.noCache;
+  const cacheState = useCache ? getCacheState(config) : null;
+  const cacheKey = cacheState ? makeCacheKey(userText, Boolean(opts.voice)) : null;
+  const cacheTtlMs = Math.max(5_000, Number(config?.aiCacheTtlMs ?? DEFAULT_CACHE_TTL_MS) || DEFAULT_CACHE_TTL_MS);
+
+  if (cacheState && cacheKey) {
+    const hit = cacheState.map.get(cacheKey);
+    if (hit && (Date.now() - hit.ts) <= cacheTtlMs) {
+      cacheState.hits += 1;
+      store?.pushHistory?.('user', userText);
+      store?.pushHistory?.('assistant', hit.result.text);
+      return { ...hit.result, tier: plan.tier, cached: true, ms: 0 };
+    }
+    if (hit) cacheState.map.delete(cacheKey);
+    cacheState.misses += 1;
+  }
+
+  // 2. Adaptive history window: shorter window for tiny/light queries = 2x faster prefill
+  const historySliceCount = plan.rank <= 2 ? 8 : 16;
   const messages = [
     { role: 'system', content: systemPrompt(config, store, { ...opts, userText }) },
-    ...(store?.data?.history ?? []).slice(-16),
+    ...(store?.data?.history ?? []).slice(-historySliceCount),
     { role: 'user', content: userText },
   ];
-  const plan = router.plan({ text: userText, needsTools: false });
   const started = Date.now();
 
   for (const model of plan.candidates) {
     const attemptStart = Date.now();
     try {
       const result = await callModel(model, config, messages, config.aiTimeoutMs);
-      router.record(model.id, { ok: true, ms: Date.now() - attemptStart, tier: plan.rank });
+      const elapsed = Date.now() - attemptStart;
+      router.record(model.id, { ok: true, ms: elapsed, tier: plan.rank });
       router.noteDecision({ text: userText, tier: plan.tier, model: model.id, reason: plan.complexity.reasons.join(', ') });
       store?.pushHistory?.('user', userText);
       store?.pushHistory?.('assistant', result.text);
@@ -154,7 +281,14 @@ export async function chat(config, store, userText, log = console, opts = {}) {
       if (profile && profile.totalTurns - (profile.lastReflectedTurn || 0) >= 8 && !opts.skipBackgroundReflect) {
         reflectOwnerProfile(config, store, log).catch(() => {});
       }
-      return { ...result, tier: plan.tier, ms: Date.now() - started };
+      if (cacheState && cacheKey) {
+        cacheState.map.set(cacheKey, { ts: Date.now(), result });
+        if (cacheState.map.size > MAX_CACHE_ENTRIES) {
+          const oldestKey = cacheState.map.keys().next().value;
+          if (oldestKey) cacheState.map.delete(oldestKey);
+        }
+      }
+      return { ...result, tier: plan.tier, cached: false, ms: Date.now() - started };
     } catch (err) {
       router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err.message });
       log.warn?.(`[ai] ${model.label} failed: ${err.message}`);

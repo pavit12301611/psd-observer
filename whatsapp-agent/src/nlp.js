@@ -13,14 +13,15 @@
 // or null. AI tool-calling (agentloop.js) handles everything beyond this list.
 
 import { extractFact, parseRuleStatement, unwrapImmediateOverride } from './memory.js';
+import { normalizeVocabText, parseVocabIntent } from './vocab.js';
 
 /** Short questions that only *look* like commands ("open source kya hai?"). */
 const QUESTION_WORDS = /\b(kya|kaise|kyun|kyu|kab|kahan|kaun|kitna|kitni|what|who|why|how|when|where|which|explain|samjhao|matlab|meaning)\b/i;
 
 const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 const stripPoliteness = (s) => clean(s)
-  .replace(/^(?:please|pls|plz|bhai|bro|yaar|yr|suno|hey|ok)\b[, ]*/i, '')
-  .replace(/\s+(?:please|pls|plz|bhai|bro|yaar|yr)$/i, '')
+  .replace(/^(?:please|pls|plz|bhai|bro|yaar|yr|suno|hey|ok|arre|arey|oye|boss|sir)\b[, ]*/i, '')
+  .replace(/\s+(?:please|pls|plz|bhai|bro|yaar|yr|boss|sir)$/i, '')
   .trim();
 
 const asCmd = (cmd, args = '') => ({ cmd, args });
@@ -39,9 +40,21 @@ export function parseIntent(input) {
     return asCmd('remember', original);
   }
 
+  // ── Vocabulary, Word-Power, Synonyms, Definitions, Rewrite & Translation ──
+  const vocabIntent = parseVocabIntent(original);
+  if (vocabIntent) {
+    if (vocabIntent.mode === 'wod') return asCmd('vocab', 'daily');
+    if (vocabIntent.mode === 'synonyms') return asCmd('vocab', `synonyms ${vocabIntent.word}`);
+    if (vocabIntent.mode === 'antonyms') return asCmd('vocab', `antonyms ${vocabIntent.word}`);
+    if (vocabIntent.mode === 'define') return asCmd('vocab', vocabIntent.word);
+    if (vocabIntent.mode === 'rewrite') return asCmd('vocab', `rewrite ${vocabIntent.text}`);
+    if (vocabIntent.mode === 'translate') return asCmd('vocab', `translate ${vocabIntent.targetLang} | ${vocabIntent.text}`);
+  }
+
   // ── Immediate overrides ("firefox nahi chrome kholo", "is baar chrome kholo") ──
   const unwrapped = unwrapImmediateOverride(original);
-  const text = stripPoliteness(unwrapped.text);
+  const rawStripped = stripPoliteness(unwrapped.text);
+  const text = normalizeVocabText(rawStripped);
   const low = text.toLowerCase();
   if (!text) return null;
   let m;

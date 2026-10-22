@@ -37,12 +37,15 @@ const ACTION_VERBS = [
   'open', 'close', 'launch', 'kill', 'run', 'execute', 'install', 'download', 'upload',
   'save', 'write', 'create', 'make', 'delete', 'remove', 'move', 'copy', 'rename', 'zip',
   'unzip', 'extract', 'send', 'share', 'search', 'find', 'scan', 'record', 'capture',
-  'screenshot', 'type', 'click', 'tap', 'press', 'play', 'pause', 'mute', 'volume',
-  'brightness', 'wifi', 'bluetooth', 'restart', 'reboot', 'shutdown', 'lock', 'restart',
+  'screenshot', 'type', 'click', 'tap', 'press', 'play', 'pause', 'mute', 'unmute', 'volume',
+  'brightness', 'wifi', 'bluetooth', 'restart', 'reboot', 'shutdown', 'lock',
   'schedule', 'remind', 'translate', 'summarise', 'summarize', 'email', 'backup',
-  // Hinglish
-  'kholo', 'khol', 'band', 'bhej', 'bhejo', 'banao', 'bana', 'likho', 'likh', 'dhundo',
-  'dhoondo', 'hata', 'hatao', 'chalao', 'chalu', 'bandh', 'kaato', 'lagao', 'karo',
+  'fire', 'spin', 'crank', 'dim', 'brighten', 'elevate', 'rephrase',
+  // Hinglish + Slang + Shorthand
+  'kholo', 'khol', 'kholdo', 'band', 'bnd', 'bhej', 'bhejo', 'bhj', 'bhjo', 'bhejdo',
+  'banao', 'bana', 'likho', 'likh', 'dhundo', 'dhoondo', 'dhund', 'hata', 'hatao', 'htao',
+  'chalao', 'chlao', 'chalu', 'chlu', 'bandh', 'kaato', 'lagao', 'karo', 'kro', 'krdo', 'kardo',
+  'dlt', 'dlte', 'rcrd', 'btao', 'dikhado',
 ];
 
 // Words that mean the answer has to be reasoned, not just looked up.
@@ -362,7 +365,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
 
   const stat = (id) => {
     if (!health.has(id)) {
-      health.set(id, { failures: 0, cooldownUntil: 0, lastError: '', calls: 0, ok: 0, fail: 0, ms: 0, lastUsed: 0, lastOk: null });
+      health.set(id, { failures: 0, cooldownUntil: 0, lastError: '', calls: 0, ok: 0, fail: 0, ms: 0, emaMs: null, lastUsed: 0, lastOk: null });
     }
     return health.get(id);
   };
@@ -439,12 +442,21 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       return m.local ? -1 : 0; // default: local first when it can do the job
     };
 
+    const emaLatencyDiff = (a, b) => {
+      const ha = health.get(a.id);
+      const hb = health.get(b.id);
+      if (ha?.emaMs != null && hb?.emaMs != null && Math.abs(ha.emaMs - hb.emaMs) >= 150) {
+        return ha.emaMs - hb.emaMs;
+      }
+      return 0;
+    };
+
     const sortIdeal = (a, b) => {
       if (rank >= 4) {
         // Heavy work: the best brain wins, wherever it runs.
         if (a.quality !== b.quality) return b.quality - a.quality;
         if (pref(a) !== pref(b)) return pref(a) - pref(b);
-        return b.speed - a.speed;
+        return emaLatencyDiff(a, b) || (b.speed - a.speed);
       }
       if (rank === 3) {
         // Standard work: needs a competent model; local only if comparable.
@@ -453,12 +465,12 @@ export function createModelRouter({ config = {}, log = console } = {}) {
         if (okA !== okB) return okB - okA;
         if (pref(a) !== pref(b)) return pref(a) - pref(b);
         if (a.cost !== b.cost) return a.cost - b.cost;
-        return b.quality - a.quality || b.speed - a.speed;
+        return b.quality - a.quality || emaLatencyDiff(a, b) || (b.speed - a.speed);
       }
       // Tiny/light: fastest + free + local. That is the whole point.
       if (pref(a) !== pref(b)) return pref(a) - pref(b);
       if (a.cost !== b.cost) return a.cost - b.cost;
-      return b.speed - a.speed;
+      return emaLatencyDiff(a, b) || (b.speed - a.speed);
     };
 
     const sortFor = (list, direction) => {
@@ -528,6 +540,10 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       entry.failures = 0;
       entry.cooldownUntil = 0;
       entry.lastError = '';
+      const dur = Math.max(0, Number(ms) || 0);
+      if (dur > 0) {
+        entry.emaMs = entry.emaMs == null ? dur : Math.round(entry.emaMs * 0.7 + dur * 0.3);
+      }
     } else {
       entry.fail += 1;
       entry.failures += 1;

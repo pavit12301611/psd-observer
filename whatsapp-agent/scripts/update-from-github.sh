@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -z "${BRANCH:-}" ] && [ -f "$HERE/../.observer-branch" ]; then
   BRANCH="$(tr -d '[:space:]' < "$HERE/../.observer-branch" 2>/dev/null || echo "")"
 fi
-BRANCH="${BRANCH:-arena/c3353b03-psd-observer}"
+BRANCH="${BRANCH:-arena/d279b248-psd-observer}"
 
 # old flag compatibility: `--fresh <dir>` meant "install from scratch"
 ARGS=(update)

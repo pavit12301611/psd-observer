@@ -198,6 +198,14 @@ const DEVANAGARI_WORDS = {
   'पीएसडी': 'PSD', 'एआई': 'Ai', 'तुम्हारा': 'tumhara', 'तेरा': 'tera', 'आपका': 'aapka', 'तुम': 'tum', 'आप': 'aap',
   'एक': 'ek', 'दस': 'das', 'बीस': 'bees', 'तीस': 'tees', 'चालीस': 'chalis', 'पचास': 'pachas',
   'साठ': 'saath', 'सत्तर': 'sattar', 'अस्सी': 'assi', 'नब्बे': 'nabbe', 'सौ': 'sau',
+  'ब्राउज़र': 'browser', 'टर्मिनल': 'terminal', 'कोड': 'code', 'स्पॉटिफाई': 'spotify',
+  'डिस्कॉर्ड': 'discord', 'टेलीग्राम': 'telegram', 'स्लैक': 'slack', 'ब्राइटनेस': 'brightness',
+  'रोशनी': 'brightness', 'चमक': 'brightness', 'लोकेशन': 'location', 'जगह': 'jagah',
+  'नोट': 'note', 'रिमाइंडर': 'reminder', 'टूडू': 'todo', 'कमांड': 'command',
+  'बनाओ': 'banao', 'रिकॉर्डिंग': 'recording', 'रिपीट': 'repeat', 'दोबारा': 'dobara',
+  'स्पीड': 'speed', 'तेज़': 'tez', 'तेज': 'tez', 'फास्ट': 'fast', 'स्लो': 'slow',
+  'म्यूट': 'mute', 'चुप': 'chup', 'शांत': 'shant', 'मतलब': 'matlab', 'अर्थ': 'arth',
+  'शब्द': 'word', 'वोकैब': 'vocab', 'ट्रांसलेट': 'translate', 'अनुवाद': 'translate',
 };
 const DEVA_DIGITS = { '०': '0', '१': '1', '२': '2', '३': '3', '४': '4', '५': '5', '६': '6', '७': '7', '८': '8', '९': '9' };
 

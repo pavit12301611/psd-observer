@@ -102,6 +102,13 @@ import {
   replayRecordedActions,
   parseActionRecorderIntent,
 } from './actionrecorder.js';
+import {
+  lookupWordPower,
+  formatVocabCard,
+  getWordOfTheDay,
+  fuzzyMatchSlashCommand,
+  normalizeVocabText,
+} from './vocab.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -2454,6 +2461,54 @@ export function createAgent({
       }
       case 'wiki': return args ? tools.wiki(args) : '📚 Usage: /wiki <topic>';
       case 'define': return args ? tools.define(args) : '🔤 Usage: /define <word>';
+      case 'vocab': case 'word': case 'synonym': case 'synonyms': case 'antonym': case 'antonyms': case 'meaning': {
+        const rawArg = String(args || '').trim();
+        if (!rawArg || /^(?:daily|wod|boost|word\s+of\s+the\s+day)$/i.test(rawArg)) {
+          return getWordOfTheDay();
+        }
+        const rwMatch = rawArg.match(/^(?:rewrite|rephrase|elevate)\s+([\s\S]+)$/i);
+        if (rwMatch) {
+          const textToElevate = rwMatch[1].trim();
+          const done = await ai.complete(
+            config,
+            `Rewrite the following text with sharp, articulate, high-impact vocabulary (preserving its exact meaning, concise for WhatsApp). Also list 2 key vocabulary words used with their Hindi/Hinglish meaning:\n\n${textToElevate}`,
+            log,
+          );
+          return done ? `✨ *Elevated Vocabulary*\n\n${done.text}` : `✨ *Normalized*: ${normalizeVocabText(textToElevate)}`;
+        }
+        const trMatch = rawArg.match(/^translate\s+(english|hindi|hinglish)\s*\|\s*([\s\S]+)$/i);
+        if (trMatch) {
+          const [, targetLang, bodyText] = trMatch;
+          const done = await ai.complete(
+            config,
+            `Translate the following text into natural, fluent, high-vocabulary ${targetLang}. Reply with only the translation:\n\n${bodyText}`,
+            log,
+          );
+          return done ? `🌐 *${targetLang} Translation*\n\n${done.text}` : `🌐 No AI brain reachable right now for full translation. Normalized text:\n${normalizeVocabText(bodyText)}`;
+        }
+        const cleanWord = rawArg.replace(/^(?:synonyms?|antonyms?|define|meaning)\s+/i, '').trim();
+        const entry = await lookupWordPower(cleanWord);
+        if (entry) return formatVocabCard(entry);
+        const aiDef = await ai.complete(
+          config,
+          `Explain the word or phrase "${cleanWord}" concisely for WhatsApp with:\n• English meaning\n• Hindi & Hinglish meaning\n• 4 Synonyms\n• 2 Antonyms\n• 1 short example sentence`,
+          log,
+        );
+        if (aiDef?.text) return `📖 *${cleanWord}*\n\n${aiDef.text}`;
+        return tools.define(cleanWord);
+      }
+      case 'translate': {
+        if (!args) return '🌐 Usage: /translate <hindi|english|hinglish> | <text>';
+        const m = String(args).match(/^(english|hindi|hinglish)\s*(?:\||:)\s*([\s\S]+)$/i);
+        const targetLang = m ? m[1] : 'English';
+        const bodyText = m ? m[2] : args;
+        const done = await ai.complete(
+          config,
+          `Translate the following text into natural, fluent ${targetLang}. Reply with only the translation:\n\n${bodyText}`,
+          log,
+        );
+        return done ? `🌐 *${targetLang}*\n\n${done.text}` : `🌐 No AI brain reachable right now (see /model).`;
+      }
       case 'news': return tools.news(args || '');
       case 'calc': {
         if (!args) return '🧮 Usage: /calc 45*12 + sqrt(81)';
@@ -2626,6 +2681,13 @@ export function createAgent({
       default: {
         const learnedRes = await runLearned(cmd, ctx, args);
         if (learnedRes != null) return learnedRes;
+        if (!ctx?._fuzzyTried) {
+          const learnedNames = (store?.data?.learned ?? []).map((l) => l.keyword);
+          const fuzzy = fuzzyMatchSlashCommand(cmd, learnedNames);
+          if (fuzzy && fuzzy !== cmd) {
+            return handleCommand(fuzzy, args, { ...ctx, _fuzzyTried: true });
+          }
+        }
         return `🤖 I don't know /${cmd} yet.\n\n${HELP.split('\n').slice(0, 6).join('\n')}\n…full list: /help`;
       }
     }
