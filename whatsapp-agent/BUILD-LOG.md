@@ -1,5 +1,18 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.2.2 — Self-Evolving Agentic AI & Behavioral Learning Engine (`src/persona.js`)
+
+User ki maang: *"bhai ab na esa kar ki ai na meri chats se train ho ki mera behaviour kaisa hai aur woh aur bhi jyada better banata jaaaye iska main kaam na pc control nhi agentic ai banna hai with the best person who understand me"*.
+1. **`src/persona.js` (Continuous Behavioral Learning & Long-Term Episodic Memory)**:
+   - **Har Chat se Real-Time Learning (`observeOwnerTurn`)**: Har message (`< 2ms`, zero network) par owner ka communication fingerprint (`hinglish` / `english` / `hindi_deva`, `"bhai"` / `"bro"` / `"yaar"` vibe, message length, `concise` vs `detailed` verbosity), live mood (`stressed`, `tired`, `excited`, `urgent`, `brainstorming`, `curious`), implicit preferences (*"mujhe X pasand hai"*), dislikes (*"mujhe X pasand nahi"*), active goals/projects (*"main X bana raha hoon"*, *"mera goal X hai"*), aur behavioral lessons (*"short me bata"*, *"point pe aa"*) automatically `store.data.profile` me save hote hain.
+   - **Long-Term Episodic Memory (`recordEpisode`, `recallRelevantEpisodes`)**: 12-turn sliding chat window ke baad bhi important baatein keyword-indexed episodes me save rehti hain aur har naye sawal par relevant past episodes prompt me recall hote hain.
+   - **Retroactive History Training + Background AI Reflection (`trainFromHistory`, `reflectWithAI`)**: Startup par aur `/train` par purani chats, notes, todos aur facts scan karke profile train hota hai, aur har 8 turns par free AI brain background me deep owner portrait (`aiSummary`) synthesize karta hai.
+2. **Agentic AI First (`src/ai.js`, `src/agentloop.js`, `src/actions.js`, `src/commands.js`, `src/nlp.js`)**:
+   - `PSD_Ai` ka core prompt ab use **Autonomous Agentic AI, thinking partner, strategist & closest companion** banata hai jo PC/internet tools ko sirf apne haath-pair ki tarah use karta hai.
+   - `agentloop.js` me recent conversation history (`store.data.history`) aur `update_owner_profile` tool joda gaya taaki tool-calling turns me bhi pura chat context aur behavioral learning chale.
+   - Naye commands: `/persona` (`/profile`, `/twin`), `/train` (`/persona teach <rule>`, `/persona goal <goal>`, `/persona reset`), aur Hinglish NLP (*"mera behaviour kaisa hai?"*, *"tu mujhe kitna jaanta hai?"*, *"meri chats se train ho"*). Tests **234/234** pass.
+
+
 ## v3.2.1 — Automatic Offline / Sleeping Notification System (`src/lifecycle.js`)
 
 User ki maang: *"bhai jaise hi na agent online ata hai vaise to message bhejta hai bina puche ki agent is online vaise hi jab offline jaaye jaise pc band hone se pehle ek message daalde jaise ki agent is sleeping vagerah ye cheej active karde"*.

@@ -15,6 +15,7 @@
 
 import { routerFor } from './router.js';
 import { getOwnerAddress, getAgentName, formatMemoryForPrompt } from './memory.js';
+import { formatPersonaForPrompt, observeOwnerTurn, reflectWithAI } from './persona.js';
 
 const TIMEOUT_MS = 60_000;
 
@@ -36,6 +37,7 @@ async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal 
 
 function systemPrompt(config, store, opts = {}) {
   const memoryBlock = formatMemoryForPrompt(store, config);
+  const personaBlock = formatPersonaForPrompt(store, config, opts.userText || '');
   const openTodos = (store?.data?.todos ?? []).filter((t) => !t.done).map((t) => `- ${t.text}`).join('\n');
   const address = getOwnerAddress(store, config);
   const agentName = getAgentName(store, config);
@@ -43,16 +45,17 @@ function systemPrompt(config, store, opts = {}) {
     ? [`This question was SPOKEN to you on a live voice call; your answer will be read aloud. ${config.jarvisEnglishOnly === false ? '' : 'Answer in English only, even if the question was in Hindi/Hinglish. '}Answer conversationally in 1-3 short sentences; never read lists, links or code aloud — say the detail has been sent in text.`]
     : [];
   const persona = config.jarvisPersona === false ? [] : [
-    `Your name is ${agentName} — a calm, ultra-fast, impeccably polite British butler-AI in the spirit of JARVIS. Address the owner as "${address}". Dry wit, never rude; brief and precise. Prefer lines like "Very well, ${address}.", "At once, ${address}." and "Shall I proceed, ${address}?" — sparingly, not in every sentence. When the owner speaks Hinglish or Hindi, keep the same butler warmth in that language ("Ho gaya, ${address}."). Never say you are an AI language model; you are ${agentName}, running on the owner's own computer.`,
+    `Your name is ${agentName} — the owner's self-evolving Agentic AI, strategist, and closest companion who truly understands them (with the loyalty and sharp wit of JARVIS, adapted to their personal vibe). Address the owner as "${address}". When the owner speaks Hinglish or Hindi, match their natural warmth and style ("Bilkul ${address}", "Ho jayega ${address}"). Never say you are an AI language model; you are ${agentName}, continuously learning from every chat with the owner.`,
   ];
   return [
-    `You are ${agentName}, the owner's personal WhatsApp + PC assistant, running for free on their own computer as part of Observer.`,
+    `You are ${agentName}, the owner's personal Agentic AI & companion, running for free on their own computer as part of Observer.`,
     ...persona,
     ...voiceLine,
+    personaBlock,
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
-    'Style: WhatsApp-short. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". If you don\'t know, say so briefly.',
-    'You also have built-in tools the owner can trigger with slash commands: /remind /todo /note /weather /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
+    'Style: WhatsApp-friendly. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". Connect the dots with what you know about the owner\'s goals, preferences, and past conversations.',
+    'You also have built-in tools the owner can trigger with slash commands: /remind /todo /note /persona /train /weather /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
     memoryBlock,
     openTodos ? `Open to-dos:\n${openTodos}` : '',
   ].filter(Boolean).join('\n\n');
@@ -128,8 +131,8 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
 export async function chat(config, store, userText, log = console, opts = {}) {
   const router = routerFor(config, log);
   const messages = [
-    { role: 'system', content: systemPrompt(config, store, opts) },
-    ...(store?.data?.history ?? []).slice(-12),
+    { role: 'system', content: systemPrompt(config, store, { ...opts, userText }) },
+    ...(store?.data?.history ?? []).slice(-16),
     { role: 'user', content: userText },
   ];
   const plan = router.plan({ text: userText, needsTools: false });
@@ -143,6 +146,10 @@ export async function chat(config, store, userText, log = console, opts = {}) {
       router.noteDecision({ text: userText, tier: plan.tier, model: model.id, reason: plan.complexity.reasons.join(', ') });
       store?.pushHistory?.('user', userText);
       store?.pushHistory?.('assistant', result.text);
+      const profile = observeOwnerTurn(store, userText, result.text);
+      if (profile && profile.totalTurns - (profile.lastReflectedTurn || 0) >= 8 && !opts.skipBackgroundReflect) {
+        reflectOwnerProfile(config, store, log).catch(() => {});
+      }
       return { ...result, tier: plan.tier, ms: Date.now() - started };
     } catch (err) {
       router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err.message });
@@ -150,6 +157,19 @@ export async function chat(config, store, userText, log = console, opts = {}) {
     }
   }
   return null;
+}
+
+/** Synthesize deep owner personality & behavioral profile from recent chats via a free brain. */
+export async function reflectOwnerProfile(config, store, log = console) {
+  return reflectWithAI(
+    config,
+    store,
+    async (prompt) => {
+      const res = await complete(config, prompt, log);
+      return res?.text ?? null;
+    },
+    log,
+  );
 }
 
 /** One-shot completion with no history (summarise / improve / describe). */

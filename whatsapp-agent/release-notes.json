@@ -1,4 +1,12 @@
 {
+  "3.2.2": {
+    "title": "Self-Evolving Agentic AI & Behavioral Learning Engine — Aapki chats se seekh kar aapko sabse behtar samajhne wala AI 🧠🤝⚡",
+    "bullets": [
+      "**Continuous Behavioral Learning (`src/persona.js`)**: `PSD_Ai` ab har WhatsApp message se aapki language style (Hinglish / `'bhai'` / `'bro'` vibe), answer-length preference (short vs detailed), live mood (stressed, tired, excited, brainstorming), likes/dislikes, active goals/projects, aur top interests khud seekhta hai.",
+      "**Long-Term Episodic Recall + AI Self-Reflection**: 12-message chat window khatam hone ke baad bhi important baatein **Episodic Memories (`episodes`)** me save rehti hain aur har 8 turns pe AI background reflection se aapka deep portrait update karta hai. Ab `agentloop.js` me bhi recent chat history aur `update_owner_profile` tool active hai.",
+      "**Agentic AI Companion First + `/persona` & `/train`**: `PSD_Ai` ka main role ab sirf PC control nahi, balki ek **Autonomous Agentic AI & Best Companion** hai jo aapko deeply samajhta hai. Check ya train karne ke liye `/persona`, `/train`, ya seedha Hinglish me bolo: *\"mera behaviour kaisa hai?\"* / *\"meri chats se train ho\"*."
+    ]
+  },
   "3.2.1": {
     "title": "Auto Offline / Sleeping Notification — PC ya Agent band hone se pehle turant WhatsApp message 😴📲",
     "bullets": [

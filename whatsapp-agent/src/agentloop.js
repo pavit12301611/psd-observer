@@ -23,6 +23,7 @@ import { routerFor } from './router.js';
 import { throwIfStopped, isStoppedError } from './cancel.js';
 import { personaLines } from './jarvis.js';
 import { getAgentName, formatMemoryForPrompt } from './memory.js';
+import { formatPersonaForPrompt, observeOwnerTurn } from './persona.js';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
@@ -76,7 +77,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     'open_app', 'screenshot', 'look_at_screen', 'system_status', 'send_file',
     'search_files', 'read_file', 'write_file', 'download_url', 'notify',
     'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
-    'remember_fact',
+    'remember_fact', 'update_owner_profile',
     // Agent-Reach × Agent-S deterministic tools — always available so the AI
     // never opens a browser to guess clicks when a structured channel exists.
     'web_search', 'read_url', 'youtube_info', 'github_lookup', 'inspect_ui',
@@ -100,22 +101,25 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     return scored.slice(0, wanted).map((entry) => entry.tool);
   }
 
-  function systemPrompt(plan, ctx = {}) {
+  function systemPrompt(plan, ctx = {}, userText = '') {
     const agentName = getAgentName(store, config);
     const memoryBlock = formatMemoryForPrompt(store, config);
+    const personaBlock = formatPersonaForPrompt(store, config, userText);
     const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
     return [
-      `You are ${agentName}, the owner's personal assistant, running 100% free on their own Fedora computer (Observer WhatsApp Agent).`,
+      `You are ${agentName}, the owner's personal Agentic AI & companion, running 100% free on their own Fedora computer (Observer WhatsApp Agent).`,
       ...personaLines(config, { voice: Boolean(ctx.voice), store }),
       ctx.voice ? `The owner is speaking to you on a live VOICE CALL right now and is listening for your spoken reply.${config.jarvisEnglishOnly === false ? '' : ' ALWAYS reply in English only, even when the owner speaks Hindi or Hinglish (you understand him perfectly; your spoken voice is English).'} Be conversational: greetings, small talk and spoken questions are all welcome — answer questions in 1-3 short spoken sentences, and put any long detail (lists, links, code) in text instead of reading it aloud. If he asks you to call him later with an update, use schedule_jarvis_call. Prefer speak_text only when explicitly asked to read/announce something; otherwise your final text is spoken automatically.` : '',
+      personaBlock,
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
       `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
-      'You can actually DO things on the owner\'s computer: open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
+      'You are an Autonomous Agentic AI who deeply understands the owner AND can actually DO things on their computer and the internet: research, reason, plan, remember behavioral insights (`update_owner_profile` / `remember_fact`), open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
       'AGENT-REACH & AGENT-S ZERO-GUESSWORK RULES:',
       '- NEVER open a browser and guess pixel clicks when a deterministic tool can do the job directly!',
       '- For web search / research / reading URLs / YouTube transcripts / GitHub repos / Reddit / Twitter / HN: ALWAYS use `web_search`, `read_url`, `youtube_info`, `github_lookup`, `social_lookup`, or `reach_research`.',
       '- When the owner says "play X on YouTube", call `youtube_info` with `mode="play"` so the exact video URL opens directly without blind UI clicking.',
       '- For anything that genuinely needs the desktop GUI (an app dialog, visual interaction, desktop settings), use `inspect_ui` to see exact AT-SPI accessibility widget coordinates or call `computer_use` which grounds actions via AT-SPI + OCR + Set-of-Marks.',
+      '- Whenever the owner shares a personal preference, goal, project, or behavioral feedback, call `update_owner_profile` or `remember_fact` so you keep evolving to understand them better.',
       'Rules:',
       '1. When the owner asks you to DO something, call the tool instead of explaining how to do it.',
       '2. You may call several tools in a row; check each result before deciding the next step.',
@@ -255,9 +259,13 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
   async function runWithModel(model, text, ctx, plan, opts = {}) {
     const selectedTools = toolsFor(text, { limit: plan.toolLimit });
     const adapter = makeAdapter(model, selectedTools, plan, opts.signal);
+    const recentHistory = (store?.data?.history ?? [])
+      .slice(-6)
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
 
     let messages = adapter.usesContents ? null : [
-      { role: 'system', content: systemPrompt(plan, ctx) },
+      { role: 'system', content: systemPrompt(plan, ctx, text) },
+      ...recentHistory,
       { role: 'user', content: String(text) },
     ];
     let contents = adapter.usesContents ? adapter.contentsStart(String(text)) : null;
@@ -464,6 +472,10 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
         };
         router.noteDecision({ text, tier: plan.tier, model: model.id, reason: meta.reasons.join(', ') });
         lastRun = meta;
+        const replyText = typeof attempt.reply === 'string' ? attempt.reply : (attempt.reply?.text ?? '');
+        store?.pushHistory?.('user', text);
+        if (replyText) store?.pushHistory?.('assistant', replyText);
+        observeOwnerTurn(store, text, replyText);
         // Callers that want the metadata use lastRun; the reply itself stays
         // a plain WhatsApp-friendly value.
         return attempt.reply;

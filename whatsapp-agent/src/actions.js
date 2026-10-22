@@ -35,6 +35,7 @@ import * as tts from './tts.js';
 import { runDoctor } from './doctor.js';
 import { createProgress, describeHandsStep } from './progress.js';
 import { noteOfflineAnnounced } from './lifecycle.js';
+import { ensureProfile, addLesson } from './persona.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -720,6 +721,35 @@ export function createActions({ config, store, log = console, journal = null, no
         }
         const res = mem.rememberFact(store, value, { explicit: true });
         return res?.reply ?? '🧠 Remembered. I\'ll keep it in mind in our chats.';
+      },
+    },
+    {
+      name: 'update_owner_profile',
+      level: 'safe',
+      label: 'Learn owner behavior / preference / goal / lesson',
+      description: 'Save a learned insight about the owner\'s behavior, personality trait, preference/like, dislike, active goal/project, or a lesson on how PSD_Ai should communicate and help them better.',
+      params: {
+        kind: { type: 'string', enum: ['trait', 'preference', 'dislike', 'goal', 'lesson'], description: 'Category of insight to learn', required: true },
+        text: { type: 'string', description: 'Concise description of the trait, preference, goal, or behavioral lesson', required: true },
+      },
+      run: async ({ kind, text }) => {
+        const cleanText = String(text ?? '').trim();
+        if (!cleanText) throw new Error('empty insight');
+        const profile = ensureProfile(store);
+        const k = String(kind ?? 'lesson').toLowerCase();
+        if (k === 'trait') {
+          if (!profile.traits.includes(cleanText)) profile.traits.push(cleanText);
+        } else if (k === 'preference') {
+          profile.preferences.push({ text: cleanText, ts: Date.now(), source: 'agent' });
+        } else if (k === 'dislike') {
+          profile.dislikes.push({ text: cleanText, ts: Date.now(), source: 'agent' });
+        } else if (k === 'goal') {
+          profile.goals.push({ text: cleanText, ts: Date.now(), status: 'active' });
+        } else {
+          addLesson(profile, cleanText, 'agent_tool');
+        }
+        store.save?.();
+        return `🧠 Learned (${k}): *${cleanText}*`;
       },
     },
 
