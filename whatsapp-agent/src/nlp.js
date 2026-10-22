@@ -319,6 +319,64 @@ export function parseIntent(input) {
     return asCmd('if', text);
   }
 
+  // ── Features #16–#30 Quality Intents ─────────────────────────────────────
+  if (/^(?:mera\s+)?(?:kharcha|expense|expenses|spending)\s*(?:kitna\s+hua|summary|dikhao|batao|list|report)?\??$/i.test(text)
+    || /^(?:total\s+(?:kharcha|expense|spending))\b/i.test(text)) {
+    return asCmd('expense', 'summary');
+  }
+  if ((m = text.match(/^(?:aaj\s+|kal\s+|abhi\s+)?(?:maine\s+)?(?:rs\.?\s*|₹\s*)?(\d+(?:\.\d+)?)\s*(?:rs\.?|rupees?|INR|₹)?\s+([a-zA-Z0-9 _-]+?)\s+(?:pe|par|me|mein|on|for)\s+(?:kharch(?:a|\s+hue|\s+kiye|\s+kiya)?|spent|lag(?:e|a)|diye|paid)$/i))
+    || (m = text.match(/^(?:spent|paid|kharch(?:a)?)\s+(?:rs\.?\s*|₹\s*)?(\d+(?:\.\d+)?)\s*(?:rs\.?|rupees?|₹)?\s+(?:on|for|pe|par|me|mein)\s+(.+)$/i))) {
+    return asCmd('expense', `${m[1]} ${clean(m[2])}`);
+  }
+  if (/^(?:meri\s+)?(?:habits?|streak|streaks)\s*(?:dikhao|batao|status|list|check)?\??$/i.test(text)) {
+    return asCmd('habit', 'list');
+  }
+  if ((m = text.match(/^(?:habit\s+done|habit\s+complete)\s+(.+)$/i))
+    || (m = text.match(/^(?:aaj\s+)?(gym|workout|dsa|meditation|yoga|running)\s+(?:habit\s+)?(?:done|complete|ho\s+gaya|kar\s+liya)$/i))) {
+    return asCmd('habit', `done ${clean(m[1])}`);
+  }
+  if (/^(?:(?:mera\s+)?git\s+status(?:\s+dikhao|\s+batao)?|repo\s+status(?:\s+dikhao|\s+batao)?)$/i.test(text)) {
+    return asCmd('gitstatus', '');
+  }
+  if (/^(?:(?:mera\s+)?git\s+diff(?:\s+dikhao|\s+batao)?)$/i.test(text)) {
+    return asCmd('gitdiff', '');
+  }
+  if ((m = original.match(/^(?:(?:ye|yeh|is|this)\s+(?:link|file|video|media|url)\s+download\s+kar(?:\s*do|\s*de|\s*o)?|grab\s+url)\s*[:\-]?\s*(https?:\/\/\S+)$/i))) {
+    return asCmd('grab', m[1].trim());
+  }
+  if ((m = original.match(/^(?:isko\s+|ise\s+|make\s+this\s+|rewrite\s+(?:this\s+)?(?:in|as)\s+)(professional\s+email|professional|formal|polite|concise|short)(?:\s+me|\s+mein|\s+style\s+me)?(?:\s+bana\s+de|\s+likh\s+de|\s+kar\s+de|\s+likho)?\s*:\s*([\s\S]+)$/i))) {
+    return asCmd('tone', `${m[1].toLowerCase().trim()} | ${m[2].trim()}`);
+  }
+  if (/^(?:wifi\s+slow\s+chal\s+raha(?:\s+hai)?|network\s+check\s+kar(?:o|do)?|internet\s+speed\s+check|netcheck)$/i.test(text)) {
+    return asCmd('netcheck', '');
+  }
+  if (/^(?:kaunse?\s+usb\s+connected\s+hai(?:n)?|usb\s+(?:devices?\s+)?check\s+kar(?:o|do)?|usbguard)$/i.test(text)) {
+    return asCmd('usbguard', '');
+  }
+  if ((m = text.match(/^(?:start\s+)?(\d+)\s*(?:m|min|mins|minute|minutes)\s+(?:ka\s+)?(?:pomo|pomodoro)(?:\s+(?:lagao|chalu\s+kar(?:o|do)?|start\s+kar(?:o|do)?|for|ke\s+liye))?\s*(.*)$/i))) {
+    const cleanTask = (m[2] || '').replace(/^(?:for|ke\s+liye)\s+/i, '').replace(/\s+ke\s+liye$/i, '').trim();
+    return asCmd('pomo', `${m[1]} ${cleanTask}`.trim());
+  }
+  if ((m = text.match(/^port\s+(\d{2,5})\s+(?:pe|par)\s+kya\s+chal\s+raha(?:\s+hai)?\??$/i))
+    || (m = text.match(/^check\s+port\s+(\d{2,5})\??$/i))) {
+    return asCmd('ports', m[1]);
+  }
+  if (/^(?:open\s+ports?\s+(?:dikhao|batao|list)|kaunse?\s+ports?\s+open\s+hain)\??$/i.test(text)) {
+    return asCmd('ports', '');
+  }
+  if (/^(?:battery\s+aur\s+temp(?:erature)?\s+check\s+kar(?:o|do)?|cpu\s+temp\s+aur\s+battery\s+health(?:\s+batao)?|thermal\s+guardian)$/i.test(text)) {
+    return asCmd('guardian', '');
+  }
+  if (/^(?:mere\s+notes?\s+se\s+(?:\d+\s+)?(?:quiz|mcq)\s+puch(?:o)?|quiz\s+me|flashcard\s+quiz)$/i.test(text)) {
+    return asCmd('quiz', '');
+  }
+  if ((m = text.match(/^quiz\s+(?:answer|ans|option)\s+([A-Da-d])$/i))) {
+    return asCmd('quiz', m[1].toUpperCase());
+  }
+  if ((m = original.match(/^(?:undo\s+file|restore\s+file)\s+(.+)$/i))) {
+    return asCmd('backup', `restore ${m[1].trim()}`);
+  }
+
   // ── productivity & quick actions ─────────────────────────────────────────
   if (/^(?:(?:mere\s+)?(?:todos?|tasks?|to-dos?)\s+(?:dikhao|batao|list)|kya\s+(?:kya\s+)?kaam\s+baaki\s+hai|show\s+(?:my\s+)?(?:todos?|tasks?))\??$/i.test(low)) return asCmd('todo');
   if (/^(?:(?:mere\s+)?notes?\s+(?:dikhao|batao|list)|show\s+(?:my\s+)?notes?)\??$/i.test(low)) return asCmd('notes');
