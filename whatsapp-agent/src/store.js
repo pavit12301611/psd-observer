@@ -14,12 +14,31 @@ const EMPTY = () => ({
   facts: {},          // /remember key -> display value, injected into the AI prompt
   factValues: {},     // canonical slot key -> clean value (e.g. name -> "Pavit"), overwritten on updates
   profile: null,      // continuous behavioral & personality learning profile (src/persona.js)
+  contacts: {},       // saved contacts { slug: { name, slug, number, addedTs } } (src/guests.js)
+  guestPolicy: null,  // controlled multi-user policy { mode, requireApproval, allowlist, blocklist, ... }
+  guestChats: {},     // isolated per-guest chat history { [number]: { name, history, lastSeenTs, msgCount, blockedCount } }
+  guestAuditLog: [],  // recent guest chat / blocked command / outbound message entries
+  pendingGuestApprovals: [], // guest messages held for owner approval (yes / no / send instead)
+  lastGuestSender: null, // { number, jid, name, ts } for quick `/reply <text>`
+  ownerLocation: null, // owner's current location { enabled, city, region, country, lat, lon, address, source, updatedTs } (src/location.js)
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
   pending: null,      // destructive action waiting for "haan"/"yes"
   offlineNotify: null,// null = follow OFFLINE_NOTIFY env (default true), boolean = owner override
   offlineMessage: '', // custom sleeping/offline message override
-  stats: { received: 0, replied: 0, ignoredNonOwner: 0, startedAt: Date.now(), sleeping: false, lastOfflineNotify: 0, lastOfflineReason: '' },
+  stats: {
+    received: 0,
+    replied: 0,
+    ignoredNonOwner: 0,
+    guestMessagesIn: 0,
+    guestRepliesOut: 0,
+    blockedGuestCommands: 0,
+    outboundToOthers: 0,
+    startedAt: Date.now(),
+    sleeping: false,
+    lastOfflineNotify: 0,
+    lastOfflineReason: '',
+  },
 });
 
 export class Store {
@@ -39,6 +58,10 @@ export class Store {
       if (!Array.isArray(this.data.rules)) this.data.rules = [];
       if (!this.data.facts || typeof this.data.facts !== 'object') this.data.facts = {};
       if (!this.data.factValues || typeof this.data.factValues !== 'object') this.data.factValues = {};
+      if (!this.data.contacts || typeof this.data.contacts !== 'object' || Array.isArray(this.data.contacts)) this.data.contacts = {};
+      if (!this.data.guestChats || typeof this.data.guestChats !== 'object' || Array.isArray(this.data.guestChats)) this.data.guestChats = {};
+      if (!Array.isArray(this.data.guestAuditLog)) this.data.guestAuditLog = [];
+      if (!Array.isArray(this.data.pendingGuestApprovals)) this.data.pendingGuestApprovals = [];
     } catch {
       this.data = EMPTY(); // first run, or a corrupt file: start clean rather than crash
     }

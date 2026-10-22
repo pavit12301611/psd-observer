@@ -93,6 +93,21 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     strictAgentNumber: bool(e.STRICT_AGENT_NUMBER, false),
     usePairingCode: bool(e.USE_PAIRING_CODE, false),
     deviceName: e.DEVICE_NAME || 'Observer Agent',
+    // Controlled multi-user / guest messaging (src/guests.js):
+    //   approval = (DEFAULT) Every non-owner message is sent to the OWNER with
+    //              sender name/number, exact timestamp, their message, and the
+    //              proposed AI reply so the owner can say `yes`, `no`, or
+    //              `no send this instead: <text>`
+    //   all      = anyone (except blocked) gets automatic safe AI replies; ALL
+    //              `/` and natural-language commands remain 100% owner-only
+    //   contacts = only saved contacts (/contact) & /allow-ed numbers can chat
+    //   off      = silent owner-only mode for incoming messages
+    guestMode: (e.GUEST_MODE || 'approval').toLowerCase(),
+    guestApproval: e.GUEST_APPROVAL !== undefined ? bool(e.GUEST_APPROVAL, true) : undefined,
+    guestRateLimitPerMinute: int(e.GUEST_RATE_LIMIT_PER_MIN, 6),
+    guestNotifyMessages: bool(e.GUEST_NOTIFY_MESSAGES, true),
+    guestNotifyBlocked: bool(e.GUEST_NOTIFY_BLOCKED, true),
+    outboundRateLimitPerMinute: int(e.OUTBOUND_RATE_LIMIT_PER_MIN, 12),
 
     // 0.0.0.0 = the phone app on your Wi-Fi can reach it (PIN/token protected).
     // 127.0.0.1 = PC-only; use that if you never want LAN access.

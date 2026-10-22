@@ -59,10 +59,11 @@ async function callBridge(endpoint, body = {}) {
 const TOOLS = [
   {
     name: 'whatsapp_send_message',
-    description: 'Send a live WhatsApp text message directly to the owner on WhatsApp (works from both WhatsApp tasks and browser dsh web sessions).',
+    description: 'Send a live WhatsApp text message to the owner (default) or to any phone number / saved contact name (`to`) on WhatsApp.',
     inputSchema: {
       type: 'object',
       properties: {
+        to: { type: 'string', description: 'Optional recipient phone number, saved contact name, or "last". Omit to send to the owner.' },
         text: { type: 'string', description: 'Message text to send on WhatsApp (supports *bold*, _italic_, ```code```).' },
       },
       required: ['text'],
@@ -70,10 +71,11 @@ const TOOLS = [
   },
   {
     name: 'whatsapp_send_file',
-    description: 'Send any local file, PDF, ZIP, image, video, or generated artifact from the Linux PC straight to the owner on WhatsApp.',
+    description: 'Send any local file, PDF, ZIP, image, video, or generated artifact from the Linux PC to the owner (default) or to a specified recipient (`to`) on WhatsApp.',
     inputSchema: {
       type: 'object',
       properties: {
+        to: { type: 'string', description: 'Optional recipient phone number or saved contact name. Omit to send to the owner.' },
         filePath: { type: 'string', description: 'Absolute or ~ path to the file on the Linux PC.' },
         caption: { type: 'string', description: 'Optional WhatsApp caption.' },
         asImage: { type: 'boolean', description: 'Send inline as an image if true (auto-detected from extension by default).' },
@@ -214,9 +216,11 @@ async function handleToolCall(name, args = {}) {
     case 'whatsapp_send_message': {
       const res = await callBridge('/api/whatsapp/send', {
         kind: 'text',
+        ...(args.to ? { to: String(args.to) } : {}),
         text: String(args.text ?? ''),
       });
-      return [{ type: 'text', text: `Sent WhatsApp message (${res.via || 'whatsapp'}): ${String(args.text ?? '').slice(0, 140)}` }];
+      const targetLabel = res.to ? ` to +${res.to}` : '';
+      return [{ type: 'text', text: `Sent WhatsApp message${targetLabel} (${res.via || 'whatsapp'}): ${String(args.text ?? '').slice(0, 140)}` }];
     }
 
     case 'whatsapp_send_file': {
@@ -224,11 +228,13 @@ async function handleToolCall(name, args = {}) {
       if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
       const res = await callBridge('/api/whatsapp/send', {
         kind: 'file',
+        ...(args.to ? { to: String(args.to) } : {}),
         filePath,
         caption: args.caption || '',
         asImage: Boolean(args.asImage),
       });
-      return [{ type: 'text', text: `Sent file to WhatsApp (${res.via || 'whatsapp'}): ${filePath}` }];
+      const targetLabel = res.to ? ` to +${res.to}` : '';
+      return [{ type: 'text', text: `Sent file${targetLabel} on WhatsApp (${res.via || 'whatsapp'}): ${filePath}` }];
     }
 
     case 'whatsapp_send_screenshot': {

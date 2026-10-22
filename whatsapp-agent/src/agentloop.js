@@ -77,7 +77,8 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     'open_app', 'screenshot', 'look_at_screen', 'system_status', 'send_file',
     'search_files', 'read_file', 'write_file', 'download_url', 'notify',
     'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
-    'remember_fact', 'update_owner_profile',
+    'remember_fact', 'update_owner_profile', 'send_whatsapp', 'manage_contacts',
+    'my_location', 'nearby_places',
     // Agent-Reach × Agent-S deterministic tools — always available so the AI
     // never opens a browser to guess clicks when a structured channel exists.
     'web_search', 'read_url', 'youtube_info', 'github_lookup', 'inspect_ui',
@@ -393,6 +394,10 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
    * when no brain could do the job (caller falls back to plain chat/offline).
    */
   async function run(text, ctx = {}, opts = {}) {
+    if (ctx?.isOwner === false || ctx?.guest === true) {
+      lastRun = { ok: false, reason: 'guest tool access blocked', model: null, tier: null };
+      return null;
+    }
     if (!enabled) {
       lastRun = { ok: false, reason: 'agent tools disabled', model: null, tier: null };
       return null;

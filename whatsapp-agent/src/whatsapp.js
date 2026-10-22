@@ -40,6 +40,8 @@ import {
   announceOffline as runAnnounceOffline,
   announceOnline as runAnnounceOnline,
 } from './lifecycle.js';
+import { canGuestInteract } from './guests.js';
+import { setOwnerLocation, formatOwnerLocationCard } from './location.js';
 
 const MIME_EXT = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
@@ -67,9 +69,17 @@ function extractContent(message) {
   if (msg.documentMessage) return { kind: 'document', text: msg.documentMessage.caption ?? '', media: msg.documentMessage, fileName: msg.documentMessage.fileName };
   if (msg.audioMessage) return { kind: msg.audioMessage.ptt ? 'voice' : 'audio', text: '', media: msg.audioMessage };
   if (msg.stickerMessage) return { kind: 'sticker', text: '', media: msg.stickerMessage };
-  if (msg.locationMessage) {
-    const { degreesLatitude: lat, degreesLongitude: lon, name } = msg.locationMessage;
-    return { kind: 'location', text: `📍 Location received${name ? `: ${name}` : ''}\nhttps://maps.google.com/?q=${lat},${lon}` };
+  if (msg.locationMessage || msg.liveLocationMessage) {
+    const locMsg = msg.locationMessage || msg.liveLocationMessage;
+    const { degreesLatitude: lat, degreesLongitude: lon, name, address } = locMsg;
+    return {
+      kind: 'location',
+      lat,
+      lon,
+      name: name || '',
+      address: address || '',
+      text: `/location set ${lat},${lon}`,
+    };
   }
   if (msg.reactionMessage) return { kind: 'reaction', text: '' };
   return { kind: 'other', text: '' };
@@ -130,6 +140,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     lastSentImage: null, // last screenshot we sent to owner — used to diff red marks
     lastSentImageAt: 0,
     inFlightOffline: null, // shared promise so concurrent shutdown signals await the same send
+    guestRateMap: new Map(), // senderNumber → recent timestamp array for per-guest rate limiting
   };
 
   const status = () =>
@@ -141,9 +152,11 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
 
   async function transportSend(chatJid, reply, quoted) {
     if (config.dryRun) {
+      const to = jidToNumber(chatJid) || chatJid;
       const summary = typeof reply === 'string'
-        ? { text: reply }
+        ? { to, text: reply }
         : {
+            to,
             text: reply.text,
             hasImage: Boolean(reply.image),
             hasAudio: Boolean(reply.audio),
@@ -152,7 +165,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
             sticker: Boolean(reply.sticker),
           };
       state.simulated.push(summary);
-      log.info?.(`[dry-run] → owner: ${(summary.text ?? '(media)').slice(0, 160)}`);
+      log.info?.(`[dry-run] → ${to}: ${(summary.text ?? '(media)').slice(0, 160)}`);
       return summary;
     }
     if (!state.sock) throw new Error('WhatsApp is not connected');
@@ -202,6 +215,27 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     await transportSend(state.ownerChatJid, reply, undefined);
     store.bump('replied');
   }
+
+  /**
+   * Send a WhatsApp message to any phone number or JID (controlled owner-initiated
+   * outbound messaging or guest reply).
+   */
+  async function sendToNumber(toNumberOrJid, reply, quoted = undefined) {
+    const rawTarget = String(toNumberOrJid ?? '').trim();
+    if (!rawTarget) throw new Error('Missing recipient phone number or JID');
+    const chatJid = rawTarget.includes('@') ? rawTarget : numberToJid(rawTarget);
+    if (!chatJid) throw new Error(`Invalid phone number: ${rawTarget}`);
+    await transportSend(chatJid, reply, quoted);
+    const norm = jidToNumber(chatJid) || normalizeNumber(rawTarget);
+    if (!isOwner([norm], config.ownerNumber)) {
+      store.bump('outboundToOthers');
+    }
+    store.bump('replied');
+    return true;
+  }
+
+  // Auto-wire the agent's outbound WhatsApp & owner-notification hooks
+  agent?.attachWhatsApp?.({ sendToNumber, sendToOwner });
 
   async function react(chatJid, key, emoji) {
     if (config.dryRun || !state.sock) return;
@@ -263,6 +297,19 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     if (content.media && ['image', 'video', 'document', 'audio', 'voice', 'sticker'].includes(content.kind)) {
       return handleMedia({ chatJid, content, rawMsg });
     }
+    if (content.kind === 'location' && content.lat != null && content.lon != null) {
+      const saved = await setOwnerLocation(store, config, {
+        lat: content.lat,
+        lon: content.lon,
+        name: content.name,
+        address: content.address,
+        source: 'gps_pin',
+      });
+      const card = formatOwnerLocationCard(store, config, saved.location);
+      await transportSend(chatJid, `📍 *WhatsApp GPS Pin Saved!*\n\n${card}`, rawMsg);
+      store.bump('replied');
+      return;
+    }
     if (content.kind === 'reaction' || content.kind === 'other') return;
     if (!content.text?.trim()) return;
 
@@ -279,6 +326,63 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     } catch (err) {
       log.error?.(`[wa] reply failed: ${err.message}`);
       await react(chatJid, key, '⚠️');
+    } finally {
+      if (!config.dryRun) { try { await state.sock.sendPresenceUpdate('paused', chatJid); } catch { /* cosmetic */ } }
+    }
+  }
+
+  /**
+   * Sandboxed inbound pipeline for non-owner guests:
+   * - Never downloads files to the PC
+   * - Enforces the strict Owner-Only Command Firewall (`/` and plain-language `baaki bhi`)
+   * - Replies with safe conversational AI or a command-blocked warning
+   */
+  async function processGuestMessage({ chatJid, senderNumber, senderName, content, rawMsg }) {
+    store.bump('received');
+    if (content.kind === 'reaction' || content.kind === 'other') return null;
+    const hasMedia = Boolean(content.media && ['image', 'video', 'document', 'audio', 'voice', 'sticker'].includes(content.kind));
+    if (!hasMedia && !content.text?.trim()) return null;
+
+    const key = rawMsg?.key;
+    if (!config.dryRun) { try { await state.sock.sendPresenceUpdate('composing', chatJid); } catch { /* cosmetic */ } }
+    try {
+      const guestOut = agent.handleGuest
+        ? await agent.handleGuest(content.text ?? '', {
+            isOwner: false,
+            guest: true,
+            senderNumber,
+            senderName,
+            senderJid: chatJid,
+            hasMedia,
+            waStatus: status,
+          })
+        : {
+            blocked: true,
+            reply: await agent.handle(content.text ?? '', {
+              isOwner: false,
+              guest: true,
+              senderNumber,
+              senderName,
+              senderJid: chatJid,
+              hasMedia,
+              waStatus: status,
+            }),
+          };
+
+      if (guestOut?.reply) {
+        await transportSend(chatJid, guestOut.reply, rawMsg);
+        store.bump('replied');
+      }
+      if (guestOut?.blocked) {
+        await react(chatJid, key, '🔒');
+      }
+      if (guestOut?.notifyOwnerText) {
+        await sendToOwner(guestOut.notifyOwnerText).catch(() => {});
+      }
+      return guestOut;
+    } catch (err) {
+      log.error?.(`[wa:guest] reply failed: ${err.message}`);
+      return null;
     } finally {
       if (!config.dryRun) { try { await state.sock.sendPresenceUpdate('paused', chatJid); } catch { /* cosmetic */ } }
     }
@@ -784,11 +888,26 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           if (state.seenIds.size > 1000) state.seenIds = new Set([...state.seenIds].slice(-500));
         }
 
-        // ── THE owner-only gate ──────────────────────────────────────────
+        // ── Owner vs Controlled Guest Gate ───────────────────────────────
         const numbers = await senderNumbers(key);
         if (!isOwner(numbers, config.ownerNumber) && !isFromOwnerLid(key)) {
-          store.bump('ignoredNonOwner');
-          log.info?.(`[wa] ignored non-owner message from ${numbers.map(maskNumber).join(',') || chatJid} (no reply sent)`);
+          const guestNumber = numbers[0] || jidToNumber(chatJid) || '';
+          const gate = canGuestInteract(store, config, guestNumber, state.guestRateMap);
+          if (!gate.allowed) {
+            store.bump('ignoredNonOwner');
+            log.info?.(`[wa] ignored non-owner message from ${numbers.map(maskNumber).join(',') || chatJid} (${gate.reason})`);
+            continue;
+          }
+          const content = extractContent(rawMsg.message);
+          const senderName = String(rawMsg.pushName || gate.contact?.name || '').trim();
+          queued.push({
+            isGuest: true,
+            chatJid,
+            senderNumber: gate.number || guestNumber,
+            senderName,
+            content,
+            rawMsg,
+          });
           continue;
         }
         state.ownerChatJid = chatJid; // reply on the exact chat (works for LID chats too)
@@ -807,14 +926,18 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           await processOwnerMessage({ chatJid, content, rawMsg });
           continue;
         }
-        queued.push({ chatJid, content, rawMsg });
+        queued.push({ isGuest: false, chatJid, content, rawMsg });
       } catch (err) {
         log.error?.(`[wa] message handling failed: ${err.message}`);
       }
     }
     for (const item of queued) {
       try {
-        await processOwnerMessage(item);
+        if (item.isGuest) {
+          await processGuestMessage(item);
+        } else {
+          await processOwnerMessage(item);
+        }
       } catch (err) {
         log.error?.(`[wa] message handling failed: ${err.message}`);
       }
@@ -1038,11 +1161,33 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     return agent.handle(text, { waStatus: status });
   }
 
-  /** Dry-run/test hook: run the owner gate + pipeline without WhatsApp. */
-  async function simulate(text, fromNumber = config.ownerNumber) {
+  /** Dry-run/test hook: run the owner vs controlled guest pipeline without WhatsApp. */
+  async function simulate(text, fromNumber = config.ownerNumber, opts = {}) {
     if (!isOwner([fromNumber], config.ownerNumber)) {
-      store.bump('ignoredNonOwner');
-      return { ignored: true, sent: [] };
+      const gate = canGuestInteract(store, config, fromNumber, state.guestRateMap);
+      if (!gate.allowed) {
+        store.bump('ignoredNonOwner');
+        return { ignored: true, isOwner: false, reason: gate.reason, sent: [] };
+      }
+      const before = state.simulated.length;
+      const guestOut = await processGuestMessage({
+        chatJid: numberToJid(fromNumber),
+        senderNumber: gate.number || normalizeNumber(fromNumber),
+        senderName: opts.senderName || gate.contact?.name || '',
+        content: { kind: 'text', text, media: opts.media ?? null },
+        rawMsg: { key: { id: `sim-guest-${Date.now()}` } },
+      });
+      return {
+        ignored: false,
+        isOwner: false,
+        blocked: Boolean(guestOut?.blocked),
+        heldForApproval: Boolean(guestOut?.heldForApproval),
+        approvalId: guestOut?.approvalId || null,
+        proposedReply: guestOut?.proposedReply || null,
+        category: guestOut?.category || null,
+        command: guestOut?.command || null,
+        sent: state.simulated.slice(before),
+      };
     }
     const before = state.simulated.length;
     await processOwnerMessage({
@@ -1050,11 +1195,11 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
       content: { kind: 'text', text },
       rawMsg: { key: { id: `sim-${Date.now()}` } },
     });
-    return { ignored: false, sent: state.simulated.slice(before) };
+    return { ignored: false, isOwner: true, sent: state.simulated.slice(before) };
   }
 
   return {
-    start, stop, status, sendToOwner, announceOffline, announceOnline, simulate, runOwner, state,
+    start, stop, status, sendToOwner, sendToNumber, announceOffline, announceOnline, simulate, runOwner, state,
     isOwnerJid, handleCallEvents,
     learnOwnerLid: (lid) => rememberOwnerLid(lid),
     setVoipCoordinator: (coordinator) => { state.voipCoordinator = coordinator; },

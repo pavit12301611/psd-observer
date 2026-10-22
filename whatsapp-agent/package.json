@@ -1,6 +1,6 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "3.2.2",
+  "version": "3.3.0",
   "private": true,
   "description": "Observer WhatsApp Agent 2.10 - Ultra-Accuracy Question Image Solver (Vision + OCR + Python/SymPy + Compilers + Fact Search + Adversarial Auditor) + free native WhatsApp + DeepSeek Harness (@deepseek-ai/dsh) full-power Linux runtime + full PC control (Fedora/Linux).",
   "type": "module",
