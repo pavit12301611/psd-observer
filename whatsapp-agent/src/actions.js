@@ -64,6 +64,12 @@ import {
   formatActionRecorderStatus,
   saveLastRecordingAsCommand,
 } from './actionrecorder.js';
+import {
+  lookupWordPower,
+  formatVocabCard,
+  getWordOfTheDay,
+  normalizeVocabText,
+} from './vocab.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -660,6 +666,22 @@ export function createActions({
       description: 'Calculate an arithmetic expression safely (sqrt, %, ^…).',
       params: { expression: { type: 'string', description: 'e.g. 45*12 + sqrt(81)', required: true } },
       run: async ({ expression }) => `🧮 ${expression} = *${tools.calc(expression)}*`,
+    },
+    {
+      name: 'vocab_power', level: 'safe', label: 'Vocabulary & Word Power',
+      description: 'Look up rich English + Hindi + Hinglish word meanings, synonyms, antonyms, usage examples, or get the Power Word of the Day.',
+      params: {
+        mode: { type: 'string', description: 'define | synonyms | antonyms | daily | normalize' },
+        word: { type: 'string', description: 'Word or phrase to look up' },
+      },
+      run: async ({ mode = 'define', word = '' }) => {
+        const m = String(mode || 'define').toLowerCase();
+        if (m === 'daily' || m === 'wod' || !word) return getWordOfTheDay();
+        if (m === 'normalize') return normalizeVocabText(word);
+        const entry = await lookupWordPower(word);
+        if (!entry) return `⚠️ "${word}" ke liye instant offline/dictionary entry nahi mili.`;
+        return formatVocabCard(entry);
+      },
     },
 
     // ── owner data (notes/todos/reminders) ──────────────────────────────────

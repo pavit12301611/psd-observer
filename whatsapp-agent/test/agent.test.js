@@ -21,6 +21,9 @@ import * as nlp from '../src/nlp.js';
 import * as guests from '../src/guests.js';
 import * as location from '../src/location.js';
 import * as actionrecorder from '../src/actionrecorder.js';
+import * as vocab from '../src/vocab.js';
+import * as ai from '../src/ai.js';
+import { createModelRouter } from '../src/router.js';
 import { archiveDeadAuthDir, createWhatsApp } from '../src/whatsapp.js';
 
 const OWNER = '919528923866';
@@ -1230,6 +1233,78 @@ test('High-Precision Micro-Action & Button-Click Recognition: widget hit-testing
   assert.equal(saved.steps[5].text, 'git status');
   assert.equal(saved.steps[6].key, 'Return');
 });
+
+test('Advanced Vocabulary Intelligence & Turbo Speed: Hinglish/Slang/Typo NLP, Fuzzy Slash Commands, Trilingual Word-Power, Hedged Racing & EMA Latency Routing', async () => {
+  const { agent } = makeAgent();
+
+  // 1. Hinglish / SMS shorthand / Slang / Typo intent resolution (< 0.5ms offline)
+  assert.deepEqual(nlp.parseIntent('chrone kholdo'), { cmd: 'open', args: 'chrome' });
+  assert.deepEqual(nlp.parseIntent('ss bhjde'), { cmd: 'screenshot', args: '' });
+  assert.deepEqual(nlp.parseIntent('awaz kam krdo'), { cmd: 'pc', args: 'volume down' });
+  assert.deepEqual(nlp.parseIntent('pump up the volume'), { cmd: 'pc', args: 'volume up' });
+  assert.deepEqual(nlp.parseIntent('shant kardo'), { cmd: 'pc', args: 'volume mute' });
+  assert.deepEqual(nlp.parseIntent('btry kitni hai'), { cmd: 'pc', args: 'battery' });
+  assert.deepEqual(nlp.parseIntent('mosam kaisa hai'), { cmd: 'weather', args: '' });
+  assert.deepEqual(nlp.parseIntent('fire up spotify'), { cmd: 'open', args: 'spotify' });
+  assert.deepEqual(nlp.parseIntent('dim the screen'), { cmd: 'pc', args: 'brightness down' });
+
+  // 2. Fuzzy Slash-Command Typo Auto-Correction (Damerau-Levenshtein <= 2)
+  assert.equal(vocab.fuzzyMatchSlashCommand('screnshot'), 'screenshot');
+  assert.equal(vocab.fuzzyMatchSlashCommand('wether'), 'weather');
+  assert.equal(vocab.fuzzyMatchSlashCommand('loction'), 'location');
+  assert.equal(vocab.fuzzyMatchSlashCommand('watcme'), 'watchme');
+  const typoRem = await agent.handle('/remnders');
+  assert.match(typoRem, /No reminders set/);
+
+  // 3. Trilingual Word-Power Lexicon (English + Hindi + Hinglish + Synonyms + Antonyms)
+  const wordReply = await agent.handle('ephemeral ka matlab kya hai');
+  assert.match(wordReply, /\*ephemeral\*/i);
+  assert.match(wordReply, /English/);
+  assert.match(wordReply, /Hindi/);
+  assert.match(wordReply, /Hinglish/);
+  assert.match(wordReply, /transient/);
+
+  const slashVocab = await agent.handle('/vocab pragmatic');
+  assert.match(slashVocab, /\*pragmatic\*/i);
+  assert.match(slashVocab, /practical/);
+
+  const wodReply = await agent.handle('word of the day');
+  assert.match(wodReply, /Power Word of the Day/);
+
+  // 4. Parallel Hedged Model Racing (`raceModels`) picks the fast backup when primary lags
+  const slowModel = { id: 'slow:1', label: 'Slow' };
+  const fastModel = { id: 'fast:2', label: 'Fast' };
+  const winner = await ai.raceModels(
+    [slowModel, fastModel],
+    async (m) => {
+      if (m.id === 'slow:1') {
+        await new Promise((r) => setTimeout(r, 120));
+        return { text: 'from slow' };
+      }
+      await new Promise((r) => setTimeout(r, 10));
+      return { text: 'from fast' };
+    },
+    { hedgeDelayMs: 20 },
+  );
+  assert.equal(winner.model.id, 'fast:2');
+  assert.equal(winner.result.text, 'from fast');
+
+  // 5. Adaptive EMA Latency Routing promotes the faster proven brain
+  const router = createModelRouter({
+    config: {
+      localApiUrl: 'http://127.0.0.1:8080/v1',
+      localModel: 'qwen2.5-7b',
+      ollamaModel: 'qwen2.5:7b',
+      aiProvider: 'auto',
+    },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  router.record('local:qwen2.5-7b', { ok: true, ms: 2200, tier: 1 });
+  router.record('ollama:qwen2.5:7b', { ok: true, ms: 140, tier: 1 });
+  const plan = router.plan({ text: 'hi', needsTools: false });
+  assert.equal(plan.candidates[0].id, 'ollama:qwen2.5:7b', 'Lower EMA latency brain should be promoted first');
+});
+
 
 
 
