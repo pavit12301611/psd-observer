@@ -36,9 +36,9 @@ export function greeting(now = new Date()) {
   const h = now.getHours();
   if (h < 5) return '🌙 Raat ka waqt';
   if (h < 12) return '☀️ Subah bakhair';
-  if (h < 17) return '🌤️ Namaste';
+  if (h < 17) return '🌤️ Dopahar bakhair';
   if (h < 21) return '🌆 Shaam bakhair';
-  return '🌙 Namaste';
+  return '🌙 Shubh ratri';
 }
 
 /**

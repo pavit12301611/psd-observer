@@ -119,9 +119,13 @@ import {
 } from './accuracy.js';
 import {
   lookupBilingualCorpus,
+  detectQuestionScope,
   runBilingualMasteryBenchmark,
   BILINGUAL_CORPUS,
 } from './bilingual.js';
+import { lookupKnowledge } from './knowledge.js';
+import { classifyIntent, learnExample } from './neural/index.js';
+import { wikiCommand, wikiFallback } from './wiki.js';
 import {
   recordTurnOutcome,
   resolveFollowUpQuery,
@@ -2555,7 +2559,7 @@ export function createAgent({
         }
         return '🌤️ Usage: /weather <city> — e.g. /weather Dehradun (or set your location with `/location set <city>`)';
       }
-      case 'wiki': return args ? tools.wiki(args) : '📚 Usage: /wiki <topic>';
+      case 'wiki': return args ? wikiCommand(args, config, store) : '📚 Usage: /wiki <topic>';
       case 'define': return args ? tools.define(args) : '🔤 Usage: /define <word>';
       case 'vocab': case 'word': case 'synonym': case 'synonyms': case 'antonym': case 'antonyms': case 'meaning': {
         const rawArg = String(args || '').trim();
@@ -2995,14 +2999,28 @@ export function createAgent({
         return solved.text;
       }
     }
-    const result = await ai.chat(config, store, text, log, { voice: Boolean(ctx?.voice) });
+    // Instant trained knowledge (Wikipedia-derived bank + learned entries):
+    // factual one-liners answer with zero AI and zero latency.
+    const kh = lookupKnowledge(text, store);
+    if (kh && detectQuestionScope(text).scope === 'direct_fact') {
+      store?.pushHistory?.('user', text);
+      store?.pushHistory?.('assistant', kh.reply);
+      return kh.reply;
+    }
+    // Trained IntentNet: tone/routing signal for the chat brain + a chance to
+    // learn from real owner conversations (retrain: npm run train:neural).
+    let intentLabel = null;
+    try {
+      const classified = classifyIntent(text);
+      intentLabel = classified.label;
+      if (classified.confidence >= 0.85) learnExample(text, intentLabel);
+    } catch { /* brain optional */ }
+    const result = await ai.chat(config, store, text, log, { voice: Boolean(ctx?.voice), intent: intentLabel });
     if (result) return result.text;
     // No brain: still try to be useful offline for factual questions.
-    const q = text.replace(/^(what is|who is|tell me about)\s+/i, '').replace(/\?$/, '').trim();
     try {
-      if (q.length >= 3 && q.length <= 80 && /^(what|who|where|when)/i.test(text)) {
-        return `${await tools.wiki(q)}\n\n_(from Wikipedia — local AI is off, see /model)_`;
-      }
+      const fb = await wikiFallback(text, config, store);
+      if (fb) return fb;
     } catch { /* fall through to hint */ }
     return ai.NO_BRAIN_HINT;
   }
@@ -3148,7 +3166,7 @@ export function createAgent({
     if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
       const ownerName = mem.getOwnerName(store);
       const agentName = mem.getAgentName(store, config);
-      return `👋 Namaste${ownerName ? ` *${ownerName}*` : ''}! Main *${agentName}* hoon — aapka fast & powerful Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nAsk me anything, or try /help, /weather <city>, /remind in 10m <text>.`;
+      return `Ji bolo${ownerName ? ` *${ownerName}*` : ''}! 👋 Main *${agentName}* hoon — aapka fast & powerful Observer agent on +${config.agentNumber} — free, native WhatsApp, listening only to you.\n\nSeedha bolo kya karna hai — ya try karo /help, /weather <city>, /remind in 10m <text>.`;
     }
     return undefined;
   }
@@ -3268,7 +3286,7 @@ export function createAgent({
     if (store.data.guestPolicy?.customAutoReply) {
       replyText = store.data.guestPolicy.customAutoReply;
     } else if (/^(hi|hello|hey|namaste|hii+|yo|hola|assalamualaikum|ram\s*ram|radhe\s*radhe|good\s*(?:morning|afternoon|evening)|kaise\s+ho|kya\s+haal\s+hai)[!.?\s]*$/i.test(cleanText)) {
-      replyText = `👋 Namaste${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aap mujhse normal baat-cheet (chat) ya koi bhi general sawal pooch sakte hain.\n_(🔒 Note: Sabhi \`/\` aur system commands sirf mere owner ke liye locked hain.)_`;
+      replyText = `Hello${senderName ? ` *${senderName}*` : ''}! 👋 Main *${agentName}* hoon. Aap mujhse normal baat-cheet (chat) ya koi bhi general sawal pooch sakte hain.\n_(🔒 Note: Sabhi \`/\` aur system commands sirf mere owner ke liye locked hain.)_`;
     } else if ((pctMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\??$/i))
       || (pctMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s+ka\s+(\d+(?:\.\d+)?)\s*(?:%|percent)\??$/i))) {
       const isHindiOrder = /\s+ka\s+/i.test(cleanText);
@@ -3296,7 +3314,7 @@ export function createAgent({
     }
 
     if (!replyText) {
-      replyText = `💬 Namaste${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aapka message mil gaya ("${cleanText.slice(0, 80)}"). Main jald hi jawab dunga.`;
+      replyText = `💬 Message mil gaya${senderName ? ` *${senderName}*` : ''}! Main *${agentName}* hoon. Aapka text ("${cleanText.slice(0, 80)}") receive hua — jald hi jawab dunga.`;
     }
 
     // ── Owner Approval Gate (`approval` mode): send to owner first for yes / no / send instead ──

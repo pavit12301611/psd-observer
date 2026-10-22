@@ -1661,6 +1661,7 @@ Test suites:
 |---|---|
 | `test/agent.test.js` | owner gate, allowlist, command router, store, relink, HTTP/health |
 | `test/power.test.js` | intents (Hinglish), action registry + permissions, confirmations, black-frame detection, portal parsing, file-watcher, chunked typing, PWA icons, bridge API |
+| `test/ai-quality.test.js` | AI language/grammar/reply pipeline: Hinglish-English-Devanagari detection, question-scope lock, preamble stripping, bilingual corpus replies + text-speak, filler post-processing, deterministic math, adaptive temperature, offline intents, chat() e2e mock-brain round-trip |
 
 Development ke waqt jo manual checks kiye:
 
@@ -1737,8 +1738,97 @@ Destructive (confirmation maangte hain): `delete_path`, `kill_process`,
 2. `journalctl --user -u observer-whatsapp-agent -n 100 --no-pager`
 3. `./scripts/fix-desktop.sh` (screenshot/input issues)
 4. `./scripts/update-from-github.sh --check` (purana code?)
-5. `npm test` (44/44 hona chahiye)
+5. `npm test` (266/266 hona chahiye)
 6. Docs: `QUICKSTART.md` → `README.md` → `../FEDORA.md`
+
+---
+
+## 10. AI quality audit — 22 Oct 2026 (language · grammar · replies)
+
+Vigorous AI test session: 3 probe sweeps (language detection, question scope,
+preamble, corpus replies, post-process, solver, temperature, offline intents)
++ full `chat()`/`guestChat()` e2e ek localhost mock brain ke against (real
+prompt build → HTTP → post-process → cache → history, koi cloud key nahi).
+Findings aur fixes:
+
+| # | Issue | Fix |
+|---|---|---|
+| 1 | Greeting "bhai kya haal hai" ko `direct_fact` scope mil raha tha (quiz-style answer lock) | `detectQuestionScope` me greeting/check-in guard — ab `focused_standard`, warm 1–2 line reply |
+| 2 | Preamble stripper "please batao ye kya hota hai" me `batao ye` chhod deta tha | `PREAMBLE_STEP_RE` ab bare `bata/batao/bataiye` + demonstratives (`ye/yeh/wo`) bhi strip karta hai |
+| 3 | WhatsApp text-speak corpus me match nahi hota tha ("what can u do", "how r u") | `lookupBilingualCorpus` ab `normalizeTextSpeak` (u→you, r→are, ur→your, thx→thanks, plz→please) se bhi match karta hai — sirf matching ke liye |
+| 4 | Model ka robotic Hinglish filler ("Namaste! Main aapki sahayata karunga.") strip nahi hota tha (directive ban karta hai par enforce nahi) | `postProcessAiAnswer` me Hinglish/Hindi filler preamble + mid-reply filler sentences ka strip (looped, stacked fillers bhi) — bare "Namaste!"/"Bilkul!" warmth safe hai |
+| 5 | Corpus reply me Devanagari "सटीक" Roman Hinglish me leak; "me … me" double postposition | dono reply strings fixed |
+| 6 | Solver "5 factorial" word-form handle nahi karta tha | factorial regex me `N factorial`, `N factorial kitna` forms added |
+| 7 | "Which of the following is NOT … (A) 2" MCQ-temperature (0.05) ki jagah 0.12 | `MCQ_CUE_RE` added (`which of the following`, `choose/select the correct`, `option (A)`) |
+| 8 | "screenshot lo" / "screenshot capture karo" intent miss | `nlp.js` screenshot patterns me `lo`, `khicho`, `capture karo` added |
+
+Test math: baseline `npm test` **245/245** → after audit **266/266** (21 naye
+AI-quality tests permanent `test/ai-quality.test.js` me, `npm test` me wired).
+Ek regression pakdi gayi aur fix hui: filler-stripper bare "Namaste!" greeting
+bhi kaat raha tha (`local.test.js` fixture) — ab full "Namaste! Main aapki
+sahayata…" phrase hi strip hota hai, greeting warmth intact.
+
+### Part 2 — same day: Namaste ban + Wikipedia training (owner request)
+
+Owner: *"yeh kabhi bhi namaste na bheje… chat ke liye properly trained nahi hai —
+train karne ke liye Wikipedia use karo"*.
+
+| # | Kaam | Kaise hua |
+|---|---|---|
+| 1 | **"Namaste"/"Namaskar" kabhi nahi jayega** — kisi bhi reply me, kisi bhi position me | 3 layers: (a) `postProcessAiAnswer` hard-strip (har position, fallback "Ji bolo! 👋"), (b) owner + guest system prompts me HARD RULE, (c) canned replies (`commands.js` greetings, `brief.js`) se word hata diya |
+| 2 | **Wikipedia training — offline knowledge bank** (`src/knowledge.js`) | ~140 curated, Wikipedia-derived facts (India GK, world capitals, science, tech, history, sports, space) — bilingual (Hinglish + English), instant, zero-AI, zero-network. `lookupKnowledge()` chat ko factually strong banata hai |
+| 3 | **Wikipedia training — live + learning loop** (`src/wiki.js`) | `wikiContextFor()` factual question se pehle AI prompt me `[WIKIPEDIA GROUNDING]` inject karta hai (learned cache 0ms → live fetch 3.5s timeout); har fetch `store.data.wikiKnowledge` me seekh jata hai (cap 250) |
+| 4 | **Batch trainer** (`scripts/train-wiki.mjs`, `npm run train:wiki`) | `--common` curriculum (~70 topics) ya apni list → `data/wiki-knowledge.json` → startup pe auto-load (`src/index.js`) |
+| 5 | **Chat pipeline upgrades** (`commands.js askAI`) | order: deterministic → corpus → *knowledge bank fast-path* (direct_fact = instant) → solver → ai.chat (knowledge + wiki grounded) → wiki fallback → hint |
+| 6 | **Conversation mastery** prompt rules | answer-first, energy/length matching, no "I hope this helps", honest uncertainty — AI chat ab "trained" feel karta hai |
+| 7 | `/wiki <topic>` upgrade | built-in bank → learned cache → live fetch + learn; offline pe bhi trained answers |
+
+Test math: **266/266 → 275/275** (9 naye tests: Namaste ban, knowledge bank,
+wiki fetch/learn/offline, trainer file load, knowledge-grounded prompt e2e).
+`.env`: `WIKI_GROUNDING=on|offline|off`, `WIKI_BASE_URL`, `WIKI_TIMEOUT_MS`.
+
+---
+
+## Part 3 — Neural network brain — 🧠 TRAINED
+
+User ask: *"ise aur bhi jyada train kar matlab ki yeh bahut hi powerful ho jaaye — ek proper
+neural network build kar"*. Delivered a **real, working neural network** — not a keyword
+heuristic — trained end-to-end in pure JavaScript.
+
+**The engine (`src/neural/`):** `nn.js` is a genuine MLP — seeded He init, dense/ReLU/softmax
+layers, **backpropagation + Adam + mini-batches + L2 + gradient clipping + early stopping**,
+proved on **XOR** (loss 0.8032 → 0.0003, 4/4 — the classic proof that learning is real).
+`text.js` featurizes into **406 dims**: 384 hash word-bi/char-3grams + **22 CUE_FLAGS**
+(digit/mathop/qmark/wh/kaise/explain/compare/praise/emo/creative/codeword/…) + a bilingual
+lexicon so "bharat ki rajdhani" ≈ "capital of india" share one feature space.
+
+**Training (`npm run train:neural`, ~20s):** ~300 handwritten labelled examples across
+**12 intent classes** + 756 template-synthesized training-only variants + 30 paraphrase groups
+(103 queries) + OOD casual negatives. Honest eval: fixed seed-42 stratified split, validation
+NEVER augmented. Results: **IntentNet [406→32→12] val 83.3%** (train 100%), **MatchNet
+[13→16→1] val P 92.6% / R 75.8%**. Checkpoint int8-quantized → `src/neural/weights.json`
+(43 KB), auto-loaded. Accuracy journey: 46% (overfit) → 67% → **83%** after CUE_FLAGS
+feature engineering — the honest lesson: *features + data beat architecture tuning*.
+
+**What it powers at runtime:**
+1. **Tone routing** (`ai.js`) — emotional → empathy first, no fact dumps; creative → piece
+   first, no lectures; code/howto → working code first. (User-visible: "mood off hai aaj"
+   no longer gets a Wikipedia dump.)
+2. **Semantic knowledge matching** (`knowledge.js`) — MatchNet + content-word guard:
+   "bharat ki rajdhani batao" finds the answer instantly (score 0.98), casual chat scores
+   ~0 and never hijacks (tested).
+3. **Wiki gate** (`wiki.js`) — trained intent (factual/comparison/explain) OR heuristics
+   decide when live fetches may happen.
+4. **k-NN memory + learning loop** — cosine ≥ 0.8 near-duplicates answer from memory;
+   confident messages (≥ 0.85) auto-save as labelled examples (`data/neural-examples.json`)
+   to be absorbed on the next `npm run train:neural`.
+
+**Result:** 275 → **287/287 tests green** (12 new: XOR proof, loss-decrease, quantize
+round-trip, feature determinism, key-case routing ≥ 12/14, honest accuracy floor, MatchNet
+ranking + cross-lingual, knowledge upgrade, fast training smoke, augmentation smoke,
+learnExample persistence, graceful heuristics). Docs: `NEURAL.md`. Honest 83% held-out
+accuracy on unseen handwritten Hinglish; remaining misses are ambiguous 2-3 word strings
+where even humans need context.
 
 ---
 

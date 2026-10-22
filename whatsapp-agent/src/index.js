@@ -4,6 +4,8 @@
 import fs from 'node:fs';
 import { loadConfig } from './config.js';
 import { Store, startReminderLoop } from './store.js';
+import path from 'node:path';
+import { loadTrainedWikiFile } from './wiki.js';
 import { startCronLoop } from './cron.js';
 import { Mailbox } from './mailbox.js';
 import { createAgent } from './commands.js';
@@ -37,6 +39,15 @@ for (const dir of [config.dataDir, config.downloadsDir, config.sharedDir]) fs.mk
 
 const store = new Store(config.storeFile);
 store.data.stats.startedAt = Date.now(); // uptime = this process, not first-ever run
+
+// Load the Wikipedia knowledge training (data/wiki-knowledge.json) if present —
+// created by `npm run train:wiki` (scripts/train-wiki.mjs). Chat answers from
+// it instantly and offline.
+{
+  const trainedPath = path.resolve('data/wiki-knowledge.json');
+  const loaded = loadTrainedWikiFile(store, trainedPath);
+  if (loaded) console.info(`   📚 Wikipedia knowledge loaded: ${loaded} trained entries (${trainedPath})`);
+}
 const mailbox = new Mailbox({ waitMs: config.observerWaitMs });
 
 const agent = createAgent({

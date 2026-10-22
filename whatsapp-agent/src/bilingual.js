@@ -87,6 +87,16 @@ export function detectQuestionScope(rawText) {
   const low = s.toLowerCase();
   const wordCount = s.split(/\s+/).filter(Boolean).length;
 
+  // Casual greetings / check-ins ("bhai kya haal hai", "kaise ho", "what's up")
+  // are NOT factual questions — never lock them to the direct_fact answer style.
+  if (/^(?:hey\s+)?(?:bhai|bro|yaar|yr|dost|boss)?\s*(?:kya\s+haal(?:\s+chaal)?(?:\s+(?:hai|ho|chalu))?(?:\s+bhai)?|kaise\s+(?:ho|hain|hai)(?:\s+(?:bhai|bro|yaar|aap))?(?:\s+aap)?|kya\s+(?:scene|chal|chal\s+raha)\s+(?:hai|raha\s+hai|hua)(?:\s+(?:bhai|bro|aaj))?(?:\s+kya)?|sab\s+(?:theek|thik|badiya|badhiya|mast|first\s+class)(?:\s+hai)?|how\s+(?:are\s+you|r\s+u|r\s+you)(?:\s+doing)?|what(?:'?s|\s+is)\s+up|wassup|good\s+(?:morning|afternoon|evening|night)|namaste|hello|hi|hey|yo)[?!.,\s]*$/i.test(low)) {
+    return {
+      scope: 'focused_standard',
+      maxSentences: 3,
+      rule: 'This is a casual check-in, not a factual question. Reply warmly and conversationally in 1–2 short lines — never like a quiz answer.',
+    };
+  }
+
   // Explicit brevity cues
   if (/\b(?:one\s+line|1\s+line|ek\s+line|short\s+me|briefly|in\s+short|seedha\s+bata|sidha\s+bata|bas\s+answer|only\s+the\s+answer|sirf\s+answer|yes\s+or\s+no|haan\s+ya\s+na|point\s+pe\s+aa)\b/i.test(low)) {
     return {
@@ -141,7 +151,7 @@ export function detectQuestionScope(rawText) {
 
 // ── 3. Conversational Preamble Stripper (Extracts the Core Question) ────────
 
-const PREAMBLE_STEP_RE = /^(?:(?:सुनो|भाई|यार|जरा|suno|dekho|listen|hey|hi|hello|yo|acha|accha|arre|arey|oye|bhai|bhaiya|bro|bruh|yaar|yr|dost|boss|sir|psd|psdai|please|plz|pls|zara|ek\s+baat\s+bata(?:o|na|de)?|mujhe\s+(?:ye\s+|ek\s+baat\s+)?bata(?:o|na|de)?|mereko\s+(?:ye\s+|ek\s+baat\s+)?bata(?:o|na|de)?|(?:mereko|merko|mujhe|mujhko)\s+(?:ye\s+|bas\s+|sirf\s+)?(?:janna|jaanna|puchna|poochna|pata\s+karna)\s+(?:hai|tha)|can\s+you\s+(?:please\s+)?(?:tell\s+me|explain|answer)|could\s+you\s+(?:please\s+)?(?:tell\s+me|explain|answer)|i\s+want\s+to\s+know|tell\s+me(?:\s+quickly)?|batao\s+(?:ki|na|zara)?|sahi\s+sahi\s+bata(?:o)?|ki|that)(?=\s|[,!:;-])[,!\s:;-]*)/i;
+const PREAMBLE_STEP_RE = /^(?:(?:सुनो|भाई|यार|जरा|suno|dekho|listen|hey|hi|hello|yo|acha|accha|arre|arey|oye|bhai|bhaiya|bro|bruh|yaar|yr|dost|boss|sir|psd|psdai|please|plz|pls|zara|ek\s+baat\s+bata(?:o|na|de)?|mujhe\s+(?:ye\s+|ek\s+baat\s+)?bata(?:o|na|de)?|mereko\s+(?:ye\s+|ek\s+baat\s+)?bata(?:o|na|de)?|(?:mereko|merko|mujhe|mujhko)\s+(?:ye\s+|bas\s+|sirf\s+)?(?:janna|jaanna|puchna|poochna|pata\s+karna)\s+(?:hai|tha)|can\s+you\s+(?:please\s+)?(?:tell\s+me|explain|answer)|could\s+you\s+(?:please\s+)?(?:tell\s+me|explain|answer)|i\s+want\s+to\s+know|tell\s+me(?:\s+quickly)?|(?:ye|yeh|wo|woh|jo)?\s*bata(?:o|na|de|iye)?(?:\s+(?:ki|na|zara|ye|yeh|wo|woh|to))?|sahi\s+sahi\s+bata(?:o)?|ki|that)(?=\s|[,!:;-])[,!\s:;-]*)/i;
 
 /**
  * Strip conversational filler preambles ("bhai yaar mujhe ek baat bata ...", "hey bro can you tell me ...")
@@ -205,7 +215,7 @@ export const BILINGUAL_CORPUS = [
       /^(?:hinglish\s+me\s+(?:baat\s+kar(?:o)?|bol(?:o)?|reply\s+kar(?:o)?)|mere\s+saath\s+hinglish\s+me\s+baat\s+kar(?:o)?|speak\s+in\s+hinglish)[!.\s]*$/i,
     ],
     setMode: 'hinglish',
-    hi: 'Done bhai! Ab se main tere saath ekdum natural, crisp aur top-class Hinglish me hi baat karunga — aur jo poochoge seedha usi ka सटीक jawab dunga. 💯',
+    hi: 'Done bhai! Ab se main tere saath ekdum natural, crisp aur top-class Hinglish me hi baat karunga — aur jo poochoge, seedha usi ka exact jawab dunga. 💯',
     en: 'Done bhai! Ab se main tere saath ekdum natural aur top-class Hinglish me hi baat karunga. 💯',
   },
   {
@@ -224,7 +234,7 @@ export const BILINGUAL_CORPUS = [
     patterns: [
       /(?:difference\s+between\s+==\s+and\s+===|==\s+(?:aur|vs|and)\s+===\s*(?:me\s+kya\s+(?:farak|difference|antar)\s+hai|in\s+js|in\s+javascript)?)/i,
     ],
-    hi: 'JavaScript me `==` aur `===` me seedha farak yeh hai:\n• **`==` (Loose Equality)**: Sirf value compare karta hai (automatic type coercion karta hai, jaise `5 == "5"` → `true`).\n• **`===` (Strict Equality)**: Value **aur** data-type dono check karta hai (`5 === "5"` → `false`).\n👉 *Best Practice*: Bugs se bachne ke liye hamesha `===` use karo.',
+    hi: 'JavaScript me `==` aur `===` ka seedha farak yeh hai:\n• **`==` (Loose Equality)**: Sirf value compare karta hai (automatic type coercion karta hai, jaise `5 == "5"` → `true`).\n• **`===` (Strict Equality)**: Value **aur** data-type dono check karta hai (`5 === "5"` → `false`).\n👉 *Best Practice*: Bugs se bachne ke liye hamesha `===` use karo.',
     en: 'Here is the exact difference between `==` and `===` in JavaScript:\n• **`==` (Loose Equality)**: Compares values after performing type coercion (e.g., `5 == "5"` is `true`).\n• **`===` (Strict Equality)**: Compares both value **and** data type without coercion (e.g., `5 === "5"` is `false`).\n👉 *Best Practice*: Always prefer `===` for predictable, bug-free comparisons.',
   },
   {
@@ -278,6 +288,25 @@ export const BILINGUAL_CORPUS = [
 ];
 
 /**
+ * Normalize WhatsApp text-speak ("what can u do", "how r u", "thx", "plz")
+ * so the corpus keeps matching what people actually type. Matching only —
+ * the stored reply text is never rewritten.
+ */
+function normalizeTextSpeak(s) {
+  return String(s ?? '')
+    .replace(/\bu\b/g, 'you')
+    .replace(/\bur\b/g, 'your')
+    .replace(/\br\b/g, 'are')
+    .replace(/\bn\b/g, 'and')
+    .replace(/\bthx\b/g, 'thanks')
+    .replace(/\bplz\b/g, 'please')
+    .replace(/\bik\b/g, 'i know')
+    .replace(/\bidk\b/g, 'i do not know')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Look up an instant, natural Bilingual Corpus answer when the user's message
  * matches a curated conversational or core knowledge pattern.
  */
@@ -285,9 +314,11 @@ export function lookupBilingualCorpus(rawText, store = null) {
   const clean = extractCoreQuestion(rawText);
   if (!clean || clean.length > 260) return null;
   const lang = detectBilingualMode(rawText, store);
+  const spoken = normalizeTextSpeak(clean);
+  const spokenRaw = normalizeTextSpeak(rawText);
 
   for (const item of BILINGUAL_CORPUS) {
-    if (item.patterns.some((re) => re.test(clean) || re.test(rawText.trim()))) {
+    if (item.patterns.some((re) => re.test(clean) || re.test(rawText.trim()) || re.test(spoken) || re.test(spokenRaw))) {
       if (item.setMode && store?.data) {
         store.data.preferredLanguageMode = item.setMode;
         store.save?.();
