@@ -48,6 +48,13 @@ SERVICE="observer-whatsapp-agent"
 MODEL_SERVICE="observer-model"
 SELF_URL="${RAW}/whatsapp-agent/scripts/observer.sh"
 
+set_branch() {
+  BRANCH="${1:-$BRANCH}"
+  ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
+  RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+  SELF_URL="${RAW}/whatsapp-agent/scripts/observer.sh"
+}
+
 # ── pretty output ────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
   B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[0m'
@@ -193,6 +200,8 @@ cmd_install() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir)       dest="${2:-}"; [ -n "$dest" ] || die "--dir needs a path"; shift 2 ;;
+      --branch|-b) [ -n "${2:-}" ] || die "--branch needs a branch name"; set_branch "$2"; shift 2 ;;
+      --branch=*)  set_branch "${1#--branch=}"; shift ;;
       --force)     force=1; shift ;;
       --fedora)    fedora=1; shift ;;
       --model)     model="${2:-}"; shift 2 ;;
@@ -270,9 +279,11 @@ cmd_update() {
   local dir="" check=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --dir)   dir="${2:-}"; [ -n "$dir" ] || die "--dir needs a path"; shift 2 ;;
-      --check) check=1; shift ;;
-      -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+      --dir)       dir="${2:-}"; [ -n "$dir" ] || die "--dir needs a path"; shift 2 ;;
+      --branch|-b) [ -n "${2:-}" ] || die "--branch needs a branch name"; set_branch "$2"; shift 2 ;;
+      --branch=*)  set_branch "${1#--branch=}"; shift ;;
+      --check)     check=1; shift ;;
+      -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
       *) die "update: unknown option $1 (try --help)" ;;
     esac
   done
