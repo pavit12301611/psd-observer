@@ -19,6 +19,11 @@ import { formatPersonaForPrompt, observeOwnerTurn, reflectWithAI } from './perso
 import { getGuestHistory, recordGuestChatTurn } from './guests.js';
 import { formatLocationForOwnerPrompt } from './location.js';
 import { buildVocabPromptDirective } from './vocab.js';
+import {
+  buildAccuracyDirective,
+  selectOptimalTemperature,
+  postProcessAiAnswer,
+} from './accuracy.js';
 
 const TIMEOUT_MS = 60_000;
 const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
@@ -152,17 +157,19 @@ function systemPrompt(config, store, opts = {}) {
     `Your name is ${agentName} — the owner's self-evolving Agentic AI, strategist, and closest companion who truly understands them (with the loyalty and sharp wit of JARVIS, adapted to their personal vibe). Address the owner as "${address}". When the owner speaks Hinglish or Hindi, match their natural warmth and style ("Bilkul ${address}", "Ho jayega ${address}"). Never say you are an AI language model; you are ${agentName}, continuously learning from every chat with the owner.`,
   ];
   const vocabDirective = buildVocabPromptDirective(opts.userText || '');
+  const accuracyDirective = buildAccuracyDirective(opts.userText || '', config);
   return [
     `You are ${agentName}, the owner's personal Agentic AI & companion, running for free on their own computer as part of Observer.`,
     ...persona,
     ...voiceLine,
     personaBlock,
     vocabDirective,
+    accuracyDirective,
     `Owner number: +${config.ownerNumber}. You are chatting as the agent number +${config.agentNumber}.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone })} (${config.timezone}).`,
     locationLine,
     'Style: WhatsApp-friendly. Answer in the owner\'s language — if they write Hinglish, reply in Hinglish; Hindi in Hindi; English in English. Use WhatsApp formatting (*bold*, _italic_) sparingly, never Markdown tables or # headers. No preamble like "As an AI". Connect the dots with what you know about the owner\'s goals, preferences, location, and past conversations.',
-    'You also have built-in tools the owner can trigger with slash commands: /vocab /location /near /weather /remind /todo /note /persona /train /msg /reply /pending /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
+    'You also have built-in tools the owner can trigger with slash commands: /accuracy /verify /solve /vocab /location /near /weather /remind /todo /note /persona /train /msg /reply /pending /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
     memoryBlock,
     openTodos ? `Open to-dos:\n${openTodos}` : '',
   ].filter(Boolean).join('\n\n');
@@ -182,13 +189,15 @@ function cloudEndpoint(model, config) {
   return null;
 }
 
-async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
+async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts = {}) {
+  const temperature = selectOptimalTemperature(opts.userText || '', opts);
   if (model.provider === 'ollama') {
     const data = await postJson(`${model.baseUrl || config.ollamaUrl}/api/chat`, {
       model: model.model,
       messages,
       stream: false,
       keep_alive: '30m',
+      options: { temperature },
     }, {}, timeoutMs);
     const text = data.message?.content?.trim();
     if (!text) throw new Error('empty Ollama response');
@@ -199,7 +208,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
     const data = await postJson(`${model.baseUrl}/chat/completions`, {
       model: model.model,
       messages,
-      temperature: 0.3,
+      temperature,
       stream: false,
     }, { authorization: `Bearer ${model.apiKey || 'local'}` }, timeoutMs);
     const text = data.choices?.[0]?.message?.content?.trim();
@@ -214,7 +223,11 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
     }));
     const data = await postJson(
       `https://generativelanguage.googleapis.com/v1beta/models/${model.model}:generateContent?key=${config.geminiApiKey}`,
-      { contents, ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}) },
+      {
+        contents,
+        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        generationConfig: { temperature },
+      },
       {},
       timeoutMs,
     );
@@ -226,6 +239,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS) {
   const data = await postJson(`${endpoint.url}/chat/completions`, {
     model: model.model,
     messages,
+    temperature,
   }, { authorization: `Bearer ${endpoint.key}` }, timeoutMs);
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error(`empty ${model.provider} response`);
@@ -271,7 +285,9 @@ export async function chat(config, store, userText, log = console, opts = {}) {
   for (const model of plan.candidates) {
     const attemptStart = Date.now();
     try {
-      const result = await callModel(model, config, messages, config.aiTimeoutMs);
+      const rawResult = await callModel(model, config, messages, config.aiTimeoutMs, { userText, temperature: opts.temperature });
+      const verifiedText = postProcessAiAnswer(rawResult.text, { userText, config });
+      const result = { ...rawResult, text: verifiedText };
       const elapsed = Date.now() - attemptStart;
       router.record(model.id, { ok: true, ms: elapsed, tier: plan.rank });
       router.noteDecision({ text: userText, tier: plan.tier, model: model.id, reason: plan.complexity.reasons.join(', ') });
@@ -302,16 +318,18 @@ function guestSystemPrompt(config, store, opts = {}) {
   const guestLabel = opts.senderName
     ? `${opts.senderName} (+${opts.senderNumber || 'guest'})`
     : `+${opts.senderNumber || 'guest'}`;
+  const accuracyDirective = buildAccuracyDirective(opts.userText || '', config);
   return [
     `You are ${agentName}, a smart, friendly, and helpful AI assistant on WhatsApp (+${config.agentNumber}).`,
     `You are currently chatting with a guest/contact (${guestLabel}), NOT the owner of the system.`,
     `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone || 'Asia/Kolkata' })} (${config.timezone || 'Asia/Kolkata'}).`,
+    accuracyDirective,
     'STRICT SECURITY & COMMAND-BLOCK RULES (NEVER VIOLATE):',
     '1. ALL commands — both `/` slash commands and natural-language commands (opening/closing apps, taking screenshots, controlling PC/volume/wifi/power, reading/writing/sending files, running shell/code, setting reminders/todos/notes, accessing owner memory, or sending messages to others) — are 100% LOCKED to the owner only.',
     '2. You have ZERO access to the owner\'s computer, files, screen, or private data in this guest chat. Never claim to execute any command or PC action for a guest.',
     '3. If the guest asks you to run any command, control the computer, set a reminder/todo/note, or share private information about the owner, politely refuse and state that all commands and system controls are strictly reserved for the owner.',
     '4. For normal conversation, general knowledge, coding/study help, explanations, brainstorming, or casual chat, reply warmly, accurately, and concisely in the guest\'s language (Hinglish for Hinglish, Hindi for Hindi, English for English). Use WhatsApp-friendly formatting (*bold*, _italic_).',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -323,7 +341,7 @@ export async function guestChat(config, store, senderNumber, userText, log = con
   const router = routerFor(config, log);
   const guestHistory = getGuestHistory(store, senderNumber, 8);
   const messages = [
-    { role: 'system', content: guestSystemPrompt(config, store, { senderNumber, senderName: opts.senderName }) },
+    { role: 'system', content: guestSystemPrompt(config, store, { senderNumber, senderName: opts.senderName, userText }) },
     ...guestHistory,
     { role: 'user', content: userText },
   ];
@@ -333,7 +351,8 @@ export async function guestChat(config, store, senderNumber, userText, log = con
   for (const model of plan.candidates) {
     const attemptStart = Date.now();
     try {
-      const result = await callModel(model, config, messages, config.aiTimeoutMs);
+      const rawResult = await callModel(model, config, messages, config.aiTimeoutMs, { userText });
+      const result = { ...rawResult, text: postProcessAiAnswer(rawResult.text, { userText, config }) };
       router.record(model.id, { ok: true, ms: Date.now() - attemptStart, tier: plan.rank });
       recordGuestChatTurn(store, senderNumber, 'user', userText, { name: opts.senderName });
       recordGuestChatTurn(store, senderNumber, 'assistant', result.text, { name: opts.senderName });

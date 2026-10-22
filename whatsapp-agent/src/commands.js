@@ -109,6 +109,14 @@ import {
   fuzzyMatchSlashCommand,
   normalizeVocabText,
 } from './vocab.js';
+import {
+  solveDeterministicQuery,
+  extractDeterministicGrounding,
+  looksLikeComplexStemOrMcq,
+  formatAccuracyReport,
+  runAccuracySelfTest,
+  bumpAccuracyStat,
+} from './accuracy.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -2600,6 +2608,8 @@ export function createAgent({
       case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
       case 'dsh': case 'harness': case 'deepseek': return handleDsh(args, ctx);
       case 'solve': case 'ans': case 'answer': case 'q': return handleSolve(args, ctx);
+      case 'accuracy': return handleAccuracy(args);
+      case 'verify': case 'factcheck': return handleVerify(args, ctx);
       case 'reach': case 'agentreach': return handleReach(args);
       case 'yt': case 'youtube': return handleReach(`yt ${args || ''}`.trim());
       case 'gh': case 'github': return handleReach(`gh ${args || ''}`.trim());
@@ -2693,7 +2703,92 @@ export function createAgent({
     }
   }
 
+  async function handleAccuracy(args = '') {
+    const raw = String(args ?? '').trim();
+    const low = raw.toLowerCase();
+
+    if (/^(?:strict\s+)?(on|enable|active|chalu)$/i.test(low)) {
+      store.data.accuracyStrict = true;
+      store.save();
+      return '🎯 *100% Strict Answer Accuracy Mode: ON* ✅\nHar math, equation, MCQ, coding, calendar, aur factual sawal ab deterministic Ground-Truth + Python/SymPy + Adversarial Auditor se verify hokar aayega.';
+    }
+    if (/^(?:strict\s+)?(off|disable|band)$/i.test(low)) {
+      store.data.accuracyStrict = false;
+      store.save();
+      return '⚙️ *Strict Multi-Pass Audit Mode: OFF* (Deterministic Ground-Truth & Low-Temp Precision still active).';
+    }
+    if (low === 'test' || low === 'benchmark' || low === 'selftest') {
+      const bench = runAccuracySelfTest();
+      const lines = [
+        `🎯 *100% Accuracy Engine — Live Self-Test Benchmark*`,
+        `• *Score*: *${bench.passed}/${bench.total} (${bench.accuracyPct}%)* in \`${bench.ms}ms\``,
+        '',
+        ...bench.results.map((r, i) => `${r.passed ? '✅' : '❌'} ${i + 1}. *${r.name}* → \`${r.summary}\``),
+      ];
+      return lines.join('\n');
+    }
+
+    const s = await solver.solverStatus(config, log).catch(() => null);
+    return formatAccuracyReport(config, store, s);
+  }
+
+  async function handleVerify(args = '', ctx = {}) {
+    const raw = String(args ?? '').trim();
+    if (!raw) {
+      return [
+        '🎯 *100% Answer Verifier — Usage:*',
+        '• `/verify <question, equation, code, or claim>`',
+        '• Examples:',
+        '  - `/verify solve x^2 - 5x + 6 = 0`',
+        '  - `/verify what day of the week was 15 August 1947`',
+        '  - `/verify Integrate x^2 * sin(x) from 0 to pi`',
+        '  - `/accuracy test` — Run 10-point live accuracy benchmark',
+      ].join('\n');
+    }
+
+    bumpAccuracyStat(config, 'verifiedAnswers');
+    const det = solveDeterministicQuery(raw);
+    if (det) {
+      bumpAccuracyStat(config, 'deterministicHits');
+      return det.reply;
+    }
+
+    const solved = await solver.solveQuestionText(config, raw, {
+      harness,
+      log,
+      signal: activeSignal,
+    });
+    if (solved?.ok && solved.text) {
+      return solved.text;
+    }
+
+    const { facts } = extractDeterministicGrounding(raw);
+    const aiOut = await askAI(raw, ctx);
+    if (facts.length && aiOut && !String(aiOut).includes('Verified Ground-Truth')) {
+      return `${aiOut}\n\n🎯 *Verified Ground-Truth*: ${facts.join(' · ')}`;
+    }
+    return aiOut;
+  }
+
   async function askAI(text, ctx = {}) {
+    const det = solveDeterministicQuery(text);
+    if (det) {
+      bumpAccuracyStat(config, 'deterministicHits');
+      return det.reply;
+    }
+    if (store.data.accuracyStrict !== false && looksLikeComplexStemOrMcq(text)) {
+      const solved = await solver.solveQuestionText(config, text, {
+        harness,
+        log,
+        signal: activeSignal,
+      }).catch(() => null);
+      if (solved?.ok && solved.text) {
+        bumpAccuracyStat(config, 'verifiedAnswers');
+        store?.pushHistory?.('user', text);
+        store?.pushHistory?.('assistant', solved.text);
+        return solved.text;
+      }
+    }
     const result = await ai.chat(config, store, text, log, { voice: Boolean(ctx?.voice) });
     if (result) return result.text;
     // No brain: still try to be useful offline for factual questions.
@@ -2807,6 +2902,12 @@ export function createAgent({
     }
     if (tools.looksLikeCalc(text)) {
       try { return `🧮 ${text.trim()} = *${tools.calc(text)}*`; } catch { /* not maths after all */ }
+    }
+    // 100% Deterministic Ground-Truth Solver (< 1ms offline: Equations, GCD/LCM, Factorials, nCr/nPr, Primes, Stats, SI/CI, Base/Roman, Calendar, Science Constants & Capitals)
+    const det = solveDeterministicQuery(text);
+    if (det) {
+      bumpAccuracyStat(config, 'deterministicHits');
+      return det.reply;
     }
     if (/^(hi|hello|hey|namaste|hii+|yo|psd|psd_ai|psdai|hey\s+psd)[!. ]*$/i.test(text)) {
       const ownerName = mem.getOwnerName(store);

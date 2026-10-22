@@ -14,6 +14,7 @@
 
 import { extractFact, parseRuleStatement, unwrapImmediateOverride } from './memory.js';
 import { normalizeVocabText, parseVocabIntent } from './vocab.js';
+import { parseAccuracyIntent } from './accuracy.js';
 
 /** Short questions that only *look* like commands ("open source kya hai?"). */
 const QUESTION_WORDS = /\b(kya|kaise|kyun|kyu|kab|kahan|kaun|kitna|kitni|what|who|why|how|when|where|which|explain|samjhao|matlab|meaning)\b/i;
@@ -38,6 +39,12 @@ export function parseIntent(input) {
   // ── Memory & custom rules ("mera naam Pavit hai", "agar main X kahun to Y karo") ──
   if (parseRuleStatement(original) || extractFact(original)) {
     return asCmd('remember', original);
+  }
+
+  // ── 100% Answer Accuracy & Verification ("verify karo: ...", "100% sahi answer batao: ...", "accuracy status") ──
+  const accIntent = parseAccuracyIntent(original);
+  if (accIntent) {
+    return asCmd(accIntent.cmd, accIntent.args);
   }
 
   // ── Vocabulary, Word-Power, Synonyms, Definitions, Rewrite & Translation ──
