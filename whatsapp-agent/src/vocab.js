@@ -251,7 +251,7 @@ export const KNOWN_SLASH_COMMANDS = [
   'msg', 'reply', 'broadcast', 'contact', 'contacts', 'guest', 'guests', 'pending',
   'approve', 'reject', 'block', 'unblock', 'allow', 'inbox',
   'agent', 'do', 'auto', 'autopilot', 'use', 'hands', 'brains', 'models', 'model',
-  'doctor', 'solve', 'reach', 'yt', 'gh', 'reddit', 'hn', 'ui', 'brief', 'undo', 'stop',
+  'doctor', 'solve', 'accuracy', 'verify', 'factcheck', 'reach', 'yt', 'gh', 'reddit', 'hn', 'ui', 'brief', 'undo', 'stop',
 ];
 
 /**

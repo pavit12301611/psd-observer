@@ -70,6 +70,11 @@ import {
   getWordOfTheDay,
   normalizeVocabText,
 } from './vocab.js';
+import {
+  solveDeterministicQuery,
+  extractDeterministicGrounding,
+  runAccuracySelfTest,
+} from './accuracy.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -1244,6 +1249,34 @@ export function createActions({
           return res.text;
         }
         return formatActionRecorderStatus(store);
+      },
+    },
+    {
+      name: 'verify_answer',
+      level: 'safe',
+      label: '100% Ground-Truth Answer Verifier',
+      description: 'Verify any mathematical equation, calculation, number-theory problem, statistics, compound interest, base conversion, historical date, scientific constant, or complex STEM/coding/MCQ question with 100% deterministic & Python/SymPy accuracy.',
+      params: {
+        question: { type: 'string', description: 'The question, equation, or claim to solve and verify with 100% accuracy.', required: true },
+        pythonCode: { type: 'string', description: 'Optional Python/SymPy verification script to execute locally.' },
+      },
+      run: async ({ question = '', pythonCode = '' }) => {
+        if (pythonCode && String(pythonCode).trim()) {
+          const pyOut = await solver.runPythonVerification(pythonCode, { config, log });
+          return `🐍 *Python/SymPy Verification (${pyOut.ok ? 'OK' : 'ERROR'})*:\n${pyOut.output}`;
+        }
+        const q = String(question || '').trim();
+        if (!q) {
+          const bench = runAccuracySelfTest();
+          return `🎯 Accuracy Self-Test: ${bench.passed}/${bench.total} (${bench.accuracyPct}%) passed in ${bench.ms}ms.`;
+        }
+        const det = solveDeterministicQuery(q);
+        if (det) return det.reply;
+        const solved = await solver.solveQuestionText(config, q, { log });
+        if (solved?.ok && solved.text) return solved.text;
+        const { facts } = extractDeterministicGrounding(q);
+        if (facts.length) return `🎯 *Verified Ground-Truth Facts*:\n• ${facts.join('\n• ')}`;
+        return '⚠️ No offline deterministic match; use Python verification or web_search for live facts.';
       },
     },
   ];

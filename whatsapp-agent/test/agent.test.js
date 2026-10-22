@@ -22,6 +22,7 @@ import * as guests from '../src/guests.js';
 import * as location from '../src/location.js';
 import * as actionrecorder from '../src/actionrecorder.js';
 import * as vocab from '../src/vocab.js';
+import * as accuracy from '../src/accuracy.js';
 import * as ai from '../src/ai.js';
 import { createModelRouter } from '../src/router.js';
 import { archiveDeadAuthDir, createWhatsApp } from '../src/whatsapp.js';
@@ -1304,6 +1305,89 @@ test('Advanced Vocabulary Intelligence & Turbo Speed: Hinglish/Slang/Typo NLP, F
   const plan = router.plan({ text: 'hi', needsTools: false });
   assert.equal(plan.candidates[0].id, 'ollama:qwen2.5:7b', 'Lower EMA latency brain should be promoted first');
 });
+
+test('100% Answer Accuracy Engine: Deterministic Algebra/Systems/NumberTheory/Stats/Finance/Base/Calendar/Science, Pre-Flight Grounding, Low-Temp Precision & /verify', async () => {
+  const { agent, config } = makeAgent();
+
+  // 1. Quadratic, Linear & 2x2 System Solvers with plug-back proof
+  const quadReply = await agent.handle('solve x^2 - 5x + 6 = 0');
+  assert.match(quadReply, /100% Verified Quadratic Solution/);
+  assert.match(quadReply, /x₁ = 3/);
+  assert.match(quadReply, /x₂ = 2/);
+  assert.match(quadReply, /Plug-Back Proof/);
+
+  const linReply = await agent.handle('solve 3x + 7 = 22');
+  assert.match(linReply, /x = 5/);
+
+  const sysReply = await agent.handle('solve 2x + 3y = 12 and x - y = 1');
+  assert.match(sysReply, /x = 3/);
+  assert.match(sysReply, /y = 2/);
+
+  // 2. Number Theory (GCD/HCF, LCM, Factorial, nCr, nPr, Prime Factorization, Fibonacci)
+  assert.match(await agent.handle('gcd of 48 and 180'), /\*12\*/);
+  assert.match(await agent.handle('12 aur 18 ka lcm'), /\*36\*/);
+  assert.match(await agent.handle('factorial of 10'), /3628800/);
+  assert.match(await agent.handle('10C3'), /\*120\*/);
+  assert.match(await agent.handle('8P2'), /\*56\*/);
+  assert.match(await agent.handle('is 97 prime?'), /Prime Number/);
+  assert.match(await agent.handle('prime factors of 360'), /2\^3 × 3\^2 × 5/);
+  assert.match(await agent.handle('15th fibonacci number'), /\*610\*/);
+
+  // 3. Statistics, Compound Interest, Multi-term Percentages & Discounts
+  const statsReply = await agent.handle('stats of 10, 20, 20, 40, 50');
+  assert.match(statsReply, /Mean \(Average\)\*: \*28\*/);
+  assert.match(statsReply, /Median\*: \*20\*/);
+  assert.match(statsReply, /Mode\*: \*20\*/);
+
+  const ciReply = await agent.handle('compound interest on 10000 at 10% for 2 years');
+  assert.match(ciReply, /2100/);
+
+  assert.match(await agent.handle('what is 15% of 240 + 35% of 600?'), /\*246\*/);
+  assert.match(await agent.handle('20% discount on 1500'), /\*1200\*/);
+
+  // 4. Base Conversions, Roman Numerals & Historical Proleptic Calendar
+  assert.match(await agent.handle('255 in binary'), /11111111/);
+  assert.match(await agent.handle('255 in hex'), /FF/);
+  assert.match(await agent.handle('2026 in roman numerals'), /MMXXVI/);
+  assert.match(await agent.handle('roman numeral MCMXCIV to number'), /\*1994\*/);
+  assert.match(await agent.handle('what day of the week was 15 August 1947'), /Friday/);
+  assert.match(await agent.handle('15 August 1947 ko kaunsa din tha'), /Friday/);
+  assert.match(await agent.handle('days between 2024-01-01 and 2024-12-31'), /365 days/);
+
+  // 5. Verified Scientific Constants, Periodic Table Elements & Capitals
+  assert.match(await agent.handle('what is the speed of light?'), /299,792,458/);
+  assert.match(await agent.handle('atomic number of gold'), /\*79\*/);
+  assert.match(await agent.handle('capital of Australia'), /Canberra/);
+  assert.match(await agent.handle('Uttarakhand ki rajdhani kya hai'), /Dehradun/);
+
+  // 6. Pre-Flight Ground-Truth Injection & Low-Temperature Precision Selection
+  assert.equal(accuracy.selectOptimalTemperature('solve x^2 - 5x + 6 = 0'), 0.05);
+  assert.equal(accuracy.selectOptimalTemperature('what is the capital of France?'), 0.12);
+  const directive = accuracy.buildAccuracyDirective('If a server costs 2400 and gets 15% of 2400 discount, and 45 * 18 extra, explain.', config);
+  assert.match(directive, /VERIFIED GROUND-TRUTH FACTS/);
+  assert.match(directive, /15% of 2400 = 360/);
+  assert.match(directive, /45 \* 18 = 810/);
+
+  // 7. Post-Generation Consistency Auditor fixes missing exact values & strips <think> tags
+  const cleaned = accuracy.postProcessAiAnswer('<think>internal reasoning</think>The answer is around three hundred.', {
+    userText: '15% of 2400',
+    config,
+  });
+  assert.doesNotMatch(cleaned, /<think>/);
+  assert.match(cleaned, /Verified Exact Ground-Truth.*360/);
+
+  // 8. `/accuracy`, `/accuracy test`, `/verify`, and Hinglish NLP triggers
+  const benchOut = await agent.handle('/accuracy test');
+  assert.match(benchOut, /10\/10 \(100%\)/);
+
+  const accStatus = await agent.handle('accuracy status');
+  assert.match(accStatus, /100% Answer Accuracy Engine/);
+
+  const verifyOut = await agent.handle('100% sahi answer batao: solve x^2 - 7x + 12 = 0');
+  assert.match(verifyOut, /x₁ = 4/);
+  assert.match(verifyOut, /x₂ = 3/);
+});
+
 
 
 
