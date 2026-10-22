@@ -238,6 +238,20 @@ export function parseIntent(input) {
   if ((m = text.match(/^(.+?\.\w{1,6})\s+(?:bhej(?:o|do)|send(?:\s+karo)?)$/i))) {
     return asCmd('send', clean(m[1]));
   }
+  // ── custom / learned commands (before generic rm / run shell rules) ───────
+  if (/^(?:(?:show|list)\s+(?:my\s+)?(?:custom|created|learned|saved)\s+commands?|(?:mere\s+)?(?:custom|naye|banaye\s+hue)\s+commands?\s*(?:dikhao|batao|list)?|learned\s+commands?)\??$/i.test(low)) {
+    return asCmd('learn', '');
+  }
+  if ((m = text.match(/^(?:run|execute|trigger)\s+(?:the\s+|my\s+)?(?:custom\s+)?command\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i))
+    || (m = text.match(/^(?:run|execute)\s+\/([a-zA-Z][a-zA-Z0-9_-]{1,27})(?:\s+command)?$/i))
+    || (m = text.match(/^\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})\s+(?:custom\s+)?command\s+(?:ko\s+)?(?:chala(?:\s*do|\s*o)?|run\s+kar(?:\s*do|\s*o)?)$/i))) {
+    return asCmd('cmd', `run ${clean(m[1])}`);
+  }
+  if ((m = text.match(/^(?:delete|remove|forget|unlearn)\s+(?:the\s+)?(?:custom\s+)?command\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i))
+    || (m = text.match(/^\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})\s+(?:custom\s+)?command\s+(?:ko\s+)?(?:delete|remove|hata(?:\s*do|\s*o)?)(?:\s+kar(?:\s*do|\s*o)?)?$/i))) {
+    return asCmd('learn', `del ${clean(m[1])}`);
+  }
+
   if ((m = text.match(/^(?:rm|remove|delete|hatao|delete\s+karo|remove\s+karo)\s+(.+)$/i))
     || (m = text.match(/^(.+?)\s+(?:delete|remove|hata\s*do|delete\s+karo)$/i))) {
     return asCmd('rm', clean(m[1]));
@@ -335,6 +349,16 @@ export function parseIntent(input) {
   }
   if ((m = text.match(/^(?:reply(?:\s+to\s+last(?:\s+guest)?)?|last\s+guest\s+ko\s+reply(?:\s+kar(?:o|do))?)\s*(?::|-)?\s+([\s\S]+)$/i))) {
     return asCmd('reply', clean(m[1]));
+  }
+
+  // ── custom / learned commands ─────────────────────────────────────────────
+  if (/^(?:(?:show|list)\s+(?:my\s+)?(?:custom|created|learned|saved)\s+commands?|(?:mere\s+)?(?:custom|naye|banaye\s+hue)\s+commands?\s*(?:dikhao|batao|list)?|learned\s+commands?)\??$/i.test(low)) {
+    return asCmd('learn', '');
+  }
+  if ((m = text.match(/^(?:run|execute|trigger)\s+(?:the\s+|my\s+)?(?:custom\s+)?command\s+\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})$/i))
+    || (m = text.match(/^(?:run|execute)\s+\/([a-zA-Z][a-zA-Z0-9_-]{1,27})(?:\s+command)?$/i))
+    || (m = text.match(/^\/?([a-zA-Z][a-zA-Z0-9_-]{1,27})\s+(?:custom\s+)?command\s+(?:ko\s+)?(?:chala(?:\s*do|\s*o)?|run\s+kar(?:\s*do|\s*o)?)$/i))) {
+    return asCmd('cmd', `run ${clean(m[1])}`);
   }
 
   // ── meta ──────────────────────────────────────────────────────────────────

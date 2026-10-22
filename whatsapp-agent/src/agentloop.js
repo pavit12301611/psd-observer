@@ -79,6 +79,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     'volume', 'media', 'run_shell', 'power', 'list_windows', 'focus_window',
     'remember_fact', 'update_owner_profile', 'send_whatsapp', 'manage_contacts',
     'my_location', 'nearby_places',
+    'create_custom_command', 'list_custom_commands', 'delete_custom_command',
     // Agent-Reach × Agent-S deterministic tools — always available so the AI
     // never opens a browser to guess clicks when a structured channel exists.
     'web_search', 'read_url', 'youtube_info', 'github_lookup', 'inspect_ui',
@@ -107,6 +108,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
     const memoryBlock = formatMemoryForPrompt(store, config);
     const personaBlock = formatPersonaForPrompt(store, config, userText);
     const todos = (store?.data?.todos ?? []).filter((t) => !t.done).slice(-10).map((t) => `- ${t.text}`).join('\n');
+    const customCmds = (store?.data?.learned ?? []).map((l) => `/${l.keyword} (${l.rawText || l.commands?.map((c) => `/${c.cmd} ${c.args || ''}`).join(' | ')})`).join(', ');
     return [
       `You are ${agentName}, the owner's personal Agentic AI & companion, running 100% free on their own Fedora computer (Observer WhatsApp Agent).`,
       ...personaLines(config, { voice: Boolean(ctx.voice), store }),
@@ -114,13 +116,14 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       personaBlock,
       `Owner: +${config.ownerNumber}. You are on the agent WhatsApp number +${config.agentNumber}.`,
       `Current time: ${new Date().toLocaleString('en-IN', { timeZone: config.timezone ?? 'Asia/Kolkata' })} (${config.timezone ?? 'Asia/Kolkata'}).`,
-      'You are an Autonomous Agentic AI who deeply understands the owner AND can actually DO things on their computer and the internet: research, reason, plan, remember behavioral insights (`update_owner_profile` / `remember_fact`), open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
+      'You are an Autonomous Agentic AI who deeply understands the owner AND can actually DO things on their computer and the internet: research, reason, plan, remember behavioral insights (`update_owner_profile` / `remember_fact`), create reusable custom `/commands` (`create_custom_command`), open/close apps, control volume/brightness/music, Wi-Fi, Bluetooth, files, screenshots, OCR, typing/clicking, downloads, webcam, screen recording, power, and more — using the tools provided.',
       'AGENT-REACH & AGENT-S ZERO-GUESSWORK RULES:',
       '- NEVER open a browser and guess pixel clicks when a deterministic tool can do the job directly!',
       '- For web search / research / reading URLs / YouTube transcripts / GitHub repos / Reddit / Twitter / HN: ALWAYS use `web_search`, `read_url`, `youtube_info`, `github_lookup`, `social_lookup`, or `reach_research`.',
       '- When the owner says "play X on YouTube", call `youtube_info` with `mode="play"` so the exact video URL opens directly without blind UI clicking.',
       '- For anything that genuinely needs the desktop GUI (an app dialog, visual interaction, desktop settings), use `inspect_ui` to see exact AT-SPI accessibility widget coordinates or call `computer_use` which grounds actions via AT-SPI + OCR + Set-of-Marks.',
       '- Whenever the owner shares a personal preference, goal, project, or behavioral feedback, call `update_owner_profile` or `remember_fact` so you keep evolving to understand them better.',
+      '- Whenever the owner asks to create, save, or turn a task/message into a command (e.g. "create a command /study that ...", "create this as a command /work"), call `create_custom_command` so it is permanently remembered and executable.',
       'Rules:',
       '1. When the owner asks you to DO something, call the tool instead of explaining how to do it.',
       '2. You may call several tools in a row; check each result before deciding the next step.',
@@ -133,6 +136,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       `This request was sized as *${plan.tier}* (${plan.complexity?.reasons?.join(', ') || 'simple ask'}); you have ${plan.maxSteps} steps. Be efficient: the fewest tool calls that finish the job.`,
       `Access level: ${actions.level?.() ?? 'full'}. Shell: ${config.allowShell ? 'enabled (PIN protected)' : 'disabled'}.`,
       memoryBlock,
+      customCmds ? `Owner's saved custom commands: ${customCmds}` : '',
       todos ? `Open to-dos:\n${todos}` : '',
     ].filter(Boolean).join('\n');
   }

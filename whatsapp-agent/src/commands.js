@@ -582,72 +582,154 @@ export function createAgent({
     }
   }
 
-  // ── learn custom keywords ──────────────────────────────────────────────
+  // ── learn & custom commands (/learn, /cmd, natural command creation) ──────
   function learnCmd(args) {
     const raw = String(args ?? '').trim();
     if (!raw || raw.toLowerCase() === 'list' || raw.toLowerCase() === 'ls') {
       const all = store.listLearned();
-      if (!all.length) return '📚 No learned keywords yet. Teach one:\n/learn work open chrome | open slack | open code\n/learn work chrome, slack, code  (shorthand: each word = app to open)\nThen just type /work';
-      return '📚 *Learned keywords*\n\n' + all.map(e => `• /${e.keyword} → ${e.commands.map(c => c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`).join(' | ')}`).join('\n');
+      if (!all.length) {
+        return [
+          '📚 *No custom commands yet.*',
+          'Aap seedha natural message me ya `/learn` se naya command bana sakte ho:',
+          '• `"create a command /study that opens chrome and sets volume to 30"`',
+          '• `"todo add revise math — create this as a command /math"`',
+          '• `"/learn work open chrome | open slack | open code"`',
+          'Phir kabhi bhi `/study` ya `study` likho aur wahi task execute hoga!',
+        ].join('\n');
+      }
+      return '📚 *Learned / Custom Commands*\n\n' + all.map(e => `• /${e.keyword} → ${e.commands.map(c => learn.formatLearnedStep ? learn.formatLearnedStep(c) : (c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`)).join(' | ')}`).join('\n');
     }
     // delete forms: del work / delete work / rm work / remove work / unlearn work
-    let m = raw.match(/^(?:del|delete|rm|remove|unlearn|forget)\s+([a-z0-9_-]+)$/i);
+    const m = raw.match(/^(?:del|delete|rm|remove|unlearn|forget)\s+\/?([a-z0-9_-]+)$/i);
     if (m) {
       const kw = learn.normalizeKeyword(m[1]);
       return store.deleteLearned(kw) ? `🗑️ /${kw} deleted.` : `No learned keyword /${kw}. See /learn list`;
     }
-    // handle "add work ..." prefix
-    let addText = raw.replace(/^add\s+/i, '');
+    // handle "add work ..." or "create work ..." prefix
+    const addText = raw.replace(/^(?:add|create|set|new)\s+/i, '');
     // split keyword from commands: first word is keyword, rest is commands
     const sp = addText.search(/\s/);
     if (sp === -1) {
-      return '📚 Usage: /learn <keyword> <commands>\nE.g. /learn work open chrome | open slack | open code\nOr shorthand: /learn work chrome slack vscode';
+      return '📚 Usage: /learn <keyword> <commands>\nE.g. /learn work open chrome | open slack | open code\nOr natural: "create a command /work that opens chrome and sets volume to 40"';
     }
     const keywordRaw = addText.slice(0, sp).trim();
-    const commandsRaw = addText.slice(sp+1).trim();
+    const commandsRaw = addText.slice(sp + 1).replace(/^(?:that|which|to|for|:|=|-)\s+/i, '').trim();
     if (!commandsRaw) return `📚 /learn ${keywordRaw} — commands kya hai? E.g. /learn ${keywordRaw} open chrome | open slack`;
     const kw = learn.normalizeKeyword(keywordRaw);
     const err = learn.validateKeyword(kw);
     if (err) return `⚠️ ${err}`;
     const cmds = learn.parseLearnCommands(commandsRaw);
     if (!cmds) return '⚠️ Commands samajh nahi aaye. Try:\n/learn work open chrome | open slack\n/learn work chrome, slack, code';
-    const entry = store.addLearned(kw, cmds, commandsRaw);
-    const steps = cmds.map(c => c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`).join(' | ');
-    return `📚 Learned /${kw} → ${steps}\nAb bas /${kw} likho aur ye saare kaam ek saath honge.`;
+    store.addLearned(kw, cmds, commandsRaw);
+    const steps = cmds.map(c => learn.formatLearnedStep ? learn.formatLearnedStep(c) : (c.inferredOpen ? c.args : `/${c.cmd}${c.args ? ' '+c.args : ''}`)).join(' | ');
+    return `📚 Learned /${kw} → ${steps}\nAb bas /${kw} ya \`${kw}\` likho aur ye saare kaam ek saath honge.`;
   }
 
-  async function runLearned(keyword, ctx) {
-    const entry = store.getLearned(keyword);
+  async function runNaturalStep(stepText, ctx = {}) {
+    const cleanStep = String(stepText ?? '').trim();
+    if (!cleanStep) return '✅ Done.';
+    const stepCtx = { ...ctx, bypassSaved: true };
+    const sl = cleanStep.match(/^\/([a-zA-Z0-9_-]+)\s*([\s\S]*)$/);
+    if (sl) return handleCommand(sl[1].toLowerCase(), sl[2].trim(), stepCtx);
+    const q = intent(cleanStep, stepCtx);
+    if (q !== undefined) return await q;
+    const pi = parseIntent(cleanStep);
+    if (pi) return pi.reply ? pi.reply : await handleCommand(pi.cmd, pi.args ?? '', stepCtx);
+    if (agentLoop.enabled) {
+      const ar = await agentLoop.run(cleanStep, stepCtx);
+      if (ar != null) return ar;
+    }
+    return askAI(cleanStep, stepCtx);
+  }
+
+  async function runLearned(keyword, ctx = {}, extraArgs = '') {
+    const cleanKw = learn.normalizeKeyword(keyword);
+    const entry = store.getLearned(cleanKw);
     if (!entry) return null;
     const results = [];
+    const stepCtx = { ...ctx, bypassSaved: true };
     for (const step of entry.commands) {
-      // inferredOpen → open_app, else use step.cmd/args
-      const cmd = step.inferredOpen ? 'open' : step.cmd;
-      const args = step.inferredOpen ? step.args : step.args;
-      const r = await handleCommand(cmd, args, ctx);
+      let r;
+      if (step.cmd === '__natural__') {
+        const naturalText = extraArgs ? `${step.args} ${extraArgs}`.trim() : step.args;
+        r = await runNaturalStep(naturalText, stepCtx);
+      } else {
+        const cmd = step.inferredOpen ? 'open' : step.cmd;
+        const baseArgs = step.args ?? '';
+        const args = extraArgs && entry.commands.length === 1
+          ? `${baseArgs} ${extraArgs}`.trim()
+          : baseArgs;
+        r = await handleCommand(cmd, args, stepCtx);
+      }
       const out = typeof r === 'string' ? r : (r?.text ?? '');
-      // if media reply, push media handling? For now just text
       if (r && typeof r === 'object' && (r.image || r.audio || r.document || r.video)) {
-        // if media, we need to send it — but stacking text join loses media. For /work we mostly open apps (text).
-        // We'll send media immediately via a side effect? Instead collect text and if any step returns media, we will return that media reply (last media wins)
-        // For simplicity, if any step has media, return it as final; caller will handle stacking text already collected
-        // We push text part and note media
         results.push(out || '(media)');
-        // TODO: media stacking could be improved to send multiple messages; for now last media will be in final reply
-        if (r.image || r.audio || r.document || r.video) {
-          // store last media to merge into final
-          results._lastMedia = r;
-        }
+        results._lastMedia = r;
       } else {
         results.push(out);
       }
+      if (store.data.pending) break;
     }
-    const text = `📚 /${keyword} (${entry.commands.length} steps):\n\n` + results.join('\n\n---\n\n');
+    const text = `📚 /${entry.keyword} (${entry.commands.length} step${entry.commands.length === 1 ? '' : 's'}):\n\n` + results.join('\n\n---\n\n');
     const lastMedia = results._lastMedia;
     if (lastMedia) {
       return { ...lastMedia, text };
     }
     return text;
+  }
+
+  async function cmdCommand(args, ctx = {}) {
+    const raw = String(args ?? '').trim();
+    if (!raw || /^(?:list|ls|show)$/i.test(raw)) return learnCmd('list');
+    const runMatch = raw.match(/^(?:run|exec|execute|start)\s+\/?([a-zA-Z0-9_-]+)(?:\s+([\s\S]+))?$/i);
+    if (runMatch) {
+      const kw = learn.normalizeKeyword(runMatch[1]);
+      const res = await runLearned(kw, ctx, (runMatch[2] || '').trim());
+      return res ?? `⚠️ Custom command \`/${kw}\` nahi mila. (\`/learn list\` dekhein)`;
+    }
+    return learnCmd(raw);
+  }
+
+  async function executeCreateCommandIntent(parsedCmd, ctx = {}) {
+    if (!parsedCmd) return undefined;
+    if (parsedCmd.action === 'list') {
+      return learnCmd('list');
+    }
+    if (parsedCmd.action === 'delete') {
+      return learnCmd(`del ${parsedCmd.name}`);
+    }
+    if (parsedCmd.action === 'create') {
+      const kw = learn.normalizeKeyword(parsedCmd.name);
+      const err = learn.validateKeyword(kw);
+      if (err) return `⚠️ ${err}`;
+      const taskText = String(parsedCmd.task || store.getLastOwnerTask() || '').trim();
+      if (!taskText) {
+        return `⚠️ Command \`/${kw}\` me kya task save karna hai? Example:\n• \`create a command /${kw} that opens chrome and sets volume to 30\`\n• Ya pehle koi task bhejo aur phir bolo: \`create this as a command /${kw}\``;
+      }
+      const cmds = learn.parseLearnCommands(taskText);
+      if (!cmds || !cmds.length) {
+        return `⚠️ Command \`/${kw}\` ke steps samajh nahi aaye. Try: \`create a command /${kw} that opens chrome and takes a screenshot\``;
+      }
+      store.addLearned(kw, cmds, taskText);
+      const steps = cmds.map((c) => learn.formatLearnedStep(c)).join(' → ');
+      const header = [
+        `🧠 *Custom Command Created:* \`/${kw}\``,
+        `📋 *Task (${cmds.length} step${cmds.length === 1 ? '' : 's'}):* ${steps}`,
+        parsedCmd.fromLastMessage ? `↩️ _Created from your previous message: "${taskText.slice(0, 100)}"_` : '',
+        '',
+        `Ab aap kabhi bhi \`/${kw}\` ya sirf \`${kw}\` bhejoge to main yahi task execute karunga!`,
+      ].filter(Boolean).join('\n');
+
+      if (parsedCmd.runNow) {
+        const executed = await runLearned(kw, ctx);
+        if (executed && typeof executed === 'object') {
+          return { ...executed, text: `${header}\n\n---\n\n${executed.text || ''}` };
+        }
+        return `${header}\n\n---\n\n${executed || ''}`;
+      }
+      return header;
+    }
+    return undefined;
   }
 
   function todo(args) {
@@ -2227,7 +2309,8 @@ export function createAgent({
       case 'callat': case 'schedulecall': case 'calllater': return callAtCommand(args);
       case 'voice': case 'jarvis': return ['📞 *JARVIS Voice*', ...callStatusLines(), '', tts.ttsStatus(config)].join('\n');
       case 'learn': case 'teach': case 'alias': return learnCmd(args);
-      case 'unlearn': case 'undefine': case 'forgetword': return learnCmd(`del ${args}`);
+      case 'cmd': case 'command': case 'createcmd': return await cmdCommand(args, ctx);
+      case 'unlearn': case 'undefine': case 'forgetword': case 'delcmd': return learnCmd(`del ${args}`);
       case 'todo': case 'todos': case 'task': return todo(args);
       case 'note': return note(args);
       case 'notes': return notes();
@@ -2443,7 +2526,7 @@ export function createAgent({
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
       default: {
-        const learnedRes = await runLearned(cmd, ctx);
+        const learnedRes = await runLearned(cmd, ctx, args);
         if (learnedRes != null) return learnedRes;
         return `🤖 I don't know /${cmd} yet.\n\n${HELP.split('\n').slice(0, 6).join('\n')}\n…full list: /help`;
       }
@@ -2477,16 +2560,21 @@ export function createAgent({
       if (steps?.length) {
         const outs = [];
         for (const step of steps) {
-          const cmd = step.inferredOpen ? 'open' : step.cmd;
-          const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
-          outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+          if (step.cmd === '__natural__') {
+            const r = await runNaturalStep(step.args ?? '', ruleCtx);
+            outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+          } else {
+            const cmd = step.inferredOpen ? 'open' : step.cmd;
+            const r = await handleCommand(cmd, step.args ?? '', ruleCtx);
+            outs.push(typeof r === 'string' ? r : (r?.text ?? '✅ Done.'));
+          }
         }
         return outs.join('\n\n---\n\n');
       }
     }
 
     // Slash command ("/brief", "/open brave")
-    const slash = actionText.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+    const slash = actionText.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
     if (slash) return handleCommand(slash[1].toLowerCase(), slash[2].trim(), ruleCtx);
 
     // Natural-language intent ("brave kholo", "screenshot bhejo", "volume 40")
@@ -2817,20 +2905,31 @@ export function createAgent({
       if (isStack) {
         const results = [];
         for (const line of lines) {
-          const m = line.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+          const m = line.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
           if (!m) { results.push(`⚠️ Skip: ${line.slice(0,40)}`); continue; }
           const r = await handleCommand(m[1].toLowerCase(), m[2].trim(), effCtx);
           const out = typeof r === 'string' ? r : (r?.text ?? JSON.stringify(r).slice(0,500));
           results.push(out);
           macro.recordStep(store, m[1].toLowerCase(), m[2].trim());
         }
+        store.setLastOwnerTask?.(working);
         lastHandledText = clean; lastHandledTs = Date.now();
         return results.join('\n\n---\n\n');
       }
 
-      const cmdMatch = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+      const cmdMatch = working.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
       if (cmdMatch) {
-        const res = await handleCommand(cmdMatch[1].toLowerCase(), cmdMatch[2].trim(), effCtx);
+        // If the message is "/<name> naam ka command banao ...", treat it as command creation rather than running an unknown slash command
+        const slashCreateIntent = learn.parseCreateCommandIntent(working, store.getLastOwnerTask?.() || '');
+        if (slashCreateIntent) {
+          const createdReply = await executeCreateCommandIntent(slashCreateIntent, effCtx);
+          if (createdReply !== undefined) {
+            lastHandledText = clean; lastHandledTs = Date.now();
+            return createdReply;
+          }
+        }
+        const slashName = cmdMatch[1].toLowerCase();
+        const res = await handleCommand(slashName, cmdMatch[2].trim(), effCtx);
         lastHandledText = clean; lastHandledTs = Date.now();
         // A stopped run is reported by /stop itself; do not send a second wall of text.
         if (res && typeof res === 'object' && res.stopped) {
@@ -2841,7 +2940,12 @@ export function createAgent({
         // macro. A failed step in a macro would fail again on every replay.
         const failed = (res && typeof res === 'object' && res.ok === false)
           || (typeof res === 'string' && /^(⚠️|🔒|⏳|🤖 I don't know)/.test(res));
-        if (!failed) macro.recordStep(store, cmdMatch[1].toLowerCase(), cmdMatch[2].trim());
+        if (!failed) {
+          macro.recordStep(store, slashName, cmdMatch[2].trim());
+          if (!['learn', 'unlearn', 'cmd', 'command', 'createcmd', 'delcmd', 'stop', 'cancel', 'yes', 'no', 'pending', 'approve', 'reject'].includes(slashName)) {
+            store.setLastOwnerTask?.(working);
+          }
+        }
         return res;
       }
 
@@ -2873,6 +2977,16 @@ export function createAgent({
       // Continuously learn owner's behavior, language vibe, mood, preferences, goals & lessons from every message
       observeOwnerTurn(store, working);
 
+      // Natural-Language Dynamic Command Creation ("create a command /study that ...", "create this as a command /work")
+      const createCmdIntent = learn.parseCreateCommandIntent(working, store.getLastOwnerTask?.() || '');
+      if (createCmdIntent) {
+        const createdReply = await executeCreateCommandIntent(createCmdIntent, effCtx);
+        if (createdReply !== undefined) return createdReply;
+      }
+
+      // Remember this actionable message so the owner can say "create this as a command /name" next
+      store.setLastOwnerTask?.(working);
+
       const quick = intent(working, effCtx);
       if (quick !== undefined) return await quick;
 
@@ -2881,7 +2995,7 @@ export function createAgent({
       if (unwrapped.bypassSaved) {
         working = unwrapped.text;
         effCtx = { ...effCtx, bypassSaved: true };
-        const innerCmd = working.match(/^\/([a-zA-Z]+)\s*([\s\S]*)$/);
+        const innerCmd = working.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
         if (innerCmd) {
           return await handleCommand(innerCmd[1].toLowerCase(), innerCmd[2].trim(), effCtx);
         }

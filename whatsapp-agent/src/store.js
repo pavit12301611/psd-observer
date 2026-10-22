@@ -21,6 +21,7 @@ const EMPTY = () => ({
   pendingGuestApprovals: [], // guest messages held for owner approval (yes / no / send instead)
   lastGuestSender: null, // { number, jid, name, ts } for quick `/reply <text>`
   ownerLocation: null, // owner's current location { enabled, city, region, country, lat, lon, address, source, updatedTs } (src/location.js)
+  lastOwnerTask: '',  // owner's most recent actionable message/command (used for "create this as a command /name")
   history: [],        // AI chat turns [{role, content}], trimmed
   downloads: [],      // received media [{file, kind, ts, caption}]
   pending: null,      // destructive action waiting for "haan"/"yes"
@@ -230,9 +231,20 @@ export class Store {
     return this.data.learned.length < before;
   }
   getLearned(keyword) {
-    return (this.data.learned ?? []).find(e => e.keyword === keyword) ?? null;
+    const k = String(keyword ?? '').trim().replace(/^\/+/, '').toLowerCase();
+    return (this.data.learned ?? []).find(e => e.keyword === k) ?? null;
   }
   listLearned() { return this.data.learned ?? []; }
+
+  setLastOwnerTask(text) {
+    const clean = String(text ?? '').trim();
+    if (!clean) return;
+    this.data.lastOwnerTask = clean.slice(0, 1200);
+    this.save();
+  }
+  getLastOwnerTask() {
+    return String(this.data.lastOwnerTask ?? '').trim();
+  }
 
   pushHistory(role, content, maxTurns = 24) {
     this.data.history.push({ role, content: String(content).slice(0, 4000) });

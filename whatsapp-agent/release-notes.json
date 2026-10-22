@@ -1,4 +1,12 @@
 {
+  "3.3.0": {
+    "title": "Controlled Multi-User Messaging, Owner Approval Gate, Location Intelligence & Natural Dynamic Command Creation 🛡️📍🧠",
+    "bullets": [
+      "**Owner Approval Gate & Strict Command Firewall (`src/guests.js`)**: Aapke alawa jab bhi koi agent ko message karega, agent pehle aapko batayega (**kisne bheja**, **kis time bheja**, aur **AI kya reply soch raha hai**) taaki aap **`yes`**, **`no`**, ya **`no send this instead: <text>`** bol sako. Saare `/` slash commands aur plain-language (`baaki bhi`) commands non-owners ke liye 100% locked hain.",
+      "**Owner Location Intelligence (`src/location.js`)**: WhatsApp GPS Location Pin bhejo ya `/location [set <city|lat,lon>|refresh]` aur `/near <query>` use karo — agent ko aapki live location, aas-paas ke places (distance + Google Maps links), aur local `/weather` ka pura access milta hai (non-owners ke liye strictly private).",
+      "**Natural-Language Dynamic Command Creation (`src/learn.js`)**: Seedha message me bolo *\"create a command /study that opens chrome and sets volume to 30\"*, *\"/morning naam ka command banao jo ...\"*, ya kisi bhi task ke baad bolo *\"create this as a command /work\"* — AI naya `/command` bana kar hamesha ke liye yaad rakhega aur `/study` ya `study` bolte hi wahi task execute karega."
+    ]
+  },
   "3.2.2": {
     "title": "Self-Evolving Agentic AI & Behavioral Learning Engine — Aapki chats se seekh kar aapko sabse behtar samajhne wala AI 🧠🤝⚡",
     "bullets": [

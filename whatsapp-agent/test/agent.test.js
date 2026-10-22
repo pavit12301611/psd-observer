@@ -911,6 +911,91 @@ test('Owner Approval Gate (yes / no / no send this instead) + Owner Location Acc
   }
 });
 
+test('Natural-Language Dynamic Command Creation: inline, Hinglish, "create this as a command" from previous message, execution & guest firewall', async () => {
+  const { agent, store, config } = makeAgent();
+
+  // 1. Create a multi-step command from natural English description
+  const createRes1 = await agent.handle(
+    'create a command /study_prep that adds a todo: finish calculus and saves a note: formula sheet page 12',
+  );
+  assert.match(createRes1, /Custom Command Created:\* `\/study_prep`/);
+  assert.equal(store.getLearned('study_prep')?.commands?.length, 2);
+
+  // Execute the newly created command via `/study_prep`
+  const exec1 = await agent.handle('/study_prep');
+  assert.match(exec1, /\/study_prep \(2 steps\)/);
+  assert.match(exec1, /Added #1: finish calculus/);
+  assert.match(exec1, /Saved note #1/);
+
+  // 2. Create a command in Hinglish ("/<name> naam ka command banao jo ...")
+  const createRes2 = await agent.handle(
+    '/my_digest naam ka command banao jo mere todos dikhaye aur mere notes dikhaye',
+  );
+  assert.match(createRes2, /Custom Command Created:\* `\/my_digest`/);
+
+  // Execute via bare keyword `my_digest` AND via natural language `"run /my_digest command"`
+  const exec2Bare = await agent.handle('my_digest');
+  assert.match(exec2Bare, /finish calculus/);
+  assert.match(exec2Bare, /formula sheet page 12/);
+
+  const exec2Natural = await agent.handle('run /my_digest command');
+  assert.match(exec2Natural, /finish calculus/);
+  assert.match(exec2Natural, /formula sheet page 12/);
+
+  // 3. Retrospective command creation: owner sends a task first, then says "create this as a command /<name>"
+  const taskOut = await agent.handle('25% of 800');
+  assert.match(taskOut, /200/);
+  assert.equal(store.getLastOwnerTask(), '25% of 800');
+
+  const retroCreate = await agent.handle('create this as a command /calc200');
+  assert.match(retroCreate, /Custom Command Created:\* `\/calc200`/);
+  assert.match(retroCreate, /Created from your previous message: "25% of 800"/);
+
+  // Now invoke `/calc200` — it executes the remembered natural step ("25% of 800")!
+  const retroExec = await agent.handle('/calc200');
+  assert.match(retroExec, /\/calc200/);
+  assert.match(retroExec, /200/);
+
+  // 4. Inline "<task> — create this as a command /<name> and run it"
+  const inlineAndRun = await agent.handle(
+    'todo: revise chapter 9 — create this as a command /rev9 and run it',
+  );
+  assert.match(inlineAndRun, /Custom Command Created:\* `\/rev9`/);
+  assert.match(inlineAndRun, /Added #2: revise chapter 9/);
+
+  // 5. AI Tool actions (`create_custom_command`, `list_custom_commands`, `delete_custom_command`)
+  const toolCreate = await agent.actions.execute(
+    'create_custom_command',
+    { name: 'quick_status', task: '/ping | /todo list' },
+    { isOwner: true },
+  );
+  assert.equal(toolCreate.ok, true);
+  assert.match(toolCreate.text, /\/quick_status/);
+
+  const toolList = await agent.actions.execute('list_custom_commands', {}, { isOwner: true });
+  assert.equal(toolList.ok, true);
+  assert.match(toolList.text, /\/study_prep/);
+  assert.match(toolList.text, /\/quick_status/);
+
+  // 6. Non-owner is strictly blocked from creating, running, or deleting custom commands
+  for (const guestAttempt of [
+    '/study_prep',
+    'study_prep',
+    'run /study_prep command',
+    'create a command /hack that opens terminal',
+    'delete command /study_prep',
+  ]) {
+    const det = guests.detectGuestCommandAttempt(guestAttempt, store, config);
+    assert.equal(det.blocked, true, `Expected guest command attempt to be blocked: "${guestAttempt}"`);
+  }
+
+  // 7. Delete custom command via natural language
+  const delRes = await agent.handle('delete command /calc200');
+  assert.match(delRes, /\/calc200 deleted/);
+  assert.equal(store.getLearned('calc200'), null);
+});
+
+
 
 
 

@@ -50,6 +50,13 @@ import {
   searchNearbyPlaces,
   formatOwnerLocationCard,
 } from './location.js';
+import {
+  normalizeKeyword,
+  validateKeyword,
+  parseLearnCommands,
+  formatLearned,
+  formatLearnedStep,
+} from './learn.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -1097,6 +1104,83 @@ export function createActions({
         const res = await searchNearbyPlaces(store, config, query);
         if (!res.ok) throw new Error(res.reason);
         return res.text;
+      },
+    },
+    {
+      name: 'create_custom_command',
+      level: 'safe',
+      label: 'Create custom /command',
+      description: 'Create or update a persistent custom command (e.g. /study, /morning, /work) from the owner\'s natural-language instructions or slash steps so the owner can run that task anytime with `/name` or `name`.',
+      params: {
+        name: { type: 'string', description: 'Command keyword without slash (e.g. "study", "morning", "gaming")', required: true },
+        task: { type: 'string', description: 'Task description or chain of commands (e.g. "open chrome and set volume to 30 and take a screenshot" or "/open chrome | /pc volume 30")', required: true },
+      },
+      run: async ({ name, task }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can create custom commands.');
+        }
+        const keyword = normalizeKeyword(name);
+        const err = validateKeyword(keyword);
+        if (err) throw new Error(err);
+        const taskStr = String(task || store.getLastOwnerTask() || '').trim();
+        const commands = parseLearnCommands(taskStr);
+        if (!commands || !commands.length) {
+          throw new Error('Could not parse command steps. Specify what the command should do.');
+        }
+        const entry = store.addLearned(keyword, commands, taskStr);
+        const steps = entry.commands.map(formatLearnedStep).join(' → ');
+        return (
+          `🧠 *Custom Command Created:* \`/${entry.keyword}\`\n` +
+          `📋 *Task Steps:* ${steps}\n\n` +
+          `Ab aap kabhi bhi \`/${entry.keyword}\` ya sirf \`${entry.keyword}\` bhejoge to main yahi task execute karunga!`
+        );
+      },
+    },
+    {
+      name: 'list_custom_commands',
+      level: 'safe',
+      label: 'List custom commands',
+      description: 'List all custom `/commands` and trigger rules created by the owner.',
+      params: {},
+      run: async (_args, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can view custom commands.');
+        }
+        const learned = store.listLearned();
+        const rules = store.data?.rules ?? [];
+        if (!learned.length && !rules.length) {
+          return '📭 Abhi koi custom command saved nahi hai.';
+        }
+        const lines = [];
+        if (learned.length) {
+          lines.push(`🧠 *Custom Commands (${learned.length}):*`);
+          learned.forEach((l, i) => lines.push(`${i + 1}. ${formatLearned(l)}`));
+        }
+        if (rules.length) {
+          if (lines.length) lines.push('');
+          lines.push(`⚡ *Custom Trigger Rules (${rules.length}):*`);
+          rules.forEach((r, i) => lines.push(`${i + 1}. "${r.trigger}" → ${r.action}`));
+        }
+        return lines.join('\n');
+      },
+    },
+    {
+      name: 'delete_custom_command',
+      level: 'safe',
+      label: 'Delete custom command',
+      description: 'Delete a saved custom `/command` by name.',
+      params: {
+        name: { type: 'string', description: 'Command keyword to remove (e.g. "study")', required: true },
+      },
+      run: async ({ name }, ctx = {}) => {
+        if (ctx?.isOwner === false || ctx?.guest) {
+          throw new Error('Blocked: only the owner can delete custom commands.');
+        }
+        const keyword = normalizeKeyword(name);
+        if (store.deleteLearned(keyword)) {
+          return `🗑️ Removed custom command \`/${keyword}\`.`;
+        }
+        return `⚠️ Custom command \`/${keyword}\` nahi mila.`;
       },
     },
   ];
