@@ -243,6 +243,12 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // again. AUTO_RELINK=false restores the manual flow (stop the agent,
     // remove authDir, restart) or ./scripts/relink-whatsapp.sh.
     autoRelink: bool(e.AUTO_RELINK, true),
+    // Automatic "😴 Agent is sleeping" WhatsApp message before the PC shuts
+    // down, suspends, or the service stops. Active by default; disable with
+    // OFFLINE_NOTIFY=false or `/sleepnotify off`.
+    offlineNotify: bool(e.OFFLINE_NOTIFY, true),
+    offlineMessage: (e.OFFLINE_MESSAGE || '').trim(),
+    offlineTimeoutMs: int(e.OFFLINE_TIMEOUT_MS, 3_500),
 
     // Screen/document reading (all local, free).
     // How long the Wayland screenshot dialog may stay open before we give up.

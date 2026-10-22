@@ -42,6 +42,11 @@ import { jarvisGreeting, spokenSummary } from './jarvis.js';
 import * as mem from './memory.js';
 import * as reach from './reach.js';
 import * as grounding from './grounding.js';
+import {
+  isOfflineNotifyEnabled,
+  buildOfflineMessage,
+  noteOfflineAnnounced,
+} from './lifecycle.js';
 
 const execAsync = promisify(exec);
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
@@ -115,6 +120,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)
 • /use <task> — *haath*: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)
 • /stop — jo chal raha hai wahi rukta hai (partial steps batata hai) · naya: update ka message khud aata hai
+• /sleepnotify [on|off|test|set <msg>] — PC band/sleep hone se pehle auto "Agent is sleeping" message (active by default)
 • /learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del
 • /weather · /wiki · /news · /calc · /unit · /currency · /url · /qr
 • /observer <task> (optional Observer app) · /screen
@@ -818,8 +824,9 @@ export function createAgent({
         if (!pendingPower || pendingPower.expires < Date.now()) { pendingPower = null; return 'Nothing is waiting for confirmation.'; }
         const { action } = pendingPower;
         pendingPower = null;
+        noteOfflineAnnounced(store, action);
         pc.schedulePower(action);
-        return `⏻ ${{ shutdown: 'Shutting down', poweroff: 'Shutting down', reboot: 'Rebooting', restart: 'Rebooting', suspend: 'Suspending', sleep: 'Suspending' }[action]} in 5 seconds. See you on the other side 👋`;
+        return `😴 *Agent is sleeping* — ⏻ ${{ shutdown: 'Shutting down', poweroff: 'Shutting down', reboot: 'Rebooting', restart: 'Rebooting', suspend: 'Suspending', sleep: 'Suspending' }[action]} in 5 seconds. See you on the other side 👋`;
       }
       case 'cancel':
         pendingPower = null;
@@ -1596,9 +1603,68 @@ export function createAgent({
     ].join('\n');
   }
 
+  function sleepNotifyCommand(args) {
+    const raw = String(args ?? '').trim();
+    const [subRaw, ...restParts] = raw.split(/\s+/);
+    const sub = (subRaw || 'status').toLowerCase();
+    const rest = restParts.join(' ').trim();
+
+    if (['on', 'enable', 'active', 'activate', 'chalu'].includes(sub)) {
+      store.data.offlineNotify = true;
+      store.save();
+      return `✅ *Offline/sleeping auto-message ACTIVE hai!* 😴\nAb jab bhi PC band (shutdown), restart, sleep/suspend ya agent offline hoga, bina puche message aayega:\n\n${buildOfflineMessage({ config, store, reason: 'shutdown' })}`;
+    }
+    if (['off', 'disable', 'band'].includes(sub)) {
+      store.data.offlineNotify = false;
+      store.save();
+      return '⚪ Offline/sleeping auto-message *OFF* kar diya. (`/sleepnotify on` se wapas active karein)';
+    }
+    if (['test', 'now', 'check', 'preview'].includes(sub)) {
+      return buildOfflineMessage({ config, store, reason: rest || 'shutdown' });
+    }
+    if (['reset', 'default', 'clear'].includes(sub)) {
+      store.data.offlineMessage = '';
+      store.data.offlineNotify = true;
+      store.save();
+      return `✅ Default sleeping message restore ho gaya:\n\n${buildOfflineMessage({ config, store, reason: 'shutdown' })}`;
+    }
+    if (sub === 'set' && rest) {
+      store.data.offlineMessage = rest;
+      store.data.offlineNotify = true;
+      store.save();
+      return `✅ Custom sleeping message set ho gaya:\n\n${buildOfflineMessage({ config, store, reason: 'shutdown' })}`;
+    }
+    if (raw && !['status', 'info', 'help'].includes(sub)) {
+      store.data.offlineMessage = raw;
+      store.data.offlineNotify = true;
+      store.save();
+      return `✅ Custom sleeping message set ho gaya:\n\n${buildOfflineMessage({ config, store, reason: 'shutdown' })}`;
+    }
+
+    const enabled = isOfflineNotifyEnabled(config, store);
+    const preview = buildOfflineMessage({ config, store, reason: 'shutdown' });
+    const lastAt = store.data.stats?.lastOfflineNotify;
+    const lastReason = store.data.stats?.lastOfflineReason || 'offline';
+    return [
+      `😴 *Offline / Sleeping Auto-Message* — ${enabled ? '🟢 *ACTIVE*' : '⚪ *OFF*'}`,
+      '• Trigger: PC shutdown, restart, sleep/suspend, ya agent service stop hone se pehle bina puche WhatsApp message bhejta hai',
+      lastAt ? `• Last sent: ${tools.formatDateTime(lastAt, tz)} (${lastReason})` : '• Last sent: _abhi tak nahi_',
+      '',
+      '*Message preview:*',
+      preview,
+      '',
+      '*Commands:*',
+      '• `/sleepnotify on` · `/sleepnotify off` — chalu ya band karo',
+      '• `/sleepnotify test` — abhi sleeping message preview dekho',
+      '• `/sleepnotify set <custom message>` — apna message set karo',
+      '• `/sleepnotify reset` — default message wapas lao',
+    ].join('\n');
+  }
+
   async function handleCommand(cmd, args, ctx) {
     switch (cmd) {
       case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
+      case 'sleepnotify': case 'offlinenotify': case 'sleepmsg': return sleepNotifyCommand(args);
       case 'undo': case 'journal': return await undoCommand(args);
       case 'shots': case 'screenshots': return shotsCommand(args);
       case 'usage': case 'quota': return usageReport(store, { catalog: router.catalog });
@@ -1625,6 +1691,7 @@ export function createAgent({
           `Access: *${actions.level()}* · ${actions.accessReport().actions} tools · shell ${config.allowShell ? 'ON (PIN)' : 'off'}`,
           `Running now: ${taskRegistry.active().length ? `${taskRegistry.active().map((t) => t.label).join(', ')} (rokne ke liye /stop)` : 'kuch nahi'}`,
           `PC control: tier-1 on (screenshot/volume/…) · input+power ${config.allowPcControl ? `ON ⌨️${config.controlPin ? ' (PIN)' : ''}` : 'off (ALLOW_PC_CONTROL)'}`,
+          `Sleep notify: ${isOfflineNotifyEnabled(config, store) ? 'ACTIVE 😴 (auto "Agent is sleeping" before PC shutdown/sleep)' : 'off (/sleepnotify on)'}`,
           `Cost so far: ₹0 (native WhatsApp, local tools)`,
         ].join('\n');
       }
@@ -1842,7 +1909,10 @@ export function createAgent({
         if (reply != null) return withRoute(reply, agentLoop.lastRun);
         return agentLoop.enabled ? noBrainReply() : '🤖 No free AI brain reachable. Direct commands still work: /open, /pc, /ls, /wifi… (/brains to fix)';
       }
-      case 'yes': case 'haan': return toReply(await actions.runPending(ctx));
+      case 'yes': case 'haan': {
+        if (!store.data.pending && (pendingPower || pendingTap)) return handlePc('confirm');
+        return toReply(await actions.runPending(ctx));
+      }
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
       case 'link': return '📱 On the PC, open the dashboard URL printed at startup (or http://<PC-IP>:8787/) — it shows the WhatsApp QR while linking.';
       default: {
@@ -2052,6 +2122,10 @@ export function createAgent({
           working = overrideWhilePending.text;
           effCtx = { ...effCtx, bypassSaved: true };
         }
+      }
+      if (pendingPower || pendingTap) {
+        if (AFFIRM.test(working)) return handlePc('confirm');
+        if (DENY.test(working)) return handlePc('cancel');
       }
 
       const quick = intent(working, effCtx);

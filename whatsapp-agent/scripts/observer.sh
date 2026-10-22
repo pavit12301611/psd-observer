@@ -39,7 +39,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 if [ -z "${BRANCH:-}" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/../.observer-branch" ]; then
   BRANCH="$(tr -d '[:space:]' < "$SELF_DIR/../.observer-branch" 2>/dev/null || echo "")"
 fi
-BRANCH="${BRANCH:-arena/31b34815-psd-observer}"
+BRANCH="${BRANCH:-arena/e4a32b35-psd-observer}"
 ARCHIVE="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 API="https://api.github.com/repos/${REPO}/contents"
@@ -167,6 +167,13 @@ service_enabled() { systemctl --user is-enabled "$SERVICE" >/dev/null 2>&1; }
 
 restart_agent() {
   local dir="$1"
+  local unit_file="$HOME/.config/systemd/user/${SERVICE}.service"
+  if [ -f "$unit_file" ] && [ -f "$dir/systemd/observer-whatsapp-agent.service" ]; then
+    local node_bin; node_bin=$(command -v node || echo "/usr/bin/node")
+    sed -e "s|__WORKDIR__|${dir}|g" -e "s|__NODE__|${node_bin}|g" \
+      "$dir/systemd/observer-whatsapp-agent.service" > "$unit_file" 2>/dev/null || true
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
   if service_enabled; then
     systemctl --user restart "$SERVICE" && sleep 1
     if service_active; then ok "service ${SERVICE} restarted with the new code"

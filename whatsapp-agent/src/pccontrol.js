@@ -1027,10 +1027,19 @@ export async function findFiles(query, { maxResults = 20, maxVisited = 25_000, m
 
 const POWER = { shutdown: 'poweroff', poweroff: 'poweroff', reboot: 'reboot', restart: 'reboot', suspend: 'suspend', sleep: 'suspend' };
 
-/** Fires the power action 5 s later so the WhatsApp confirmation can send first. */
+let powerHook = null;
+/** Register a callback invoked immediately when schedulePower() is called. */
+export function setPowerHook(fn) {
+  powerHook = typeof fn === 'function' ? fn : null;
+}
+
+/** Fires the power action 5 s later so the WhatsApp confirmation/sleeping message can send first. */
 export function schedulePower(action) {
   const verb = POWER[action];
   if (!verb) throw new Error(`unknown power action "${action}"`);
+  if (powerHook) {
+    Promise.resolve().then(() => powerHook(action, verb)).catch(() => {});
+  }
   setTimeout(() => {
     execFile('systemctl', [verb], { env: displayEnv() }, (err) => {
       if (err) console.error(`[pc] power action ${verb} failed: ${err.message}`);

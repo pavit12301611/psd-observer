@@ -34,6 +34,7 @@ import { StoppedError, isStoppedError } from './cancel.js';
 import * as tts from './tts.js';
 import { runDoctor } from './doctor.js';
 import { createProgress, describeHandsStep } from './progress.js';
+import { noteOfflineAnnounced } from './lifecycle.js';
 
 const execFileAsync = promisify(execFile);
 const LEVELS = { safe: 0, standard: 1, full: 2 };
@@ -370,9 +371,10 @@ export function createActions({ config, store, log = console, journal = null, no
       run: async ({ action }) => {
         const act = String(action ?? '').toLowerCase();
         if (!['shutdown', 'poweroff', 'reboot', 'restart', 'suspend', 'sleep'].includes(act)) throw new Error('usage: shutdown|reboot|suspend');
+        noteOfflineAnnounced(store, act);
         pc.schedulePower(act);
         const verb = { shutdown: 'Shutting down', poweroff: 'Shutting down', reboot: 'Rebooting', restart: 'Rebooting', suspend: 'Suspending', sleep: 'Suspending' }[act];
-        return `⏻ ${verb} in 5 seconds. See you on the other side 👋`;
+        return `😴 *Agent is sleeping* — ⏻ ${verb} in 5 seconds. See you on the other side 👋`;
       },
     },
 

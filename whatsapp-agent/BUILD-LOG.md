@@ -1,5 +1,16 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## v3.2.1 — Automatic Offline / Sleeping Notification System (`src/lifecycle.js`)
+
+User ki maang: *"bhai jaise hi na agent online ata hai vaise to message bhejta hai bina puche ki agent is online vaise hi jab offline jaaye jaise pc band hone se pehle ek message daalde jaise ki agent is sleeping vagerah ye cheej active karde"*.
+1. **Automatic "Agent is sleeping" WhatsApp Alert (`src/lifecycle.js`, `src/whatsapp.js`, `src/index.js`)**:
+   - **Graceful Shutdown Hook (`SIGINT` / `SIGTERM` / `SIGHUP`)**: `index.js` me `shutdown()` ab `whatsapp.stop()` call karne se pehle `await whatsapp.announceOffline({ reason: signal })` chalata hai (bounded by `OFFLINE_TIMEOUT_MS`, default `2500ms`) taaki socket band hone se pehle owner ko WhatsApp message *`😴 *Agent is sleeping* — ...`* chala jaye.
+   - **Linux `systemd-logind` D-Bus Watcher + Inhibitor Delay Lock (`startPowerLifecycleWatcher`)**: Jab user PC ka power button dabaye, lid close kare, ya OS shutdown/reboot/suspend initiate kare, `gdbus monitor --system --dest org.freedesktop.login1` se `PrepareForShutdown` / `PrepareForSleep` signal milte hi agent `systemd-inhibit --what=shutdown:sleep --mode=delay` lock hold karke rakhta hai jab tak WhatsApp message deliver na ho jaye, aur phir lock release karta hai.
+   - **WhatsApp `/pc` & Action Power Hook (`src/pccontrol.js`, `src/actions.js`, `src/commands.js`)**: `schedulePower` aur `/pc confirm` / `power` action ke 5-second countdown me bhi turant *`😴 *Agent is sleeping*`* message aur deduplication (`noteOfflineAnnounced`) active hai.
+   - **Smart Update-Restart Suppression + Instant Wake-Up Online Notice**: `observer.sh update` ke dauran (`data/last-update.json` fresh hone par) false sleeping message skip hota hai; aur sleep/shutdown ke baad jab PC wapas on/wake hota hai (`store.data.stats.sleeping === true`), agent 6-hour startup cooldown ka wait kiye bina turant *`🤖 *Observer agent is online*`* bhejta hai.
+   - **Owner Controls (`/sleepnotify`)**: `/sleepnotify [on|off|test|set <msg>|reset]` aur Hinglish NLP (*"sleep message test karo"*, *"offline message active karo"*) se kabhi bhi check ya customize kar sakte hain. Systemd service me `TimeoutStopSec=10` add kiya gaya. Tests **232/232** pass.
+
+
 ## v3.2.0 — Agent-Reach × Agent-S: Deterministic Internet & Computer Control (Zero Guessing!)
 
 User ki maang: *"bro maine na ek zip file daali hai agent reach naam se use study kar aur hamare ai ko best banade use actual control miljaaye computer ka rather than guessing"*.

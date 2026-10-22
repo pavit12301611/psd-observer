@@ -31,6 +31,18 @@ import { executeSteps } from '../src/autopilot.js';
 import { runHands, buildHandsPrompt, resolveTarget } from '../src/hands.js';
 import { createAgent } from '../src/commands.js';
 import { Store } from '../src/store.js';
+import { createWhatsApp } from '../src/whatsapp.js';
+import {
+  isOfflineNotifyEnabled,
+  normalizeOfflineReason,
+  buildOfflineMessage,
+  buildOnlineMessage,
+  announceOffline,
+  announceOnline,
+  parseLogindSignal,
+  startPowerLifecycleWatcher,
+} from '../src/lifecycle.js';
+import { EventEmitter } from 'node:events';
 
 const silent = { info() {}, warn() {}, error() {} };
 
@@ -453,3 +465,221 @@ test('updates: brainSummary counts local and vision models', () => {
   assert.deepEqual(summary.ids, ['ollama:llama3.2', 'gemini:flash']);
   assert.match(summary.text, /2 \(1 local, 1 vision\)/);
 });
+
+// ── automatic offline / sleeping notifications ───────────────────────────────
+
+test('lifecycle: announceOffline sends "Agent is sleeping" before shutdown/sleep/stop, deduplicates, and skips during update restart', async () => {
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir);
+    const store = new Store(config.storeFile);
+    const sent = [];
+    const send = async (text) => { sent.push(text); };
+
+    assert.equal(isOfflineNotifyEnabled(config, store), true);
+    assert.equal(normalizeOfflineReason('poweroff'), 'shutdown');
+    assert.equal(normalizeOfflineReason('suspend'), 'sleep');
+    assert.equal(normalizeOfflineReason('SIGTERM'), 'stop');
+
+    const first = await announceOffline({
+      config, store, send, reason: 'shutdown', log: silent, now: 100_000,
+    });
+    assert.equal(first.sent, true);
+    assert.equal(first.reason, 'shutdown');
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /Agent is sleeping/i);
+    assert.match(sent[0], /shutdown/i);
+    assert.equal(store.data.stats.sleeping, true);
+
+    // Cooldown prevents duplicate message when SIGTERM arrives right after PrepareForShutdown.
+    const duplicate = await announceOffline({
+      config, store, send, reason: 'SIGTERM', log: silent, now: 102_000,
+    });
+    assert.equal(duplicate.sent, false);
+    assert.equal(duplicate.reason, 'cooldown');
+    assert.equal(sent.length, 1);
+
+    // During `observer.sh update`, last-update.json is present — skip false sleeping notice.
+    fs.writeFileSync(path.join(dir, 'last-update.json'), JSON.stringify({
+      from: '3.2.0', to: '3.2.1', at: new Date(200_000).toISOString(), seconds: 5,
+    }));
+    const duringUpdate = await announceOffline({
+      config, store, send, reason: 'SIGTERM', log: silent, now: 205_000,
+    });
+    assert.equal(duringUpdate.sent, false);
+    assert.equal(duringUpdate.reason, 'updating');
+    clearUpdateMarker(dir);
+
+    // When disabled via /sleepnotify off, nothing is sent unless forced.
+    store.data.offlineNotify = false;
+    const disabled = await announceOffline({
+      config, store, send, reason: 'shutdown', log: silent, now: 300_000,
+    });
+    assert.equal(disabled.sent, false);
+    assert.equal(disabled.reason, 'disabled');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lifecycle: announceOnline wakes up and notifies immediately after sleeping, even inside 6h startup cooldown', async () => {
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir);
+    const store = new Store(config.storeFile);
+    const sent = [];
+    const send = async (text) => { sent.push(text); };
+
+    // Initial startup sends online message.
+    const boot1 = await announceOnline({ config, store, send, log: silent, now: 1_000_000 });
+    assert.equal(boot1.sent, true);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /Observer agent is online/);
+
+    // Ordinary reconnect 5 minutes later (was NOT sleeping) stays quiet.
+    const reconnect = await announceOnline({ config, store, send, log: silent, now: 1_300_000 });
+    assert.equal(reconnect.sent, false);
+    assert.equal(reconnect.reason, 'cooldown');
+
+    // PC goes to sleep/shutdown → sets sleeping = true.
+    await announceOffline({ config, store, send, reason: 'sleep', log: silent, now: 1_400_000 });
+    assert.equal(store.data.stats.sleeping, true);
+    assert.equal(sent.length, 2);
+    assert.match(sent[1], /Agent is sleeping/);
+
+    // PC wakes up 10 minutes later → because sleeping === true, it DOES notify online!
+    const wake = await announceOnline({ config, store, send, log: silent, now: 2_000_000 });
+    assert.equal(wake.sent, true);
+    assert.equal(wake.reason, 'wakeup');
+    assert.equal(store.data.stats.sleeping, false);
+    assert.equal(sent.length, 3);
+    assert.match(sent[2], /Observer agent is online/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lifecycle: parseLogindSignal and startPowerLifecycleWatcher hold systemd-inhibit delay lock until WhatsApp sleeping message is sent', async () => {
+  assert.deepEqual(
+    parseLogindSignal('/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForShutdown (true,)'),
+    { kind: 'shutdown', active: true },
+  );
+  assert.deepEqual(
+    parseLogindSignal("/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForShutdownWithMetadata (true, {'type': <'reboot'>})"),
+    { kind: 'reboot', active: true },
+  );
+  assert.deepEqual(
+    parseLogindSignal('/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForSleep (true,)'),
+    { kind: 'sleep', active: true },
+  );
+  assert.deepEqual(
+    parseLogindSignal('/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForSleep (false,)'),
+    { kind: 'sleep', active: false },
+  );
+  assert.equal(parseLogindSignal('unrelated dbus signal'), null);
+
+  const spawned = [];
+  let monitorStdout = null;
+  const events = [];
+
+  const fakeSpawn = (bin, args) => {
+    const proc = new EventEmitter();
+    proc.bin = bin;
+    proc.args = args;
+    proc.killed = false;
+    proc.stdin = { end: () => { events.push(`inhibit-stdin-end`); } };
+    proc.stdout = new EventEmitter();
+    proc.kill = () => {
+      proc.killed = true;
+      events.push(`kill:${path.basename(bin)}`);
+      proc.emit('close', 0);
+    };
+    proc.unref = () => {};
+    spawned.push(proc);
+    if (bin.includes('gdbus')) monitorStdout = proc.stdout;
+    if (bin.includes('systemd-inhibit')) events.push('inhibit-acquired');
+    return proc;
+  };
+
+  const watcher = startPowerLifecycleWatcher({
+    config: {},
+    log: silent,
+    forceStart: true,
+    findBinFn: (name) => `/usr/bin/${name}`,
+    spawnFn: fakeSpawn,
+    onGoingOffline: async (kind) => {
+      await new Promise((r) => setTimeout(r, 20));
+      events.push(`offline-sent:${kind}`);
+    },
+    onWakeUp: async () => {
+      events.push('wakeup');
+    },
+  });
+
+  assert.equal(watcher.active, true);
+  assert.equal(watcher.hasInhibitLock(), true);
+
+  // Emit PrepareForSleep(true): must send offline message BEFORE releasing inhibit lock!
+  monitorStdout.emit('data', Buffer.from('/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForSleep (true,)\n'));
+  await new Promise((r) => setTimeout(r, 60));
+
+  const sentIdx = events.indexOf('offline-sent:sleep');
+  const releaseIdx = events.indexOf('kill:systemd-inhibit');
+  assert.ok(sentIdx !== -1, 'onGoingOffline was called for sleep');
+  assert.ok(releaseIdx > sentIdx, 'systemd-inhibit delay lock released ONLY AFTER offline message was sent');
+  assert.equal(watcher.hasInhibitLock(), false);
+
+  // Emit PrepareForSleep(false): re-acquires inhibit lock and triggers onWakeUp
+  monitorStdout.emit('data', Buffer.from('/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForSleep (false,)\n'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(watcher.hasInhibitLock(), true);
+  assert.ok(events.includes('wakeup'));
+
+  watcher.stop();
+  assert.equal(watcher.hasInhibitLock(), false);
+});
+
+test('lifecycle: whatsapp.announceOffline deduplicates concurrent calls and /sleepnotify + NLP work end-to-end', async () => {
+  const dir = tempDir();
+  try {
+    const config = makeConfig(dir, { dryRun: true, allowPcControl: true });
+    const store = new Store(config.storeFile);
+    const agent = createAgent({ config, store, log: silent });
+    const whatsapp = createWhatsApp({ config, store, agent, log: silent });
+
+    // Concurrent calls (e.g. PrepareForShutdown + SIGTERM) share one send and resolve together.
+    const [r1, r2] = await Promise.all([
+      whatsapp.announceOffline({ reason: 'shutdown' }),
+      whatsapp.announceOffline({ reason: 'SIGTERM' }),
+    ]);
+    assert.equal(r1.sent, true);
+    assert.equal(r2.sent, true);
+    assert.equal(whatsapp.state.simulated.length, 1);
+    assert.match(whatsapp.state.simulated[0].text, /Agent is sleeping/);
+
+    // /sleepnotify commands and Hinglish NLP
+    const status = await agent.handle('/sleepnotify');
+    assert.match(status, /ACTIVE/);
+    assert.match(status, /Agent is sleeping/);
+
+    const custom = await agent.handle('/sleepnotify set PC band ho raha hai bhai');
+    assert.match(custom, /Agent is sleeping.*PC band ho raha hai bhai/);
+
+    const preview = await agent.handle('sleep message test karo');
+    assert.match(preview, /Agent is sleeping.*PC band ho raha hai bhai/);
+
+    const off = await agent.handle('offline message band karo');
+    assert.match(off, /OFF/);
+    assert.equal(isOfflineNotifyEnabled(config, store), false);
+
+    const on = await agent.handle('sleep message active karo');
+    assert.match(on, /ACTIVE/);
+    assert.equal(isOfflineNotifyEnabled(config, store), true);
+
+    await agent.handle('/sleepnotify reset');
+    assert.equal(store.data.offlineMessage, '');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+

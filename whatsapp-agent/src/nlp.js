@@ -67,6 +67,16 @@ export function parseIntent(input) {
     return asCmd('solve', text);
   }
 
+  // ── Offline / Sleeping auto-notification control ──────────────────────────
+  if ((m = text.match(/^(?:sleep(?:ing)?|offline)\s+(?:message|msg|notify|notification|alert)(?:\s+(on|off|active|activate|enable|disable|chalu|band|test|check|preview|status|reset))?(?:\s+kar(?:o|do))?$/i))) {
+    const act = (m[1] || 'status').toLowerCase();
+    const mapped = ['on', 'active', 'activate', 'enable', 'chalu'].includes(act) ? 'on'
+      : ['off', 'disable', 'band'].includes(act) ? 'off'
+      : ['test', 'check', 'preview'].includes(act) ? 'test'
+      : act === 'reset' ? 'reset' : 'status';
+    return asCmd('sleepnotify', mapped);
+  }
+
   // ── app control ───────────────────────────────────────────────────────────
   if ((m = text.match(/^(?:open|launch|khol(?:o|do|de)?|chalu\s+kar(?:o|do)?|start)\s+(?:the\s+|app\s+)?(.+)$/i))) {
     const rest = clean(m[1]).replace(/\s+(?:app|application)$/i, '').replace(/\s+(?:karo|kar do|kholo|khol do)$/i, '');

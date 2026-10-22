@@ -36,6 +36,10 @@ import * as pc from './pccontrol.js';
 import * as finder from './elementfinder.js';
 import { isStopCommand } from './cancel.js';
 import { transcribeAudio } from './transcribe.js';
+import {
+  announceOffline as runAnnounceOffline,
+  announceOnline as runAnnounceOnline,
+} from './lifecycle.js';
 
 const MIME_EXT = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
@@ -125,6 +129,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     callTimers: new Map(), // callId → fallback timer
     lastSentImage: null, // last screenshot we sent to owner — used to diff red marks
     lastSentImageAt: 0,
+    inFlightOffline: null, // shared promise so concurrent shutdown signals await the same send
   };
 
   const status = () =>
@@ -910,12 +915,9 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
           log.warn?.(`[wa] ⚠️ Linked account +${state.me} != AGENT_NUMBER +${config.agentNumber}.${config.strictAgentNumber ? ' STRICT_AGENT_NUMBER=true: refusing to run.' : ' Continuing, but check which phone you scanned with.'}`);
           if (config.strictAgentNumber) { state.stopped = true; try { sock.end(new Error('agent number mismatch')); } catch { /* noop */ } return; }
         }
-        // One friendly hello per process start, at most every 6 h (no restart spam).
-        if (Date.now() - (store.data.stats.lastStartupNotify ?? 0) > 6 * 3600_000) {
-          store.data.stats.lastStartupNotify = Date.now();
-          store.save();
-          sendToOwner('🤖 *Observer agent is online* (free native WhatsApp).\nSend /help, ask me anything, or /observer <task> to use the PC.').catch(() => {});
-        }
+        // One friendly hello per process start (at most every 6 h), OR immediately
+        // whenever waking back up after announcing "Agent is sleeping".
+        announceOnline({ reason: 'startup' }).catch(() => {});
         // "Updated!" message (version + what changed + how long) — the owner
         // should never have to wonder whether an update landed.
         if (typeof onConnected === 'function') {
@@ -984,6 +986,47 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     }
   }
 
+  /**
+   * Send the automatic "😴 Agent is sleeping" message before the PC shuts down,
+   * suspends, or the service stops. Concurrent signals share `inFlightOffline`
+   * so the message is sent once and shutdown waits for the send to complete.
+   */
+  async function announceOffline(opts = {}) {
+    if (state.inFlightOffline) return state.inFlightOffline;
+    const canSend = config.dryRun || Boolean(state.sock && state.conn === 'connected');
+    state.inFlightOffline = runAnnounceOffline({
+      config,
+      store,
+      log,
+      reason: opts.reason ?? 'offline',
+      force: Boolean(opts.force),
+      timeoutMs: opts.timeoutMs,
+      cooldownMs: opts.cooldownMs,
+      flushMs: config.dryRun ? 0 : (opts.flushMs ?? 120),
+      send: canSend ? (text) => sendToOwner(text) : null,
+    }).finally(() => {
+      state.inFlightOffline = null;
+    });
+    return state.inFlightOffline;
+  }
+
+  /**
+   * Send the "🤖 Observer agent is online" message on startup or when waking
+   * back up after sleeping.
+   */
+  async function announceOnline(opts = {}) {
+    const canSend = config.dryRun || Boolean(state.sock && state.conn === 'connected');
+    if (!canSend) return { sent: false, reason: 'not connected' };
+    return runAnnounceOnline({
+      config,
+      store,
+      log,
+      reason: opts.reason ?? 'startup',
+      force: Boolean(opts.force),
+      send: (text) => sendToOwner(text),
+    });
+  }
+
   function stop() {
     state.stopped = true;
     try { state.sock?.end?.(new Error('shutdown')); } catch { /* noop */ }
@@ -1011,7 +1054,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
   }
 
   return {
-    start, stop, status, sendToOwner, simulate, runOwner, state,
+    start, stop, status, sendToOwner, announceOffline, announceOnline, simulate, runOwner, state,
     isOwnerJid, handleCallEvents,
     learnOwnerLid: (lid) => rememberOwnerLid(lid),
     setVoipCoordinator: (coordinator) => { state.voipCoordinator = coordinator; },
