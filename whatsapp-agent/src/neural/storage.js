@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { INTENT_LABELS } from './dataset.js';
 
@@ -17,15 +16,5 @@ export function readExamples(dataDir = DEFAULT_DATA_DIR) {
   } catch { return []; }
 }
 
-/** Same-filesystem rename: readers see the old OR the complete new file. */
-export function atomicJSON(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  try {
-    fs.writeFileSync(temp, JSON.stringify(value), { flag: 'wx', mode: 0o600 });
-    fs.renameSync(temp, file);
-  } finally {
-    try { fs.unlinkSync(temp); } catch { /* renamed/not created */ }
-  }
-  return file;
-}
+// Kept as a public re-export for existing neural callers.
+export { atomicJSON } from '../persistence.js';

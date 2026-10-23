@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import QRCode from 'qrcode';
+import { ROOT } from './config.js';
 import * as tools from './tools.js';
 import * as learn from './learn.js';
 import * as cron from './cron.js';
@@ -49,7 +50,7 @@ import { setWindow as setQuietWindow, clearWindow as clearQuiet, digest as quiet
 import { shouldVoiceReply, voiceReply } from './voicereply.js';
 import {
   isDestructive, requestConfirm, confirmPending, cancelPending, pendingState,
-  moveToTrash, listTrash, restoreTrash, runPanic, TRASH_DIR,
+  moveToTrash, listTrash, restoreTrash, runPanic,
 } from './safety.js';
 import { saveSnapshot, rollback as rollbackTo, snapshotList } from './rollback.js';
 import { setupMail, checkMail, mailStatus, setMonitor } from './mail.js';
@@ -3210,7 +3211,7 @@ export function createAgent({
       case 'rm': case 'delete': {
         if (!args) return '🗑️ Usage: /rm <path>  (confirm ke baad TRASH me jaata hai — recoverable)';
         if (!ctx.confirmed) return requestConfirm('rm', args);
-        const tr = moveToTrash(args);
+        const tr = moveToTrash(args, { trashDir: path.join(config.dataDir || path.join(ROOT, 'data'), 'trash') });
         return tr.reply ?? tr.error;
       }
 
@@ -3633,30 +3634,39 @@ export function createAgent({
         return runAgentTask(plan.task, ctx);
       }
       case 'snapshot': {
-        const r = saveSnapshot({ label: 'manual' });
+        const r = saveSnapshot({ label: 'manual', snapRoot: path.join(config.dataDir || path.join(ROOT, 'data'), 'rollback') });
         return r.ok ? `⏪ Snapshot save: ${r.dest}` : r.error;
       }
-      case 'snapshots': return snapshotList();
-      case 'rollback': return rollbackTo();
+      case 'snapshots': return snapshotList(path.join(config.dataDir || path.join(ROOT, 'data'), 'rollback'));
+      case 'rollback': return rollbackTo({ snapRoot: path.join(config.dataDir || path.join(ROOT, 'data'), 'rollback') });
       case 'panic': {
         if (!ctx.confirmed) return requestConfirm('panic', '');
-        const r = runPanic({});
-        try { if (config.allowPcControl) await pc.lock?.(); } catch { /* best effort */ }
-        return r.reply;
+        liveMirror.stopLive(); guardMode.stopGuard();
+        lastBatch = null; cancelPlan(); clearContext(); ai.clearAiCache(config);
+        const r = runPanic({ dataDir: config.dataDir, store });
+        (await import('./neural/index.js')).reloadBrain({ dataDir: config.dataDir });
+        let lock = 'PC lock not requested (PC control disabled).';
+        if (config.allowPcControl) {
+          try { lock = `PC lock request: ${await pc.lockSession()}`; }
+          catch (err) { lock = `⚠️ PC lock failed: ${err.message}`; }
+        }
+        return `${r.reply}\n${lock}`;
       }
       case 'trash': {
         const raw = String(args || '').trim();
         const [sub, ...rest] = raw.split(/\s+/);
-        if (sub === 'restore') return restoreTrash(rest.join(' '));
+        const trashDir = path.join(config.dataDir || path.join(ROOT, 'data'), 'trash');
+        if (sub === 'restore') return restoreTrash(rest.join(' '), { trashDir });
         if (sub === 'empty') {
+          if (!ctx.confirmed) return requestConfirm('trash', 'empty');
           try {
-            for (const f of (await import('node:fs')).readdirSync(TRASH_DIR)) {
-              (await import('node:fs')).rmSync(`${TRASH_DIR}/${f}`, { recursive: true, force: true });
+            for (const f of (await import('node:fs')).readdirSync(trashDir)) {
+              (await import('node:fs')).rmSync(`${trashDir}/${f}`, { recursive: true, force: true });
             }
             return '🗑️ Trash empty kar diya (permanent delete).';
           } catch { return '🗑️ Trash pehle se khaali hai.'; }
         }
-        return listTrash();
+        return listTrash(trashDir);
       }
       case 'voicereply': {
         const raw = String(args || '').trim().toLowerCase();

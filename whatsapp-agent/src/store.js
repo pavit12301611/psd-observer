@@ -1,7 +1,7 @@
 // store.js — persistence with zero infrastructure: one JSON file, atomic writes.
 // (The cloud version needed Redis + R2 for this; a single-user agent does not.)
 import fs from 'node:fs';
-import path from 'node:path';
+import { atomicJSON } from './persistence.js';
 
 const EMPTY = () => ({
   notes: [],          // {id, text, ts}
@@ -56,17 +56,22 @@ export class Store {
   load() {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.data = { ...EMPTY(), ...parsed, stats: { ...EMPTY().stats, ...(parsed.stats ?? {}) } };
-      if (!Array.isArray(this.data.cronJobs)) this.data.cronJobs = [];
-      if (!Array.isArray(this.data.learned)) this.data.learned = [];
-      if (!Array.isArray(this.data.rules)) this.data.rules = [];
-      if (!this.data.facts || typeof this.data.facts !== 'object') this.data.facts = {};
-      if (!this.data.factValues || typeof this.data.factValues !== 'object') this.data.factValues = {};
-      if (!this.data.contacts || typeof this.data.contacts !== 'object' || Array.isArray(this.data.contacts)) this.data.contacts = {};
-      if (!this.data.guestChats || typeof this.data.guestChats !== 'object' || Array.isArray(this.data.guestChats)) this.data.guestChats = {};
-      if (!Array.isArray(this.data.guestAuditLog)) this.data.guestAuditLog = [];
-      if (!Array.isArray(this.data.pendingGuestApprovals)) this.data.pendingGuestApprovals = [];
-      if (!Array.isArray(this.data.actionRecordings)) this.data.actionRecordings = [];
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('State must be a JSON object');
+      const defaults = EMPTY();
+      this.data = { ...defaults, ...parsed };
+      for (const [key, initial] of Object.entries(defaults)) {
+        if (Array.isArray(initial) && !Array.isArray(this.data[key])) this.data[key] = [];
+      }
+      for (const key of ['facts', 'factValues', 'contacts', 'guestChats']) {
+        const value = this.data[key];
+        if (!value || typeof value !== 'object' || Array.isArray(value)) this.data[key] = {};
+      }
+      const stats = parsed.stats;
+      this.data.stats = { ...defaults.stats, ...(stats && typeof stats === 'object' && !Array.isArray(stats) ? stats : {}) };
+      for (const [key, initial] of Object.entries(defaults.stats)) {
+        if (typeof initial === 'number' && (!Number.isFinite(this.data.stats[key]) || this.data.stats[key] < 0)) this.data.stats[key] = initial;
+        if (typeof initial === 'boolean' && typeof this.data.stats[key] !== 'boolean') this.data.stats[key] = initial;
+      }
     } catch {
       this.data = EMPTY(); // first run, or a corrupt file: start clean rather than crash
     }
@@ -78,10 +83,7 @@ export class Store {
     clearTimeout(this._saveTimer);
     this._saveTimer = setTimeout(() => {
       try {
-        fs.mkdirSync(path.dirname(this.file), { recursive: true });
-        const tmp = `${this.file}.tmp`;
-        fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-        fs.renameSync(tmp, this.file);
+        atomicJSON(this.file, this.data, { space: 2 });
       } catch (err) {
         console.error('[store] save failed:', err.message);
       }
@@ -92,11 +94,14 @@ export class Store {
   saveNow() {
     clearTimeout(this._saveTimer);
     try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-      fs.renameSync(tmp, this.file);
+      atomicJSON(this.file, this.data, { space: 2 });
     } catch { /* shutdown path, best effort */ }
+  }
+
+  /** Panic/privacy reset: never let an old debounce resurrect wiped data. */
+  reset() {
+    clearTimeout(this._saveTimer); this._saveTimer = null;
+    this.data = EMPTY();
   }
 
   _nextId(list) {

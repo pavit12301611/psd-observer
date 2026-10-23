@@ -9,6 +9,7 @@
   const CHAT_KEY = 'observer-agent-chat';
 
   let token = localStorage.getItem(TOKEN_KEY) || '';
+  let sessionEpoch = 0;
   let statusTimer = null;
   let screenBusy = false;
   let screenEtag = '';
@@ -41,25 +42,31 @@
   };
 
   async function api(path, { method = 'GET', body } = {}) {
+    const epoch = sessionEpoch, requestToken = token;
     const res = await fetch(path, {
       method,
       headers: {
         'content-type': 'application/json',
-        'x-bridge-token': token,
+        'x-bridge-token': requestToken,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (epoch !== sessionEpoch || requestToken !== token) throw new Error('session changed');
     if (res.status === 401) {
+      token = ''; localStorage.removeItem(TOKEN_KEY);
       showLogin('Session expired — PIN dobara daalo.');
       throw new Error('unauthorised');
     }
     const data = await res.json().catch(() => ({}));
+    if (epoch !== sessionEpoch || requestToken !== token) throw new Error('session changed');
     if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
     return data;
   }
 
   // ── screens ───────────────────────────────────────────────────────────────
   function showLogin(message) {
+    sessionEpoch++;
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
     $('#app').classList.add('hidden');
     $('#login').classList.remove('hidden');
     const box = $('#login-error');
@@ -72,10 +79,12 @@
   }
 
   async function showApp() {
+    const epoch = sessionEpoch;
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
     renderChat();
     await refreshStatus();
+    if (epoch !== sessionEpoch || !token) return;
     loadFiles();
     if (statusTimer) clearInterval(statusTimer);
     statusTimer = setInterval(refreshStatus, 15000);
@@ -83,7 +92,14 @@
 
   // ── chat ──────────────────────────────────────────────────────────────────
   function loadChat() {
-    try { return JSON.parse(localStorage.getItem(CHAT_KEY) || '[]'); } catch { return []; }
+    try {
+      const parsed = JSON.parse(localStorage.getItem(CHAT_KEY) || '[]');
+      if (!Array.isArray(parsed)) return [];
+      return parsed.slice(-80).filter((m) => m && typeof m === 'object' && ['user', 'bot', 'assistant'].includes(m.role)).map((m) => ({
+        ...m, text: String(m.text ?? ''), images: Array.isArray(m.images) ? m.images.filter((src) => typeof src === 'string') : [],
+        documentName: String(m.documentName ?? ''), documentPath: String(m.documentPath ?? ''),
+      }));
+    } catch { return []; }
   }
   function saveChat(list) {
     // Screenshots are big; keep image data only for the last few messages so
@@ -192,6 +208,7 @@
   }
 
   async function sendText(text) {
+    const epoch = sessionEpoch;
     const clean = String(text || '').trim();
     if (pendingUpload) {
       const upload = pendingUpload;
@@ -217,9 +234,11 @@
           },
         });
         typing.remove();
+        if (epoch !== sessionEpoch || !token) return;
         addMessage('bot', data.text || '✅ Solved.', { images: data.images || [] });
       } catch (err) {
         typing.remove();
+        if (epoch !== sessionEpoch || !token) return;
         if (err.message !== 'unauthorised') addMessage('bot', `⚠️ ${err.message}`);
       }
       return;
@@ -232,6 +251,7 @@
     try {
       const data = await api('/api/chat', { method: 'POST', body: { text: clean } });
       typing.remove();
+      if (epoch !== sessionEpoch || !token) return;
       const reply = data.text || (data.ok ? '✅ Done.' : '⚠️ Kuch gadbad ho gayi.');
       addMessage('bot', reply, {
         images: data.images || [],
@@ -240,6 +260,7 @@
       });
     } catch (err) {
       typing.remove();
+      if (epoch !== sessionEpoch || !token) return;
       if (err.message !== 'unauthorised') addMessage('bot', `⚠️ ${err.message}`);
     }
   }
@@ -978,13 +999,14 @@
     // token from private dashboard URL (?t=…) → store and clean the address bar
     const params = new URLSearchParams(location.search);
     if (params.get('t')) {
-      token = params.get('t');
+      token = params.get('t'); sessionEpoch++;
       localStorage.setItem(TOKEN_KEY, token);
       history.replaceState(null, '', location.pathname);
     }
 
     $('#login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const loginEpoch = sessionEpoch;
       const pin = $('#pin').value.trim();
       if (!pin) return;
       const err = $('#login-error');
@@ -996,12 +1018,14 @@
           body: JSON.stringify({ pin }),
         });
         const data = await res.json().catch(() => ({}));
+        if (loginEpoch !== sessionEpoch) return;
         if (!res.ok || !data.token) throw new Error(data.detail || 'Wrong PIN');
-        token = data.token;
+        token = data.token; sessionEpoch++;
         localStorage.setItem(TOKEN_KEY, token);
         $('#pin').value = '';
         showApp();
       } catch (e2) {
+        if (loginEpoch !== sessionEpoch) return;
         err.textContent = e2.message;
         err.classList.remove('hidden');
       }
@@ -1139,7 +1163,8 @@
       localStorage.removeItem(TOKEN_KEY);
       token = '';
       if (statusTimer) clearInterval(statusTimer);
-      chat = [];
+      chat = []; pendingUpload = null; renderPendingUpload();
+      if ($('#question-file')) $('#question-file').value = '';
       saveChat(chat);
       showLogin();
     });
@@ -1197,11 +1222,6 @@
 
     if (token) showApp();
     else showLogin();
-  }
-
-  boot();
-})();
-
   }
 
   boot();

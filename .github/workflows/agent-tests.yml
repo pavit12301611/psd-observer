@@ -1,0 +1,65 @@
+name: WhatsApp agent deep tests
+on:
+  pull_request:
+    paths: ['whatsapp-agent/**', '.github/workflows/agent-tests.yml']
+  push:
+    branches: [main]
+    paths: ['whatsapp-agent/**', '.github/workflows/agent-tests.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: agent-tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    defaults:
+      run:
+        working-directory: whatsapp-agent
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: whatsapp-agent/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+        if: matrix.node != '22'
+      - run: npm run test:coverage
+        if: matrix.node == '22'
+      - run: npm run test:mutation
+        if: matrix.node == '22'
+      # Verify the checked-in archive before regenerating timestamped reports.
+      - run: npm run verify:bundle
+        if: matrix.node == '22'
+      - run: npm run audit:deps
+        if: matrix.node == '22'
+      - run: npm run audit:report
+        if: matrix.node == '22'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-test-evidence-node${{ matrix.node }}
+          path: |
+            whatsapp-agent/coverage/
+            whatsapp-agent/.cache/deep-audit/tests-*.json
+            whatsapp-agent/.cache/deep-audit/mutations.json
+            whatsapp-agent/.cache/deep-audit/dependency-after.json
+          include-hidden-files: true
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success() && matrix.node == '22'
+        with:
+          name: agent-function-audit
+          path: whatsapp-agent/audits/
+          retention-days: 14

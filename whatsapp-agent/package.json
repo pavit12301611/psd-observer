@@ -1,11 +1,11 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "3.9.0",
+  "version": "3.9.1",
   "private": true,
   "description": "Owner-controlled WhatsApp agent with trained local routing, safe bounded multitasking, free/local AI and guarded Linux PC tools.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -16,7 +16,7 @@
     "service:status": "systemctl --user status observer-whatsapp-agent",
     "service:logs": "journalctl --user -u observer-whatsapp-agent -f",
     "relink": "bash scripts/relink-whatsapp.sh",
-    "test": "node --test test/agent.test.js test/power.test.js test/router.test.js test/brain-reliability.test.js test/local.test.js test/cloud.test.js test/hands.test.js test/control.test.js test/features.test.js test/screens.test.js test/harness.test.js test/solver.test.js test/voice.test.js test/engine-patch.test.js test/ai-quality.test.js test/neural.test.js test/neural-v2.test.js test/multitask.test.js test/agents.test.js test/shades.test.js test/batch1.test.js test/batch2.test.js test/batch3.test.js test/batch4.test.js test/batch5.test.js test/batch6.test.js",
+    "test": "node scripts/test.mjs",
     "check": "node scripts/check.mjs",
     "app": "node --env-file-if-exists=.env src/index.js",
     "models": "bash scripts/local-models.sh",
@@ -28,7 +28,14 @@
     "train": "node scripts/train-neural.mjs && node scripts/train-wiki.mjs --common",
     "harness": "bash scripts/observer.sh harness",
     "build:bundle": "bash scripts/build-bundle.sh",
-    "bench": "node scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs",
+    "test:contracts": "node scripts/test.mjs --contracts",
+    "test:coverage": "node scripts/test.mjs --coverage",
+    "test:mutation": "node scripts/mutation-check.mjs",
+    "audit:report": "node scripts/audit-report.mjs",
+    "verify:bundle": "python3 scripts/verify-bundle.py",
+    "test:deep": "npm run check && npm run test:coverage && npm run test:mutation && npm run audit:deps && npm run audit:report",
+    "audit:deps": "node -e \"require('fs').mkdirSync('.cache/deep-audit',{recursive:true})\" && npm audit --json > .cache/deep-audit/dependency-after.json"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {
@@ -37,6 +44,12 @@
     "qrcode": "^1.5.4"
   },
   "optionalDependencies": {
-    "sharp": "^0.34.0"
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "acorn": "^8.19.0",
+    "c8": "^12.0.0",
+    "fast-check": "^4.10.2",
+    "jsdom": "^29.1.1"
   }
 }

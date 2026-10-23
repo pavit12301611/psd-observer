@@ -27,7 +27,9 @@ export function trainPersonalBrain({ dataDir, epochs = 90, seed = 42, signal, ti
     };
     const stop = () => finish(new StoppedError('Neural training'));
     try {
-      worker = new Worker(new URL('./train-worker.js', import.meta.url), { workerData: { dataDir: dir, epochs, seed }, execArgv: process.execArgv.filter((arg) => !arg.startsWith('--input-type')) });
+      // Plain ESM worker: parent CLI/V8/test flags are unnecessary and may be
+      // rejected by Worker (notably Node 24's expanded test-runner defaults).
+      worker = new Worker(new URL('./train-worker.js', import.meta.url), { workerData: { dataDir: dir, epochs, seed }, execArgv: [] });
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) return stop();
       timer = setTimeout(() => finish(new Error('Training timed out; previous checkpoint kept')), timeoutMs);

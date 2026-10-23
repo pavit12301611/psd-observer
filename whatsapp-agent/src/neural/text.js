@@ -147,7 +147,7 @@ function textFeaturesRaw(text, dim = DEFAULT_DIM) {
   const normText = normalizeText(text);
   const toks = normText.split(' ').filter(Boolean);
   const add = (gram, weight = 1) => {
-    const idx = fnv1a(gram) % HASH_DIM;
+    const idx = fnv1a(gram) % (dim - FLAG_DIM);
     vec[idx] += weight;
   };
   for (const t of toks) {
@@ -161,7 +161,7 @@ function textFeaturesRaw(text, dim = DEFAULT_DIM) {
 
   // append cue-flag slots (dedicated positions, weight 2.5 — strong signals)
   for (let f = 0; f < CUE_FLAGS.length; f++) {
-    if (CUE_FLAGS[f][0].test(raw) || CUE_FLAGS[f][0].test(normText)) vec[HASH_DIM + f] = 2.5;
+    if (CUE_FLAGS[f][0].test(raw) || CUE_FLAGS[f][0].test(normText)) vec[dim - FLAG_DIM + f] = 2.5;
   }
 
   let norm = 0;
@@ -172,7 +172,8 @@ function textFeaturesRaw(text, dim = DEFAULT_DIM) {
 }
 
 export function textFeatures(text, dim = DEFAULT_DIM) {
-  const key = dim === DEFAULT_DIM ? String(text ?? '') : `d${dim}:${text ?? ''}`;
+  if (!Number.isInteger(dim) || dim <= FLAG_DIM || dim > 4096) throw new RangeError(`Feature dimension must be ${FLAG_DIM + 1}..4096`);
+  const key = `${dim}:${String(text ?? '')}`;
   const hit = featLRU.get(key);
   if (hit) return hit;
   return featLRU.set(key, textFeaturesRaw(text, dim));
