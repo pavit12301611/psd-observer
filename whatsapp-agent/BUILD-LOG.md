@@ -1958,6 +1958,25 @@ when already at 0, guard re-armed after restart with tick still clamping, inert 
 are off, stealth brightness adjusts saved level only and `/shades off` restores the
 stealth-adjusted value).
 
+## Part 9 — 🕶️ Flash-proof Shades: 3-layer reveal prevention (3.4.3)
+
+Owner reports the remaining gap: *"brightness control kar raha hun to screen thodi der ke liye
+dikh raha hai fir cover kar raha hai"* — the 600ms guard window still produced a visible flash.
+Fixed structurally, not just faster:
+
+1. **Dual-layer blackout** — backlight 0 AND gamma ramp 0 (X11). Brightness keys can raise the
+   backlight freely; content still renders black. A keypress cannot show a single frame.
+2. **25ms instant clamp** — fork-free sysfs watch (direct sysfs write first, brightnessctl
+   fallback), overlapping-tick guard. Ghost flash ≤ ~1 frame where gamma is unavailable
+   (Wayland + kernel-handled keys — honest limit).
+3. **GNOME key unbind** — brightness media keys are unbound while shades are on (saved and
+   restored exactly on `/shades off`); no key event reaches the system at all.
+
+**Result:** 322 → **325/325 tests green** (3 new: dual-layer gamma pin + re-pin on clamp +
+both-layer restore, GNOME key unbind with exact binding restore and volume keys untouched,
+25ms backlight guard clamp path). The framebuffer invariant now allows exactly three
+panel-level tools: brightnessctl, xrandr, gsettings — never capture tools.
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

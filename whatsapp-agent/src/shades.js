@@ -137,11 +137,25 @@ export async function shadesOn(opts = {}) {
     return '🕶️ Shades nahi chale — na `brightnessctl` mila (sudo dnf install brightnessctl) na `xrandr` (X11 session).';
   }
 
+  // Layer 1b: belt-and-braces — if the backlight method is active, ALSO pin
+  // the gamma ramp to 0 when X11 allows it. Brightness keys can then raise
+  // the backlight freely and the CONTENT STILL RENDERS BLACK — no flash,
+  // structurally impossible, no matter how fast anyone presses keys.
+  let gammaLayer = null;
+  if (applied.method === 'backlight') {
+    try { gammaLayer = await gammaOn(run); } catch { /* non-X11/Wayland: fine */ }
+  }
+  // Layer 3: on GNOME, unbind the brightness media keys entirely (saved and
+  // restored on /shades off). No key event, no backlight change at all.
+  const mediaKeys = await unbindBrightnessMediaKeys(run);
+
   const state = {
     enabled: true,
     at: now(),
     timeoutMs,
     ...applied,
+    gamma: gammaLayer?.outputs ?? [],
+    mediaKeys,
   };
   saveShadeState(state, stateFile);
 
@@ -158,12 +172,15 @@ export async function shadesOn(opts = {}) {
   startShadeGuard({ run, stateFile });
 
   const how = applied.method === 'backlight'
-    ? `hardware backlight 0${applied.savedPct != null ? ` (saved: ${applied.savedPct}%)` : ''}`
+    ? `hardware backlight 0${applied.savedPct != null ? ` (saved: ${applied.savedPct}%)` : ''}${gammaLayer ? ' + gamma 0 (dual-layer)' : ''}`
     : `gamma ramp 0 on ${applied.outputs.join(', ')}`;
   return [
     '🕶️ *SHADES ON* — screen physically *BLACK* for everyone nearby.',
     `✅ Screenshots *clear* — sirf panel dark hai (${how}), framebuffer safe.`,
     '🛡️ *STEALTH MODE* — keyboard/touchpad ki zarurat *nahi*: sab kuch WhatsApp se. Brightness keys ya koi bhi brightness change screen *reveal nahi kar sakta* (ShadeGuard active).',
+    gammaLayer
+      ? '⚡ *FLASH-PROOF*: brightness keys dabao — content phir bhi kaala rahega (dual-layer blackout).'
+      : '⚡ ShadeGuard instant-clamp active — brightness change microseconds me wapas 0.',
     timeoutMs > 0
       ? `⏱️ Opt-in auto-restore: ${Math.round(timeoutMs / 60000)} min · turant wapas: \`/shades off\``
       : '🔒 Screen tab tak black rahega jab tak *aap* `/shades off` nahi bhejte — koi auto-restore NAHI.',
@@ -190,6 +207,8 @@ export async function shadesOff(opts = {}) {
   try {
     if (state.method === 'backlight') await backlightOff(run, state);
     else await gammaOff(run, state);
+    if (state.gamma?.length) await gammaOff(run, { outputs: state.gamma });
+    await restoreBrightnessMediaKeys(state.mediaKeys ?? [], run);
   } catch (err) {
     return `🕶️ Shades off karte waqt error: ${err?.message ?? err}\nRecovery: \`brightnessctl set 50%\``;
   }
@@ -249,14 +268,23 @@ export async function initShades(opts = {}) {
 }
 
 // ── ShadeGuard: nothing may reveal the panel while shades are ON ────────────
-// The bug this fixes: laptop brightness keys (or any power daemon) changed
-// the backlight from 0 and instantly revealed the screen. The guard watches
-// the backlight (fork-free via sysfs when possible) and clamps every change
-// straight back to 0 — keyboard, touchpad, /pc brightness — nothing reveals.
+// Three structural layers, because a 600ms clamp still showed a visible
+// flash when brightness keys were pressed:
+//
+//   1. DUAL-LAYER BLACKOUT — backlight 0 AND gamma ramp 0. Brightness keys
+//      raise the backlight all they want; the content still renders black.
+//      (X11; skipped silently on Wayland.)
+//   2. INSTANT CLAMP — 25ms fork-free sysfs watch, direct sysfs write back
+//      to 0 (fallback: brightnessctl). Ghost flash ≤ ~1 frame where gamma
+//      is unavailable.
+//   3. KEY UNBIND — on GNOME the brightness media keys are unbound while
+//      shades are on (saved + restored on /shades off). No key event at all.
+//
 // Full stealth remote: the phone is the only input that matters.
 
 let guardTimer = null;
-let guardMeta = null;
+let guardBusy = false;
+let guardTickCount = 0;
 
 export function isGuardActive() {
   return guardTimer != null;
@@ -265,7 +293,19 @@ export function isGuardActive() {
 export function stopShadeGuard() {
   if (guardTimer) clearInterval(guardTimer);
   guardTimer = null;
-  guardMeta = null;
+  guardBusy = false;
+  guardTickCount = 0;
+}
+
+/** Clamp via direct sysfs write first (no fork, ~0.1ms), then brightnessctl. */
+async function clampBacklightZero(run, state) {
+  if (state.device) {
+    try {
+      fs.writeFileSync(`/sys/class/backlight/${state.device}/brightness`, '0');
+      return;
+    } catch { /* no write access / no sysfs — fall through */ }
+  }
+  await run('brightnessctl', ['set', '0']).catch(() => {});
 }
 
 /** One protection pass. Returns 'clamped' | 'ok' | 'off'. */
@@ -298,13 +338,26 @@ export async function shadeGuardTick(opts = {}) {
           : null;
       }
       if (Number.isFinite(pct) && pct !== 0) {
-        await run('brightnessctl', ['set', '0']).catch(() => {});
+        await clampBacklightZero(run, state);
+        // Re-assert the gamma layer too — dual blackout stays pinned.
+        if (state.gamma?.length) {
+          for (const out of state.gamma) {
+            await run('xrandr', ['--output', out, '--brightness', '0']).catch(() => {});
+          }
+        }
         return 'clamped';
+      }
+      // periodic gamma re-pin (monitor replug / compositor resets)
+      guardTickCount += 1;
+      if (state.gamma?.length && guardTickCount % 80 === 0) {
+        for (const out of state.gamma) {
+          await run('xrandr', ['--output', out, '--brightness', '0']).catch(() => {});
+        }
       }
       return 'ok';
     }
-    // gamma method: brightness keys don't touch gamma, but monitor changes
-    // might — cheap re-assert keeps the ramp pinned at 0.
+    // gamma method: brightness keys don't touch gamma; re-assert keeps the
+    // ramp pinned through monitor changes.
     for (const out of state.outputs ?? []) {
       await run('xrandr', ['--output', out, '--brightness', '0']).catch(() => {});
     }
@@ -314,18 +367,56 @@ export async function shadeGuardTick(opts = {}) {
   }
 }
 
-/** Arm the guard (idempotent). Interval is small: a keypress lasts < 1s. */
+/** Arm the guard (idempotent). 25ms for backlight: a flash must be invisible. */
 export function startShadeGuard(opts = {}) {
   const { run, stateFile, readPct, now } = stateOpts(opts);
   stopShadeGuard();
   const state = loadShadeState(stateFile);
   if (!state?.enabled) return false;
-  guardMeta = { stateFile };
-  const tick = () => shadeGuardTick({ run, stateFile, readPct, now }).catch(() => {});
+  const interval = opts.intervalMs ?? (state.method === 'backlight' ? 25 : 600);
+  const tick = () => {
+    if (guardBusy) return; // never pile up overlapping ticks
+    guardBusy = true;
+    shadeGuardTick({ run, stateFile, readPct, now })
+      .catch(() => {})
+      .finally(() => { guardBusy = false; });
+  };
   tick(); // clamp immediately on arming
-  guardTimer = setInterval(tick, opts.intervalMs ?? 600);
+  guardTimer = setInterval(tick, interval);
   guardTimer.unref?.(); // never hold the process open
   return true;
+}
+
+// ── GNOME brightness-key unbind (layer 3) ───────────────────────────────────
+// The cleanest fix is at the source: no key event → no backlight change.
+// gsettings saves/empties the media-key bindings; /shades off restores them.
+const MEDIA_KEYS_SCHEMA = 'org.gnome.settings-daemon.plugins.media-keys';
+
+async function unbindBrightnessMediaKeys(run) {
+  try {
+    const keysRaw = await run('gsettings', ['list-keys', MEDIA_KEYS_SCHEMA]).catch(() => null);
+    if (!keysRaw) return []; // not GNOME / no gsettings — layers 1-2 cover it
+    const names = String(keysRaw).split('\n').map((s) => s.trim())
+      .filter((k) => /brightness-(up|down)/.test(k));
+    const saved = [];
+    for (const name of names) {
+      const cur = await run('gsettings', ['get', MEDIA_KEYS_SCHEMA, name]).catch(() => null);
+      if (cur == null) continue;
+      const val = String(cur).trim();
+      const empty = val.startsWith('[') ? '[]' : "''";
+      const ok = await run('gsettings', ['set', MEDIA_KEYS_SCHEMA, name, empty]).then(() => true).catch(() => false);
+      if (ok) saved.push({ name, val });
+    }
+    return saved;
+  } catch {
+    return [];
+  }
+}
+
+async function restoreBrightnessMediaKeys(saved, run) {
+  for (const { name, val } of saved ?? []) {
+    await run('gsettings', ['set', MEDIA_KEYS_SCHEMA, name, val]).catch(() => {});
+  }
 }
 
 /**

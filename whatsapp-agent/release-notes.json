@@ -1,4 +1,12 @@
 {
+  "3.4.3": {
+    "title": "🕶️ FLASH-PROOF Shades — brightness keys ab 1 frame bhi screen nahi dikhayenge! ⚡🛡️",
+    "bullets": [
+      "**Dual-Layer Blackout**: Pehle brightness keys dabate hi screen thodi der ke liye dikh jaati thi (guard ka 600ms window). Ab wo STRUCTURALLY khatam — backlight 0 ke saath-saath *gamma bhi 0* pin hota hai. Brightness keys backlight chahe badlein, CONTENT bilkul kaala render hota rahega — zero flash.",
+      "**25ms Instant Clamp + Key Unbind**: Guard ab 25ms me fork-free sysfs watch karta hai (direct write se clamp, microseconds me). GNOME pe brightness media keys hi shades ke dauraan *unbind* ho jaate hain — key event hi nahi! `/shades off` pe sab kuch exact wapas.",
+      "**Koi trade-off nahi**: Screenshots clear, saved brightness `/shades off` pe wapas, restart-proof guard, koi auto-restore nahi — sirf aapka `/shades off`. Tests 322→325."
+    ]
+  },
   "3.4.2": {
     "title": "🕶️ Shades: FULL STEALTH MODE — brightness keys ab screen reveal nahi kar sakti! 🛡️",
     "bullets": [

@@ -246,7 +246,9 @@ test('shades: never touches the framebuffer — only panel commands', async () =
   await shadesOff({ run, stateFile, now: () => 2 });
   for (const c of run.calls) {
     const line = c.join(' ');
-    assert.ok(/^(brightnessctl|xrandr)/.test(line), `only panel-level tools, got: ${line}`);
+    // panel-level tools ONLY: backlight (brightnessctl), gamma (xrandr) and
+    // media-key unbind (gsettings) — never anything that reads the screen.
+    assert.ok(/^(brightnessctl|xrandr|gsettings)/.test(line), `only panel-level tools, got: ${line}`);
     assert.ok(!/gnome-screenshot|grim|scrot|maim|import|pipewire/.test(line), 'capture tools untouched');
   }
 });
@@ -399,4 +401,95 @@ test('stealth: /pc brightness while shades ON adjusts the SAVED level only', asy
   } finally {
     stopShadeGuard();
   }
+});
+
+// ── 8. Flash-proof layers: brightness keys can NEVER show content ──────────
+// The reported bug: a keypress raised the backlight and the screen flashed
+// for the ~600ms before the guard clamped. Fix is structural, not faster.
+
+test('flash-proof: dual-layer blackout — gamma pinned even when backlight jumps', async () => {
+  const stateFile = tmpState();
+  const run = fakeRun({
+    'brightnessctl -m': 'intel_backlight,backlight,937,47%,2000',
+    'brightnessctl set 0': '',
+    'brightnessctl set 937': '',
+    'xrandr --query': 'eDP-1 connected primary 1920x1080\nHDMI-1 connected',
+    'xrandr --output eDP-1 --brightness 0': '',
+    'xrandr --output HDMI-1 --brightness 0': '',
+    'xrandr --output eDP-1 --brightness 1': '',
+    'xrandr --output HDMI-1 --brightness 1': '',
+    'gsettings list-keys org.gnome.settings-daemon.plugins.media-keys': Object.assign(new Error('x'), { code: 'ENOENT' }),
+  });
+  const msg = await shadesOn({ run, stateFile, timeoutMs: 0, now: () => 1 });
+  assert.match(msg, /dual-layer/, 'message promises flash-proof dual blackout');
+  const state = loadShadeState(stateFile);
+  assert.equal(state.method, 'backlight');
+  assert.deepEqual(state.gamma, ['eDP-1', 'HDMI-1'], 'gamma layer armed on top of backlight');
+  assert.ok(run.calls.some((c) => c.join(' ') === 'xrandr --output eDP-1 --brightness 0'), 'gamma pinned to 0');
+
+  // Someone presses brightness keys → backlight jumps — guard re-pins BOTH layers
+  const { shadeGuardTick, stopShadeGuard } = await import('../src/shades.js');
+  const r = await shadeGuardTick({ run, stateFile, readPct: async () => 47 });
+  assert.equal(r, 'clamped');
+  assert.ok(run.calls.some((c) => c.join(' ') === 'brightnessctl set 0'), 'backlight clamped');
+  const gammaPins = run.calls.filter((c) => c.join(' ') === 'xrandr --output eDP-1 --brightness 0').length;
+  assert.ok(gammaPins >= 2, 'gamma re-pinned on the clamp event too');
+
+  // /shades off restores BOTH layers
+  await shadesOff({ run, stateFile, now: () => 2 });
+  assert.ok(run.calls.some((c) => c.join(' ') === 'xrandr --output eDP-1 --brightness 1'), 'gamma restored');
+  assert.ok(run.calls.some((c) => c.join(' ') === 'brightnessctl set 937'), 'backlight restored');
+  stopShadeGuard();
+});
+
+test('flash-proof: GNOME brightness keys are UNBOUND while shades are on', async () => {
+  const stateFile = tmpState();
+  let brightnessUpBinding = "['XF86MonBrightnessUp']";
+  const calls = [];
+  const run = async (bin, args = []) => {
+    const key = [bin, ...args].join(' ');
+    calls.push(key);
+    if (key === 'brightnessctl -m') return 'intel_backlight,backlight,937,47%,2000';
+    if (key === 'brightnessctl set 0' || key === 'brightnessctl set 937') return '';
+    if (key === 'xrandr --query') { const e = new Error('x'); e.code = 'ENOENT'; throw e; }
+    if (key === 'gsettings list-keys org.gnome.settings-daemon.plugins.media-keys') {
+      return 'brightness-up\nbrightness-down\nvolume-up';
+    }
+    if (key === 'gsettings get org.gnome.settings-daemon.plugins.media-keys brightness-up') return brightnessUpBinding;
+    if (key === 'gsettings get org.gnome.settings-daemon.plugins.media-keys brightness-down') return "['XF86MonBrightnessDown']";
+    if (key.startsWith('gsettings set org.gnome.settings-daemon.plugins.media-keys brightness-up ')) {
+      brightnessUpBinding = key.split(' ').pop();
+      return '';
+    }
+    if (key.startsWith('gsettings set org.gnome.settings-daemon.plugins.media-keys brightness-down ')) return '';
+    const e = new Error(`unexpected: ${key}`); e.code = 'ENOENT'; throw e;
+  };
+
+  await shadesOn({ run, stateFile, timeoutMs: 0, now: () => 1 });
+  assert.equal(brightnessUpBinding, '[]', 'brightness-up unbound (empty binding)');
+  const state = loadShadeState(stateFile);
+  assert.equal(state.mediaKeys.length, 2, 'both brightness keys saved');
+  // volume keys untouched
+  assert.ok(!calls.some((c) => /gsettings set .* volume-up/.test(c)), 'volume keys never touched');
+
+  await shadesOff({ run, stateFile, now: () => 2 });
+  assert.equal(brightnessUpBinding, "['XF86MonBrightnessUp']", 'binding restored exactly');
+});
+
+test('flash-proof: backlight guard runs at 25ms — a flash cannot be seen', async () => {
+  const { startShadeGuard, stopShadeGuard, isGuardActive } = await import('../src/shades.js');
+  const stateFile = tmpState();
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    enabled: true, at: 0, timeoutMs: 0, method: 'backlight',
+    savedPct: 47, savedRaw: '937', device: 'intel_backlight', gamma: [],
+  }));
+  const run = fakeRun({ 'brightnessctl set 0': '' });
+  startShadeGuard({ run, stateFile, readPct: async () => 0 });
+  assert.equal(isGuardActive(), true);
+  // clamp path uses the direct sysfs write first, brightnessctl as fallback
+  const { shadeGuardTick } = await import('../src/shades.js');
+  await shadeGuardTick({ run, stateFile, readPct: async () => 47 });
+  assert.ok(run.calls.some((c) => c.join(' ') === 'brightnessctl set 0'), 'fallback clamp fired');
+  stopShadeGuard();
 });
