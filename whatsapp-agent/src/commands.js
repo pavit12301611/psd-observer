@@ -23,6 +23,11 @@ import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import { shadesOn, shadesOff, shadesStatus, initShades, shadeAwareBrightness } from './shades.js';
+import * as liveMirror from './livemirror.js';
+import * as guardMode from './guard.js';
+import * as notifMirror from './notifmirror.js';
+import * as study from './studypack.js';
+import * as expenses from './expenses.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -38,6 +43,9 @@ import { createProgress, describeHandsStep } from './progress.js';
 import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
 import { createHarness } from './harness.js';
 import * as solver from './solver.js';
+import { imageStats } from './imaging.js';
+import { webcamPhoto } from './systemx.js';
+import { spawn } from 'node:child_process';
 import { createVoiceCall } from './voicecall.js';
 import { jarvisGreeting, spokenSummary } from './jarvis.js';
 import * as mem from './memory.js';
@@ -168,6 +176,48 @@ const execAsync = promisify(exec);
 async function execAsyncFile(bin, args = []) {
   const { execFile } = await import('node:child_process');
   return promisify(execFile)(bin, args ?? [], { timeout: 8000 }).then((r) => r.stdout ?? '');
+}
+
+// 🔔 Notification mirror: stream the freedesktop notification bus (GNOME).
+function notifMonitorSpawner(onLine) {
+  const child = spawn('gdbus', ['monitor', '--session', '--dest', 'org.freedesktop.Notifications'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let buf = '';
+  child.stdout?.on('data', (d) => {
+    buf += String(d);
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? '';
+    for (const line of lines) onLine(line);
+  });
+  child.on('error', () => { /* no gdbus — mirror simply has nothing to show */ });
+  return child;
+}
+
+// 📚 Study pack builder: AI generates summary + flashcards + quiz JSON.
+async function buildStudyPack(topic, ctx) {
+  const prompt = [
+    `Create a study pack on "${topic}" for an Indian school student.`,
+    'Return ONLY a JSON object, no prose:',
+    '{"summary":"4-6 line crisp summary","flashcards":[{"q":"question","a":"short answer"} x 12],"quiz":[{"q":"question","options":["a","b","c","d"],"answer":"a"} x 6]}',
+  ].join('\n');
+  const raw = await ai.complete(config, prompt, log).catch(() => null);
+  const parsed = raw ? solver.extractJsonObject(solver.stripThinkBlocks(raw)) : null;
+  if (!parsed?.flashcards?.length && !parsed?.summary) {
+    return '📚 Study pack banane ke liye AI brain chahiye — `/brains` se setup karo (free: Ollama/Groq).';
+  }
+  const pack = study.buildPack(topic, parsed, Date.now());
+  study.savePack(pack);
+  store.data.lastStudyTopic = topic;
+  store.save?.();
+  return [
+    `📚 *Study pack ready — ${pack.topic}*`,
+    '',
+    pack.summary,
+    '',
+    `🃏 ${pack.flashcards.length} flashcards · 📝 ${pack.quiz.length} quiz questions`,
+    'Revise: `/revise` · Quiz: `/quiz ' + topic + '`',
+  ].join('\n');
 }
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
@@ -2909,6 +2959,80 @@ export function createAgent({
         return toReply(await actions.runPending(ctx));
       }
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
+      case 'live': {
+        // 🎥 Live screen mirror — frames keep coming to WhatsApp.
+        const arg = String(args || '').trim().toLowerCase();
+        if (arg === 'off' || arg === 'stop') return liveMirror.stopLive();
+        if (arg === 'status') return liveMirror.liveStatus();
+        const intervalSec = Number(arg) || liveMirror.DEFAULT_INTERVAL_SEC;
+        return liveMirror.startLive({
+          intervalSec,
+          capture: () => pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }),
+          send: (payload) => notifyOwner(payload),
+        });
+      }
+      case 'guard': {
+        // 🛡️ Motion-triggered webcam security camera.
+        const [sub, ...restArgs] = String(args || '').trim().toLowerCase().split(/\s+/);
+        const restJoined = restArgs.join(' ');
+        if (sub === 'off' || sub === 'stop') return guardMode.stopGuard();
+        if (sub === 'status') return guardMode.guardStatus();
+        if (sub === 'sens' || sub === 'sensitivity') return guardMode.setGuardSensitivity(restJoined);
+        return guardMode.startGuard({
+          sensitivity: Number(restJoined) || undefined,
+          capture: async () => (await webcamPhoto()).image,
+          statFn: (buf) => imageStats(buf),
+          send: (payload) => notifyOwner(payload),
+        });
+      }
+      case 'nmirror': case 'notifmirror': case 'mirror': {
+        // 🔔 Desktop notifications → WhatsApp.
+        const [sub, ...restArgs] = String(args || '').trim().split(/\s+/);
+        const restJoined = restArgs.join(' ');
+        if (sub === 'off') return notifMirror.toggleMirror(false);
+        if (sub === 'status') return notifMirror.mirrorStatus();
+        if (sub === 'allow') return notifMirror.setAllow(restJoined);
+        return notifMirror.toggleMirror(true, {
+          spawnMonitor: (onLine) => notifMonitorSpawner(onLine),
+          send: (text) => notifyOwner(text),
+        });
+      }
+      case 'study': {
+        // 📚 Study pack generator — summary + flashcards + quiz.
+        const topic = String(args || '').trim();
+        if (!topic) return '📚 Usage: `/study <topic>` — e.g. `/study photosynthesis`';
+        return buildStudyPack(topic, ctx);
+      }
+      case 'revise': {
+        const arg = String(args || '').trim().toLowerCase();
+        const topic = arg && !['ok', 'again'].includes(arg) ? arg : store.data.lastStudyTopic;
+        const pack = topic ? study.loadPack(topic) : null;
+        if (!pack) return '📚 Revision ke liye pack chahiye — `/study <topic>` pehle.';
+        return study.reviseMessage(pack, Date.now());
+      }
+      case 'quiz': {
+        const arg = String(args || '').trim();
+        if (/^answers\b/i.test(arg)) {
+          const topic = arg.replace(/^answers\s+/i, '').trim() || store.data.lastStudyTopic;
+          const pack = topic ? study.loadPack(topic) : null;
+          return pack ? study.quizAnswers(pack) : '📚 Pack nahi mila.';
+        }
+        const pack = study.loadPack(arg || store.data.lastStudyTopic);
+        return pack ? study.quizMessage(pack) : '📚 Usage: `/quiz <topic>` (pehle `/study <topic>`)';
+      }
+      case 'exp': case 'expense': case 'kharcha': {
+        // 💰 Expense tracker.
+        const raw = String(args || '').trim();
+        if (!raw) return expenses.lastEntries(5);
+        if (/^report\b/i.test(raw)) {
+          const month = raw.replace(/^report\s*/i, '').trim() || null;
+          return expenses.report({ month });
+        }
+        if (/^budget\b/i.test(raw)) return expenses.setBudget(raw.replace(/^budget\s*/i, '').trim());
+        if (/^undo\b/i.test(raw)) return expenses.undoLast();
+        if (/^list\b/i.test(raw)) return expenses.lastEntries(10);
+        return expenses.addExpense(raw).reply;
+      }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
         // screenshots stay CLEAR (backlight/gamma, never the framebuffer).
