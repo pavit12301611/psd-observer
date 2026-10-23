@@ -86,3 +86,20 @@ test('unpair clears the local session and history, and never replays old request
   await page.waitForTimeout(650); expect(await page.evaluate(() => Object.values(localStorage).some((v) => v.includes('private fixture phrase')))).toBe(false);
   expect(f.requests.filter((r) => r.path === '/api/chat' && r.body.text === 'private fixture phrase')).toHaveLength(1);
 });
+
+test('PC tool selection leaves Direct AI in a fresh thread and never forwards tool commands to a cloud model', async ({ page }) => {
+  await page.addInitScript(() => {
+    const calls: string[] = []; (window as unknown as { fixtureCalls: string[] }).fixtureCalls = calls;
+    window.ObserverAndroid = { postMessage: (raw) => { const p = JSON.parse(raw); calls.push(p.method); let data: unknown = true;
+      if (p.method === 'readState') data = JSON.stringify({ preferences: { chatMode: 'cloud' }, activeId: 'cloud-fixture', conversations: [{ id: 'cloud-fixture', mode: 'cloud', title: 'Cloud fixture', messages: [] }] });
+      if (p.method === 'restore') data = null;
+      if (p.method === 'cloudStatus') data = { configured: true, provider: 'fixture', model: 'fixture' };
+      setTimeout(() => window.dispatchEvent(new CustomEvent('observer-native-result', { detail: { id: p.id, ok: true, data } })), 0);
+    } };
+  });
+  await page.goto('/'); await expect(page.locator('.model-chip')).toContainText('Direct AI');
+  await page.getByRole('button', { name: 'Explore commands', exact: true }).click(); await page.getByLabel('Search commands').fill('/shades'); await page.getByRole('button', { name: /^\/shades/ }).click();
+  await expect(page.locator('.model-chip')).not.toContainText('Direct AI'); await expect(page.getByLabel('Message Observer')).toHaveValue('/shades ');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click(); await expect(page.getByRole('dialog')).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { fixtureCalls: string[] }).fixtureCalls.filter((m) => m === 'cloudChat'))).toEqual([]);
+});

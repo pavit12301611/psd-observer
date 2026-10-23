@@ -51,7 +51,7 @@ export default function App() {
   useEffect(() => { if (!loaded) return; const generation = session.current; const timer = setTimeout(() => { if (generation !== session.current) return; void saveState(state).catch(() => notify('Could not save local history. Free space or disable history in Settings.')); }, 450); return () => clearTimeout(timer); }, [state, loaded, notify]);
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = () => { const theme = state.preferences.theme === 'system' ? query.matches ? 'dark' : 'light' : state.preferences.theme; document.documentElement.dataset.theme = theme; setEffectiveDark(theme === 'dark'); document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#101010' : '#ffffff'); if (isNative()) void nativeCall('appearance', { dark: theme === 'dark', screenPrivacy: state.preferences.screenPrivacy }).catch(() => {}); };
+    const apply = () => { const theme = state.preferences.theme === 'system' ? query.matches ? 'dark' : 'light' : state.preferences.theme; document.documentElement.dataset.theme = theme; setEffectiveDark(theme === 'dark'); document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff'); if (isNative()) void nativeCall('appearance', { dark: theme === 'dark', screenPrivacy: state.preferences.screenPrivacy }).catch(() => {}); };
     apply(); query.addEventListener('change', apply); return () => query.removeEventListener('change', apply);
   }, [state.preferences.theme, state.preferences.screenPrivacy]);
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function App() {
   useEffect(() => { const shortcut = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setCommandsOpen(true); } }; window.addEventListener('keydown', shortcut); return () => window.removeEventListener('keydown', shortcut); }, []);
   const updatePreferences = useCallback((patch: Partial<Preferences>) => setState((s) => ({ ...s, preferences: { ...s.preferences, ...patch } })), []);
   function newChat() { const c = newConversation(stateRef.current.preferences.chatMode); setState((s) => ({ ...s, conversations: [...s.conversations, c].slice(-20), activeId: c.id })); setDraft(''); setFile(null); setPage('chat'); setDrawer(false); setHistoryOpen(false); }
-  function chooseDraft(text: string) { setDraft(text); setPage('chat'); setCommandsOpen(false); setDrawer(false); setTimeout(() => textarea.current?.focus(), 50); }
+  function chooseDraft(text: string) { if (text.trim().startsWith('/') && stateRef.current.preferences.chatMode === 'cloud') { const c = newConversation('agent'); setState((s) => ({ ...s, preferences: { ...s.preferences, chatMode: 'agent' }, conversations: [...s.conversations, c].slice(-20), activeId: c.id })); notify('PC tool selected. Switched to a fresh PC agent thread; nothing has run.'); } setDraft(text); setPage('chat'); setCommandsOpen(false); setDrawer(false); setTimeout(() => textarea.current?.focus(), 50); }
   function append(message: Message, conversationId = stateRef.current.activeId) {
     setState((s) => ({ ...s, conversations: s.conversations.map((c) => c.id === conversationId ? { ...c, updated: Date.now(), title: c.messages.length ? c.title : message.text.replace(/^\//, '').slice(0, 54) || 'Attachment', messages: [...c.messages, message].slice(-100).map((m, i, all) => all.length - i > 8 ? { ...m, images: [], audio: undefined } : m) } : c) }));
   }
@@ -88,6 +88,7 @@ export default function App() {
     const direct = state.preferences.chatMode === 'cloud';
     if (direct && !cloud.configured) { setModeOpen(true); return; }
     if (!direct && !profile) { setPairOpen(true); return; }
+    if (direct && draft.trim().startsWith('/')) { notify('Slash commands use PC agent mode, not Direct AI. Choose PC agent first.'); setModeOpen(true); return; }
     if (direct && file) { notify('Files need PC agent mode in this version. Direct AI is text-only.'); return; }
     const text = draft.trim(), upload = file, cId = stateRef.current.activeId, generation = session.current, id = crypto.randomUUID();
     requestMode.current = direct ? 'cloud' : 'agent';

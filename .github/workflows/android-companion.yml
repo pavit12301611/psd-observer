@@ -2,9 +2,9 @@ name: Android companion
 on:
   push:
     branches: [main, arena/9787e6e8-psd-observer]
-    paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml']
+    paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml', '!app/companion/docs/**', '!app/companion/README.md']
   pull_request:
-    paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml']
+    paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml', '!app/companion/docs/**', '!app/companion/README.md']
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,6 +1,6 @@
 @charset "UTF-8";
 :root { font-family: -apple-system, BlinkMacSystemFont, 'SamsungOne', 'Segoe UI', 'Roboto', sans-serif; color: #262624; background: #fff; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; --bg: #fff; --surface: #fafaf9; --soft: #f3f3f0; --hover: #efefec; --ink: #262624; --muted: #6e6e67; --border: #e8e8e3; --line: #f0f0ec; --button: #292927; --on-button: #fff; --radius: 12px; --app-height: 100dvh; color-scheme: light; }
-:root[data-theme='dark'] { --bg: #101010; --surface: #161616; --soft: #202020; --hover: #282828; --ink: #e9e9e5; --muted: #93938d; --border: #30302e; --line: #232322; --button: #e8e8e4; --on-button: #151515; color: var(--ink); background: var(--bg); color-scheme: dark; }
+:root[data-theme='dark'] { --bg: #000000; --surface: #121212; --soft: #202020; --hover: #282828; --ink: #e9e9e5; --muted: #93938d; --border: #30302e; --line: #232322; --button: #e8e8e4; --on-button: #151515; color: var(--ink); background: var(--bg); color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
