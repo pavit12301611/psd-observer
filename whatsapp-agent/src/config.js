@@ -130,6 +130,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     groqApiKey: e.GROQ_API_KEY || '',
     groqModel: e.GROQ_MODEL || 'openai/gpt-oss-120b',
     groqModelSmall: e.GROQ_MODEL_SMALL || 'openai/gpt-oss-20b',
+    groqModelFallbacks: (e.GROQ_MODEL_FALLBACKS || '').split(',').map((id) => id.trim()).filter(Boolean),
     groqVisionModel: e.GROQ_VISION_MODEL === undefined ? 'qwen/qwen3.8-27b' : e.GROQ_VISION_MODEL,
     groqBaseUrl: (e.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
     geminiApiKey: e.GEMINI_API_KEY || '',
@@ -139,6 +140,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     openrouterApiKey: e.OPENROUTER_API_KEY || '',
     openrouterModel: e.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
     openrouterVisionModel: e.OPENROUTER_VISION_MODEL || '',
+    openrouterModelFallbacks: (e.OPENROUTER_MODEL_FALLBACKS ?? 'openrouter/free').split(',').map((id) => id.trim()).filter(Boolean),
     openrouterBaseUrl: (e.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
 
     // ── workload routing (router.js) ───────────────────────────────────────
@@ -194,6 +196,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     maxHeavyPerHour: int(e.MAX_HEAVY_PER_HOUR, 12),
     heavyWindowMs: int(e.HEAVY_WINDOW_MS, 3_600_000),
     aiTimeoutMs: int(e.AI_TIMEOUT_MS, 60_000),
+    maxParallelTasks: Math.max(1, Math.min(4, int(e.MAX_PARALLEL_TASKS, 2))),
 
     // Automation safety: older builds clicked hard-coded screen coordinates
     // when OCR missed a button. Off by default — blind clicking can hit
@@ -246,6 +249,11 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // Free AI tool-calling: plain language → real actions on the PC.
     agentTools: bool(e.AGENT_TOOLS, true),
     maxAgentSteps: int(e.MAX_AGENT_STEPS, 6),
+    // Try the complete healthy fallback queue, not only its first 3 entries.
+    agentMaxTries: int(e.AGENT_MAX_TRIES, 6),
+    // Bound output reservation and prompt overhead on rate-limited free APIs.
+    agentMaxTokens: int(e.AGENT_MAX_TOKENS, 2048),
+    agentPromptMaxChars: int(e.AGENT_PROMPT_MAX_CHARS, 24_000),
     // Local models have small contexts: send only the ~20 most relevant tools
     // and give Ollama a real context window.
     agentToolLimit: int(e.AGENT_TOOL_LIMIT, 20),

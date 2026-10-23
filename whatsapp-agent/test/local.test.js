@@ -287,8 +287,16 @@ test('local: /agent works end-to-end with no cloud at all', async () => {
       const store = new Store(path.join(dir, 'store.json'));
       const config = localConfig(dir, { localApiUrl: `http://127.0.0.1:${port}/v1` });
       const agent = createAgent({ config, store, log: silent });
+      // This is an offline API round-trip test, not a real desktop launch.
+      // A failed real launch must never be hidden by the model's success text.
+      const executed = [];
+      agent.actions.execute = async (name, args) => {
+        executed.push({ name, args });
+        return { ok: true, text: 'Opened chrome (fixture)' };
+      };
       const reply = await agent.handle('/agent chrome kholo', {});
       const text = typeof reply === 'string' ? reply : reply?.text ?? '';
+      assert.deepEqual(executed, [{ name: 'open_app', args: { app: 'chrome' } }]);
       assert.match(text, /Chrome khul gaya/);
       assert.match(text, /🧠 tiny/, 'proves which brain ran');
     });

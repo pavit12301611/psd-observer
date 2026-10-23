@@ -19,7 +19,7 @@ import * as tts from './tts.js';
 import * as autopilot from './autopilot.js';
 import { describeSite } from './sites.js';
 import * as hands from './hands.js';
-import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js';
+import { tasks as globalTasks, isStopCommand, isStoppedError, throwIfStopped } from './cancel.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import { shadesOn, shadesOff, shadesStatus, initShades, shadeAwareBrightness } from './shades.js';
@@ -29,7 +29,7 @@ import * as notifMirror from './notifmirror.js';
 import * as study from './studypack.js';
 import * as expenses from './expenses.js';
 import { resolveRefs, absorb, contextStatus, clearContext } from './context.js';
-import { parseCorrection, saveCorrection, applyCorrection, listCorrections, shouldRetrain, markTrained, asTrainingPairs, RETRAIN_AFTER_DAYS, RETRAIN_AFTER_NEW } from './corrections.js';
+import { parseCorrection, saveCorrection, applyCorrection, listCorrections } from './corrections.js';
 import { scoreAnswer, bestAnswer } from './answerquality.js';
 import { withSource, extractSources } from './sourcelinks.js';
 import { completeWithFallback, fallbackReply } from './brainfallback.js';
@@ -193,8 +193,10 @@ import {
   BILINGUAL_CORPUS,
 } from './bilingual.js';
 import { lookupKnowledge } from './knowledge.js';
-import { classifyIntent, learnExample } from './neural/index.js';
-import { orchestrate, missionDirective, agentTag, taskBrief, mergeSquadAnswers, fleetStatus, AGENTS } from './agents.js';
+import { classifyIntent, learnExample, brainInfo, INTENT_LABELS } from './neural/index.js';
+import { trainPersonalBrain } from './neural/training.js';
+import { parseBatch, runBatch, batchSummary, conversationSnapshot, concurrencyLimit } from './multitask.js';
+import { orchestrate, independentParts, agentForIntent, missionDirective, agentTag, taskBrief, mergeSquadAnswers, fleetStatus, AGENTS } from './agents.js';
 import { wikiCommand, wikiFallback } from './wiki.js';
 import {
   recordTurnOutcome,
@@ -430,6 +432,9 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /allow <number|name> · /block <number|name> · /unblock <number|name>
 • 🔒 *Strict Command Firewall:* Non-owners ke liye sabhi \`/\` aur plain-language commands + aapki location 100% blocked hain!
 *Safety*
+• /batch <question> || <question> — up to 8 tasks; bounded parallel answers, serial PC actions
+• /taskstatus · /batch status — live progress · /batch results — completed/partial outputs · /stop — cancel
+• /neural status · /neural learn <label> | <example> · /neural train — real local neural training
 • /doctor — kya kaam nahi kar raha, aur exact fix (screenshot/input/AI)
 • /access — what is allowed · /yes · /no (destructive actions ask first)
 • /run <PIN> <command> — shell, only if ALLOW_SHELL=true
@@ -447,6 +452,7 @@ export function createAgent({
   // The signal of whatever command is running right now. Commands are
   // serialized (isProcessing), so one slot is enough; /stop does not use it.
   let activeSignal = null;
+  let lastBatch = null;
   // Unsolicited messages (live progress, watch alerts). index.js wires this to
   // WhatsApp; in tests it stays a no-op so nothing ever sends by accident.
   let notifyOwner = typeof notify === 'function' ? notify : async () => false;
@@ -1529,7 +1535,11 @@ export function createAgent({
       '⚠️ *Kaam nahi ho paaya — kuch bhi nahi kiya.*',
       `_Reason: ${meta.reason || 'brain ne koi usable jawab nahi diya'}_`,
       '',
-      `Work size: ${meta.tier ?? plan.tier} · tried: ${plan.candidates.slice(0, 2).map((m) => shortModel(m.label)).join(' → ') || 'none'}`,
+      `Work size: ${meta.requestedTier ?? meta.tier ?? plan.tier} · tried: ${(meta.attempts ?? []).map((attempt) => shortModel(attempt.model)).join(' → ') || 'none (cooldown/provider filter)'}`,
+      ...((meta.attempts ?? []).filter((attempt) => attempt.error).map((attempt) =>
+        `• ${shortModel(attempt.model)} — ${attempt.error.kind}${attempt.error.status ? ` / HTTP ${attempt.error.status}` : ''}: ${attempt.error.message}`)),
+      ...[...new Set((meta.attempts ?? []).filter((attempt) => attempt.error).map((attempt) => attempt.error.hint))].slice(0, 3),
+      ...(!meta.attempts?.length ? (meta.plan?.notes ?? []) : []),
       '',
       'Ye try karo:',
       '• /brains — live health + power budget',
@@ -3209,11 +3219,14 @@ export function createAgent({
       case 'agent': return runAgentTask(args, ctx);
       case 'use': case 'hands': return runUseTask(args, ctx.signal);
       case 'arena': return runArenaPrompt(args, ctx.signal);
+      case 'batch': return batchCommand(args, ctx);
+      case 'taskstatus': return workStatus();
+      case 'neural': return neuralCommand(args, ctx);
       case 'agents': case 'fleet': {
         const head = `🤖🤖 *Multi-Agent Fleet* — kaam bots me divide hota hai (IntentNet dispatcher):`;
         let brain = '🧠 IntentNet: trained checkpoint loaded';
-        try { brain = `🧠 IntentNet: ${classifyIntent('hello').source} · conf ${classifyIntent('hello').confidence.toFixed(2)}`; } catch { /* optional */ }
-        return `${head}\n${fleetStatus()}\n\n${brain}\n👁️ VisionBot — images/questions (vision pipeline)\n\nHar bot ka apna mission + tools hai. Compound messages me squad ban jaata hai. ✅`;
+        try { brain = `🧠 IntentNet: ${classifyIntent('hello', { dataDir: config.dataDir }).source} · conf ${classifyIntent('hello', { dataDir: config.dataDir }).confidence.toFixed(2)}`; } catch { /* optional */ }
+        return `${head}\n${fleetStatus()}\n\n${brain}\n👁️ VisionBot — images/questions (vision pipeline)\n\nIndependent text questions split into specialists. Execution/verification uses /agent or /solve; /batch bounds parallel answers and serializes allowed actions. ✅`;
       }
       case 'brains': case 'models': case 'router': {
         if (args && /^(why|explain|route)\b/i.test(args)) {
@@ -3605,13 +3618,7 @@ export function createAgent({
         return contextStatus();
       }
       case 'corrections': return listCorrections();
-      case 'retrain': {
-        const st = shouldRetrain();
-        if (!st.due) return `🧠 Retrain abhi zarurat nahi (${st.pending} new corrections, policy: ${RETRAIN_AFTER_DAYS}d ya ${RETRAIN_AFTER_NEW} new).`;
-        markTrained();
-        const pairs = asTrainingPairs();
-        return `🧠 *Retrain policy triggered* — ${pairs.length} corrections packed. Run \`npm run train:neural\` (ya main heartbeat pe khud) — abhi mark trained.`;
-      }
+      case 'retrain': return neuralCommand(`train ${args || ''}`.trim(), ctx);
       case 'plan': {
         if (!args) return planStatus();
         const steps = await buildSteps(args, {
@@ -3940,22 +3947,144 @@ ${recapGoal()}`;
     return aiOut;
   }
 
-  async function askAI(text, ctx = {}) {
-    if (store?.data) store.data.lastQuestion = String(text).slice(0, 200);
-    const forcedAnswer = applyCorrection(text, null);
-    if (forcedAnswer) return forcedAnswer;
-    const det = solveDeterministicQuery(text);
+  function workStatus() {
+    const active = taskRegistry.active();
+    const lines = ['🧩 *Work status*', ...active.map((t) => `⚡ ${t.label} · ${tools.humanDuration(t.elapsedMs)}`)];
+    if (!active.length) lines.push('No active task.');
+    if (lastBatch) {
+      const count = (s) => lastBatch.entries.filter((e) => e.status === s).length;
+      lines.push(`Batch: ${count('running')} running · ${count('queued')} queued · ${count('completed')} completed · ${count('failed')} failed · ${count('waiting')} awaiting confirmation · ${count('skipped')} skipped`);
+    }
+    if (lastBatch) lines.push('Completed/partial outputs: `/batch results`');
+    lines.push(`Parallel answer/read limit: ${concurrencyLimit(config.maxParallelTasks)}; PC/write actions are serial.`,
+      'Usage: `/batch /ask explain recursion || /ask write a short poem || /time`', '/stop cancels active work and prevents queued tasks from starting.');
+    return lines.join('\n');
+  }
+
+  async function neuralCommand(raw = '', ctx = {}) {
+    const value = String(raw).trim();
+    if (!value || /^status$/i.test(value)) {
+      const b = brainInfo({ dataDir: config.dataDir });
+      const metric = b.metrics?.intent?.testHybrid;
+      return [
+        `🧠 Local routing brain: ${b.trained ? b.architecture.join('→') : 'heuristic fallback'}`,
+        `Memory: ${b.memorySize} examples · ${b.approvedExamples} owner-approved · ${b.ignoredUntrusted} unverified legacy labels ignored`,
+        metric ? `Held-out int8 routing test: ${(metric.accuracy * 100).toFixed(1)}% (n=${metric.n}); macro-F1 ${metric.macroF1.toFixed(3)}` : 'No validated checkpoint metrics.',
+        b.loadIssues.length ? '⚠️ Bad/incompatible override skipped; using the next healthy checkpoint.' : '',
+        'This is intent/matching training, not Grok/Claude language-model fine-tuning.',
+        '`/neural classify <text>` · `/neural labels` · `/neural learn <label> | <example>` · `/neural train [epochs]`',
+      ].filter(Boolean).join('\n');
+    }
+    if (/^labels$/i.test(value)) return `Intent labels: ${INTENT_LABELS.join(', ')}`;
+    const query = value.match(/^classify\s+([\s\S]+)$/i);
+    if (query) {
+      const c = classifyIntent(query[1], { dataDir: config.dataDir });
+      return `🧠 ${c.label} · routing confidence ${(c.confidence * 100).toFixed(1)}% · ${c.source}${c.uncertain ? ' · ambiguous' : ''}\nConfidence is about routing, NOT factual answer correctness.`;
+    }
+    const correction = value.match(/^learn\s+([a-z_]+)\s*\|\s*([\s\S]+)$/i);
+    if (correction) {
+      const ok = learnExample(correction[2], correction[1].toLowerCase(), { dataDir: config.dataDir });
+      return ok ? '✅ Owner-approved label saved; routing memory/cache updated immediately. `/neural train` updates weights privately.' : '⚠️ Label not saved. Use `/neural labels`; example must be 1..300 characters and the data file must be valid/writable.';
+    }
+    const train = value.match(/^train(?:\s+(\d+))?$/i);
+    if (train) {
+      const epochs = train[1] ? Number(train[1]) : 90;
+      const result = await trainPersonalBrain({ dataDir: config.dataDir, epochs, signal: activeSignal ?? ctx.signal });
+      const m = result.metrics;
+      return `✅ *Neural training actually completed* (CPU worker; private checkpoint loaded).\nIntent test: ${(m.intent.testHybrid.accuracy * 100).toFixed(1)}% (n=${m.intent.test.n}); Match test: ${(m.match.test.accuracy * 100).toFixed(1)}%.\n${m.intent.approvedRuntimeExamples} approved personal labels included. Answer corrections remain lookup rules; this does NOT train the external language model.`;
+    }
+    return '🧠 Usage: `/neural status|labels|classify <text>|learn <label> | <example>|train [1..500]`';
+  }
+
+  async function batchCommand(raw, ctx = {}) {
+    if (/^results$/i.test(String(raw ?? '').trim())) return lastBatch ? batchSummary(lastBatch) : workStatus();
+    if (!String(raw ?? '').trim() || /^status$/i.test(String(raw).trim())) return workStatus();
+    let parsed;
+    try {
+      parsed = parseBatch(raw);
+      // An answer request cannot silently turn into a PC action (or claim one).
+      const answerIntents = new Set(['ask', 'ai', 'calc', 'unit', 'convert', 'currency', 'wiki', 'define', 'time', 'date', 'joke', 'fact', 'quote', 'weather', 'news', 'coin', 'dice', 'choose']);
+      for (const [index, task] of parsed.tasks.entries()) if (task.kind === 'answer') {
+        if (index > 0 && /\b(?:(?:explain|summarize|translate|convert|fix|improve)\s+(?:it|that|this|the above)|previous (?:task|answer|result|output)|based on (?:it|that|the)|using (?:it|that|the previous))\b/i.test(task.args)) {
+          throw new Error('Batch tasks must be independent. Use one /ask or /agent request for dependent steps.');
+        }
+        const intent = parseIntent(task.args);
+        if (intent?.cmd && !answerIntents.has(intent.cmd)) throw new Error(`Use an explicit /${intent.cmd} command for actions; bare batch tasks are answer-only.`);
+      }
+    } catch (err) { return `⚠️ Batch not started: ${err.message}`; }
+    if (parsed.stop) return `${stopCommand()}\nNo batch tasks started.`;
+    if (store.data.pending || pendingState() || pendingPower || pendingTap) return '🔒 Resolve the pending confirmation first (/yes or /no); no batch tasks started.';
+    store.data.lastQuestion = null; // multiple answers: a correction must name its question
+    const result = await runBatch(parsed.tasks, {
+      concurrency: concurrencyLimit(config.maxParallelTasks), signal: activeSignal,
+      onUpdate: (state) => { lastBatch = state; },
+      shouldPause: (value) => Boolean(store.data.pending || pendingState() || pendingPower || pendingTap || value?.pending || value?.needsConfirmation),
+      run: async (task) => {
+        if (task.kind === 'answer') {
+          const answer = await askAI(task.args, ctx, { single: true, isolated: true, store: conversationSnapshot(store) });
+          return { ok: answer !== ai.NO_BRAIN_HINT, text: answer };
+        }
+        // Each action traverses the original handler and owner/PIN/confirmation
+        // policy. No permission escalation, cached action, implicit retry or yes.
+        return handleCommand(task.cmd, task.args, { ...ctx, confirmed: false, signal: activeSignal });
+      },
+    });
+    lastBatch = result;
+    throwIfStopped(activeSignal, 'Batch');
+    const reply = batchSummary(result);
+    const questions = parsed.tasks.filter((t) => t.kind === 'answer').map((t) => t.args).join('\n');
+    ai.recordChatTurn(config, store, `/batch ${raw}`, reply, log, { skipBackgroundReflect: true, profileText: questions, skipObserve: !questions });
+    return reply;
+  }
+
+  async function askAI(text, ctx = {}, taskOptions = {}) {
+    const turnStore = taskOptions.store ?? store;
+    throwIfStopped(activeSignal, 'AI answer');
+    if (turnStore?.data) turnStore.data.lastQuestion = String(text).slice(0, 200);
+    const fastReply = (answer) => {
+      throwIfStopped(activeSignal, 'AI answer');
+      ai.recordChatTurn(config, turnStore, text, answer, log, { isolated: taskOptions.isolated, skipBackgroundReflect: Boolean(taskOptions.isolated) });
+      return answer;
+    };
+    const compound = independentParts(text);
+    const complexStem = looksLikeComplexStemOrMcq(text);
+    let classified = null, plan = null;
+    if (!taskOptions.single && compound.length && !complexStem) {
+      try { classified = classifyIntent(text, { dataDir: config.dataDir }); } catch { /* optional */ }
+      plan = orchestrate(text, classified || { label: 'misc_chat', scores: {} }, (q) => classifyIntent(q, { dataDir: config.dataDir }));
+    }
+    // Corrections for a sub-question must not erase the other requested work.
+    const forcedAnswer = compound.length ? null : applyCorrection(text, null);
+    if (forcedAnswer) return fastReply(forcedAnswer);
+    if (plan?.multi) {
+      const tasks = plan.squad.map((entry) => ({ kind: 'answer', lane: 'parallel', cmd: 'ask', entry }));
+      const output = await runBatch(tasks, {
+        concurrency: concurrencyLimit(config.maxParallelTasks), signal: activeSignal,
+        run: async ({ entry }) => {
+          const answer = await askAI(entry.text, ctx, { single: true, isolated: true, store: conversationSnapshot(turnStore), agent: entry.agent, parentContext: text, squadName: entry.agent.name });
+          return { ok: answer !== ai.NO_BRAIN_HINT, text: answer };
+        },
+      });
+      throwIfStopped(activeSignal, 'Squad');
+      const parts = plan.squad.map((entry, i) => ({ agent: entry.agent,
+        text: output.entries[i].value?.text || '⚠️ No answer for this part; it was not completed.' }));
+      // Request order, never answer-length/quality sorting or duplicate turn writes.
+      const merged = mergeSquadAnswers(parts);
+      if (turnStore?.data) turnStore.data.lastQuestion = null;
+      ai.recordChatTurn(config, turnStore, text, merged, log, { isolated: taskOptions.isolated });
+      return merged;
+    }
+
+    const det = compound.length ? null : solveDeterministicQuery(text);
     if (det) {
       bumpAccuracyStat(config, 'deterministicHits');
-      return det.reply;
+      return fastReply(det.reply);
     }
-    const bilingualHit = lookupBilingualCorpus(text, store);
+    const bilingualHit = compound.length ? null : lookupBilingualCorpus(text, turnStore);
     if (bilingualHit) {
-      store?.pushHistory?.('user', text);
-      store?.pushHistory?.('assistant', bilingualHit.reply);
-      return bilingualHit.reply;
+      return fastReply(bilingualHit.reply);
     }
-    if (store.data.accuracyStrict !== false && looksLikeComplexStemOrMcq(text)) {
+    if (!taskOptions.isolated && turnStore.data.accuracyStrict !== false && complexStem) {
       const solved = await solver.solveQuestionText(config, text, {
         harness,
         log,
@@ -3963,54 +4092,37 @@ ${recapGoal()}`;
       }).catch(() => null);
       if (solved?.ok && solved.text) {
         bumpAccuracyStat(config, 'verifiedAnswers');
-        store?.pushHistory?.('user', text);
-        store?.pushHistory?.('assistant', solved.text);
-        return solved.text;
+        return fastReply(solved.text);
       }
     }
     // Instant trained knowledge (Wikipedia-derived bank + learned entries):
     // factual one-liners answer with zero AI and zero latency.
-    const kh = lookupKnowledge(text, store);
-    if (kh && detectQuestionScope(text).scope === 'direct_fact') {
-      store?.pushHistory?.('user', text);
-      store?.pushHistory?.('assistant', kh.reply);
+    const kh = lookupKnowledge(text, turnStore, { dataDir: config.dataDir });
+    if (!compound.length && kh && detectQuestionScope(text).scope === 'direct_fact') {
       const wikiUrl = kh.url ?? (kh.wiki ? `https://en.wikipedia.org/wiki/${encodeURIComponent(String(text).split(/\s+/).slice(0, 4).join('_'))}` : null);
-      return withSource(kh.reply, kh.sources ?? (wikiUrl ? [{ url: wikiUrl, title: 'Wikipedia' }] : []));
+      return fastReply(withSource(kh.reply, kh.sources ?? (wikiUrl ? [{ url: wikiUrl, title: 'Wikipedia' }] : [])));
     }
     // ── Multi-agent dispatcher: trained IntentNet splits the work ──
     // One bot for single-intent messages, a SQUAD for compound ones
     // ("explain X and likho ek poem" → 🔬 + ✍️ answering together).
-    let classified = null;
-    try {
-      classified = classifyIntent(text);
-      if (classified.confidence >= 0.85) learnExample(text, classified.label);
-    } catch { /* brain optional */ }
-    const plan = orchestrate(text, classified || { label: 'misc_chat', scores: {} });
-
-    if (plan.multi && plan.squad.length > 1) {
-      // Squad runs IN PARALLEL — 2-bot latency = max(t1, t2), not t1 + t2.
-      const results = await Promise.all(plan.squad.map((entry) => ai.chat(config, store, text, log, {
-        voice: Boolean(ctx?.voice),
-        intent: entry.intent,
-        agent: entry.agent,
-        squadName: entry.agent.name,
-        taskBrief: taskBrief(entry),
-      }).catch(() => null)));
-      const parts = plan.squad.map((entry, i) => ({ agent: entry.agent, text: results[i]?.text || '' }));
-      const rankedParts = [...parts].sort((a, b) => scoreAnswer(text, b.text) - scoreAnswer(text, a.text));
-      const merged = mergeSquadAnswers(rankedParts);
-      if (merged) {
-        store?.pushHistory?.('user', text);
-        store?.pushHistory?.('assistant', merged);
-        return merged;
-      }
+    if (!classified) {
+      try { classified = classifyIntent(text, { dataDir: config.dataDir }); } catch { /* optional */ }
     }
+    plan ??= taskOptions.single || complexStem
+      ? { primary: taskOptions.agent ?? agentForIntent(classified?.label), multi: false }
+      : orchestrate(text, classified || { label: 'misc_chat', scores: {} }, (q) => classifyIntent(q, { dataDir: config.dataDir }));
 
-    const result = await ai.chat(config, store, text, log, {
+    const result = await ai.chat(config, turnStore, text, log, {
       voice: Boolean(ctx?.voice),
+      signal: activeSignal, isolated: Boolean(taskOptions.isolated),
+      squadName: taskOptions.squadName,
+      skipBackgroundReflect: Boolean(taskOptions.isolated),
       intent: classified?.label,
       agent: plan.primary,
-      taskBrief: taskBrief({ agent: plan.primary, intent: classified?.label }),
+      taskBrief: [taskBrief({ agent: plan.primary, intent: classified?.label }),
+        ...compound.map((q) => { const answer = applyCorrection(q, null); return answer ? `Owner-corrected answer for ${JSON.stringify(q)}: ${answer}` : ''; }),
+        taskOptions.parentContext ? `Original multi-part question (background only; answer ONLY your current sub-request, not the other parts): ${taskOptions.parentContext}` : '',
+      ].filter(Boolean).join('\n'),
     });
     if (result?.text) {
       const tagged = config?.agentTag === false ? result.text : `${result.text}\n\n${agentTag(plan.primary)}`;
@@ -4018,9 +4130,10 @@ ${recapGoal()}`;
     }
     // No brain: still try to be useful offline for factual questions.
     try {
-      const fb = await wikiFallback(text, config, store);
-      if (fb) return fb;
+      const fb = await wikiFallback(text, config, turnStore, { signal: activeSignal });
+      if (fb) return fastReply(fb);
     } catch { /* fall through to hint */ }
+    throwIfStopped(activeSignal, 'AI answer');
     return ai.NO_BRAIN_HINT;
   }
 
@@ -4399,13 +4512,16 @@ ${recapGoal()}`;
     // /stop is checked before everything else — before the dedup window and
     // before the busy flag — because it must cut in while work is running.
     if (isStopCommand(clean)) return stopCommand();
+    if (/^\/batch\s+results\s*$/i.test(clean)) return lastBatch ? batchSummary(lastBatch) : workStatus();
+    if (/^\/taskstatus\s*$/i.test(clean) || /^\/batch\s+status\s*$/i.test(clean)) return workStatus();
+    if (/^\/neural(?:\s+status)?\s*$/i.test(clean)) return neuralCommand('status', ctx);
     // dedup: same exact text within 4s → ignore second copy (double tap / network retry)
     if (clean === lastHandledText && Date.now() - lastHandledTs < 4000) {
       return '⏳ Same command abhi process hua tha (4s ke andar) — duplicate ignore kiya, double kaam nahi karunga.';
     }
     if (isProcessing) {
       // queue-like behaviour: tell owner we're busy, don't run in parallel (no double work)
-      return '⏳ Ek kaam abhi chal raha hai — rokna ho to *\/stop* bhejo, ya khatam hone ka wait karo. (Parallel double-work blocked)';
+      return '⏳ Ek kaam chal raha hai — /taskstatus se progress, /stop se roko. Multiple independent tasks ek message me: `/batch sawal 1 || sawal 2` (PC actions serialized).';
     }
     // ✏️ 3.6.0 — "galat, asli jawab X hai" → bot permanently seekh jata hai.
     const corr = parseCorrection(rawText);
@@ -4426,10 +4542,10 @@ ${recapGoal()}`;
       // A message starting with the shell PIN unlocks shell for this message
       // only ("1234 df -h"), so the PIN never has to live in the AI prompt.
       let working = clean;
-      let effCtx = ctx;
+      let effCtx = { ...ctx, signal: activeSignal };
       if (config.shellPin && working.startsWith(`${config.shellPin} `)) {
         working = working.slice(config.shellPin.length + 1).trim();
-        effCtx = { ...ctx, shellPinOk: true };
+        effCtx = { ...effCtx, shellPinOk: true };
       }
 
       // ── stack: multiple slash commands in one WhatsApp bubble, each line starting with /
@@ -4444,12 +4560,17 @@ ${recapGoal()}`;
       if (isStack) {
         const results = [];
         for (const line of lines) {
+          throwIfStopped(activeSignal, 'Command stack');
           const m = line.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)\s*([\s\S]*)$/);
           if (!m) { results.push(`⚠️ Skip: ${line.slice(0,40)}`); continue; }
           const r = await handleCommand(m[1].toLowerCase(), m[2].trim(), effCtx);
           const out = typeof r === 'string' ? r : (r?.text ?? JSON.stringify(r).slice(0,500));
           results.push(out);
           macro.recordStep(store, m[1].toLowerCase(), m[2].trim());
+          if (store.data.pending || pendingState() || pendingPower || pendingTap) {
+            results.push('🔒 Confirmation needed — remaining stack commands were NOT started. Confirm separately.');
+            break;
+          }
         }
         store.setLastOwnerTask?.(working);
         lastHandledText = clean; lastHandledTs = Date.now();

@@ -1,3 +1,5 @@
+import { V2_EXAMPLES } from './examples-v2.js';
+
 // dataset.js — the labeled training corpus for the neural brain.
 //
 // Two datasets, both hand-labeled and Hinglish+English+text-speak rich:
@@ -26,6 +28,7 @@ export const INTENT_LABELS = [
 const e = (t, label) => ({ t, label });
 
 export const INTENT_EXAMPLES = [
+  ...V2_EXAMPLES,
   // ── greeting ──
   e('hi', 'greeting'), e('hello bhai', 'greeting'), e('hey there', 'greeting'),
   e('kya haal hai', 'greeting'), e('kaise ho', 'greeting'), e('good morning', 'greeting'),

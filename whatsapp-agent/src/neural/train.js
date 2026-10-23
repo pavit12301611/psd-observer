@@ -1,280 +1,211 @@
-// train.js — training pipeline for the neural brain (IntentNet + MatchNet).
-//
-// Deterministic: seeded splits + seeded shuffles → same data, same weights,
-// every run. Exports trainAll() (used by scripts/train-neural.mjs and tests).
-//
-//   IntentNet  [384 → 64 → 12 softmax]  cross-entropy  — what kind of message is this
-//   MatchNet   [13 → 16 → 1 sigmoid]    binary CE      — does this query match that target
-//
-// Runtime-learned examples (data/neural-examples.json, from `learnExample`)
-// are folded in automatically so real conversations make the nets better.
-
-import fs from 'node:fs';
+// Reproducible CPU training. Validation selects checkpoints/calibration;
+// the TEST split is measured only after selection, including int8 weights.
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { MLP, createRNG } from './nn.js';
-import { textFeatures, pairFeatures, DEFAULT_DIM } from './text.js';
+import { textFeatures, pairFeatures, normalizeText, DEFAULT_DIM, FEATURE_VERSION } from './text.js';
 import { INTENT_LABELS, INTENT_EXAMPLES, MATCH_PARAPHRASES, templateExamples } from './dataset.js';
+import { makeMemory, nearestIntent, decideIntent, calibratedScores } from './decision.js';
+import { readExamples, trustedExample, dataDirectory, atomicJSON } from './storage.js';
 
-export const INTENT_HIDDEN = 32;
+export const INTENT_HIDDEN = 64;
+export const MATCH_HIDDEN = 16;
+export const leakageKey = (t) => normalizeText(t)
+  .replace(/^(?:(?:hey|arre|suno|please)\s+)+/, '')
+  .replace(/(?:\s+(?:bhai|yaar|bro|please))+$/, '');
 
-/**
- * Deterministic augmentation — real WhatsApp messages carry noise ("bhai",
- * "yaar", "please", punctuation, casing). Each example spawns variants so the
- * net learns the invariances instead of memorising exact strings.
- */
 export function augmentExamples(examples, seed = 42) {
   const rng = createRNG(seed);
   const suffixes = ['', ' bhai', ' yaar', ' bro', '?', ' ...', ' please'];
   const prefixes = ['', 'arre ', 'suno ', 'hey '];
   const out = [...examples];
   for (const ex of examples) {
-    const n = 2 + Math.floor(rng() * 2); // 2–3 variants
+    const n = 2 + Math.floor(rng() * 2);
     for (let k = 0; k < n; k++) {
-      const pre = prefixes[Math.floor(rng() * prefixes.length)];
-      const suf = suffixes[Math.floor(rng() * suffixes.length)];
-      const variant = `${pre}${ex.t}${suf}`.trim();
+      const variant = `${prefixes[Math.floor(rng() * prefixes.length)]}${ex.t}${suffixes[Math.floor(rng() * suffixes.length)]}`.trim();
       if (variant !== ex.t) out.push({ t: variant, label: ex.label });
     }
   }
   return out;
 }
-export const MATCH_HIDDEN = 16;
 
-function loadRuntimeExamples() {
-  try {
-    const raw = JSON.parse(fs.readFileSync('data/neural-examples.json', 'utf8'));
-    return Array.isArray(raw) ? raw.filter((x) => x?.t && x?.label) : [];
-  } catch {
-    return [];
+function shuffled(list, seed) {
+  const out = [...list], rng = createRNG(seed);
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1)); [out[i], out[j]] = [out[j], out[i]];
   }
+  return out;
 }
 
-function stratifiedSplit(examples, valFrac = 0.15, seed = 42) {
-  const rng = createRNG(seed);
-  const byLabel = new Map();
+export function intentSplits(examples, seed = 42) {
+  const unique = new Map();
   for (const ex of examples) {
-    if (!byLabel.has(ex.label)) byLabel.set(ex.label, []);
-    byLabel.get(ex.label).push(ex);
+    if (typeof ex?.t === 'string' && ex.t.trim() && INTENT_LABELS.includes(ex.label)) unique.set(leakageKey(ex.t), ex);
   }
-  const train = [];
-  const val = [];
-  for (const [, list] of byLabel) {
-    for (let i = list.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [list[i], list[j]] = [list[j], list[i]];
-    }
-    const nVal = Math.max(1, Math.round(list.length * valFrac));
-    val.push(...list.slice(0, nVal));
-    train.push(...list.slice(nVal));
+  const train = [], val = [], test = [];
+  for (let i = 0; i < INTENT_LABELS.length; i++) {
+    const list = shuffled([...unique.values()].filter((ex) => ex.label === INTENT_LABELS[i]), seed + i);
+    const n = list.length >= 3 ? Math.max(1, Math.round(list.length * 0.15)) : 0;
+    val.push(...list.slice(0, n)); test.push(...list.slice(n, n * 2)); train.push(...list.slice(n * 2));
   }
-  return { train, val };
+  return { train, val, test };
 }
 
-/** Train the intent classifier. Returns { net, metrics }. */
-export function trainIntent({ epochs = 90, lr = 0.008, seed = 42, extraExamples = [] } = {}) {
-  const examples = [...INTENT_EXAMPLES, ...extraExamples, ...loadRuntimeExamples()];
-  const { train, val } = stratifiedSplit(examples, 0.15, seed);
-  // Train set = handwritten train fold + synthetic templates + noise variants.
-  // Validation stays 100% handwritten held-out — honest generalization numbers.
-  const trainAug = [
-    ...augmentExamples(train, seed + 5),
-    ...templateExamples(),
-  ];
-  const net = new MLP([DEFAULT_DIM, INTENT_HIDDEN, INTENT_LABELS.length], { seed, out: 'softmax' });
+function classificationMetrics(list, predict) {
+  const perClass = Object.fromEntries(INTENT_LABELS.map((l) => [l, { correct: 0, total: 0, predicted: 0 }]));
+  let correct = 0;
+  for (const ex of list) {
+    const pred = predict(ex.t);
+    perClass[ex.label].total++;
+    perClass[pred].predicted++;
+    if (pred === ex.label) { correct++; perClass[ex.label].correct++; }
+  }
+  const present = Object.values(perClass).filter((p) => p.total > 0);
+  const macroF1 = present.reduce((sum, p) => sum + 2 * p.correct / Math.max(1, p.total + p.predicted), 0) / Math.max(1, present.length);
+  return { accuracy: correct / Math.max(1, list.length), macroF1, perClass, n: list.length };
+}
 
+function netLabel(net, t) { return INTENT_LABELS[net.predict(textFeatures(t))]; }
+function nll(net, list, temperature = 1) {
+  return list.reduce((sum, ex) => sum - Math.log(Math.max(1e-12,
+    calibratedScores(net.forward(textFeatures(ex.t)), temperature)[INTENT_LABELS.indexOf(ex.label)])), 0) / Math.max(1, list.length);
+}
+
+export function trainIntent({ epochs = 90, lr = 0.006, seed = 42, extraExamples = [], includeRuntime = false, dataDir } = {}) {
+  const approved = includeRuntime ? readExamples(dataDirectory({ dataDir })).filter(trustedExample) : [];
+  const examples = [...INTENT_EXAMPLES, ...extraExamples, ...approved];
+  const split = intentSplits(examples, seed);
+  const protectedKeys = new Set([...split.val, ...split.test].map((ex) => leakageKey(ex.t)));
+  const trainAug = [...augmentExamples(split.train, seed + 5), ...templateExamples()]
+    .filter((ex) => !protectedKeys.has(leakageKey(ex.t)));
+  const net = new MLP([DEFAULT_DIM, INTENT_HIDDEN, INTENT_LABELS.length], { seed, out: 'softmax' });
   const xs = trainAug.map((ex) => textFeatures(ex.t));
   const ys = trainAug.map((ex) => INTENT_LABELS.indexOf(ex.label));
-
-  // Train with L2 weight decay + early stopping on the validation fold:
-  // snapshot the best weights so extra epochs can never hurt.
-  const valXs = val.map((ex) => textFeatures(ex.t));
-  const valYs = val.map((ex) => INTENT_LABELS.indexOf(ex.label));
-  let best = { acc: -1, json: null, epoch: -1 };
+  let best = { acc: -1, loss: Infinity, json: null, epoch: -1 };
+  let trainedEpochs = 0;
   net.fit(xs, ys, {
-    epochs, lr, batchSize: 16, seed: seed + 1, weightDecay: 2e-4,
+    epochs, lr, batchSize: 32, seed: seed + 1, weightDecay: 2e-4,
     onEpoch: (ep) => {
-      let correct = 0;
-      for (let i = 0; i < valXs.length; i++) {
-        if (net.predict(valXs[i]) === valYs[i]) correct += 1;
+      trainedEpochs = ep + 1;
+      const acc = classificationMetrics(split.val, (t) => netLabel(net, t)).accuracy;
+      const loss = nll(net, split.val);
+      if (acc > best.acc || (acc === best.acc && loss < best.loss)) {
+        best = { acc, loss, json: net.toJSON({ quantize: false }), epoch: ep };
       }
-      const acc = correct / Math.max(1, valXs.length);
-      if (acc > best.acc) best = { acc, json: net.toJSON({ quantize: false }), epoch: ep };
+      return ep - best.epoch < 18; // actual early stopping, never uses test labels
     },
   });
-  if (best.json) {
-    const restored = MLP.fromJSON(best.json);
-    net.W = restored.W;
-    net.b = restored.b;
+  const restored = MLP.fromJSON(best.json ?? net.toJSON({ quantize: false }));
+  // All reported deployment metrics use the actual int8 round-trip, not just float weights.
+  const deployed = MLP.fromJSON(restored.toJSON(), { inference: true });
+  let temperature = 1, loss = Infinity;
+  for (const t of [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+    const value = nll(deployed, split.val, t);
+    if (value < loss) { temperature = t; loss = value; }
   }
-
-  // k-NN memory over the TRAIN fold only — evaluation must not leak val.
-  const memory = train.map((ex) => ({ label: ex.label, vec: textFeatures(ex.t) }));
-  const knn = (t) => {
-    const v = textFeatures(t);
-    let best = null;
-    for (const m of memory) {
-      let s = 0;
-      for (let i = 0; i < v.length; i++) s += v[i] * m.vec[i];
-      if (!best || s > best.sim) best = { label: m.label, sim: s };
-    }
-    return best;
-  };
-
-  const evaluate = (list, hybrid = false) => {
-    let correct = 0;
-    const perClass = {};
-    for (const ex of list) {
-      const out = net.forward(textFeatures(ex.t));
-      let bestIdx = 0;
-      for (let i = 1; i < out.length; i++) if (out[i] > out[bestIdx]) bestIdx = i;
-      let pred = INTENT_LABELS[bestIdx];
-      if (hybrid) {
-        // Mirrors runtime blend in index.js: near-duplicate memory wins at
-        // sim ≥ 0.8; an uncertain net (conf < 0.65) defers to memory at
-        // sim ≥ 0.55 (short ambiguous strings live in memory).
-        const near = knn(ex.t);
-        if (near && (near.sim >= 0.8 || (out[bestIdx] < 0.65 && near.sim >= 0.55))) pred = near.label;
-      }
-      const ok = pred === ex.label;
-      if (ok) correct += 1;
-      perClass[ex.label] = perClass[ex.label] || { correct: 0, total: 0 };
-      perClass[ex.label].total += 1;
-      if (ok) perClass[ex.label].correct += 1;
-    }
-    return { accuracy: correct / Math.max(1, list.length), perClass, n: list.length };
-  };
-
+  const memory = makeMemory(split.train);
+  const hybrid = (t) => decideIntent(deployed.forward(textFeatures(t)), nearestIntent(textFeatures(t), memory), { temperature }).label;
   return {
-    net,
+    net: restored, temperature, splits: split,
     metrics: {
-      train: evaluate(train),
-      val: evaluate(val),
-      valHybrid: evaluate(val, true),
-      examples: examples.length,
+      train: classificationMetrics(split.train, (t) => netLabel(deployed, t)),
+      val: classificationMetrics(split.val, (t) => netLabel(deployed, t)),
+      valHybrid: classificationMetrics(split.val, hybrid),
+      test: classificationMetrics(split.test, (t) => netLabel(deployed, t)),
+      testHybrid: classificationMetrics(split.test, hybrid),
+      examples: [...split.train, ...split.val, ...split.test].length,
+      augmentedExamples: trainAug.length, approvedRuntimeExamples: approved.length,
+      bestEpoch: best.epoch + 1, trainedEpochs, temperature, validationNll: loss,
+      evaluation: 'deduplicated stratified 70/15/15; train-only memory; int8; test not used for selection',
     },
   };
 }
 
-/** Train the pairwise matcher. Returns { net, metrics }. */
-export function trainMatch({ epochs = 80, lr = 0.02, seed = 42 } = {}) {
-  const rng = createRNG(seed + 11);
-  const pairs = [];
-  for (const group of MATCH_PARAPHRASES) {
+export function matchSplits(seed = 42) {
+  const groups = shuffled(MATCH_PARAPHRASES, seed + 11);
+  const n = Math.max(1, Math.round(groups.length * 0.15));
+  return { train: groups.slice(n * 2), val: groups.slice(0, n), test: groups.slice(n, n * 2) };
+}
+
+function makePairs(groups, seed) {
+  const pairs = [], rng = createRNG(seed);
+  for (const group of groups) {
+    pairs.push({ q: group.target, cand: group.target, label: 1 });
     for (const q of group.queries) {
       pairs.push({ q, cand: group.target, label: 1 });
-      // paraphrase-to-paraphrase positives within the group
-      for (const other of group.queries) {
-        if (other !== q && rng() < 0.25) pairs.push({ q, cand: other, label: 1 });
-      }
-      // hard negatives: other groups' targets (same-shape, wrong answer)
-      for (let k = 0; k < 2; k++) {
-        const otherGroup = MATCH_PARAPHRASES[Math.floor(rng() * MATCH_PARAPHRASES.length)];
-        if (otherGroup.target !== group.target) {
-          pairs.push({ q, cand: otherGroup.target, label: 0 });
-        }
-      }
+      for (const other of group.queries) if (q !== other && rng() < 0.25) pairs.push({ q, cand: other, label: 1 });
+      const others = groups.filter((g) => g !== group);
+      // A random wrong topic is too easy. Also teach the closest WRONG topic
+      // (same word/shape, different entity) rather than relying on length cues.
+      const hard = others.map((g) => ({ g, overlap: pairFeatures(q, g.target)[0] })).sort((a, b) => b.overlap - a.overlap)[0]?.g;
+      if (hard) pairs.push({ q, cand: hard.target, label: 0 });
+      if (others.length) pairs.push({ q, cand: others[Math.floor(rng() * others.length)].target, label: 0 });
     }
   }
-  // OOD negatives: casual/emotional short talk paired with knowledge targets —
-  // without these the sigmoid net gets confidently wrong on greetings
-  // ("hello how are you" vs "b r ambedkar" scored 0.98 before this fix).
+  for (const g of groups) for (const other of groups) {
+    if (g !== other && pairFeatures(g.target, other.target)[0] > 0) pairs.push({ q: g.target, cand: other.target, label: 0 });
+  }
   const casual = INTENT_EXAMPLES.filter((x) => ['greeting', 'gratitude', 'emotional', 'misc_chat', 'creative'].includes(x.label));
-  for (let i = 0; i < 90; i++) {
-    const c = casual[Math.floor(rng() * casual.length)];
-    const g = MATCH_PARAPHRASES[Math.floor(rng() * MATCH_PARAPHRASES.length)];
-    pairs.push({ q: c.t, cand: g.target, label: 0 });
-    pairs.push({ q: c.t, cand: g.queries[Math.floor(rng() * g.queries.length)], label: 0 });
+  for (let i = 0; i < groups.length * 3; i++) {
+    const q = casual[Math.floor(rng() * casual.length)].t;
+    const g = groups[Math.floor(rng() * groups.length)];
+    pairs.push({ q, cand: g.target, label: 0 });
+    pairs.push({ q, cand: g.queries[Math.floor(rng() * g.queries.length)], label: 0 });
   }
-
-  // deterministic shuffle + split
-  for (let i = pairs.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
+  return shuffled([...new Map(pairs.map((p) => [`${p.q}\0${p.cand}`, p])).values()], seed);
+}
+function matchMetrics(net, list) {
+  let correct = 0, tp = 0, fp = 0, fn = 0, loss = 0;
+  for (const p of list) {
+    const score = net.predict(pairFeatures(p.q, p.cand)), pred = Number(score >= 0.5);
+    if (pred === p.label) correct++;
+    if (pred === 1 && p.label === 1) tp++;
+    if (pred === 1 && p.label === 0) fp++;
+    if (pred === 0 && p.label === 1) fn++;
+    loss -= p.label ? Math.log(Math.max(1e-12, score)) : Math.log(Math.max(1e-12, 1 - score));
   }
-  const nVal = Math.max(8, Math.round(pairs.length * 0.15));
-  const val = pairs.slice(0, nVal);
-  const train = pairs.slice(nVal);
-
+  return { accuracy: correct / Math.max(1, list.length), precision: tp / Math.max(1, tp + fp), recall: tp / Math.max(1, tp + fn), loss: loss / Math.max(1, list.length), n: list.length };
+}
+export function trainMatch({ epochs = 80, lr = 0.02, seed = 42 } = {}) {
+  const groups = matchSplits(seed);
+  const train = makePairs(groups.train, seed + 21), val = makePairs(groups.val, seed + 22), test = makePairs(groups.test, seed + 23);
   const net = new MLP([13, MATCH_HIDDEN, 1], { seed, out: 'sigmoid' });
-  const xs = train.map((p) => pairFeatures(p.q, p.cand));
-  const ys = train.map((p) => p.label);
-
-  const evaluate = (list) => {
-    let correct = 0;
-    let tp = 0;
-    let fp = 0;
-    let fn = 0;
-    for (const p of list) {
-      const score = net.predict(pairFeatures(p.q, p.cand));
-      const pred = score >= 0.5 ? 1 : 0;
-      if (pred === p.label) correct += 1;
-      if (pred === 1 && p.label === 1) tp += 1;
-      if (pred === 1 && p.label === 0) fp += 1;
-      if (pred === 0 && p.label === 1) fn += 1;
-    }
-    return {
-      accuracy: correct / Math.max(1, list.length),
-      precision: tp / Math.max(1, tp + fp),
-      recall: tp / Math.max(1, tp + fn),
-      n: list.length,
-    };
-  };
-
-  // Chunked training with early stopping — val accuracy is watched every
-  // 15 epochs and the best weights are kept (stops overfitting the pairs).
-  const chunk = 15;
-  let bestNet = null;
-  let bestVal = -1;
-  for (let done = 0; done < epochs; done += chunk) {
-    net.fit(xs, ys, {
-      epochs: Math.min(chunk, epochs - done), lr, batchSize: 32, seed: seed + 2 + done,
-    });
-    const v = evaluate(val).accuracy;
-    if (v > bestVal) {
-      bestVal = v;
-      bestNet = net.toJSON();
-    }
-  }
-  if (bestNet) {
-    const restored = MLP.fromJSON(bestNet);
-    net.W = restored.W;
-    net.b = restored.b;
-  }
-
-  return {
-    net,
-    metrics: { train: evaluate(train), val: evaluate(val), pairs: pairs.length },
-  };
+  const xs = train.map((p) => pairFeatures(p.q, p.cand)), ys = train.map((p) => p.label);
+  let best = { acc: -1, loss: Infinity, json: null, epoch: -1 };
+  net.fit(xs, ys, { epochs, lr, batchSize: 32, seed: seed + 2,
+    onEpoch: (ep) => {
+      const v = matchMetrics(net, val);
+      if (v.accuracy > best.acc || (v.accuracy === best.acc && v.loss < best.loss)) {
+        best = { acc: v.accuracy, loss: v.loss, json: net.toJSON({ quantize: false }), epoch: ep };
+      }
+      return ep - best.epoch < 18;
+    },
+  });
+  const restored = MLP.fromJSON(best.json ?? net.toJSON({ quantize: false }));
+  const deployed = MLP.fromJSON(restored.toJSON(), { inference: true });
+  return { net: restored, splits: groups, metrics: {
+    train: matchMetrics(deployed, train), val: matchMetrics(deployed, val), test: matchMetrics(deployed, test),
+    pairs: train.length + val.length + test.length, groups: Object.fromEntries(Object.entries(groups).map(([k, g]) => [k, g.length])),
+    bestEpoch: best.epoch + 1, evaluation: 'disjoint paraphrase/target groups; test untouched; int8',
+  } };
 }
 
-/** Train everything and return the checkpoint object (not yet written). */
 export function trainAll(opts = {}) {
-  const intent = trainIntent(opts);
-  const match = trainMatch(opts);
+  const intent = trainIntent(opts), match = trainMatch(opts);
+  const metrics = { intent: intent.metrics, match: match.metrics };
   return {
     checkpoint: {
-      version: 1,
-      trainedAt: new Date().toISOString(),
-      intent: intent.net.toJSON(),
-      match: match.net.toJSON(),
-      meta: {
-        intent: intent.metrics,
-        match: match.metrics,
-      },
+      version: 2, featureVersion: FEATURE_VERSION, labels: INTENT_LABELS,
+      trainedAt: new Date().toISOString(), seed: opts.seed ?? 42,
+      corpusSha256: createHash('sha256').update(JSON.stringify({ INTENT_EXAMPLES, MATCH_PARAPHRASES, templates: templateExamples() })).digest('hex'),
+      temperature: intent.temperature, intent: intent.net.toJSON(), match: match.net.toJSON(), meta: metrics,
     },
-    metrics: { intent: intent.metrics, match: match.metrics },
-    nets: { intent: intent.net, match: match.net },
+    metrics, nets: { intent: intent.net, match: match.net },
   };
 }
 
-export function saveCheckpoint(checkpoint, filePath) {
-  fs.writeFileSync(filePath, JSON.stringify(checkpoint));
-  return filePath;
-}
-
+export function saveCheckpoint(checkpoint, filePath) { return atomicJSON(filePath, checkpoint); }
 export function loadCheckpoint(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
+  // Maintained for the command-line/checkpoint inspection API.
+  try { return JSON.parse(readFileSync(filePath, 'utf8')); } catch { return null; }
 }

@@ -97,7 +97,8 @@ test('groq: GROQ_VISION_MODEL="" switches vision off', () => {
 test('openrouter: gemma 4 free is the default and it can see images', () => {
   const catalog = buildCatalog({ openrouterApiKey: 'k' });
   const or = catalog.filter((m) => m.provider === 'openrouter');
-  assert.equal(or.length, 1);
+  assert.equal(or.length, 2);
+  assert.equal(or[1].model, 'openrouter/free', 'free auto-router survives stale named models');
   assert.equal(or[0].model, 'google/gemma-4-31b-it:free');
   assert.equal(or[0].vision, true);
   assert.equal(or[0].tools, true);

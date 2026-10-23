@@ -1,5 +1,27 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.9.0 — Neural v2, measurable routing and safe multitasking (2026-10-23)
+
+- Fixed the neural score-array/specialist score-object mismatch, aliased early-stopping snapshots, stale result caches after corrections, and confidence being transferred from a different label. Grew IntentNet 406→64→12, added 120 curated bilingual/Hindi examples, trained and shipped an 86 KiB int8 checkpoint.
+- Sparse first-layer inference/backprop, inference-only deserialization, and an inverted-index cosine memory. Same-harness three-process comparison against 507d640: routing p50 161.3→48.0µs, p95 240.9→86.5µs; kNN p50 129.6→13.1µs. This is local CPU work, not LLM/WhatsApp latency.
+- Frozen 72-case routing regression probe 55→68 correct (76.4→94.4%). Separately, quantized trainer test 61/73 (83.6%, macro-F1 .839); MatchNet disjoint-group test 84/101 (83.2%). Deduplicated stratified train/validation/test, train-only evaluation memory, calibrated neural probabilities and honest checkpoint metadata; no training-inclusive “unseen accuracy”. Probe was inspected during development, not an external blind audit.
+- Stopped prediction-as-ground-truth feedback. Only explicit owner-approved personal labels enter memory/training; legacy auto-labels are ignored, corrections replace prior labels, and public training excludes private conversations. `/neural train` and `/retrain` run actual cancellable CPU-worker backprop with compatibility/held-out quality gates and atomic private installation.
+- `/batch` bounds up to eight tasks with two answer/read workers by default (configurable 1..4), preserves request order, and serializes allowlisted PC/write commands as exclusive barriers. Owner/PIN gates remain; confirmation/failure prevents later starts; no implicit yes, action retry, shell/media/nested batching. `/batch status`, `/taskstatus`, `/stop` stay responsive; `/batch results` preserves completed/partial outputs after cancellation without replaying work. Snapshots after a serial barrier include committed owner-state changes.
+- Auto-squads get separate sub-prompts and detached stores; one owner history/profile turn instead of concurrent duplicate writes. Text workers do not execute code/PC tools. Advanced dependent execution and full verification stay in `/agent`, `/solve`, `/verify`.
+- Context-aware exact response cache preserves code case and invalidates changed history/memory/mission; consistent fast-answer history, no generated-answer retry on persistence failure, cancellable chat/wiki preparation, safer content-word fact matching, and correct 413 context precedence over misleading rate-limit codes.
+- Added local HTTP/action-stub, worker cancellation, real-training, checkpoint, split, confidence, scheduler and context regressions. Recursive syntax checks include neural modules/workers. Benchmark inputs/results and NEURAL.md ship in the rebuilt curl-install bundle. Live providers and the installed PC remain unverified.
+- Shades unchanged: never auto-restore, only the owner's `/shades off`.
+
+## 3.8.1 — Heavy-task routing & safe failover (2026-10-23)
+
+- Replaced opaque `all brains failed` reports with actual attempted models, HTTP/error categories, redacted details and actionable hints; HTTP-200 error envelopes and Retry-After now work too.
+- Heavy routing ranks all capable fallbacks before weak local defaults, supports configured backup IDs and the free OpenRouter auto-router, and tries up to six healthy models instead of only three. Failed requests do not consume the hourly heavy-completion budget; a budget downgrade keeps the task's steps/tools.
+- Smaller, bounded prompts/tool descriptions, explicit output limits and one compact retry for context errors. Correct native Ollama tool wrappers and grouped Gemini function responses/thought signatures.
+- Verified progress and media survive handoff. Writes/messages are not replayed by another model, observations can be refreshed, tool batches run sequentially, malformed calls are repaired without executing defaults, and confirmation or `/stop` prevents later actions.
+- Step exhaustion/provider failure reports partial work rather than fabricated completion. Conversation-save errors cannot restart completed actions. Added offline HTTP-fixture regressions in `test/brain-reliability.test.js` and made the desktop-launch round-trip fixture deterministic.
+- Package/lock/release notes and the tracked curl-install bundle are synchronized so installers receive this code, not the old 3.8.0 archive. Live provider availability/quotas and the owner's desktop still require validation on the installed PC.
+
+
 ## v3.2.2 — Self-Evolving Agentic AI & Behavioral Learning Engine (`src/persona.js`)
 
 User ki maang: *"bhai ab na esa kar ki ai na meri chats se train ho ki mera behaviour kaisa hai aur woh aur bhi jyada better banata jaaaye iska main kaam na pc control nhi agentic ai banna hai with the best person who understand me"*.

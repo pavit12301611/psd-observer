@@ -1,0 +1,955 @@
+{
+  "version": "3.9.0",
+  "measuredAt": "2026-10-23T15:30:29.594Z",
+  "baselineCommit": "507d640b6a47274446136fb1f195a75c05bde9a0",
+  "environment": {
+    "node": "v22.22.3",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.60GHz",
+    "platform": "linux"
+  },
+  "method": {
+    "uniqueWarmups": 1000,
+    "samplesPerPathPerTrial": 3000,
+    "trialsPerRuntime": 3,
+    "aggregation": "median of trial percentiles; fresh processes; runtime order interleaved; kNN reuses prepared query vectors"
+  },
+  "summary": {
+    "before": {
+      "architecture": [
+        406,
+        32,
+        12
+      ],
+      "probeCorrect": 55,
+      "probeTotal": 72,
+      "uniqueIntent": {
+        "p50Us": 161.26899999994748,
+        "p95Us": 240.88100000000168
+      },
+      "knn": {
+        "p50Us": 129.6110000000681,
+        "p95Us": 247.55800000002637
+      }
+    },
+    "after": {
+      "architecture": [
+        406,
+        64,
+        12
+      ],
+      "probeCorrect": 68,
+      "probeTotal": 72,
+      "uniqueIntent": {
+        "p50Us": 47.99800000000687,
+        "p95Us": 86.46200000001159
+      },
+      "knn": {
+        "p50Us": 13.056000000005952,
+        "p95Us": 20.186000000023796
+      }
+    }
+  },
+  "speedupP50": {
+    "uniqueIntent": 3.3599108296163256,
+    "knn": 9.927313112745788
+  },
+  "probe": {
+    "sha256": "86fb6735220dc828093fc71be65cc337542f9991802edc075af8aa3aa25c2ba0",
+    "rows": [
+      {
+        "t": "hey buddy how is your day going",
+        "label": "greeting",
+        "pred": "greeting",
+        "before": "misc_chat"
+      },
+      {
+        "t": "subah ho gayi dost good morning",
+        "label": "greeting",
+        "pred": "greeting",
+        "before": "greeting"
+      },
+      {
+        "t": "hello observer tum ready ho",
+        "label": "greeting",
+        "pred": "greeting",
+        "before": "greeting"
+      },
+      {
+        "t": "good afternoon yaar kya haal chal",
+        "label": "greeting",
+        "pred": "greeting",
+        "before": "greeting"
+      },
+      {
+        "t": "hi there my friend",
+        "label": "greeting",
+        "pred": "greeting",
+        "before": "greeting"
+      },
+      {
+        "t": "oye bhai sab badhiya na",
+        "label": "greeting",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "tumne bahut help ki thank you dost",
+        "label": "gratitude",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "that explanation helped a lot thanks",
+        "label": "gratitude",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "shukriya problem finally clear ho gayi",
+        "label": "gratitude",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "amazing work i appreciate your help",
+        "label": "gratitude",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "you nailed it thanks bro",
+        "label": "gratitude",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "bahut khoob yaar dhanyavaad",
+        "label": "gratitude",
+        "pred": "gratitude",
+        "before": "gratitude"
+      },
+      {
+        "t": "which country has helsinki as its capital",
+        "label": "factual",
+        "pred": "factual",
+        "before": "gratitude"
+      },
+      {
+        "t": "bharat ka national animal kaunsa hai",
+        "label": "factual",
+        "pred": "factual",
+        "before": "comparison"
+      },
+      {
+        "t": "who discovered the electron",
+        "label": "factual",
+        "pred": "factual",
+        "before": "factual"
+      },
+      {
+        "t": "what does the acronym cpu stand for",
+        "label": "factual",
+        "pred": "factual",
+        "before": "factual"
+      },
+      {
+        "t": "mars ke kitne natural satellites hain",
+        "label": "factual",
+        "pred": "factual",
+        "before": "factual"
+      },
+      {
+        "t": "when did the first moon landing happen",
+        "label": "factual",
+        "pred": "factual",
+        "before": "factual"
+      },
+      {
+        "t": "compare postgresql and sqlite for a small app",
+        "label": "comparison",
+        "pred": "comparison",
+        "before": "comparison"
+      },
+      {
+        "t": "react versus vue kis use case me accha hai",
+        "label": "comparison",
+        "pred": "comparison",
+        "before": "comparison"
+      },
+      {
+        "t": "solid state drive aur hard disk me antar bata",
+        "label": "comparison",
+        "pred": "comparison",
+        "before": "comparison"
+      },
+      {
+        "t": "contrast supervised and unsupervised learning",
+        "label": "comparison",
+        "pred": "comparison",
+        "before": "misc_chat"
+      },
+      {
+        "t": "which is better for latency grpc or rest",
+        "label": "comparison",
+        "pred": "comparison",
+        "before": "comparison"
+      },
+      {
+        "t": "fedora vs ubuntu as a developer workstation",
+        "label": "comparison",
+        "pred": "comparison",
+        "before": "comparison"
+      },
+      {
+        "t": "how can i set up a python virtual environment",
+        "label": "howto",
+        "pred": "howto",
+        "before": "howto"
+      },
+      {
+        "t": "wifi password linux par kaise change karte hain",
+        "label": "howto",
+        "pred": "howto",
+        "before": "howto"
+      },
+      {
+        "t": "steps to enable two factor authentication",
+        "label": "howto",
+        "pred": "howto",
+        "before": "code"
+      },
+      {
+        "t": "git repository ka backup kaise banate hain",
+        "label": "howto",
+        "pred": "howto",
+        "before": "howto"
+      },
+      {
+        "t": "how do i configure ssh keys safely",
+        "label": "howto",
+        "pred": "howto",
+        "before": "howto"
+      },
+      {
+        "t": "docker compose install karne ka tarika bata",
+        "label": "howto",
+        "pred": "howto",
+        "before": "howto"
+      },
+      {
+        "t": "implement a typescript debounce utility",
+        "label": "code",
+        "pred": "code",
+        "before": "howto"
+      },
+      {
+        "t": "mere javascript promise rejection ka bug fix kar",
+        "label": "code",
+        "pred": "code",
+        "before": "code"
+      },
+      {
+        "t": "write sql to count active users per week",
+        "label": "code",
+        "pred": "code",
+        "before": "code"
+      },
+      {
+        "t": "python me csv parser ka working code do",
+        "label": "code",
+        "pred": "code",
+        "before": "code"
+      },
+      {
+        "t": "refactor this recursive function for readability",
+        "label": "code",
+        "pred": "code",
+        "before": "code"
+      },
+      {
+        "t": "build a node api endpoint with validation",
+        "label": "code",
+        "pred": "code",
+        "before": "code"
+      },
+      {
+        "t": "walk me through how garbage collection works",
+        "label": "explain",
+        "pred": "explain",
+        "before": "factual"
+      },
+      {
+        "t": "why does a rainbow form after rain",
+        "label": "explain",
+        "pred": "explain",
+        "before": "explain"
+      },
+      {
+        "t": "machine learning overfitting ko simple language me samjhao",
+        "label": "explain",
+        "pred": "factual",
+        "before": "factual"
+      },
+      {
+        "t": "describe the mechanism behind a solar cell",
+        "label": "explain",
+        "pred": "explain",
+        "before": "explain"
+      },
+      {
+        "t": "explain why database indexes improve reads",
+        "label": "explain",
+        "pred": "explain",
+        "before": "explain"
+      },
+      {
+        "t": "neural network backpropagation kaise kaam karta hai",
+        "label": "explain",
+        "pred": "explain",
+        "before": "explain"
+      },
+      {
+        "t": "yaar sab kuch overwhelming lag raha hai",
+        "label": "emotional",
+        "pred": "emotional",
+        "before": "emotional"
+      },
+      {
+        "t": "i feel alone and could use someone to talk to",
+        "label": "emotional",
+        "pred": "emotional",
+        "before": "howto"
+      },
+      {
+        "t": "exam ko lekar anxiety bahut badh gayi hai",
+        "label": "emotional",
+        "pred": "emotional",
+        "before": "emotional"
+      },
+      {
+        "t": "i am exhausted and losing motivation",
+        "label": "emotional",
+        "pred": "emotional",
+        "before": "emotional"
+      },
+      {
+        "t": "aaj dil bahut dukhi hai dost",
+        "label": "emotional",
+        "pred": "emotional",
+        "before": "emotional"
+      },
+      {
+        "t": "i am nervous about tomorrow and cannot relax",
+        "label": "emotional",
+        "pred": "emotional",
+        "before": "howto"
+      },
+      {
+        "t": "compose a short hopeful verse about winter",
+        "label": "creative",
+        "pred": "creative",
+        "before": "howto"
+      },
+      {
+        "t": "write an instagram caption for my mountain trip",
+        "label": "creative",
+        "pred": "creative",
+        "before": "creative"
+      },
+      {
+        "t": "ek funny kahani suna ek robot ki",
+        "label": "creative",
+        "pred": "creative",
+        "before": "creative"
+      },
+      {
+        "t": "suggest playful names for a coffee shop",
+        "label": "creative",
+        "pred": "creative",
+        "before": "creative"
+      },
+      {
+        "t": "barish par chaar line ki kavita likho",
+        "label": "creative",
+        "pred": "creative",
+        "before": "creative"
+      },
+      {
+        "t": "draft a warm birthday wish for my sister",
+        "label": "creative",
+        "pred": "creative",
+        "before": "personal"
+      },
+      {
+        "t": "evaluate 18 percent of 750",
+        "label": "math",
+        "pred": "math",
+        "before": "math"
+      },
+      {
+        "t": "calculate the lcm of 18 and 24",
+        "label": "math",
+        "pred": "math",
+        "before": "math"
+      },
+      {
+        "t": "solve the equation 4x minus 8 equals 20",
+        "label": "math",
+        "pred": "math",
+        "before": "math"
+      },
+      {
+        "t": "2500 par 12 percent discount kitna bachega",
+        "label": "math",
+        "pred": "math",
+        "before": "math"
+      },
+      {
+        "t": "find the derivative of x cubed",
+        "label": "math",
+        "pred": "math",
+        "before": "misc_chat"
+      },
+      {
+        "t": "a rectangle is 13 by 7 what is its area",
+        "label": "math",
+        "pred": "math",
+        "before": "math"
+      },
+      {
+        "t": "remember that my preferred editor is neovim",
+        "label": "personal",
+        "pred": "personal",
+        "before": "personal"
+      },
+      {
+        "t": "meri coffee preference bina chini wali save kar",
+        "label": "personal",
+        "pred": "personal",
+        "before": "personal"
+      },
+      {
+        "t": "my birthday is on the twenty first of march remember it",
+        "label": "personal",
+        "pred": "personal",
+        "before": "personal"
+      },
+      {
+        "t": "what have you learned about my study habits",
+        "label": "personal",
+        "pred": "factual",
+        "before": "factual"
+      },
+      {
+        "t": "mujhe chhote replies pasand hain yaad rakhna",
+        "label": "personal",
+        "pred": "personal",
+        "before": "personal"
+      },
+      {
+        "t": "remind me that my favourite colour is teal",
+        "label": "personal",
+        "pred": "personal",
+        "before": "personal"
+      },
+      {
+        "t": "what is your opinion on a four day work week",
+        "label": "misc_chat",
+        "pred": "factual",
+        "before": "misc_chat"
+      },
+      {
+        "t": "would you rather live near mountains or a beach",
+        "label": "misc_chat",
+        "pred": "misc_chat",
+        "before": "howto"
+      },
+      {
+        "t": "yaar kuch interesting random baat kar",
+        "label": "misc_chat",
+        "pred": "misc_chat",
+        "before": "misc_chat"
+      },
+      {
+        "t": "do you think humans will ever stop using phones",
+        "label": "misc_chat",
+        "pred": "misc_chat",
+        "before": "misc_chat"
+      },
+      {
+        "t": "tell me a silly joke about office life",
+        "label": "misc_chat",
+        "pred": "misc_chat",
+        "before": "misc_chat"
+      },
+      {
+        "t": "aaj bas thodi casual baat karte hain",
+        "label": "misc_chat",
+        "pred": "misc_chat",
+        "before": "factual"
+      }
+    ]
+  },
+  "checkpoint": {
+    "sha256": "e8ca026221076d0b2977dac5e4bdac15b6d58153208f42644c9671cd0c1bdff5",
+    "metrics": {
+      "intent": {
+        "train": {
+          "accuracy": 1,
+          "macroF1": 1,
+          "perClass": {
+            "greeting": {
+              "correct": 34,
+              "total": 34,
+              "predicted": 34
+            },
+            "gratitude": {
+              "correct": 30,
+              "total": 30,
+              "predicted": 30
+            },
+            "factual": {
+              "correct": 27,
+              "total": 27,
+              "predicted": 27
+            },
+            "comparison": {
+              "correct": 26,
+              "total": 26,
+              "predicted": 26
+            },
+            "howto": {
+              "correct": 31,
+              "total": 31,
+              "predicted": 31
+            },
+            "code": {
+              "correct": 30,
+              "total": 30,
+              "predicted": 30
+            },
+            "explain": {
+              "correct": 27,
+              "total": 27,
+              "predicted": 27
+            },
+            "emotional": {
+              "correct": 23,
+              "total": 23,
+              "predicted": 23
+            },
+            "creative": {
+              "correct": 29,
+              "total": 29,
+              "predicted": 29
+            },
+            "math": {
+              "correct": 20,
+              "total": 20,
+              "predicted": 20
+            },
+            "personal": {
+              "correct": 26,
+              "total": 26,
+              "predicted": 26
+            },
+            "misc_chat": {
+              "correct": 25,
+              "total": 25,
+              "predicted": 25
+            }
+          },
+          "n": 328
+        },
+        "val": {
+          "accuracy": 0.9178082191780822,
+          "macroF1": 0.9227716727716727,
+          "perClass": {
+            "greeting": {
+              "correct": 6,
+              "total": 8,
+              "predicted": 6
+            },
+            "gratitude": {
+              "correct": 6,
+              "total": 7,
+              "predicted": 7
+            },
+            "factual": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 7
+            },
+            "comparison": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "howto": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "code": {
+              "correct": 7,
+              "total": 7,
+              "predicted": 7
+            },
+            "explain": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "emotional": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "creative": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 7
+            },
+            "math": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "personal": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "misc_chat": {
+              "correct": 4,
+              "total": 6,
+              "predicted": 6
+            }
+          },
+          "n": 73
+        },
+        "valHybrid": {
+          "accuracy": 0.9178082191780822,
+          "macroF1": 0.9227716727716727,
+          "perClass": {
+            "greeting": {
+              "correct": 6,
+              "total": 8,
+              "predicted": 6
+            },
+            "gratitude": {
+              "correct": 6,
+              "total": 7,
+              "predicted": 7
+            },
+            "factual": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 7
+            },
+            "comparison": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "howto": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "code": {
+              "correct": 7,
+              "total": 7,
+              "predicted": 7
+            },
+            "explain": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "emotional": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "creative": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 7
+            },
+            "math": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "personal": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "misc_chat": {
+              "correct": 4,
+              "total": 6,
+              "predicted": 6
+            }
+          },
+          "n": 73
+        },
+        "test": {
+          "accuracy": 0.8356164383561644,
+          "macroF1": 0.8393719706219707,
+          "perClass": {
+            "greeting": {
+              "correct": 7,
+              "total": 8,
+              "predicted": 8
+            },
+            "gratitude": {
+              "correct": 4,
+              "total": 7,
+              "predicted": 4
+            },
+            "factual": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 8
+            },
+            "comparison": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "howto": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 10
+            },
+            "code": {
+              "correct": 6,
+              "total": 7,
+              "predicted": 6
+            },
+            "explain": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 6
+            },
+            "emotional": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "creative": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 6
+            },
+            "math": {
+              "correct": 4,
+              "total": 5,
+              "predicted": 4
+            },
+            "personal": {
+              "correct": 4,
+              "total": 5,
+              "predicted": 5
+            },
+            "misc_chat": {
+              "correct": 4,
+              "total": 6,
+              "predicted": 5
+            }
+          },
+          "n": 73
+        },
+        "testHybrid": {
+          "accuracy": 0.8356164383561644,
+          "macroF1": 0.8393719706219707,
+          "perClass": {
+            "greeting": {
+              "correct": 7,
+              "total": 8,
+              "predicted": 8
+            },
+            "gratitude": {
+              "correct": 4,
+              "total": 7,
+              "predicted": 4
+            },
+            "factual": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 8
+            },
+            "comparison": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 6
+            },
+            "howto": {
+              "correct": 6,
+              "total": 6,
+              "predicted": 10
+            },
+            "code": {
+              "correct": 6,
+              "total": 7,
+              "predicted": 6
+            },
+            "explain": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 6
+            },
+            "emotional": {
+              "correct": 5,
+              "total": 5,
+              "predicted": 5
+            },
+            "creative": {
+              "correct": 5,
+              "total": 6,
+              "predicted": 6
+            },
+            "math": {
+              "correct": 4,
+              "total": 5,
+              "predicted": 4
+            },
+            "personal": {
+              "correct": 4,
+              "total": 5,
+              "predicted": 5
+            },
+            "misc_chat": {
+              "correct": 4,
+              "total": 6,
+              "predicted": 5
+            }
+          },
+          "n": 73
+        },
+        "examples": 474,
+        "augmentedExamples": 1882,
+        "approvedRuntimeExamples": 0,
+        "bestEpoch": 36,
+        "trainedEpochs": 54,
+        "temperature": 1.25,
+        "validationNll": 0.4589932621666931,
+        "evaluation": "deduplicated stratified 70/15/15; train-only memory; int8; test not used for selection"
+      },
+      "match": {
+        "train": {
+          "accuracy": 0.8333333333333334,
+          "precision": 0.7239583333333334,
+          "recall": 0.7853107344632768,
+          "loss": 0.3913159600079119,
+          "n": 546
+        },
+        "val": {
+          "accuracy": 0.859504132231405,
+          "precision": 0.9666666666666667,
+          "recall": 0.6444444444444445,
+          "loss": 0.3624841926171944,
+          "n": 121
+        },
+        "test": {
+          "accuracy": 0.8316831683168316,
+          "precision": 0.75,
+          "recall": 0.6774193548387096,
+          "loss": 0.36836308889655794,
+          "n": 101
+        },
+        "pairs": 768,
+        "groups": {
+          "train": 29,
+          "val": 6,
+          "test": 6
+        },
+        "bestEpoch": 8,
+        "evaluation": "disjoint paraphrase/target groups; test untouched; int8"
+      }
+    }
+  },
+  "timings": {
+    "before": [
+      {
+        "uniqueIntent": {
+          "p50Us": 154.3540000000121,
+          "p95Us": 207.25000000004457
+        },
+        "knn": {
+          "p50Us": 121.98900000009871,
+          "p95Us": 151.47699999999986
+        }
+      },
+      {
+        "uniqueIntent": {
+          "p50Us": 161.26899999994748,
+          "p95Us": 280.5150000000367
+        },
+        "knn": {
+          "p50Us": 129.6110000000681,
+          "p95Us": 247.55800000002637
+        }
+      },
+      {
+        "uniqueIntent": {
+          "p50Us": 161.52200000010453,
+          "p95Us": 240.88100000000168
+        },
+        "knn": {
+          "p50Us": 139.90899999998874,
+          "p95Us": 267.23900000001777
+        }
+      }
+    ],
+    "after": [
+      {
+        "uniqueIntent": {
+          "p50Us": 46.00899999999797,
+          "p95Us": 83.83900000001177
+        },
+        "knn": {
+          "p50Us": 13.056000000005952,
+          "p95Us": 21.109999999964657
+        }
+      },
+      {
+        "uniqueIntent": {
+          "p50Us": 47.99800000000687,
+          "p95Us": 86.46200000001159
+        },
+        "knn": {
+          "p50Us": 12.431999999989785,
+          "p95Us": 16.21299999999337
+        }
+      },
+      {
+        "uniqueIntent": {
+          "p50Us": 48.553000000026714,
+          "p95Us": 90.69399999998495
+        },
+        "knn": {
+          "p50Us": 13.594000000011874,
+          "p95Us": 20.186000000023796
+        }
+      }
+    ]
+  },
+  "schedulerFixture": {
+    "tasks": 4,
+    "simulatedWaitMsPerTask": 40,
+    "trials": 3,
+    "serialMedianMs": 161.71253499999966,
+    "parallel2MedianMs": 80.5721910000002,
+    "peakParallel": 2,
+    "note": "Synthetic timer workload, NOT measured live AI-provider/WhatsApp speed."
+  },
+  "limitations": [
+    "Fixed developer-created routing regression probe; not a certified production or overall-answer accuracy estimate.",
+    "Held-out trainer metrics are int8 with train-only memory. Runtime includes all curated memory examples.",
+    "CPU timings vary with JIT/host load. No live provider, installed-PC or desktop actions were benchmarked.",
+    "Runtime personalization and external language models are not part of this comparison."
+  ]
+}

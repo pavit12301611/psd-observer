@@ -104,7 +104,7 @@ export function markTrained(opts = {}) {
   saveCorrections(data, file);
 }
 
-/** Export corrections as {text: label} pairs for train:neural. */
+/** Legacy answer-lookup export. These correction:* labels are NOT IntentNet classes. */
 export function asTrainingPairs(opts = {}) {
   return loadCorrections(opts.file ?? CORR_FILE).items.map((i) => ({
     text: i.q,

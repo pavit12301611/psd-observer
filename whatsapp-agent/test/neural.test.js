@@ -105,8 +105,8 @@ test('neural: trained checkpoint loads and key messages route correctly', () => 
   assert.ok(ok >= 12, `key-case accuracy ${ok}/${keyCases.length} (want ≥ 12)`);
 });
 
-test('neural: trained validation accuracy floor is honest (≥ 75%)', () => {
-  // Evaluate the SHIPPED net on a fresh holdout slice not used above.
+test('neural: shipped net fits the full curated corpus (≥ 75%, not held-out)', () => {
+  // Training-inclusive fit guard only; independent probes and split metrics live in neural-v2.test.js.
   const brain = loadBrain();
   assert.ok(brain.intent, 'trained net present');
   let ok = 0;
@@ -164,19 +164,18 @@ test('neural: augmentation + templates expand the training set', () => {
 // ── 5. Runtime learning ────────────────────────────────────────────────────
 
 test('neural: learnExample persists examples (and dedupes)', () => {
-  const file = path.join(process.cwd(), 'data', 'neural-examples.json');
-  const backup = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-neural-legacy-'));
+  const file = path.join(dataDir, 'neural-examples.json');
   try {
     fs.rmSync(file, { force: true });
-    assert.equal(learnExample('meri nayi test line hai yaad rakh', 'personal'), true);
-    assert.equal(learnExample('meri nayi test line hai yaad rakh', 'personal'), true, 'dupe is a no-op success');
+    assert.equal(learnExample('meri nayi test line hai yaad rakh', 'personal', { dataDir }), true);
+    assert.equal(learnExample('meri nayi test line hai yaad rakh', 'personal', { dataDir }), true, 'dupe is a no-op success');
     const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(saved.length, 1);
     assert.equal(saved[0].label, 'personal');
-    assert.equal(learnExample('x', 'not-a-label'), false, 'unknown labels rejected');
+    assert.equal(learnExample('x', 'not-a-label', { dataDir }), false, 'unknown labels rejected');
   } finally {
-    if (backup) fs.writeFileSync(file, backup);
-    else fs.rmSync(file, { force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
 

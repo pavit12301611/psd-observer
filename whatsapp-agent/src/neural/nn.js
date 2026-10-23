@@ -64,16 +64,28 @@ export class MLP {
   }
 
   /** Forward pass. Returns the output layer activations. */
-  forward(x) {
+  forward(x, sparse = null) {
+    if (sparse === null && x.length >= 64) {
+      sparse = [];
+      for (let i = 0; i < x.length; i++) if (x[i] !== 0) sparse.push(i);
+    }
+    this._inputIndices = sparse;
     let a = x;
-    this._acts = [x];
+    if (!this.inference) this._acts = [x];
     for (let l = 0; l < this.W.length; l++) {
       const isLast = l === this.W.length - 1;
       const z = new Array(this.W[l].length);
       for (let i = 0; i < this.W[l].length; i++) {
         let s = this.b[l][i];
         const row = this.W[l][i];
-        for (let j = 0; j < row.length; j++) s += row[j] * a[j];
+        if (l === 0 && sparse) {
+          for (let k = 0; k < sparse.length; k++) {
+            const j = sparse[k];
+            s += row[j] * a[j];
+          }
+        } else {
+          for (let j = 0; j < row.length; j++) s += row[j] * a[j];
+        }
         z[i] = s;
       }
       if (isLast) {
@@ -81,13 +93,13 @@ export class MLP {
       } else {
         a = z.map(relu);
       }
-      this._acts.push(a);
+      if (!this.inference) this._acts.push(a);
     }
     return a;
   }
 
-  predict(x) {
-    const y = this.forward(x);
+  predict(x, sparse = null) {
+    const y = this.forward(x, sparse);
     if (this.out === 'sigmoid') return y[0];
     let best = 0;
     for (let i = 1; i < y.length; i++) if (y[i] > y[best]) best = i;
@@ -99,6 +111,7 @@ export class MLP {
    * 0/1 targets (sigmoid). Returns the average loss for the batch.
    */
   trainBatch(xs, ys, { lr = 0.001, clip = 5, weightDecay = 0 } = {}) {
+    if (this.inference) throw new Error('Inference-only MLP cannot train');
     const L = this.W.length;
     const gW = this.W.map((w) => w.map((r) => r.map(() => 0)));
     const gb = this.b.map((r) => r.map(() => 0));
@@ -161,7 +174,11 @@ export class MLP {
       const aPrev = this._acts[l];
       for (let i = 0; i < this.W[l].length; i++) {
         gb[l][i] += d[i];
-        for (let j = 0; j < this.W[l][i].length; j++) gW[l][i][j] += d[i] * aPrev[j];
+        if (l === 0 && this._inputIndices) {
+          for (const j of this._inputIndices) gW[l][i][j] += d[i] * aPrev[j];
+        } else {
+          for (let j = 0; j < this.W[l][i].length; j++) gW[l][i][j] += d[i] * aPrev[j];
+        }
       }
       if (l > 0) {
         const dPrev = new Array(this.W[l][0].length).fill(0);
@@ -194,7 +211,7 @@ export class MLP {
       }
       const avg = loss / Math.max(1, batches);
       history.push(avg);
-      onEpoch?.(ep, avg);
+      if (onEpoch?.(ep, avg) === false) break;
     }
     return history;
   }
@@ -207,7 +224,7 @@ export class MLP {
    */
   toJSON({ quantize = true } = {}) {
     const layers = this.W.map((w, l) => {
-      if (!quantize) return { W: w, b: this.b[l] };
+      if (!quantize) return { W: w.map((r) => Array.from(r)), b: Array.from(this.b[l]) };
       let maxAbs = 1e-8;
       for (const row of w) for (const v of row) maxAbs = Math.max(maxAbs, Math.abs(v));
       for (const v of this.b[l]) maxAbs = Math.max(maxAbs, Math.abs(v));
@@ -215,27 +232,33 @@ export class MLP {
       return {
         quantized: true,
         scale,
-        W: w.map((row) => row.map((v) => Math.round(v / scale))),
-        b: this.b[l].map((v) => Math.round(v / scale)),
+        W: w.map((row) => Array.from(row, (v) => Math.round(v / scale))),
+        b: Array.from(this.b[l], (v) => Math.round(v / scale)),
       };
     });
-    return { sizes: this.sizes, out: this.out, layers };
+    return { sizes: [...this.sizes], out: this.out, layers };
   }
 
-  static fromJSON(json) {
-    const net = new MLP(json.sizes, { out: json.out });
-    net.W = json.layers.map((layer) => {
-      if (!layer.quantized) return layer.W.map((r) => [...r]);
-      return layer.W.map((r) => r.map((v) => v * layer.scale));
-    });
-    net.b = json.layers.map((layer) => {
-      if (!layer.quantized) return [...layer.b];
-      return layer.b.map((v) => v * layer.scale);
-    });
-    net.mW = net.W.map((w) => w.map((r) => r.map(() => 0)));
-    net.vW = net.W.map((w) => w.map((r) => r.map(() => 0)));
-    net.mb = net.b.map((r) => r.map(() => 0));
-    net.vb = net.b.map((r) => r.map(() => 0));
+  static fromJSON(json, { inference = false } = {}) {
+    validateModel(json);
+    // Loading weights must not initialize thousands of random weights first,
+    // or allocate four Adam moment tensors on an inference-only hot path.
+    const net = Object.create(MLP.prototype);
+    net.sizes = [...json.sizes];
+    net.out = json.out;
+    net.inference = inference;
+    net.t = 0;
+    const row = (r, scale) => inference
+      ? Float32Array.from(r, (v) => v * scale)
+      : Array.from(r, (v) => v * scale);
+    net.W = json.layers.map((l) => l.W.map((r) => row(r, l.quantized ? l.scale : 1)));
+    net.b = json.layers.map((l) => row(l.b, l.quantized ? l.scale : 1));
+    if (!inference) {
+      net.mW = net.W.map((w) => w.map((r) => r.map(() => 0)));
+      net.vW = net.W.map((w) => w.map((r) => r.map(() => 0)));
+      net.mb = net.b.map((r) => r.map(() => 0));
+      net.vb = net.b.map((r) => r.map(() => 0));
+    }
     return net;
   }
 }
@@ -245,4 +268,30 @@ function softmax(z) {
   const exps = z.map((v) => Math.exp(v - max));
   const sum = exps.reduce((a, c) => a + c, 0);
   return exps.map((v) => v / sum);
+}
+
+/** Reject corrupt/incompatible checkpoints before allocating or running them. */
+export function validateModel(json) {
+  const dims = json?.sizes;
+  if (!Array.isArray(dims) || dims.length < 2 || dims.length > 8
+    || dims.some((n) => !Number.isInteger(n) || n < 1 || n > 4096)
+    || dims.slice(1).reduce((n, d, i) => n + d * dims[i], 0) > 2_000_000
+    || !['softmax', 'sigmoid'].includes(json.out)
+    || !Array.isArray(json.layers) || json.layers.length !== dims.length - 1) {
+    throw new Error('Invalid neural model architecture');
+  }
+  for (let l = 0; l < json.layers.length; l++) {
+    const layer = json.layers[l];
+    const quantized = layer?.quantized === true;
+    const valid = (v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 1e6
+      && (!quantized || (Number.isInteger(v) && v >= -127 && v <= 127));
+    if (!layer || (quantized && (!Number.isFinite(layer.scale) || layer.scale <= 0 || layer.scale > 1e6))
+      || !Array.isArray(layer.W) || layer.W.length !== dims[l + 1]
+      || !Array.isArray(layer.b) || layer.b.length !== dims[l + 1]
+      || !layer.b.every(valid)
+      || layer.W.some((r) => !Array.isArray(r) || r.length !== dims[l] || !r.every(valid))) {
+      throw new Error('Invalid neural model weights');
+    }
+  }
+  return true;
 }

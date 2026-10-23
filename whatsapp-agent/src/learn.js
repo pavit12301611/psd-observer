@@ -14,6 +14,7 @@
 import { parseIntent } from './nlp.js';
 
 const RESERVED = new Set([
+  'batch', 'taskstatus', 'neural', 'retrain',
   'help','commands','menu','start','ping','me','id','whoami','status','time','date',
   'remind','reminder','reminders','timer','todo','todos','task','note','notes','remember','memory','forget',
   'model','ai','ask','summarize','summarise','tldr','improve','rewrite',

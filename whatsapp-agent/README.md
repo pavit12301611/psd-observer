@@ -442,14 +442,96 @@ on "hi" and nothing hands a 10-step job to a 1B model:
 
 - **Local first** (`ROUTER_PREFER=local`): free and private. Cloud free tiers are
   only used when the local model is too small for the job or is down.
-- **Failures cool down**: a brain that times out is skipped for 2 min, doubling
-  on repeats (max 30 min) — one dead provider never slows WhatsApp again.
-- **Power budget**: at most `MAX_HEAVY_PER_HOUR` (12) heavy calls an hour; after
-  that, work is downgraded to standard instead of waking a huge model.
+- **Failures cool down**: normally 2 min, doubling on repeats (max 30 min).
+  Provider `Retry-After` is respected (up to 24 hours). A rejected shared API
+  key skips sibling models instead of wasting the whole fallback queue.
+- **Power budget**: `MAX_HEAVY_PER_HOUR` (12) successful heavy completions an
+  hour. Failed attempts do not spend it. After that, routing uses lighter
+  configured brains **without cutting the heavy task's step/tool allowance**.
 - **Multimodal**: photos go to a vision model (local `OLLAMA_VISION_MODEL`
   first, then Gemini), and screenshots are only sent to vision when the task
   actually needs to *read* an image.
-- `/brains` shows the live catalog, health, recent decisions and budget.
+- `/brains` shows the configured catalog, observed health, actual error/hint,
+  recent decisions and budget (it does not prove unused endpoints are live).
+
+### Trained routing and safe multitasking (3.9.0)
+
+- Local IntentNet is now **406→64→12**, trained with 491 curated English,
+  Hinglish and basic Hindi examples. Indexed kNN + sparse inference reduce
+  local routing p50 from ~161µs to ~48µs in the recorded comparison (~3.4×).
+- Fixed 72-case routing probe: **55→68 correct** (76.4→94.4%); independent
+  trainer split test: **83.6% (73 examples, int8/train-only memory)**. These
+  are routing metrics, **not overall AI-answer accuracy** or Grok/Claude-level
+  foundation-model training. See [NEURAL.md](NEURAL.md) for methodology/limits.
+- `/neural status`, `/neural classify <text>`, `/neural labels`,
+  `/neural learn code | my example`, `/neural train` and `/retrain` support
+  real cancellable CPU-worker training. Only explicit owner-approved labels
+  are trusted; private examples are never included in release training.
+
+```text
+/batch /ask explain snapshot isolation || /ask write a poem about a comet || /time
+/batch /open chrome || /open code || /note prepare the demo
+/batch status
+/batch results
+/taskstatus
+/stop
+```
+
+Up to **8 tasks**, normally **2 concurrent answer/read workers**
+(`MAX_PARALLEL_TASKS=1..4`). Allowlisted PC/write commands run as exclusive
+serialized barriers, respecting the original owner/PIN/confirmation checks.
+A failure/confirmation prevents new starts; no automatic approvals, side-effect
+retries, shell/media or nested batching. Parallel answers are text-only; use
+`/agent` for dependent execution and `/solve` for full computation verification.
+Progress, saved partial `/batch results`, and `/stop` work during a batch. Separate incoming messages still use
+the busy guard.
+
+Clear independent two-part questions auto-split into specialists with separate
+prompts and detached history. Results stay in request order and write one
+conversation turn. The answer cache now includes context/memory/mission; fast
+local answers also remain in conversation history. Bad checkpoints fall back
+safely instead of masking the shipped model.
+
+`npm run bench` separates unique/cached queries and a real fresh-process load;
+`node scripts/compare-neural.mjs --ref 507d640` reproduces the before/after
+comparison from Git history. Neither benchmark measures live-provider speed.
+
+### Heavy-task reliability (3.8.1)
+
+`/agent` no longer hides every failure behind **all brains failed**:
+
+- **Real failure evidence:** the reply lists the models actually tried and
+  distinguishes quota/429, invalid key/401, unavailable model/404, unsupported
+  tools, oversized context, timeout and truncated output. Keys are redacted.
+- **Usable fallbacks:** up to `AGENT_MAX_TRIES=6` healthy brains (max 12),
+  ranked by capability for heavy work, rather than stopping after the first
+  three. `OPENROUTER_MODEL_FALLBACKS=openrouter/free` is the default backup
+  when a named free model disappears; `provider.require_parameters` requests
+  tool-capable endpoints. Set the fallback list empty to opt out. Extra Groq
+  backups can be listed in `GROQ_MODEL_FALLBACKS`. Provider/local-only pinning
+  still applies; no paid fallback is added automatically.
+- **Bounded requests:** relevant tool selection, compact descriptions, bounded
+  old chat/results, `AGENT_MAX_TOKENS=2048` output reservation, and a
+  `AGENT_PROMPT_MAX_CHARS=24000` input character budget. An oversized request
+  gets one compact retry; current task instructions are never silently cut.
+  An output-token limit is reported separately, not retried with fewer tokens.
+- **Safe continuation:** a handoff carries a verified tool journal and media.
+  Already-attempted side effects are not replayed by the next brain; read-only
+  observations can be refreshed. Actions run in order, stop for confirmation,
+  and receive the same `/stop` signal. Malformed/unoffered tool calls are
+  rejected before execution.
+- **Honest partial results:** a provider failure or step limit after work began
+  returns the verified progress, not “nothing done” or a fabricated “Done”. A
+  real tool failure is not hidden by the model's success claim.
+
+This cannot remove provider quotas or repair invalid keys/missing desktop
+services. Those still need the reported fix. Check `/brains why <task>` for
+routing and `/agent --plan <task>` before running. For a genuinely longer
+workflow, `MAX_AGENT_STEPS=10` gives heavy attempts up to 12 steps; raise
+`AGENT_MAX_TOKENS` only when needed for large code/tool arguments.
+
+Offline regression checks: `npm ci && npm test` (local HTTP provider fixtures;
+no live cloud account or desktop required).
 
 ### What changed in 2.1 (the `/agent` fix)
 
