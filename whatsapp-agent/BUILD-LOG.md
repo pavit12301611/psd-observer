@@ -2067,3 +2067,50 @@ Bugs caught by tests: aadhaar over-match on card numbers; OTP regex missed
 redaction semantics; release-notes manual-restore bullet regex.
 
 Suite: 368 → 376 tests, 376/376 green. v3.7.0 + notes + bundle 923K.
+
+---
+
+## 3.8.0 — Complete Feature Suite: 29 Upgrades (har suggestion, ek-ek karke)
+
+- 🎓 Voice revision call (`/revise call`) + `/today` timeline + `/exam` scheduler + `/study scan` + `/accuracy report`
+- 🕶️ Shades guarantee unchanged: `/shades off` se hi restore hota hai — kabhi auto-restore nahi
+- 💬 `/nudges` proactive engine + `/recap` weekly + `/routine` morning auto-routines + `/leaveby` commute
+- 🖥️ `/block` study-window site-blocker + `/organize` downloads + `/backup now|cloud` + `/timeline` + `/home` webhooks + `/wake` "Hey JARVIS"
+- 👨‍👩‍👧 `/role kids|family` + `/rolelimit` + `/fun quiz|riddle` + `/audit` log + `/pcs ask|all|check` fleet queue + meeting action-items auto-extract
+- ✅ 12 new tests (batch6) — 388/388 passing; notes shadow-fix (now/stop/status routing); /photos sends real images
+
+### Padhai & Voice (one-by-one)
+- `/revise call [topic]` — `callMeCommand` + per-segment TTS; fallback: text segments + call khud suggest. `/revise chapter` normal.
+- `/today` — `today.js buildToday`: next exam + kal ke HW + 24h reminders + pending + due routines (day-sorted).
+- `/exam add <sub> <date> | list | del` — `exams.js`; countdown + study schedule `revision-plan` engine reuse (pure function).
+- `/study scan` — `studyscan.js cardsFromText`: OCR text → cards → ek mini pack (`store.data.studyPacks`).
+- `/accuracy report` — `accuracyreport.js`: asked/verified/deterministic/corrections → hit-rate (stats optional).
+
+### Proactive & Smart
+- `/nudges on|off|now` — `nudges.js evaluateNudges`: padhai gap (17-21h), missed reminder, battery (≥2h since last msg), streak. Once-per-day + 4h cooldown + defaults inert.
+- `/recap` + `recapGoal('5 days')` — weekly counts (todos/notes/reminders/expenses/study/homework).
+- `/routine at 7am /today | list | off <name>` — `routine.js` IST due calc; `dueRoutines(store, now)` minute-matching.
+- `/leaveby 9am 25km` — `leaveby.js`: km→minutes (25km/h city + 15min buffer) → leave-by time.
+- HW reminders: `escalate.js` stages 48h/24h/2h + `humanDelta` ("aaj 6:00 pm tak").
+
+### PC & Home
+- `/block [now] [sites]` — `siteblock.js`: window-title close (`wmctrl`), music apps exempt, hourly tick.
+- `/organize now [path]` — `organizer.js RULES`: Images/Videos/Docs/Archives/Audio/Code/Other.
+- `/backup now [path] | list | cloud` — `backup.js`: zip+gzip, keep 5, SHA256; cloud = GitHub file-upload fallback copy.
+- `/timeline on|off|<time>` — `timeline.js`: shots index (local-time math) + `recordShot` hook in `startLive`.
+- `/home add <name> <ep> | <dev> on|off|dim | setup` — `smarthome.js` webhook `fetch` fire.
+- `/wake on|off|status` — `wake.js matchWake` + 3s ffmpeg clips → `transcribeAudio` → `/revise`-style dispatch.
+
+### Family, Fleet & Safety
+- `/role <num> kids|family|admin` + `/rolelimit <min>` — `roles.js`: kids topics blocked + per-role min/day limit.
+- `/fun quiz|answer <n>|riddle` — `fun.js` 20 GK Qs + 12 riddles (1 free-time nudge).
+- `/audit [n]` — `audit.js` JSONL (guest attempts, new contacts, actions, block/guard events).
+- `/pcs ask <pc> <cmd> | all <cmd> | check <pc>` — `fleetqueue.js` queue files + result poll.
+- Notes case shadow-**fixed**: `now|stop|status` → meeting-notes (was swallowed by the second `case 'notes'`); `meetingNotesCmd` merges + `extractActions`.
+- `/photos` sends actual image (top match ≥0.12) + `imageStats` footer; focus `block:sites` → `blockTick` + `wmctrl` close.
+
+### Notes for next time
+- Two functions named `allowCommand` (gate + `/allow` handler) silently shadowed each other — renamed gate to `commandGateOk`. **Never declare duplicate function names inside `createAgent`.**
+- `src/accuracy.js` is the EXISTING 100%-accuracy engine — new report card lives in `accuracyreport.js`. **Always `git status` before creating files.**
+- `changesFor()` reads release-notes `{title, bullets}` OR BUILD-LOG `## <ver> —` first block (`^[-*]` bullets) — shades test needs ≥3 bullets incl. "shades" + "shades off|auto-restore" there.
+- Test fakes must WRITE the files their API produces (wake recorder fake) or the code correctly reports "nothing found".

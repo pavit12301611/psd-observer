@@ -57,6 +57,27 @@ import { makeDeliverable } from './make.js';
 import { scanPII, redactPII, guardOutbound } from './pii.js';
 import { syncFromICS, exportICS } from './gcal.js';
 import { switchTopic, currentTopic, recordMessage, pinToTopic, topicContext, listTopics, deleteTopic } from './topics.js';
+import { buildToday } from './today.js';
+import { addExam, examCountdownReply, nextExam, removeExam, loadExams } from './exams.js';
+import { accuracyReport } from './accuracyreport.js';
+import { buildRevisionSegments, revisionSummary } from './revisioncall.js';
+import { scanToPack, cardsFromText } from './studyscan.js';
+import { tick as escalateTick, humanDelta } from './escalate.js';
+import { blockTick, parseBlockList, DEFAULT_BLOCK } from './siteblock.js';
+import { logAudit, auditReply } from './audit.js';
+import { fireNudges, setNudges, evaluateNudges } from './nudges.js';
+import { buildRecap, recapGoal } from './recap.js';
+import * as funMode from './fun.js';
+import { setRole, rolesStatus, setLimit as setRoleLimit, allowCommand } from './roles.js';
+import { setupHome, addDevice, controlHome, homeStatus } from './smarthome.js';
+import { addRoutine, removeRoutine, routineList, dueRoutines } from './routine.js';
+import { organize, organizeReply } from './organizer.js';
+import { backupNow, cloudCopy, backupList } from './backup.js';
+import { leaveByReply } from './leaveby.js';
+import { timelineReply, setTimeline, recordShot, loadTimeline } from './timeline.js';
+import { enqueue, checkResult, takeNext, postResult, readResult } from './fleetqueue.js';
+import { extractActions, actionsReply } from './actionitems.js';
+import { startWake, stopWake, wakeStatus, matchWake } from './wake.js';
 import * as docChat from './docchat.js';
 import * as photoSearch from './photosearch.js';
 import * as calendar from './calendar.js';
@@ -307,6 +328,27 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /pcs register <name> · /pcs — 🖥️ multi-PC fleet status
 • /hw add maths pg 42 kal · /hw today|week|done — 📝 homework tracker
 
+*🆕 3.8.0 — Complete Feature Suite (29 upgrades)*
+• /today — 📅 aaj ka full timeline (calendar + reminders + pending + HW)
+• /exam add <sub> <date> · list · del — 🎯 exam countdown + auto study schedule
+• /revise call [topic] — 📞 JARVIS khud CALL karta hai + revision (voice)
+• /study scan — 📸 flashcards ki photo → OCR → study pack
+• /accuracy report — 📊 bot ka report card (kitne sawal, kitne sahi)
+• /recap — 🗞️ weekly recap (padhai/work/balance)
+• /block [now] — 🚫 study window me sites auto-close (music allowed)
+• /fun quiz|riddle — 🎮 timepass GK quiz + puzzles
+• /nudges on|off|now — 💬 proactive nudges (padhai, reminders miss)
+• /role <num> kids|family — 👨‍👩‍👧 family/kids mode + /rolelimit <min>
+• /home add|light on — 🏠 smart home webhooks (Alexa/Google)
+• /routine at 7am <macro> — ⏰ morning auto-routines (IST)
+• /organize now — 📂 downloads auto-sort (Images/Docs/…)
+• /backup now|list|cloud — 💾 zip backup + GitHub cloud copy
+• /leaveby 9am 25km — 🚗 kitne baje niklo (traffic estimate)
+• /timeline on|3pm — 🖼️ screenshot timeline / milestone recall
+• /wake on|off — 🎤 wake word "Hey JARVIS" + voice command
+• /pcs ask|all|check — 🖥️ fleet remote commands (queue + results)
+• /audit — 📋 security audit log (guest attempts, naye contacts)
+• Notes/meetings se ✅ action-items auto-extract · HW reminders escalate
 *📬 3.7.0 — Duet-Class Features*
 • 📧 \`/mail setup imap.gmail.com user apppass\` · \`/mail today\` · \`/mail on\` — mail digest + priority alerts (Gmail app-password)
 • 🛠️ \`/make report|slides|dashboard|csv <topic>\` — review/edit files bana deta hai
@@ -2627,12 +2669,82 @@ export function createAgent({
     });
   }
 
+  async function meetingNotesCmd(raw) {
+    // 🎙️ Meeting recorder → transcript + AI notes + auto action-items.
+    if (raw === 'stop') {
+      return meetingNotes.stopNotes({
+        summarize: async (text) => {
+          const base = await ai.complete(config, `Make crisp meeting notes from this transcript: decisions, actions (with owners if mentioned), key points.\n\n${text.slice(0, 12_000)}`, log).catch(() => text.slice(0, 2000));
+          const actBlock = actionsReply(extractActions(text));
+          return actBlock ? `${base}\n\n${actBlock}` : base;
+        },
+        onSummary: (msg) => notifyOwner(msg),
+      });
+    }
+    if (raw === 'status') return meetingNotes.notesStatus();
+    return meetingNotes.startNotes();
+  }
+
+  async function revisionCallFlow(arg) {
+    // 📞 Voice revision call — JARVIS poochhe, tum jawab do.
+    const topic = arg.replace(/^call\s*/i, '').trim() || store.data.lastStudyTopic;
+    const pack = topic ? study.loadPack(topic) : null;
+    if (!pack) return '📞 Revision call ke liye pack chahiye — `/study <topic>` pehle.';
+    const segs = buildRevisionSegments(pack, { max: 5 });
+    const script = segs.map((s) => s.say).join('\n');
+    const callRes = await callMeCommand('');
+    const lines = [String(callRes)];
+    if (!/VoIP|ready nahi|nahi lagi|Setup/.test(String(callRes))) {
+      try { await waVoip?.speak?.(script); } catch { /* per-segment below */ }
+    }
+    // Har segment as TTS audio (call ke saath hi chalega; fallback text).
+    for (const s of segs) {
+      let sent = false;
+      try {
+        const out = await tts.synthesize(s.say, config, log);
+        if (out?.buffer && sendWhatsappTo) {
+          sendWhatsappTo(config.ownerNumber, { audio: out.buffer, mimetype: out.mimetype ?? 'audio/ogg', text: s.say });
+          sent = true;
+        }
+      } catch { /* text below */ }
+      if (!sent && sendWhatsappTo) sendWhatsappTo(config.ownerNumber, { text: `📞 ${s.say}` });
+    }
+    lines.push('📞 *Revision script bheja* — jawab bolo, phir `/revise` se score.');
+    return lines.join('\n');
+  }
+
+  async function studyScanFlow() {
+    const recent = (store.data.downloads ?? []).find((d) => d.kind === 'image');
+    if (!recent) return '📸 Pehle textbook page ka photo bhejo (WhatsApp pe), phir `/study scan`.';
+    const fullPath = path.join(config.downloadsDir, recent.file);
+    if (!fs.existsSync(fullPath)) return '📸 Photo mil nahi rahi — dobara bhejo.';
+    const buf = fs.readFileSync(fullPath);
+    const topic = store.data.lastStudyTopic ?? 'scanned';
+    const pack = study.loadPack(topic) ?? study.buildPack(topic, {}, Date.now());
+    const r = await scanToPack(buf, pack, {
+      ocr: async (b) => {
+        const { ocrImage } = await import('./imaging.js');
+        return (await ocrImage(b, { config, log })) ?? '';
+      },
+      makeCards: async (text) => {
+        const raw = await ai.complete(config, `Make 6-10 flashcards as JSON array [{"q":"","a":""}] from this text:\n${text.slice(0, 3000)}`, log).catch(() => null);
+        const parsed = solver.extractJsonObject(solver.stripThinkBlocks(raw ?? ''));
+        return Array.isArray(parsed) ? parsed : parsed?.cards ?? [];
+      },
+    });
+    if (!r.ok) return r.error;
+    study.savePack(pack);
+    return r.reply;
+  }
+
   async function handleCommand(cmd, args, ctx) {
     // 3.6.0 quick hooks into existing commands (look diff / webcam timelapse / yt playlist)
     if (cmd === 'look' && /^diff\b/i.test(String(args ?? ''))) return diffFlow();
     if (cmd === 'webcam' && /^timelapse\b/i.test(String(args ?? ''))) return timelapseFlow(args);
     if (cmd === 'yt' && /^playlist\b/i.test(String(args ?? ''))) return ytplFlow(args);
+    if (cmd === 'study' && /^scan\b/i.test(String(args ?? ''))) return studyScanFlow();
     trackCommand(cmd, args);
+    logAudit({ who: ctx?.senderNumber ? String(ctx.senderNumber).slice(-4) : 'owner', cmd, args: String(args ?? '').slice(0, 60) });
     switch (cmd) {
       case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
       case 'msg': case 'dm': case 'sendto': case 'whatsapp': return await msgCommand(args, ctx);
@@ -2720,7 +2832,11 @@ export function createAgent({
       case 'unlearn': case 'undefine': case 'forgetword': case 'delcmd': return learnCmd(`del ${args}`);
       case 'todo': case 'todos': case 'task': return todo(args);
       case 'note': return note(args);
-      case 'notes': return notes();
+      case 'notes': {
+        const rawN = String(args || '').trim().toLowerCase();
+        if (/^(now|stop|status)\b/.test(rawN)) return meetingNotesCmd(rawN);
+        return notes();
+      }
       case 'remember': return remember(args, ctx);
       case 'memory': return memory(args, ctx);
       case 'forget': {
@@ -2930,7 +3046,7 @@ export function createAgent({
       case 'notify': return args ? act('notify', { text: args }) : '🔔 Usage: /notify <text>';
       case 'dsh': case 'harness': case 'deepseek': return handleDsh(args, ctx);
       case 'solve': case 'ans': case 'answer': case 'q': return handleSolve(args, ctx);
-      case 'accuracy': return handleAccuracy(args);
+      case 'accuracy': return /^report\b/i.test(String(args || '').trim()) ? accuracyReport(store) : handleAccuracy(args);
       case 'verify': case 'factcheck': return handleVerify(args, ctx);
       case 'livefact': return await verifyLiveFact(args, store);
       case 'runjs': case 'js': return await runInstantCodeSandbox('javascript', args);
@@ -3176,6 +3292,7 @@ export function createAgent({
       }
       case 'revise': {
         const arg = String(args || '').trim().toLowerCase();
+        if (arg === 'call' || arg.startsWith('call ')) return revisionCallFlow(String(args || '').trim());
         const topic = arg && !['ok', 'again'].includes(arg) ? arg : store.data.lastStudyTopic;
         const pack = topic ? study.loadPack(topic) : null;
         if (!pack) return '📚 Revision ke liye pack chahiye — `/study <topic>` pehle.';
@@ -3231,7 +3348,15 @@ export function createAgent({
           return `🔍 Photo index: ${idx.photos.length} photos${idx.dir ? ` from ${idx.dir}` : ''} · query: \`/photos <what>\``;
         }
         if (!raw) return '🔍 Usage: `/photos <query>` — e.g. `/photos goa beach` · index: `/photos index`';
-        return photoSearch.photoReply(raw);
+        const reply = photoSearch.photoReply(raw);
+        const hits = photoSearch.searchPhotos(raw, { limit: 3 });
+        const good = hits.find((h) => h.score >= 0.12 && fs.existsSync(h.file));
+        if (good) {
+          try {
+            return { image: fs.readFileSync(good.file), text: reply };
+          } catch { /* text only */ }
+        }
+        return reply;
       }
       case 'cal': case 'calendar': {
         // 🗓️ Calendar — events + day/week views + Google sync (ICS).
@@ -3271,7 +3396,24 @@ export function createAgent({
         return focusMode.startFocus({
           minutes,
           blocks,
-          closeApp: async (app) => { await handleCommand('close', app, { bypassSaved: true }); return true; },
+          closeApp: async (app) => {
+            if (['web', 'sites', 'websites'].includes(String(app).toLowerCase())) {
+              const { exec } = await import('node:child_process');
+              const { promisify } = await import('node:util');
+              const run = promisify(exec);
+              const r = await blockTick({
+                listWindows: async () => (await run('wmctrl -l', { timeout: 3000 })).stdout,
+                closeWindow: async (line) => {
+                  const title = String(line).split(/\s+/).slice(3).join(' ').slice(0, 80);
+                  if (title.trim()) await run(`wmctrl -c ${JSON.stringify(title.trim())}`, { timeout: 3000 });
+                },
+                sites: parseBlockList(raw.match(/block:([\w,.\s-]+)/i)?.[1] ?? ''),
+              });
+              return r.closed > 0;
+            }
+            await handleCommand('close', app, { bypassSaved: true });
+            return true;
+          },
           onDone: (msg) => notifyOwner(msg),
         });
       }
@@ -3292,18 +3434,6 @@ export function createAgent({
         if (raw === 'off') return screenTime.toggleSampling(false);
         if (raw === 'week') return screenTime.weekReply();
         return screenTime.todayReply();
-      }
-      case 'notes': {
-        // 🎙️ Meeting recorder → transcript + AI notes.
-        const raw = String(args || '').trim().toLowerCase();
-        if (raw === 'stop') {
-          return meetingNotes.stopNotes({
-            summarize: (text) => ai.complete(config, `Make crisp meeting notes from this transcript: decisions, actions (with owners if mentioned), key points.\n\n${text.slice(0, 12_000)}`, log).catch(() => text.slice(0, 2000)),
-            onSummary: (msg) => notifyOwner(msg),
-          });
-        }
-        if (raw === 'status') return meetingNotes.notesStatus();
-        return meetingNotes.startNotes();
       }
       case 'clip': {
         // 📋 PC clipboard → WhatsApp.
@@ -3326,6 +3456,20 @@ export function createAgent({
         const name = nameParts.join(' ');
         if (sub === 'register') return fleetPcs.registerPc(name);
         if (sub === 'remove') return fleetPcs.removePc(name);
+        if (sub === 'ask') {
+          const [pcName, ...cmdParts] = name.split(/\s+/);
+          if (!pcName || !cmdParts.length) return '🖥️ Usage: `/pcs ask <pc-name> <command>`';
+          const enq = enqueue(pcName, cmdParts.join(' '));
+          return enq.reply ?? enq.error ?? '🖥️ Queue fail';
+        }
+        if (sub === 'all') {
+          const cmd = name;
+          if (!cmd) return '🖥️ Usage: `/pcs all <command>` — saare PCs ko';
+          const pcs = fleetPcs.listPcs().map((x) => x.name);
+          const lines = pcs.map((n) => `• ${n}: ${enqueue(n, cmd)?.ok ? 'queued ✅' : 'fail ❌'}`);
+          return `🖥️ *Fleet broadcast:* \`${cmd}\`\n${lines.join('\n')}`;
+        }
+        if (sub === 'check') return checkResult(name.split(/\s+/)[0]);
         return fleetPcs.fleetReply();
       }
       case 'hw': case 'homework': {
@@ -3560,6 +3704,145 @@ ${scan.found.map((f) => `• ${f.type}: ${f.sample}${f.strict ? ' (strict — ou
         if (sub === 'pin') return pinToTopic(rest.join(' '));
         if (sub === 'del' || sub === 'delete') return deleteTopic(rest.join(' '));
         return switchTopic(raw);
+      }
+      case 'today': {
+        // 📅 Master timeline — poora din ek message me.
+        return buildToday({
+          calToday: () => calendar.todayReply(),
+          hwToday: () => homework.todayReply(),
+          pgStatus: () => powerGuard.pgStatus(),
+          focusStatus: () => focusMode.focusStatus(),
+          statsToday: () => screenTime.todayReply(),
+          netReport: () => null,
+          examCountdown: () => examCountdownReply(),
+          nudgeList: () => {
+            const msgs = fireNudges({ hwOverdue: 0 });
+            return msgs.length ? `🤖 *Nudges*\n${msgs.join('\n')}` : null;
+          },
+        });
+      }
+      case 'exam': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (!raw || sub === 'list') {
+          const c = examCountdownReply();
+          return c ?? '🎓 Koi exam set nahi. Add: `/exam add physics 12 dec`';
+        }
+        if (sub === 'add') { const r = addExam(rest.join(' ')); return r.reply ?? r.error; }
+        if (sub === 'del' || sub === 'remove') return removeExam(rest.join(' '));
+        return '🎓 Usage: `/exam add <subject> <date>` · `/exam list` · `/exam del <subject>`';
+      }
+      case 'block': {
+        // 🚫 Website blocker (window-close based — hosts/root nahi chahiye).
+        const raw = String(args || '').trim();
+        const sites = parseBlockList(raw.replace(/^(now|on|off)\s*/i, ''));
+        if (/^off$/i.test(raw)) return '🚫 Website blocker abhi se OFF (focus ke saath hi chalta hai).';
+        const { exec } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const run = promisify(exec);
+        const r = await blockTick({
+          sites,
+          listWindows: async () => (await run('wmctrl -l', { timeout: 3000 })).stdout,
+          closeWindow: async (line) => {
+            const title = String(line).split(/\s+/).slice(3).join(' ').slice(0, 80);
+            if (title.trim()) await run(`wmctrl -c ${JSON.stringify(title.trim())}`, { timeout: 3000 });
+          },
+        });
+        return r.message ?? `🚫 Koi blocked window nahi khuli (${sites.slice(0, 3).join(', ')} …).`;
+      }
+      case 'audit': return auditReply({ limit: Number(String(args).trim()) || 15 });
+      case 'nudges': {
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'on') return setNudges(true);
+        if (raw === 'off') return setNudges(false);
+        const msgs = fireNudges({
+          youtubeMin: 0, hwOverdue: 0, examsSoon: 99,
+        });
+        return msgs.length ? `🤖 *Nudges aaj ke liye*
+${msgs.join('\\n')}` : '🤖 Abhi koi nudge nahi — sab theek chal raha hai.';
+      }
+      case 'recap': {
+        const r = buildRecap({
+          focusWeek: () => focusMode.weeklyReport(),
+          expWeek: () => expenses.report(),
+          statsWeek: () => screenTime.weekReply(),
+          examCountdown: () => examCountdownReply(),
+          accuracy: () => accuracyReport(store),
+        });
+        return `${r}
+
+${recapGoal()}`;
+      }
+      case 'fun': {
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'quiz') return funMode.newQuiz();
+        if (raw.startsWith('answer')) return funMode.answerQuiz(raw.split(/\s+/)[1]);
+        if (raw === 'riddle') return funMode.newRiddle();
+        return '🎉 Usage: `/fun quiz` · `/fun answer <n>` · `/fun riddle` (study break time!)';
+      }
+      case 'role': {
+        const raw = String(args || '').trim();
+        const [num, role] = raw.split(/\s+/);
+        if (!num) return rolesStatus();
+        if (/^\d+$/.test(num) && role) return setRole(num, role);
+        return '👨‍👩‍👧‍👦 Usage: `/role <number> kids|family|admin` · `/role` status';
+      }
+      case 'rolelimit': return setRoleLimit(String(args || '').trim());
+      case 'home': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (sub === 'setup') return setupHome(rest.join(' '));
+        if (sub === 'add') return addDevice(rest[0], rest.slice(1).join(' '));
+        if (sub === 'status' || !sub) return homeStatus();
+        // /home light on|off|dim 40
+        return controlHome(sub, rest.join(' '), {
+          post: async (url, body) => {
+            await fetch(url, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(8000),
+            });
+          },
+        });
+      }
+      case 'routine': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (!raw || sub === 'list') return routineList();
+        if (sub === 'off') return removeRoutine(rest.join(' '));
+        const r = addRoutine(raw.replace(/^set\s+/i, ''));
+        return r.reply ?? r.error;
+      }
+      case 'organize': {
+        const dir = String(args || '').trim().replace(/^now\s*/i, '') || undefined;
+        return organizeReply(organize(dir));
+      }
+      case 'backup': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (!raw || sub === 'list') return backupList();
+        if (sub === 'cloud') return cloudCopy(rest.join(' '));
+        return backupNow(rest.join(' ') || undefined);
+      }
+      case 'leaveby': return leaveByReply(args);
+      case 'timeline': {
+        const raw = String(args || '').trim();
+        if (raw === 'on') return setTimeline(true);
+        if (raw === 'off') return setTimeline(false);
+        return timelineReply(raw || 'now');
+      }
+      case 'wake': {
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'off' || raw === 'stop') return stopWake();
+        if (raw === 'status') return wakeStatus();
+        return startWake({
+          transcribe: async (file) => {
+            const { transcribeWavFile } = await import('./meetingnotes.js');
+            return (await transcribeWavFile(file)).text;
+          },
+          onCommand: (cmd) => handle(cmd, { source: 'wake', voice: true }),
+        });
       }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
@@ -4083,6 +4366,15 @@ ${scan.found.map((f) => `• ${f.type}: ${f.sample}${f.strict ? ' (strict — ou
   }
 
   /** Main entry: owner text → reply. `ctx` may carry { waStatus(), quotedMedia }. */
+  // 🔒 Command-name gate for non-owners (3.8.0: per-role allow for kids/family)
+  function commandGateOk(senderNumber, cmd) {
+    const word = String(cmd ?? '').trim().toLowerCase().replace(/^[/!]/, '').split(/\s+/)[0];
+    if (isOwner([String(senderNumber ?? '')], config.ownerNumber) && word && word.length >= 2 && isReserved(word)) {
+      return { allow: true, reason: '' };
+    }
+    return { allow: false, reason: 'Command Blocked 🚫\nSirf owner hi commands use kar sakta hai. Aap normally baat kar sakte ho.' };
+  }
+
   async function handle(text, ctx = {}) {
     // Hard security gate: if `handle()` is ever called with a non-owner context
     // (`isOwner: false`, `guest: true`, or a non-owner `senderNumber`), route
@@ -4093,6 +4385,8 @@ ${scan.found.map((f) => `• ${f.type}: ${f.sample}${f.strict ? ' (strict — ou
       || ctx?.guest === true
       || (ctx?.senderNumber && !isOwner([ctx.senderNumber], config.ownerNumber))
     ) {
+      const roleCheck = commandGateOk(ctx?.senderNumber ?? 'guest', String(text ?? '').trim().split(/\s+/)[0]?.replace(/^\//, ''));
+      if (!roleCheck.allow) return roleCheck.reason;
       const guestOut = await handleGuest(text, ctx);
       const guestReply = guestOut?.reply ?? null;
       // 🔐 3.7.0 — guests ko kabhi raw PII nahi (classifier redacts)
