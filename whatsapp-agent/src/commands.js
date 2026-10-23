@@ -28,6 +28,11 @@ import * as guardMode from './guard.js';
 import * as notifMirror from './notifmirror.js';
 import * as study from './studypack.js';
 import * as expenses from './expenses.js';
+import * as docChat from './docchat.js';
+import * as photoSearch from './photosearch.js';
+import * as calendar from './calendar.js';
+import * as focusMode from './focus.js';
+import * as powerGuard from './powerguard.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -3032,6 +3037,73 @@ export function createAgent({
         if (/^undo\b/i.test(raw)) return expenses.undoLast();
         if (/^list\b/i.test(raw)) return expenses.lastEntries(10);
         return expenses.addExpense(raw).reply;
+      }
+      case 'doc': {
+        // 📄 Document Q&A — load a doc, then ask questions from it.
+        const raw = String(args || '').trim();
+        if (!raw) return docChat.docStatus();
+        if (/^clear\b/i.test(raw)) return docChat.clearDoc();
+        if (/^status\b/i.test(raw)) return docChat.docStatus();
+        if (/^q\s+/i.test(raw)) {
+          return docChat.askDoc(raw.replace(/^q\s+/i, ''), {
+            ask: (prompt) => ai.complete(config, prompt, log),
+          });
+        }
+        const loaded = await docChat.loadDoc(raw);
+        return loaded.reply ?? loaded.error;
+      }
+      case 'photos': case 'pics': {
+        // 🔍 Semantic-ish photo search over the local library.
+        const raw = String(args || '').trim();
+        if (/^index\b/i.test(raw)) {
+          const dir = raw.replace(/^index\s*/i, '').trim() || photoSearch.DEFAULT_DIR;
+          const idx = photoSearch.buildPhotoIndex({ dir });
+          return `🔍 Photo index ready — *${idx.photos.length} photos* from ${idx.dir}\nAb dhundo: \`/photos goa trip\``;
+        }
+        if (/^status\b/i.test(raw)) {
+          const idx = photoSearch.loadIndex();
+          return `🔍 Photo index: ${idx.photos.length} photos${idx.dir ? ` from ${idx.dir}` : ''} · query: \`/photos <what>\``;
+        }
+        if (!raw) return '🔍 Usage: `/photos <query>` — e.g. `/photos goa beach` · index: `/photos index`';
+        return photoSearch.photoReply(raw);
+      }
+      case 'cal': case 'calendar': {
+        // 🗓️ Calendar — events + day/week views.
+        const raw = String(args || '').trim();
+        if (!raw || /^today\b/i.test(raw)) return calendar.todayReply();
+        if (/^week\b/i.test(raw)) return calendar.weekReply();
+        if (/^del\b/i.test(raw)) return calendar.delEvent(raw.replace(/^del\s+/i, '').trim());
+        if (/^add\b/i.test(raw)) {
+          const r = calendar.addEvent(raw.replace(/^add\s+/i, ''));
+          return r.reply ?? r.error;
+        }
+        return '🗓️ Usage: `/cal add kal 4pm meeting` · `/cal today` · `/cal week` · `/cal del <id>`';
+      }
+      case 'focus': {
+        // 🎯 Focus mode — pomodoro + distraction gate.
+        const raw = String(args || '').trim();
+        if (/^stop\b/i.test(raw) || raw === 'off') return focusMode.stopFocus();
+        if (/^status\b/i.test(raw)) return focusMode.focusStatus();
+        if (/^week\b/i.test(raw)) return focusMode.weeklyReport();
+        const blockM = raw.match(/block:([\w,\s-]+)/i);
+        const blocks = (blockM?.[1] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+        const minutes = Number((raw.match(/\d+/) ?? [focusMode.DEFAULT_MINUTES])[0]);
+        return focusMode.startFocus({
+          minutes,
+          blocks,
+          closeApp: async (app) => { await handleCommand('close', app, { bypassSaved: true }); return true; },
+          onDone: (msg) => notifyOwner(msg),
+        });
+      }
+      case 'pguard': case 'powerguard': {
+        // 🔋 Power Guardian — battery/temp thresholds + alerts.
+        const [sub, ...restArgs] = String(args || '').trim().toLowerCase().split(/\s+/);
+        const restJoined = restArgs.join(' ');
+        if (!sub || sub === 'status') return powerGuard.pgStatus();
+        if (sub === 'on') return powerGuard.togglePowerGuard(true, { send: (t) => notifyOwner(t) });
+        if (sub === 'off') return powerGuard.togglePowerGuard(false);
+        if (sub === 'battery' || sub === 'temp') return powerGuard.setThreshold(sub, restJoined);
+        return '🔋 Usage: `/pguard on|off|status` · `/pguard battery 20` · `/pguard temp 90`';
       }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
