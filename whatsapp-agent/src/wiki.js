@@ -19,6 +19,7 @@
 // work; whole path is timeout-bounded so chat never hangs.
 
 import fs from 'node:fs';
+import { throwIfStopped } from './cancel.js';
 import { classifyIntent } from './neural/index.js';
 import {
   lookupKnowledge,
@@ -59,13 +60,20 @@ export function toWikiQuery(text) {
     .slice(0, 120);
 }
 
-async function fetchJson(url, timeoutMs) {
-  const res = await fetch(url, {
-    headers: { 'user-agent': 'observer-whatsapp-agent/3.3 (personal assistant; wiki grounding)', accept: 'application/json' },
-    signal: AbortSignal.timeout(Math.max(1000, timeoutMs)),
-  });
-  if (!res.ok) throw new Error(`wikipedia ${res.status}`);
-  return res.json();
+async function fetchJson(url, timeoutMs, signal) {
+  throwIfStopped(signal, 'Wiki grounding');
+  const controller = new AbortController();
+  const stop = () => controller.abort(signal.reason);
+  signal?.addEventListener('abort', stop, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error('Wikipedia timeout')), Math.max(1000, timeoutMs));
+  try {
+    const res = await fetch(url, {
+      headers: { 'user-agent': 'observer-whatsapp-agent/3.9 (personal assistant; wiki grounding)', accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`wikipedia ${res.status}`);
+    return await res.json();
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); }
 }
 
 /**
@@ -73,7 +81,8 @@ async function fetchJson(url, timeoutMs) {
  * queries work), then the REST summary. Returns { title, extract, url, query }
  * or null. `config.wikiBaseUrl` overrides the host (tests, mirrors).
  */
-export async function wikiSummary(query, config = {}) {
+export async function wikiSummary(query, config = {}, opts = {}) {
+  throwIfStopped(opts.signal, 'Wiki grounding');
   const base = String(config.wikiBaseUrl || DEFAULT_BASE).replace(/\/+$/, '');
   const timeoutMs = Number(config.wikiTimeoutMs) > 0 ? Number(config.wikiTimeoutMs) : 3500;
   const q = toWikiQuery(query);
@@ -83,15 +92,15 @@ export async function wikiSummary(query, config = {}) {
   try {
     const search = await fetchJson(
       `${base}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&srlimit=1&format=json`,
-      timeoutMs,
+      timeoutMs, opts.signal,
     );
     const hit = search?.query?.search?.[0]?.title;
     if (hit) title = hit;
-  } catch { /* fall back to the raw query as a page title */ }
+  } catch { throwIfStopped(opts.signal, 'Wiki grounding'); /* raw title fallback */ }
 
   const page = await fetchJson(
     `${base}/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
-    timeoutMs,
+    timeoutMs, opts.signal,
   );
   const extract = String(page?.extract ?? '').trim();
   if (!extract) return null;
@@ -148,7 +157,8 @@ export function loadTrainedWikiFile(store, filePath) {
  * Order: learned cache (0 ms) → live fetch (timeout-bounded, result is learned).
  * Returns '' when nothing is available or the question is not factual.
  */
-export async function wikiContextFor(userText, config = {}, store = null, log = console) {
+export async function wikiContextFor(userText, config = {}, store = null, log = console, opts = {}) {
+  throwIfStopped(opts.signal, 'Wiki grounding');
   if (config.wikiGrounding === false) return '';
 
   // Learned answers first (0 ms, offline) — the match itself is the filter, so
@@ -165,14 +175,15 @@ export async function wikiContextFor(userText, config = {}, store = null, log = 
   // casual/emotional/creative chat never triggers a network call.
   let factualIntent = false;
   try {
-    const label = classifyIntent(userText).label;
+    const label = classifyIntent(userText, { dataDir: config?.dataDir }).label;
     factualIntent = label === 'factual' || label === 'comparison' || label === 'explain';
   } catch { /* heuristics below still gate */ }
-  if (!factualIntent && !looksFactualQuery(userText) && !lookupKnowledge(userText, store)) return '';
+  if (!factualIntent && !looksFactualQuery(userText) && !lookupKnowledge(userText, store, { dataDir: config?.dataDir })) return '';
   if (config.wikiGrounding === 'offline') return '';
 
   try {
-    const rec = await wikiSummary(userText, config);
+    const rec = await wikiSummary(userText, config, opts);
+    throwIfStopped(opts.signal, 'Wiki grounding');
     if (!rec) return '';
     if (store) ingestWikiEntry(store, rec); // the training loop: every fetch is remembered
     return [
@@ -180,14 +191,15 @@ export async function wikiContextFor(userText, config = {}, store = null, log = 
       `• ${rec.title}: ${rec.extract}`,
     ].join('\n');
   } catch (err) {
+    throwIfStopped(opts.signal, 'Wiki grounding');
     log?.info?.(`[wiki] grounding skipped: ${err?.message || err}`);
     return '';
   }
 }
 
 /** Prompt block from the curated built-in bank (instant, offline). */
-export function knowledgeContextFor(userText, store = null) {
-  const hit = lookupKnowledge(userText, store);
+export function knowledgeContextFor(userText, store = null, opts = {}) {
+  const hit = lookupKnowledge(userText, store, opts);
   return hit ? formatKnowledgeContext(hit) : '';
 }
 
@@ -201,7 +213,7 @@ export async function wikiCommand(query, config = {}, store = null) {
   const q = String(query ?? '').trim();
   if (!q) return '📚 Usage: /wiki <topic>';
 
-  const builtin = lookupKnowledge(q, store);
+  const builtin = lookupKnowledge(q, store, { dataDir: config?.dataDir });
   if (builtin) {
     return `📚 *${q}*\n\n${builtin.reply}\n\n_(instant knowledge — trained from Wikipedia; /wiki ${q} fetch karo live update ke liye)_`;
   }
@@ -225,15 +237,19 @@ export async function wikiCommand(query, config = {}, store = null) {
 }
 
 /** No-brain fallback for factual questions (used by commands.js askAI). */
-export async function wikiFallback(text, config = {}, store = null) {
-  const builtin = lookupKnowledge(text, store);
+export async function wikiFallback(text, config = {}, store = null, opts = {}) {
+  throwIfStopped(opts.signal, 'Wiki fallback');
+  const builtin = lookupKnowledge(text, store, { dataDir: config?.dataDir });
   if (builtin) return `${builtin.reply}\n\n_(instant knowledge — trained from Wikipedia)_`;
+  if (config.wikiGrounding === false || config.wikiGrounding === 'offline') return null;
   try {
-    const rec = await wikiSummary(text, config);
+    const rec = await wikiSummary(text, config, opts);
+    throwIfStopped(opts.signal, 'Wiki fallback');
     if (!rec) return null;
     if (store) ingestWikiEntry(store, rec);
     return `📚 *${rec.title}*\n\n${rec.extract}\n\n${rec.url}\n\n_(from Wikipedia — local AI is off, see /model)_`;
   } catch {
+    throwIfStopped(opts.signal, 'Wiki fallback');
     return null;
   }
 }

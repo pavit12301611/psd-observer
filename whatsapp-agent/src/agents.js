@@ -1,3 +1,5 @@
+import { classifyIntent, INTENT_LABELS } from './neural/index.js';
+
 // agents.js — the multi-agent fleet 🤖🤝🤖
 //
 // Work is divided among specialized bots. The trained IntentNet is the
@@ -128,28 +130,39 @@ export function agentForIntent(label) {
  * Returns { primary, squad, multi } where squad = [{ agent, intent, share }]
  * and share is the relative weight from the net's scores.
  */
-export function orchestrate(text, classified) {
+/** Only clear, independent two-part answer requests are auto-parallelized.
+ * A dependency, code block, or ambiguous connector stays one coherent job.
+ * No neural result is an authorization or side-effect-safety decision.
+ */
+export function independentParts(text) {
+  const raw = String(text ?? '').trim();
+  if (raw.includes('`') || /(?:^|[\s(])'/.test(raw)) return [];
+  if (/```|["“”]|\b(?:then|after that|based on|using (?:it|that|the above)|about it|its result|that result|previous|iske baad|aur phir|usko|isko)\b/i.test(raw)) return [];
+  const verb = '(?:write|likho|make|banao|create|compose|generate|solve|calculate|compute|explain|describe|tell|batao|code|compare|samjhao|sunao|convert|implement|draft)';
+  const separator = new RegExp(`\\s+(?:and|aur|along with)\\s+(?=${verb}\\b)|[;\\n]+|\\?\\s+(?=(?:what|who|when|where|how|${verb})\\b)`, 'i');
+  const parts = raw.split(separator).map((s) => s.trim()).filter(Boolean);
+  if (parts.length !== 2 || parts.some((s) => s.length < 6)) return [];
+  if (/\b(?:it|this|that|these|those|above|previous|same|iska|iski|iske|uska|uski|uske|isko|usko|ise|usse|usi)\b/i.test(parts[1])) return [];
+  return parts;
+}
+
+export function orchestrate(text, classified, classifyPart = classifyIntent) {
   const label = classified?.label || 'misc_chat';
-  const scores = classified?.scores || {};
+  const scores = Array.isArray(classified?.scores)
+    ? Object.fromEntries(INTENT_LABELS.map((l, i) => [l, classified.scores[i] ?? 0]))
+    : classified?.scores ?? {};
   const primary = agentForIntent(label);
-
-  // Squad detection: a strong second intent on a DIFFERENT bot, AND the text
-  // really looks like two tasks glued together (connector + task verb, double
-  // question, or explicit separator). Plain "and"/"bhi" alone is NOT enough —
-  // "what is light and sound" is one research question, not a squad.
-  const compound = /\b(?:aur|and then|along with|ke saath)\b|\b(?:and|aur)\s+(?:likho|write|make|banao|create|draw|generate|solve|calculate|compute|explain|tell|batao|code|compare|samjhao|sunao|convert)\b|\?[^?]*\?|[\n;]/i.test(String(text || ''));
-  const ranked = Object.entries(scores)
-    .filter(([intent, s]) => s > 0.15 && agentForIntent(intent).id !== primary.id)
-    .sort((a, b) => b[1] - a[1]);
-
-  const squad = [{ agent: primary, intent: label, share: scores[label] ?? 1 }];
-  if (compound && ranked.length) {
-    const [secondIntent, secondScore] = ranked[0];
-    if (secondScore >= 0.2) {
-      squad.push({ agent: agentForIntent(secondIntent), intent: secondIntent, share: secondScore });
-    }
-  }
-  return { primary, squad, multi: squad.length > 1 };
+  const solo = { primary, squad: [{ agent: primary, intent: label, share: scores[label] ?? 1, text: String(text ?? '') }], multi: false };
+  const parts = independentParts(text);
+  if (!parts.length) return solo;
+  try {
+    const squad = parts.map((part) => {
+      const c = classifyPart(part);
+      return { agent: agentForIntent(c.label), intent: c.label, share: c.confidence, text: part };
+    });
+    if (squad.some((s) => !s.intent || s.share < 0.5) || squad[0].agent.id === squad[1].agent.id) return solo;
+    return { primary: squad[0].agent, squad, multi: true };
+  } catch { return solo; }
 }
 
 /** System-prompt lines for one bot's mission. */
@@ -184,11 +197,11 @@ export function mergeSquadAnswers(parts) {
 }
 
 /**
- * How each bot should answer THIS message. For squads every bot gets the full
- * text but only owns its share of the work.
+ * How each bot should answer its sub-request. Squad members receive distinct
+ * sub-prompts and detached conversation snapshots, never shared writable state.
  */
 export function taskBrief(entry) {
-  const { agent, intent } = entry;
+  const { intent } = entry;
   if (intent === 'factual' || intent === 'comparison') return 'Your share: the factual/research part of this message.';
   if (intent === 'explain' || intent === 'howto') return 'Your share: the explanation/tutorial part of this message.';
   if (intent === 'code') return 'Your share: the programming part of this message.';

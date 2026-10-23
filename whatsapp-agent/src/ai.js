@@ -13,6 +13,8 @@
 // (local Ollama vision model first, then Gemini), instead of being saved
 // without a description.
 
+import { createHash } from 'node:crypto';
+import { throwIfStopped } from './cancel.js';
 import { routerFor } from './router.js';
 import { postBrainJson as postJson, safeBrainText } from './brainrequest.js';
 import { getOwnerAddress, getAgentName, formatMemoryForPrompt } from './memory.js';
@@ -34,7 +36,7 @@ const TIMEOUT_MS = 60_000;
 const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
 const MAX_CACHE_ENTRIES = 150;
 
-// Per-config semantic response cache so repeated / identical questions return in <1ms
+// Per-config EXACT response cache. Conversation/memory/mission changes invalidate it.
 const AI_CACHES = new WeakMap();
 
 function getCacheState(config) {
@@ -48,13 +50,58 @@ function getCacheState(config) {
 }
 
 function makeCacheKey(text, voice = false) {
-  const norm = String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const norm = String(text ?? '').trim();
   if (!norm || norm.length < 2 || norm.length > 320) return null;
   // Do not cache context-dependent follow-ups ("aur batao", "what about that", "iska matlab")
   if (/^(?:and|aur|also|what\s+about|how\s+about|it|that|this|ye|yeh|iska|uska|uske|phir|fir|more|explain\s+more)\b/i.test(norm)) {
     return null;
   }
+  if (/\b(?:now|today|current|latest|weather|time|aaj|abhi|live|price)\b/i.test(norm)) return null;
   return `${voice ? 'v' : 't'}:${norm}`;
+}
+
+// Cache both the prompt and its actual context; never serve another owner's
+// memory, a different code snippet, changed facts, or a different task mission.
+function responseCacheKey(config, store, userText, opts, plan) {
+  const prompt = makeCacheKey(userText, Boolean(opts.voice));
+  if (!prompt) return null;
+  try {
+    const { stats: _volatile, ...context } = store?.data ?? {};
+    if (opts.history) context.history = opts.history;
+    return createHash('sha256').update(JSON.stringify({
+      prompt, context, config, agent: opts.agent?.id, intent: opts.intent,
+      brief: opts.taskBrief, squad: opts.squadName, temperature: opts.temperature,
+      tone: opts.tone, knowledgeBlock: opts.knowledgeBlock, wikiBlock: opts.wikiBlock,
+      isolated: Boolean(opts.isolated), candidates: plan.candidates.map((m) => m.id),
+    })).digest('hex');
+  } catch { return null; } // exotic/cyclic stores: safe cache miss
+}
+function cacheResult(state, key, result) {
+  if (!state || !key) return;
+  state.map.delete(key);
+  state.map.set(key, { ts: Date.now(), result });
+  while (state.map.size > MAX_CACHE_ENTRIES) state.map.delete(state.map.keys().next().value);
+}
+
+/** One owner turn, regardless of how many specialists answered it. */
+export function recordChatTurn(config, store, userText, answer, log = console, opts = {}) {
+  if (opts.isolated) return;
+  const previous = Array.isArray(store?.data?.history) ? [...store.data.history] : null;
+  try {
+    store?.pushHistory?.('user', userText);
+    store?.pushHistory?.('assistant', answer);
+  } catch (err) {
+    if (previous && store?.data) store.data.history = previous;
+    log.warn?.(`[ai] Reply ready; history save failed: ${safeBrainText(err.message, config)}`);
+  }
+  try {
+    const profile = opts.skipObserve ? null : observeOwnerTurn(store, opts.profileText ?? userText, answer);
+    if (profile && profile.totalTurns - (profile.lastReflectedTurn || 0) >= 8 && !opts.skipBackgroundReflect) {
+      reflectOwnerProfile(config, store, log).catch(() => {});
+    }
+  } catch (err) {
+    log.warn?.(`[ai] Reply ready; profile update skipped: ${safeBrainText(err.message, config)}`);
+  }
 }
 
 export function clearAiCache(config) {
@@ -150,6 +197,7 @@ export function systemPrompt(config, store, opts = {}) {
   // specialist bot — its mission (and optional task brief for squad work)
   // steers tone, structure and tool discipline.
   const toneLine = [];
+  if (opts.isolated) toneLine.push('READ-ONLY ANSWER MODE: You have NO action tools here. Provide answers/code as text only. Never claim you opened apps, ran code, wrote files, sent messages or changed this PC. Tell the owner to use the appropriate explicit command for actions.');
   const agent = opts.agent || (opts.intent ? agentForIntent(opts.intent) : null);
   if (agent) {
     toneLine.push(...missionDirective(agent));
@@ -185,6 +233,7 @@ export function systemPrompt(config, store, opts = {}) {
     ...toneLine,
     opts.knowledgeBlock,
     opts.wikiBlock,
+    'TEXT-ONLY CHAT: This call cannot execute actions. Never claim you opened an app, ran code, wrote a file or sent a message without actual tool evidence. Suggest /agent for execution or /solve for computation verification.',
     'You also have built-in tools the owner can trigger with slash commands: /accuracy /verify /solve /vocab /location /near /weather /remind /todo /note /persona /train /msg /reply /pending /wiki /define /calc /unit /currency /news /qr /url /system /observer (Observer can see their screen/camera). Mention one only when genuinely relevant.',
     memoryBlock,
     openTodos ? `Open to-dos:\n${openTodos}` : '',
@@ -214,7 +263,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts =
       stream: false,
       keep_alive: '30m',
       options: { temperature },
-    }, {}, timeoutMs);
+    }, {}, timeoutMs, opts.signal);
     const text = data.message?.content?.trim();
     if (!text) throw new Error('empty Ollama response');
     return { text, provider: model.label, model: model.model };
@@ -226,7 +275,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts =
       messages,
       temperature,
       stream: false,
-    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, timeoutMs);
+    }, { authorization: `Bearer ${model.apiKey || 'local'}` }, timeoutMs, opts.signal);
     const text = data.choices?.[0]?.message?.content?.trim();
     if (!text) throw new Error('empty local model response');
     return { text, provider: model.label, model: model.model };
@@ -246,6 +295,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts =
       },
       {},
       timeoutMs,
+      opts.signal,
     );
     const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('').trim();
     if (!text) throw new Error('empty Gemini response');
@@ -256,7 +306,7 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts =
     model: model.model,
     messages,
     temperature,
-  }, { authorization: `Bearer ${endpoint.key}` }, timeoutMs);
+  }, { authorization: `Bearer ${endpoint.key}` }, timeoutMs, opts.signal);
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error(`empty ${model.provider} response`);
   return { text, provider: model.label, model: model.model };
@@ -267,70 +317,59 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts =
  * when no brain is reachable.
  */
 export async function chat(config, store, userText, log = console, opts = {}) {
+  const started = Date.now();
+  throwIfStopped(opts.signal, 'AI chat');
   const router = routerFor(config, log);
   const plan = router.plan({ text: userText, needsTools: false });
   if (!plan.candidates.length) return null;
-
-  // 1. Check ultra-fast per-config semantic response cache (< 1ms)
-  const useCache = config?.aiCache !== false && !opts.noCache;
-  const cacheState = useCache ? getCacheState(config) : null;
-  const cacheKey = cacheState ? makeCacheKey(`${opts.agent?.id ? `${opts.agent.id}::` : ''}${userText}`, Boolean(opts.voice)) : null;
-  const cacheTtlMs = Math.max(5_000, Number(config?.aiCacheTtlMs ?? DEFAULT_CACHE_TTL_MS) || DEFAULT_CACHE_TTL_MS);
-
-  if (cacheState && cacheKey) {
-    const hit = cacheState.map.get(cacheKey);
-    if (hit && (Date.now() - hit.ts) <= cacheTtlMs) {
-      cacheState.hits += 1;
-      store?.pushHistory?.('user', userText);
-      store?.pushHistory?.('assistant', hit.result.text);
-      return { ...hit.result, tier: plan.tier, cached: true, ms: 0 };
-    }
-    if (hit) cacheState.map.delete(cacheKey);
-    cacheState.misses += 1;
-  }
-
-  // 2. Adaptive history window: shorter window for tiny/light queries = 2x faster prefill
-  const historySliceCount = plan.rank <= 2 ? 8 : 16;
-  // 2b. Knowledge grounding: curated bank + (learned/live) Wikipedia context —
-  // this is what makes the chat brain factually "trained" instead of guessing.
-  let knowledgeBlock = '';
-  let wikiBlock = '';
   let intent = opts.intent;
-  try { if (!intent) intent = classifyIntent(userText).label; } catch { /* heuristics inside chat still work */ }
-  try { knowledgeBlock = knowledgeContextFor(userText, store); } catch { /* never block chat */ }
-  try { wikiBlock = await wikiContextFor(userText, config, store, log); } catch { /* never block chat */ }
+  try { if (!intent) intent = classifyIntent(userText, { dataDir: config?.dataDir }).label; } catch { /* optional */ }
+  opts = { ...opts, intent };
+  // Initialize prompt-derived profile defaults BEFORE hashing the context.
+  const baseSystem = systemPrompt(config, store, { ...opts, userText });
+  const useCache = config?.aiCache !== false && !opts.noCache;
+  const state = useCache ? getCacheState(config) : null;
+  const key = state ? responseCacheKey(config, store, userText, opts, plan) : null;
+  const ttl = Math.max(5_000, Number(config?.aiCacheTtlMs ?? DEFAULT_CACHE_TTL_MS) || DEFAULT_CACHE_TTL_MS);
+  if (state && key) {
+    const hit = state.map.get(key);
+    if (hit && Date.now() - hit.ts <= ttl) {
+      state.hits++;
+      throwIfStopped(opts.signal, 'AI chat');
+      recordChatTurn(config, store, userText, hit.result.text, log, opts);
+      // Immediate repeats remain cheap; ANY intervening context change misses.
+      cacheResult(state, responseCacheKey(config, store, userText, opts, plan), hit.result);
+      return { ...hit.result, tier: plan.tier, cached: true, ms: Date.now() - started };
+    }
+    if (hit) state.map.delete(key);
+    state.misses++;
+  }
+  let knowledgeBlock = '', wikiBlock = '';
+  try { knowledgeBlock = knowledgeContextFor(userText, store, { dataDir: config?.dataDir }); } catch { /* optional */ }
+  try { wikiBlock = await wikiContextFor(userText, config, store, log, { signal: opts.signal }); } catch { /* optional */ }
+  throwIfStopped(opts.signal, 'AI chat');
+  const history = opts.history ?? store?.data?.history ?? [];
   const messages = [
-    { role: 'system', content: systemPrompt(config, store, { ...opts, userText, knowledgeBlock, wikiBlock, intent }) },
-    ...(store?.data?.history ?? []).slice(-historySliceCount),
+    { role: 'system', content: [baseSystem, knowledgeBlock, wikiBlock].filter(Boolean).join('\n\n') },
+    ...history.slice(-(plan.rank <= 2 ? 8 : 16)).map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: userText },
   ];
-  const started = Date.now();
-
   for (const model of plan.candidates) {
+    throwIfStopped(opts.signal, 'AI chat');
     if (router.isCooling(model)) continue;
     const attemptStart = Date.now();
     try {
-      const rawResult = await callModel(model, config, messages, config.aiTimeoutMs, { userText, temperature: opts.temperature });
-      const verifiedText = postProcessAiAnswer(rawResult.text, { userText, config });
-      const result = { ...rawResult, text: verifiedText };
-      const elapsed = Date.now() - attemptStart;
-      router.record(model.id, { ok: true, ms: elapsed, tier: plan.rank });
+      const raw = await callModel(model, config, messages, config.aiTimeoutMs, { userText, temperature: opts.temperature, signal: opts.signal });
+      throwIfStopped(opts.signal, 'AI chat');
+      const result = { ...raw, text: postProcessAiAnswer(raw.text, { userText, config }) };
+      router.record(model.id, { ok: true, ms: Date.now() - attemptStart, tier: plan.rank });
       router.noteDecision({ text: userText, tier: plan.tier, model: model.id, reason: plan.complexity.reasons.join(', ') });
-      store?.pushHistory?.('user', userText);
-      store?.pushHistory?.('assistant', result.text);
-      const profile = observeOwnerTurn(store, userText, result.text);
-      if (profile && profile.totalTurns - (profile.lastReflectedTurn || 0) >= 8 && !opts.skipBackgroundReflect) {
-        reflectOwnerProfile(config, store, log).catch(() => {});
-      }
-      if (cacheState && cacheKey) {
-        cacheState.map.set(cacheKey, { ts: Date.now(), result });
-        if (cacheState.map.size > MAX_CACHE_ENTRIES) {
-          const oldestKey = cacheState.map.keys().next().value;
-          if (oldestKey) cacheState.map.delete(oldestKey);
-        }
-      }
+      recordChatTurn(config, store, userText, result.text, log, opts);
+      cacheResult(state, key, result);
+      cacheResult(state, responseCacheKey(config, store, userText, opts, plan), result);
       return { ...result, tier: plan.tier, cached: false, ms: Date.now() - started };
     } catch (err) {
+      throwIfStopped(opts.signal, 'AI chat'); // cancellation is NOT provider failure/fallback
       router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err });
       log.warn?.(`[ai] ${model.label} failed: ${safeBrainText(err.message, config)}`);
     }

@@ -16,7 +16,7 @@
 // Facts are stable, evergreen ones (speed of light, capitals, history). For
 // current people/numbers the live Wikipedia layer is the source of truth.
 
-import { matchScorePrepared } from './neural/index.js';
+import { matchScorePrepared, loadBrain } from './neural/index.js';
 import { preparePairSide } from './neural/text.js';
 
 // Shared-token sanity check must count CONTENT words only — "kya"/"hai" style
@@ -26,6 +26,8 @@ const MATCH_STOP = new Set([
   'the', 'is', 'of', 'a', 'an', 'to', 'in', 'and', 'or', 'what', 'who', 'how', 'when', 'where',
   'batao', 'bata', 'kaisa', 'kaisi', 'kaise', 'ye', 'yeh', 'wo', 'wahi', 'liye', 'wala',
   'bhai', 'yaar', 'bro', 'please', 'plz', 'tell', 'about', 'explain', 'did', 'does', 'do',
+  'are', 'you', 'your', 'my', 'i', 'we', 'our', 'it', 'its', 'this', 'that', 'was', 'were',
+  'theory', 'process', 'method', 'definition', 'meaning', 'concept',
 ]);
 
 const normalize = (s) => String(s ?? '')
@@ -356,12 +358,13 @@ function itemKeys(item) {
   return ITEM_KEYS.get(item);
 }
 
-function scoreEntry(qSide, normQuery, queryWords, queryContent, item) {
+function scoreEntry(qSide, normQuery, queryWords, queryContent, item, opts) {
   let best = 0;
   for (const { k, len, words, content, side } of itemKeys(item)) {
     let lexical = 0;
-    if (normQuery.includes(k)) lexical = len;
-    else if (k.includes(normQuery) && normQuery.length >= 5) lexical = normQuery.length;
+    if (` ${normQuery} `.includes(` ${k} `)) lexical = len;
+    else if (` ${k} `.includes(` ${normQuery} `) && normQuery.length >= 5
+      && queryContent.size >= 2 && queryContent.size >= content.length * 0.75) lexical = normQuery.length;
     else {
       // token overlap fallback ("batao india ki capital kya hai" — key "india ki capital")
       if (words.length >= 2 && words.every((w) => queryWords.has(w))) lexical = len - 1;
@@ -374,12 +377,12 @@ function scoreEntry(qSide, normQuery, queryWords, queryContent, item) {
     // content-word prefilter FIRST (the net only runs when plausible), then
     // the high score bar.
     try {
-      let shared = false;
-      for (let i = 0; i < content.length; i++) {
-        if (queryContent.has(content[i])) { shared = true; break; }
-      }
-      if (!shared) continue;
-      const sem = matchScorePrepared(qSide, side);
+      let shared = 0;
+      for (let i = 0; i < content.length; i++) if (queryContent.has(content[i])) shared++;
+      // One generic word is not evidence that two entities/facts are equal.
+      // Abstain instead of turning an unrelated stored answer into "ground truth".
+      if (!shared || (content.length >= 2 && queryContent.size >= 2 && shared < 2)) continue;
+      const sem = matchScorePrepared(qSide, side, opts);
       if (sem >= 0.9 && sem * 14 > best) best = sem * 14;
     } catch { /* neural brain unavailable — lexical scores still work */ }
   }
@@ -393,7 +396,7 @@ function scoreEntry(qSide, normQuery, queryWords, queryContent, item) {
 import { FastCache } from './fastcache.js';
 const LOOKUP_CACHE = new FastCache({ max: 800, ttlMs: 15 * 60_000 });
 
-export function lookupKnowledge(rawText, store = null) {
+export function lookupKnowledge(rawText, store = null, opts = {}) {
   const s = String(rawText ?? '').trim();
   if (!s || s.length > 220) return null;
   const normQuery = normalize(s.replace(/^(?:please|plz|bhai|bro|yaar|hey|hi|hello|suno|arre|arey|batao|bata|tell me|what is|who is|kya hai|kaun hai|kab hua|kahan hai)\s+/i, '').replace(/[?!.]+$/, ''));
@@ -401,7 +404,7 @@ export function lookupKnowledge(rawText, store = null) {
   // ⚡ 3.7.0 result cache — repeated questions answer in ~µs (LRU + TTL)
   const langHint = /[\u0900-\u097F]/.test(s) ? 'd'
     : /\b(kya|kaun|kab|kahan|kaise|hai|ki|ke|me|mein|batao|bata|kisne|hota|hoti)\b/.test(s.toLowerCase()) ? 'h' : 'e';
-  const cacheKey = `${normQuery}|${langHint}`;
+  const cacheKey = `${normQuery}|${langHint}|${store?.data?.preferredLanguageMode ?? ""}|${loadBrain(opts).meta?.trainedAt ?? "fallback"}`;
   const cachedHit = LOOKUP_CACHE.get(cacheKey);
   if (cachedHit !== undefined) return cachedHit;
 
@@ -411,7 +414,7 @@ export function lookupKnowledge(rawText, store = null) {
   let bestItem = null;
   let bestScore = 0;
   for (const item of BUILTIN_KNOWLEDGE) {
-    const sc = scoreEntry(qSide, normQuery, queryWords, queryContent, item);
+    const sc = scoreEntry(qSide, normQuery, queryWords, queryContent, item, opts);
     if (sc > bestScore) {
       bestScore = sc;
       bestItem = item;

@@ -57,12 +57,9 @@ test('dispatch: single-intent messages go to one bot', () => {
 test('dispatch: compound messages split into a squad', () => {
   const text = 'explain photosynthesis and likho ek poem barish pe';
   const plan = orchestrate(text, classifyIntent(text));
-  // Whatever the net's exact labels are, the squad must span 2 different bots
-  // OR degrade gracefully to a single bot — never crash, never 3+ bots.
-  assert.ok(plan.squad.length <= 2, 'squad capped at 2');
-  if (plan.multi) {
-    assert.notEqual(plan.squad[0].agent.id, plan.squad[1].agent.id, 'different bots');
-  }
+  assert.equal(plan.multi, true, 'clear independent parts must actually split');
+  assert.deepEqual(plan.squad.map((s) => s.agent.id), ['explainer', 'creative']);
+  assert.deepEqual(plan.squad.map((s) => s.text), ['explain photosynthesis', 'likho ek poem barish pe']);
 });
 
 test('dispatch: plain "and" inside one question does NOT create a squad', () => {
@@ -76,8 +73,8 @@ test('dispatch: "solve X and write code" wants MathBot + CodeBot', () => {
   const text = 'solve 2x + 4 = 8 and write a python function to reverse a string';
   const plan = orchestrate(text, classifyIntent(text));
   const names = plan.squad.map((s) => s.agent.name);
-  assert.ok(names.includes('MathBot') || names.includes('CodeBot'), names.join('+'));
-  if (plan.multi) assert.equal(plan.squad.length, 2);
+  assert.deepEqual(names, ['MathBot', 'CodeBot']);
+  assert.equal(plan.multi, true);
 });
 
 test('dispatch: taskBrief tells each bot its share of the work', () => {

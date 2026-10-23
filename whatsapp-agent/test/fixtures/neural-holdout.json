@@ -1,0 +1,290 @@
+[
+  {
+    "t": "hey buddy how is your day going",
+    "label": "greeting"
+  },
+  {
+    "t": "subah ho gayi dost good morning",
+    "label": "greeting"
+  },
+  {
+    "t": "hello observer tum ready ho",
+    "label": "greeting"
+  },
+  {
+    "t": "good afternoon yaar kya haal chal",
+    "label": "greeting"
+  },
+  {
+    "t": "hi there my friend",
+    "label": "greeting"
+  },
+  {
+    "t": "oye bhai sab badhiya na",
+    "label": "greeting"
+  },
+  {
+    "t": "tumne bahut help ki thank you dost",
+    "label": "gratitude"
+  },
+  {
+    "t": "that explanation helped a lot thanks",
+    "label": "gratitude"
+  },
+  {
+    "t": "shukriya problem finally clear ho gayi",
+    "label": "gratitude"
+  },
+  {
+    "t": "amazing work i appreciate your help",
+    "label": "gratitude"
+  },
+  {
+    "t": "you nailed it thanks bro",
+    "label": "gratitude"
+  },
+  {
+    "t": "bahut khoob yaar dhanyavaad",
+    "label": "gratitude"
+  },
+  {
+    "t": "which country has helsinki as its capital",
+    "label": "factual"
+  },
+  {
+    "t": "bharat ka national animal kaunsa hai",
+    "label": "factual"
+  },
+  {
+    "t": "who discovered the electron",
+    "label": "factual"
+  },
+  {
+    "t": "what does the acronym cpu stand for",
+    "label": "factual"
+  },
+  {
+    "t": "mars ke kitne natural satellites hain",
+    "label": "factual"
+  },
+  {
+    "t": "when did the first moon landing happen",
+    "label": "factual"
+  },
+  {
+    "t": "compare postgresql and sqlite for a small app",
+    "label": "comparison"
+  },
+  {
+    "t": "react versus vue kis use case me accha hai",
+    "label": "comparison"
+  },
+  {
+    "t": "solid state drive aur hard disk me antar bata",
+    "label": "comparison"
+  },
+  {
+    "t": "contrast supervised and unsupervised learning",
+    "label": "comparison"
+  },
+  {
+    "t": "which is better for latency grpc or rest",
+    "label": "comparison"
+  },
+  {
+    "t": "fedora vs ubuntu as a developer workstation",
+    "label": "comparison"
+  },
+  {
+    "t": "how can i set up a python virtual environment",
+    "label": "howto"
+  },
+  {
+    "t": "wifi password linux par kaise change karte hain",
+    "label": "howto"
+  },
+  {
+    "t": "steps to enable two factor authentication",
+    "label": "howto"
+  },
+  {
+    "t": "git repository ka backup kaise banate hain",
+    "label": "howto"
+  },
+  {
+    "t": "how do i configure ssh keys safely",
+    "label": "howto"
+  },
+  {
+    "t": "docker compose install karne ka tarika bata",
+    "label": "howto"
+  },
+  {
+    "t": "implement a typescript debounce utility",
+    "label": "code"
+  },
+  {
+    "t": "mere javascript promise rejection ka bug fix kar",
+    "label": "code"
+  },
+  {
+    "t": "write sql to count active users per week",
+    "label": "code"
+  },
+  {
+    "t": "python me csv parser ka working code do",
+    "label": "code"
+  },
+  {
+    "t": "refactor this recursive function for readability",
+    "label": "code"
+  },
+  {
+    "t": "build a node api endpoint with validation",
+    "label": "code"
+  },
+  {
+    "t": "walk me through how garbage collection works",
+    "label": "explain"
+  },
+  {
+    "t": "why does a rainbow form after rain",
+    "label": "explain"
+  },
+  {
+    "t": "machine learning overfitting ko simple language me samjhao",
+    "label": "explain"
+  },
+  {
+    "t": "describe the mechanism behind a solar cell",
+    "label": "explain"
+  },
+  {
+    "t": "explain why database indexes improve reads",
+    "label": "explain"
+  },
+  {
+    "t": "neural network backpropagation kaise kaam karta hai",
+    "label": "explain"
+  },
+  {
+    "t": "yaar sab kuch overwhelming lag raha hai",
+    "label": "emotional"
+  },
+  {
+    "t": "i feel alone and could use someone to talk to",
+    "label": "emotional"
+  },
+  {
+    "t": "exam ko lekar anxiety bahut badh gayi hai",
+    "label": "emotional"
+  },
+  {
+    "t": "i am exhausted and losing motivation",
+    "label": "emotional"
+  },
+  {
+    "t": "aaj dil bahut dukhi hai dost",
+    "label": "emotional"
+  },
+  {
+    "t": "i am nervous about tomorrow and cannot relax",
+    "label": "emotional"
+  },
+  {
+    "t": "compose a short hopeful verse about winter",
+    "label": "creative"
+  },
+  {
+    "t": "write an instagram caption for my mountain trip",
+    "label": "creative"
+  },
+  {
+    "t": "ek funny kahani suna ek robot ki",
+    "label": "creative"
+  },
+  {
+    "t": "suggest playful names for a coffee shop",
+    "label": "creative"
+  },
+  {
+    "t": "barish par chaar line ki kavita likho",
+    "label": "creative"
+  },
+  {
+    "t": "draft a warm birthday wish for my sister",
+    "label": "creative"
+  },
+  {
+    "t": "evaluate 18 percent of 750",
+    "label": "math"
+  },
+  {
+    "t": "calculate the lcm of 18 and 24",
+    "label": "math"
+  },
+  {
+    "t": "solve the equation 4x minus 8 equals 20",
+    "label": "math"
+  },
+  {
+    "t": "2500 par 12 percent discount kitna bachega",
+    "label": "math"
+  },
+  {
+    "t": "find the derivative of x cubed",
+    "label": "math"
+  },
+  {
+    "t": "a rectangle is 13 by 7 what is its area",
+    "label": "math"
+  },
+  {
+    "t": "remember that my preferred editor is neovim",
+    "label": "personal"
+  },
+  {
+    "t": "meri coffee preference bina chini wali save kar",
+    "label": "personal"
+  },
+  {
+    "t": "my birthday is on the twenty first of march remember it",
+    "label": "personal"
+  },
+  {
+    "t": "what have you learned about my study habits",
+    "label": "personal"
+  },
+  {
+    "t": "mujhe chhote replies pasand hain yaad rakhna",
+    "label": "personal"
+  },
+  {
+    "t": "remind me that my favourite colour is teal",
+    "label": "personal"
+  },
+  {
+    "t": "what is your opinion on a four day work week",
+    "label": "misc_chat"
+  },
+  {
+    "t": "would you rather live near mountains or a beach",
+    "label": "misc_chat"
+  },
+  {
+    "t": "yaar kuch interesting random baat kar",
+    "label": "misc_chat"
+  },
+  {
+    "t": "do you think humans will ever stop using phones",
+    "label": "misc_chat"
+  },
+  {
+    "t": "tell me a silly joke about office life",
+    "label": "misc_chat"
+  },
+  {
+    "t": "aaj bas thodi casual baat karte hain",
+    "label": "misc_chat"
+  }
+]

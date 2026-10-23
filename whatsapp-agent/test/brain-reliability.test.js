@@ -515,3 +515,10 @@ test('protocol: a large current task is rejected with a size error, never silent
   assert.throws(() => fitAgentMessages(messages, [write], { maxChars: 4000, compact: true }), (err) => err.status === 413);
   assert.equal(messages[1].content.length, 8000);
 });
+
+
+test('transport: HTTP 413 wins over a misleading rate_limit_exceeded envelope', () => {
+  const error = new BrainError('413: request payload too large', { status: 413, code: 'rate_limit_exceeded' });
+  assert.equal(brainFailure(error).kind, 'context');
+  assert.equal(brainFailure(new BrainError('429: too many tokens this minute', { status: 429, code: 'rate_limit_exceeded' })).kind, 'rate_limit');
+});

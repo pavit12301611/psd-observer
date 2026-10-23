@@ -5,6 +5,7 @@
 // no vocabulary to maintain, handles Hinglish/English/text-speak equally.
 
 const HASH_DIM = 384;
+export const FEATURE_VERSION = 2;
 
 /**
  * Lexicographic cue flags — engineered indicator features appended to the
@@ -18,19 +19,19 @@ const CUE_FLAGS = [
   [/[?]/, 'qmark'],
   [/^(?:what|who|when|where|why)\b/, 'wh'],
   [/^how\s+(?:many|much|far|tall|old|long|often)\b/, 'howmany'],
-  [/^(?:how to|how do i|how do you (?:make|install|create|reset|change|write|build|start|use|get)|how can i|kaise (?:kar|install|ban))\b/, 'howto'],
+  [/^(?:how to|how do i|how do you (?:make|install|create|reset|change|write|build|start|use|get)|how can i|steps to|instructions for|kaise (?:kar|install|ban))\b/, 'howto'],
   [/^how\b/, 'how'],
   [/^(?:kya|kaun|kab|kahan|kyun|kisne|kitna|kitne|kitni)\b/, 'hiwh'],
   [/^kaise\b/, 'kaise'],
-  [/(?:^(?:explain|samjhao|describe|detail)\b|how (?:does|do) .*\bwork|kaise kaam karta|kyun hota hai)/, 'explain'],
+  [/(?:^(?:explain|samjhao|describe|detail|walk me through)\b|how (?:does|do) .*\bwork|kaise kaam karta|kyun hota hai)/, 'explain'],
   [/^(?:write|likho|banao|create|compose|design|generate)\b/, 'create'],
   [/^(?:solve|calculate|compute|evaluate|find)\b/, 'mathverb'],
-  [/\b(vs\.?|versus|difference|compare|farak|better|antar|kaunsa)\b/, 'cmp'],
+  [/\b(vs\.?|versus|difference|compare|contrast|farak|better|antar)\b/, 'cmp'],
   [/\b(thanks|thank|shukriya|dhanyavaad|badhiya|great|awesome|accha jawab|kamaal)\b/, 'praise'],
-  [/\b(mood|sad|khush|tension|stress|lonely|dar|bura|off hai|burnout|fail|anxiety|dukhi)\b/, 'emo'],
-  [/\b(poem|kavita|story|kahani|caption|shayari|quote|lyrics|limerick|rap|song|gaana)\b/, 'creative'],
+  [/\b(mood|sad|khush|tension|stress|stressed|lonely|alone|overwhelmed|overwhelming|exhausted|nervous|motivation|dar|bura|off hai|burnout|fail|anxiety|dukhi)\b/, 'emo'],
+  [/\b(poem|verse|kavita|story|kahani|caption|shayari|quote|lyrics|limerick|rap|song|gaana|names|wish)\b/, 'creative'],
   [/\b(mera|meri|mujhe|mereko|my name|my favourite|my favorite|yaad rakh|remember|reminder|birthday|who am i|about me)\b/, 'personal'],
-  [/\b(code|script|function|debug|bug|regex|sql|python|javascript|react|api|query|compiler)\b/, 'codeword'],
+  [/\b(code|script|function|debug|bug|refactor|implement|regex|sql|python|javascript|typescript|react|api|query|compiler)\b/, 'codeword'],
   [/\b(hi|hello|hey|yo|namaste|namaskar|radhe|good morning|good night|good evening|kaise ho|kya haal|wassup|sup)\b/, 'greet'],
   [/\b(bye|gn|tata|see you|goodbye)\b/, 'bye'],
   [/^(?:\d|[xXn]\s*[*+\-/^=])/, 'mathstart'],
@@ -72,6 +73,13 @@ const BILINGUAL = {
   samvidhan: 'constitution', pradhanmantri: 'prime minister',
   rashtrapati: 'president', sansad: 'parliament', sainya: 'military',
   fauj: 'army', yuddh: 'war', shanti: 'peace', kranti: 'revolution',
+  'नमस्ते': 'hello', 'नमस्कार': 'hello', 'धन्यवाद': 'thanks', 'शुक्रिया': 'thanks',
+  'भारत': 'india', 'राजधानी': 'capital', 'किसने': 'who', 'कब': 'when',
+  'कैसे': 'how', 'क्या': 'what', 'कौन': 'who', 'समझाओ': 'explain',
+  'समझाइए': 'explain', 'कविता': 'poem', 'कहानी': 'story', 'लिखो': 'write',
+  'कोड': 'code', 'गणना': 'calculate', 'उदास': 'sad', 'परेशान': 'stressed',
+  'तुलना': 'compare', 'अंतर': 'difference', 'याद': 'remember', 'मेरा': 'my',
+  'मेरी': 'my', 'मुझे': 'me', 'जन्मदिन': 'birthday', 'मित्र': 'friend',
 };
 
 // ── Memoization ────────────────────────────────────────────────────────────
@@ -103,6 +111,7 @@ const tokLRU = makeLRU();
 
 function normalizeTextRaw(s) {
   return String(s ?? '')
+    .normalize('NFKC')
     .toLowerCase()
     .replace(/\bu\b/g, 'you')
     .replace(/\bur\b/g, 'your')
@@ -112,7 +121,7 @@ function normalizeTextRaw(s) {
     .replace(/\bplz\b/g, 'please')
     .replace(/\bwanna\b/g, 'want to')
     .replace(/\bgotta\b/g, 'got to')
-    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
@@ -135,7 +144,8 @@ export function tokens(s) {
 function textFeaturesRaw(text, dim = DEFAULT_DIM) {
   const raw = String(text ?? '').toLowerCase().trim();
   const vec = new Array(dim).fill(0);
-  const toks = tokens(text);
+  const normText = normalizeText(text);
+  const toks = normText.split(' ').filter(Boolean);
   const add = (gram, weight = 1) => {
     const idx = fnv1a(gram) % HASH_DIM;
     vec[idx] += weight;
@@ -151,7 +161,7 @@ function textFeaturesRaw(text, dim = DEFAULT_DIM) {
 
   // append cue-flag slots (dedicated positions, weight 2.5 — strong signals)
   for (let f = 0; f < CUE_FLAGS.length; f++) {
-    if (CUE_FLAGS[f][0].test(raw)) vec[HASH_DIM + f] = 2.5;
+    if (CUE_FLAGS[f][0].test(raw) || CUE_FLAGS[f][0].test(normText)) vec[HASH_DIM + f] = 2.5;
   }
 
   let norm = 0;
@@ -173,6 +183,13 @@ export function textFeatures(text, dim = DEFAULT_DIM) {
 // knowledge scan (query × hundreds of keys) the sides repeat constantly —
 // compute each side once, then only the 13 cheap scalars per pair.
 const sideLRU = makeLRU();
+// Function words must not make unrelated facts look semantically equal
+// ("of" in two different science topics, "are" in an initial/name).
+const PAIR_STOP = new Set(('a an the of to in on and or what who when where why how is are was were be been being '
+  + 'do does did you your me my i we our it its this that these those can could would should '
+  + 'kya hai hain ho hoon ka ki ke ko se me mein par pe bata batao tell about explain '
+  + 'bhai bro yaar please plz').split(' '));
+
 
 export function preparePairSide(s) {
   const raw = String(s ?? '');
@@ -180,12 +197,12 @@ export function preparePairSide(s) {
   if (hit) return hit;
   const norm = normalizeText(raw);
   const toks = new Set(norm.split(' ').filter(Boolean));
-  return sideLRU.set(raw, { raw, norm, toks, vec: textFeatures(raw), len: norm.length });
+  return sideLRU.set(raw, { raw, norm, toks, contentToks: new Set([...toks].filter((t) => !PAIR_STOP.has(t))), vec: textFeatures(raw), len: norm.length });
 }
 
 export function pairFeaturesPrepared(q, c) {
-  const qt = q.toks;
-  const ct = c.toks;
+  const qt = q.contentToks ?? q.toks;
+  const ct = c.contentToks ?? c.toks;
   let inter = 0;
   for (const t of qt) if (ct.has(t)) inter += 1;
   const union = qt.size + ct.size - inter || 1;

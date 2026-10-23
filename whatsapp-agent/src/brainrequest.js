@@ -35,13 +35,16 @@ export function brainFailure(error, config = {}) {
   if (status === 401 || (status === 403 && !/model|endpoint/i.test(detail)) || /invalid.api.key|authentication/i.test(detail)) {
     kind = 'auth';
     hint = 'Provider rejected the API key/access. Check its key in .env, then restart the agent.';
+  } else if (status === 413) {
+    kind = 'context';
+    hint = 'Prompt/tool context is too large. /agent tries one compact retry; use file paths for large code/data.';
   } else if (status === 429 || /rate.limit|quota.exceeded|too.many.requests/i.test(detail)) {
     kind = 'rate_limit';
     hint = 'Free-tier quota/rate limit reached. Wait for the cooldown or configure another brain.';
   } else if (code === 'output_limit') {
     kind = 'output';
     hint = 'Model output was cut off. Increase AGENT_MAX_TOKENS or use smaller file edits.';
-  } else if (status === 413 || /context.length|context.window|too.many.tokens|request.too.large|maximum.context|reduce.*(?:tokens|length)/i.test(detail)) {
+  } else if (/context.length|context.window|too.many.tokens|request.too.large|maximum.context|reduce.*(?:tokens|length)/i.test(detail)) {
     kind = 'context';
     hint = 'Prompt/tool context is too large. /agent tries one compact retry; use file paths for large code/data.';
   } else if (status === 404 || /model.*(?:not.found|decommission|not.available|does.not.exist)|no.endpoints/i.test(detail)) {

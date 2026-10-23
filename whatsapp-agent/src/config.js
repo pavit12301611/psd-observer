@@ -196,6 +196,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     maxHeavyPerHour: int(e.MAX_HEAVY_PER_HOUR, 12),
     heavyWindowMs: int(e.HEAVY_WINDOW_MS, 3_600_000),
     aiTimeoutMs: int(e.AI_TIMEOUT_MS, 60_000),
+    maxParallelTasks: Math.max(1, Math.min(4, int(e.MAX_PARALLEL_TASKS, 2))),
 
     // Automation safety: older builds clicked hard-coded screen coordinates
     // when OCR missed a button. Off by default — blind clicking can hit

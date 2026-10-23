@@ -454,6 +454,48 @@ on "hi" and nothing hands a 10-step job to a 1B model:
 - `/brains` shows the configured catalog, observed health, actual error/hint,
   recent decisions and budget (it does not prove unused endpoints are live).
 
+### Trained routing and safe multitasking (3.9.0)
+
+- Local IntentNet is now **406→64→12**, trained with 491 curated English,
+  Hinglish and basic Hindi examples. Indexed kNN + sparse inference reduce
+  local routing p50 from ~161µs to ~48µs in the recorded comparison (~3.4×).
+- Fixed 72-case routing probe: **55→68 correct** (76.4→94.4%); independent
+  trainer split test: **83.6% (73 examples, int8/train-only memory)**. These
+  are routing metrics, **not overall AI-answer accuracy** or Grok/Claude-level
+  foundation-model training. See [NEURAL.md](NEURAL.md) for methodology/limits.
+- `/neural status`, `/neural classify <text>`, `/neural labels`,
+  `/neural learn code | my example`, `/neural train` and `/retrain` support
+  real cancellable CPU-worker training. Only explicit owner-approved labels
+  are trusted; private examples are never included in release training.
+
+```text
+/batch /ask explain snapshot isolation || /ask write a poem about a comet || /time
+/batch /open chrome || /open code || /note prepare the demo
+/batch status
+/batch results
+/taskstatus
+/stop
+```
+
+Up to **8 tasks**, normally **2 concurrent answer/read workers**
+(`MAX_PARALLEL_TASKS=1..4`). Allowlisted PC/write commands run as exclusive
+serialized barriers, respecting the original owner/PIN/confirmation checks.
+A failure/confirmation prevents new starts; no automatic approvals, side-effect
+retries, shell/media or nested batching. Parallel answers are text-only; use
+`/agent` for dependent execution and `/solve` for full computation verification.
+Progress, saved partial `/batch results`, and `/stop` work during a batch. Separate incoming messages still use
+the busy guard.
+
+Clear independent two-part questions auto-split into specialists with separate
+prompts and detached history. Results stay in request order and write one
+conversation turn. The answer cache now includes context/memory/mission; fast
+local answers also remain in conversation history. Bad checkpoints fall back
+safely instead of masking the shipped model.
+
+`npm run bench` separates unique/cached queries and a real fresh-process load;
+`node scripts/compare-neural.mjs --ref 507d640` reproduces the before/after
+comparison from Git history. Neither benchmark measures live-provider speed.
+
 ### Heavy-task reliability (3.8.1)
 
 `/agent` no longer hides every failure behind **all brains failed**:
