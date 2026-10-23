@@ -1,5 +1,7 @@
 # Observer Android companion
 
+**[Download and install the verified Preview](docs/INSTALL.md)** · [CI evidence](docs/validation-ci.json)
+
 A lean, installable Android client for the existing owner-controlled agent. This is a separate focused build target, **not a rewrite of the large upstream Tauri application**. It deliberately avoids bundling Auth0, telemetry, OCR/WASM runtimes, a JVM/Rust engine or large on-device models into the phone frontend. The existing `app/mobile` project is preserved.
 
 ## Design / target
