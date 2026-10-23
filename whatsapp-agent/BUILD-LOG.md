@@ -2015,3 +2015,28 @@ loop); transcribe.js has `transcribeAudio(config, buffer)` not
 
 **Suite:** 325 → 348 tests (batch1 8 + batch2 7 + batch3 8), 348/348 green.
 Version 3.5.0 + release notes + bundle 874K.
+
+## Part 11 — 3.6.0: 26 Smart Upgrades (one best-per-feature)
+User asked for the BEST improvement of every existing feature. All landed:
+context.js (multi-turn "wo file" memory), brainfallback.js (failover ladder),
+corrections.js ("galat, asli jawab X hai" + weekly retrain policy),
+answerquality.js (squad best-answer scoring), sourcelinks.js (wiki footer),
+planpreview.js (/plan→/go), screendiff.js (/look diff), highlights.js
+(scene-detect reels), timelapse.js (webcam timelapse), formfill.js (/fill),
+sharedetect.js (screen-share warn/arm), macrohistory.js (/savemacro),
+watchalert.js (/watch price/change/release alerts — brief-integrated),
+playlist.js (/yt playlist notes), contentsearch.js (/fsearch),
+netwatch.js (wifi watchdog), catchup.js (missed-cron catch-up),
+callscript.js (saved call scripts), quiet.js (quiet hours + digest),
+voicereply.js (voice→voice), safety.js (confirm token + TRASH + /panic),
+rollback.js (/snapshot + /rollback).
+
+Bugs caught by tests: absorb() stored pdfs out of the "file" slot ("wo file"
+never resolved); macrohistory over-filtered via isReserved (ALL command names
+were reserved); watchalert lastAlert=0 cooldown math (0 means never — the
+powerguard trap AGAIN); AFFIRM chain in handle() only knew actions.js pending
+("haan" fell through to chat for safety confirms — fixed + confirm wildcard).
+node_modules wiped mid-run (qrcode missing) — npm install restored it.
+
+Suite: 348 → 368 tests, 368/368 green. Version 3.6.0, notes (⚡ SMART
+UPGRADES), bundle 907K.

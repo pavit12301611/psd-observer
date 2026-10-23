@@ -28,6 +28,30 @@ import * as guardMode from './guard.js';
 import * as notifMirror from './notifmirror.js';
 import * as study from './studypack.js';
 import * as expenses from './expenses.js';
+import { resolveRefs, absorb, contextStatus, clearContext } from './context.js';
+import { parseCorrection, saveCorrection, applyCorrection, listCorrections, shouldRetrain, markTrained, asTrainingPairs, RETRAIN_AFTER_DAYS, RETRAIN_AFTER_NEW } from './corrections.js';
+import { scoreAnswer, bestAnswer } from './answerquality.js';
+import { withSource, extractSources } from './sourcelinks.js';
+import { completeWithFallback, fallbackReply } from './brainfallback.js';
+import { makePlan, planStatus, approvePlan, cancelPlan, buildSteps, planReply } from './planpreview.js';
+import { diffBuffers, setBaseline, compareWithBaseline, diffReply, pushBuffer, resetDiff } from './screendiff.js';
+import { extractHighlights, highlightReply } from './highlights.js';
+import { startTimelapse, stopTimelapse } from './timelapse.js';
+import { parseFill, fillForm, fillReply } from './formfill.js';
+import { detectShare, sharePolicy } from './sharedetect.js';
+import { saveMacroFromHistory, trackCommand } from './macrohistory.js';
+import { addWatch, removeWatch, checkAll, watchList } from './watchalert.js';
+import { buildPlaylistNotes } from './playlist.js';
+import { searchContent, contentReply } from './contentsearch.js';
+import { netTick, netReport, setNetwatch } from './netwatch.js';
+import { saveScript, getScript, listScripts, callPlan } from './callscript.js';
+import { setWindow as setQuietWindow, clearWindow as clearQuiet, digest as quietDigest, gate as quietGate, loadQuiet } from './quiet.js';
+import { shouldVoiceReply, voiceReply } from './voicereply.js';
+import {
+  isDestructive, requestConfirm, confirmPending, cancelPending, pendingState,
+  moveToTrash, listTrash, restoreTrash, runPanic, TRASH_DIR,
+} from './safety.js';
+import { saveSnapshot, rollback as rollbackTo, snapshotList } from './rollback.js';
 import * as docChat from './docchat.js';
 import * as photoSearch from './photosearch.js';
 import * as calendar from './calendar.js';
@@ -277,6 +301,16 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /clip · /copy <text> — 📋 PC↔phone clipboard sync
 • /pcs register <name> · /pcs — 🖥️ multi-PC fleet status
 • /hw add maths pg 42 kal · /hw today|week|done — 📝 homework tracker
+
+*⚡ 3.6.0 — Smart Upgrades*
+• 🧠 Multi-turn yaad (\"wo file bhejo\") · \`/context\` · \`galat, asli jawab X hai\` se seekhta hai (\`/corrections\`) · \`/retrain\`
+• 🤖 \`/plan <task>\` → preview → \`/go\` (plan-confirm mode) · \`/no\` cancel
+• 🔍 \`/look diff\` — screen pe kya badla · \`/highlights <rec>\` — reel · \`/webcam timelapse 2h\` · \`/fill name:Rahul, phone:…\`
+• 👀 \`/watch add <url> [price<5000|contains x|release]\` — page/price/release alerts (brief me bhi) · \`/yt playlist <url>\` notes
+• 🔎 \`/fsearch <text>\` — file CONTENT search · \`/netwatch\` — wifi watchdog · \`/savemacro <name>\` — last commands → macro
+• 📞 \`/callscript save <name> <text>\` · 🌙 \`/quiet 22:00-07:00\` + \`/digest\` · 🎤 voice→voice reply
+• 🔒 \`/rm\` ab TRASH me (recoverable: \`/trash restore\`) · double-confirm · \`/panic\` kill-switch · \`/snapshot\` + \`/rollback\`
+• 🕶️ \`/shares\` — screen-share detect (shades kabhi auto-OFF nahi)
 
 *🌐 Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)*
 • /reach [doctor] — 16+ internet channels + AT-SPI desktop grounding health report
@@ -1716,6 +1750,13 @@ export function createAgent({
         const hwToday = homework.todayReply();
         if (!/koi homework due nahi/.test(hwToday)) extra.push(hwToday);
       } catch { /* brief never breaks */ }
+      try {
+        // 👀 watch alerts (page change / price / release) join the brief
+        const { alerts } = await checkAll({
+          fetchText: (u) => fetch(u, { signal: AbortSignal.timeout(5000) }).then((r) => r.text()),
+        });
+        if (alerts?.length) extra.push(`👀 *Watch alerts*\n${alerts.join('\n')}`);
+      } catch { /* brief never breaks */ }
       return [baseBrief, addons, ...extra].filter(Boolean).join('\n\n');
     }
     if (/^(off|band|stop)$/i.test(raw)) {
@@ -2521,7 +2562,64 @@ export function createAgent({
     return formatOwnerLocationCard(store, config, res.location);
   }
 
+  // ── 3.6.0 flows (diff / timelapse / playlist) ─────────────────────────
+  async function diffFlow() {
+    try {
+      const shot = await pc.captureScreenshot();
+      const buf = shot?.image ?? shot;
+      if (!buf || !Buffer.isBuffer(buf)) return '🔍 Screenshot nahi mila.';
+      const res = compareWithBaseline(buf, {});
+      if (res.first) {
+        setBaseline(buf, {});
+        pushBuffer(buf);
+        return '📸 Pehla snapshot liya — ab `\/look diff` dobara bolo, badlaav bataunga.';
+      }
+      const out = diffReply(res, {});
+      setBaseline(buf, {});
+      pushBuffer(buf);
+      return out;
+    } catch (err) {
+      return `🔍 Diff fail: ${err?.message ?? err}`;
+    }
+  }
+
+  async function timelapseFlow(raw) {
+    const s = String(raw ?? '').replace(/^timelapse\s*/i, '').trim();
+    const stopM = s.match(/^stop\s+(\S+)/i);
+    if (stopM) return stopTimelapse(stopM[1]);
+    const mins = Number((s.match(/(\d+(?:\.\d+)?)\s*(?:min|m|h)/) ?? [])[1] ?? 60);
+    const unit = (s.match(/\d+(?:\.\d+)?\s*(min|m|h)/) ?? [])[1] ?? 'min';
+    const durationMs = mins * (unit.startsWith('h') ? 3600_000 : 60_000);
+    const intervalSec = Number((s.match(/every\s+(\d+)\s*s/i) ?? [])[1] ?? 60);
+    return startTimelapse({
+      durationMs,
+      intervalSec,
+      capture: async () => (await webcamPhoto()).image,
+      onDone: (r) => notifyOwner(`⏩ Timelapse ready: ${r.file} (${r.frames} frames)`),
+    }).reply ?? '⏩ Timelapse start nahi hua.';
+  }
+
+  async function ytplFlow(raw) {
+    const ref = String(raw ?? '').replace(/^playlist\s*/i, '').trim();
+    if (!ref) return '📺 Usage: `/yt playlist <url>`';
+    return buildPlaylistNotes(ref, {
+      listVideos: async (r) => {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const run = promisify(execFile);
+        const { stdout } = await run('yt-dlp', ['--flat-playlist', '-J', r], { timeout: 45_000, maxBuffer: 8 * 1024 * 1024 });
+        const data = JSON.parse(stdout);
+        return (data.entries ?? []).map((e) => ({ title: e.title, url: e.url ?? e.webpage_url ?? '', transcript: '' }));
+      },
+    });
+  }
+
   async function handleCommand(cmd, args, ctx) {
+    // 3.6.0 quick hooks into existing commands (look diff / webcam timelapse / yt playlist)
+    if (cmd === 'look' && /^diff\b/i.test(String(args ?? ''))) return diffFlow();
+    if (cmd === 'webcam' && /^timelapse\b/i.test(String(args ?? ''))) return timelapseFlow(args);
+    if (cmd === 'yt' && /^playlist\b/i.test(String(args ?? ''))) return ytplFlow(args);
+    trackCommand(cmd, args);
     switch (cmd) {
       case 'stop': case 'cancel': case 'abort': case 'ruko': return stopCommand();
       case 'msg': case 'dm': case 'sendto': case 'whatsapp': return await msgCommand(args, ctx);
@@ -2806,7 +2904,11 @@ export function createAgent({
         return act('wifi', { action: sub || 'status' });
       }
       case 'bt': case 'bluetooth': return act('bluetooth', { action: (args || 'status').trim() || 'status' });
-      case 'kill': return args ? act('kill_process', { name: args }) : '🛑 Usage: /kill <process name>';
+      case 'kill': {
+        if (!args) return '🛑 Usage: /kill <process name> (confirm ke baad)';
+        if (!ctx.confirmed) return requestConfirm('kill', args);
+        return act('kill_process', { name: args });
+      }
       case 'svc': case 'service': {
         const [sub, name] = (args || '').split(/\s+/);
         if (!name) return '⚙️ Usage: /svc status <name> · /svc restart <name>';
@@ -2966,7 +3068,12 @@ export function createAgent({
         return act('zip_paths', { paths, output });
       }
       case 'unzip': return args ? act('unzip_path', { path: args }) : '📂 Usage: /unzip <file.zip>';
-      case 'rm': case 'delete': return args ? act('delete_path', { path: args }) : '🗑️ Usage: /rm <path>  (asks for confirmation)';
+      case 'rm': case 'delete': {
+        if (!args) return '🗑️ Usage: /rm <path>  (confirm ke baad TRASH me jaata hai — recoverable)';
+        if (!ctx.confirmed) return requestConfirm('rm', args);
+        const tr = moveToTrash(args);
+        return tr.reply ?? tr.error;
+      }
 
       // ── agent + confirmations ───────────────────────────────────────────
       case 'auto': case 'autopilot': return args ? autopilot.runAutopilot(args, { config, log, signal: ctx.signal }) : '🤖 Usage: /auto open chrome | tap Search | type hello | key enter | screenshot\nNatural: /auto open chrome and search for today weather then screenshot\nHar step verify hota hai — jo fail hua wahi batata hai.';
@@ -2992,10 +3099,24 @@ export function createAgent({
         return agentLoop.enabled ? noBrainReply() : '🤖 No free AI brain reachable. Direct commands still work: /open, /pc, /ls, /wifi… (/brains to fix)';
       }
       case 'yes': case 'haan': {
+        if (pendingState()) {
+          const conf = confirmPending('yes');
+          if (conf.ok) return handleCommand(conf.action, conf.args, { ...ctx, confirmed: true });
+          return conf.error;
+        }
         if (!store.data.pending && (pendingPower || pendingTap)) return handlePc('confirm');
         return toReply(await actions.runPending(ctx));
       }
-      case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
+      case 'no': case 'nahi': case 'cancel': {
+        if (pendingState()) cancelPending();
+        actions.clearPending(); pendingPower = null; pendingTap = null;
+        return '👍 Cancelled — kuch nahi kiya.';
+      }
+      case 'confirm': {
+        const conf = confirmPending(String(args || '').trim());
+        if (!conf.ok) return conf.error;
+        return handleCommand(conf.action, conf.args, { ...ctx, confirmed: true });
+      }
       case 'live': {
         // 🎥 Live screen mirror — frames keep coming to WhatsApp.
         const arg = String(args || '').trim().toLowerCase();
@@ -3190,6 +3311,179 @@ export function createAgent({
         }
         return '📝 Usage: `/hw add maths pg 42 kal` · `/hw today` · `/hw week` · `/hw done <id>`';
       }
+      case 'diff': return diffFlow();
+      case 'highlights': case 'highlight': {
+        const raw = String(args || '').trim();
+        const target = raw || store.data.lastRecordFile;
+        if (!target) return '✨ Usage: `/highlight <recording-file>` (ya /record ke baad `/highlight`)';
+        return highlightReply(await extractHighlights(target));
+      }
+      case 'fill': {
+        const fields = parseFill(args);
+        const r = await fillForm(fields, {
+          type: (t) => handlePc(`type ${t}`),
+          tab: () => handlePc('key tab'),
+        });
+        return fillReply(r);
+      }
+      case 'shares': {
+        const res = await detectShare({
+          probe: async () => {
+            const { exec } = await import('node:child_process');
+            const { promisify } = await import('node:util');
+            try { return (await promisify(exec)('ps -eo args', { timeout: 3000 })).stdout; } catch { return ''; }
+          },
+        });
+        if (!res.sharing) return '🕶️ Koi screen share detect nahi hui — safe.';
+        if (/^arm$/i.test(String(args || '').trim())) {
+          await handleCommand('shades', 'on', ctx);
+          return `🕶️ Screen share detect (${res.apps[0] ?? '?'}) — shades auto-ON kar diye. OFF sirf \`/shades off\` se.`;
+        }
+        return sharePolicy(res, { shadesOn: false }).message;
+      }
+      case 'watch': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (!sub || sub === 'list') return watchList();
+        if (sub === 'off') return removeWatch(rest[0]);
+        if (sub === 'check' || sub === 'now') {
+          const { alerts, checked } = await checkAll({
+            fetchText: async (u) => {
+              const res = await fetch(u, { signal: AbortSignal.timeout(8000) });
+              return res.text();
+            },
+          }).catch(() => ({ alerts: [], checked: 0 }));
+          return alerts.length
+            ? `👀 Checked ${checked}:\n${alerts.join('\n')}`
+            : `👀 Checked ${checked} watchers — abhi kuch naya nahi.`;
+        }
+        if (sub === 'add') {
+          const url = rest[0];
+          if (!url) return '👀 Usage: `/watch add <url> [price<5000 | contains <text> | release]`';
+          const r = addWatch(url, rest.slice(1).join(' '));
+          return r.reply ?? r.error;
+        }
+        return '👀 Usage: `/watch add <url> [rule]` · `/watch list` · `/watch check` · `/watch off <id>`';
+      }
+      case 'ytpl': return ytplFlow(args);
+      case 'fsearch': {
+        const raw = String(args || '').trim();
+        if (!raw) return '🔎 Usage: `/fsearch <text> [path]` — file CONTENT me search';
+        const [q, ...pathParts] = raw.split(/\s+(?=\/|~)/);
+        const root = pathParts.join(' ') || os.homedir();
+        const hits = await searchContent(q, { root });
+        return contentReply(hits, q);
+      }
+      case 'netwatch': {
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'on') return setNetwatch(true);
+        if (raw === 'off') return setNetwatch(false);
+        if (raw === 'report') return netReport();
+        const r = await netTick({
+          pingFn: async () => {
+            const { exec } = await import('node:child_process');
+            const { promisify } = await import('node:util');
+            await promisify(exec)('ping -c1 -W2 8.8.8.8', { timeout: 5000 });
+            return 10;
+          },
+          reconnectFn: async () => {
+            const { exec } = await import('node:child_process');
+            const { promisify } = await import('node:util');
+            await promisify(exec)('nmcli radio wifi on && nmcli con up --ask 2>/dev/null || true', { timeout: 15_000 });
+            return true;
+          },
+        });
+        return r.message ?? `📶 Net *${r.state}*${r.latency != null ? ` (${r.latency}ms)` : ''}`;
+      }
+      case 'callscript': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (!sub) return listScripts();
+        if (sub === 'save') {
+          const name = rest[0];
+          const r = saveScript(name, rest.slice(1).join(' '));
+          return r.reply ?? r.error;
+        }
+        if (sub === 'list') return listScripts();
+        const script = getScript(sub);
+        if (!script) return '📞 Script nahi mili. List: `/callscript list`';
+        const plan = callPlan(script);
+        return `📞 *Call script: ${sub}*\n${plan.map((s, i) => `${i + 1}. ${s.question ? '🗣️❓' : '🗣️'} ${s.say}`).join('\n')}\n\n_JARVIS call chahiye to: \`/callme\` bolo, main ye script bolunga._`;
+      }
+      case 'quiet': {
+        const raw = String(args || '').trim();
+        if (!raw || raw === 'status') {
+          const w = loadQuiet().window;
+          return w ? `🌙 Quiet hours active: ${w.startMin / 60}:${String(w.startMin % 60).padStart(2, '0')}–${w.endMin / 60}:${String(w.endMin % 60).padStart(2, '0')}` : '🌙 Quiet hours OFF. Set: `/quiet 22:00-07:00`';
+        }
+        if (/^(off|clear)$/i.test(raw)) return clearQuiet();
+        return setQuietWindow(raw);
+      }
+      case 'digest': return quietDigest();
+      case 'savemacro': {
+        const raw = String(args || '').trim();
+        const [name, nRaw] = raw.split(/\s+/);
+        if (!name) return '💾 Usage: `/savemacro <name> [n]` — last n commands ko macro banao';
+        const r = saveMacroFromHistory(store, name, Number(nRaw) || 5);
+        return r.reply ?? r.error;
+      }
+      case 'context': {
+        if (/^clear$/i.test(String(args || '').trim())) return clearContext();
+        return contextStatus();
+      }
+      case 'corrections': return listCorrections();
+      case 'retrain': {
+        const st = shouldRetrain();
+        if (!st.due) return `🧠 Retrain abhi zarurat nahi (${st.pending} new corrections, policy: ${RETRAIN_AFTER_DAYS}d ya ${RETRAIN_AFTER_NEW} new).`;
+        markTrained();
+        const pairs = asTrainingPairs();
+        return `🧠 *Retrain policy triggered* — ${pairs.length} corrections packed. Run \`npm run train:neural\` (ya main heartbeat pe khud) — abhi mark trained.`;
+      }
+      case 'plan': {
+        if (!args) return planStatus();
+        const steps = await buildSteps(args, {
+          plannerFn: (task) => ai.complete(config, `Plan this PC/browser task as 3-6 short numbered steps (no prose): ${task}`, log),
+        });
+        const plan = makePlan(args, steps);
+        return planReply(plan);
+      }
+      case 'go': {
+        const plan = approvePlan();
+        if (!plan) return '✅ Koi pending plan nahi. Banao: `/plan <task>`';
+        return runAgentTask(plan.task, ctx);
+      }
+      case 'snapshot': {
+        const r = saveSnapshot({ label: 'manual' });
+        return r.ok ? `⏪ Snapshot save: ${r.dest}` : r.error;
+      }
+      case 'snapshots': return snapshotList();
+      case 'rollback': return rollbackTo();
+      case 'panic': {
+        if (!ctx.confirmed) return requestConfirm('panic', '');
+        const r = runPanic({});
+        try { if (config.allowPcControl) await pc.lock?.(); } catch { /* best effort */ }
+        return r.reply;
+      }
+      case 'trash': {
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (sub === 'restore') return restoreTrash(rest.join(' '));
+        if (sub === 'empty') {
+          try {
+            for (const f of (await import('node:fs')).readdirSync(TRASH_DIR)) {
+              (await import('node:fs')).rmSync(`${TRASH_DIR}/${f}`, { recursive: true, force: true });
+            }
+            return '🗑️ Trash empty kar diya (permanent delete).';
+          } catch { return '🗑️ Trash pehle se khaali hai.'; }
+        }
+        return listTrash();
+      }
+      case 'voicereply': {
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'on') { store.data.voiceReplyOff = false; store.save?.(); return '🎤 Voice→voice reply *ON* (voice aayega to main bhi bolunga).'; }
+        if (raw === 'off') { store.data.voiceReplyOff = true; store.save?.(); return '🎤 Voice→voice reply *OFF*.'; }
+        return `🎤 Voice reply: ${store.data.voiceReplyOff ? 'OFF' : 'ON'} · on/off toggle`;
+      }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
         // screenshots stay CLEAR (backlight/gamma, never the framebuffer).
@@ -3287,6 +3581,9 @@ export function createAgent({
   }
 
   async function askAI(text, ctx = {}) {
+    if (store?.data) store.data.lastQuestion = String(text).slice(0, 200);
+    const forcedAnswer = applyCorrection(text, null);
+    if (forcedAnswer) return forcedAnswer;
     const det = solveDeterministicQuery(text);
     if (det) {
       bumpAccuracyStat(config, 'deterministicHits');
@@ -3317,7 +3614,8 @@ export function createAgent({
     if (kh && detectQuestionScope(text).scope === 'direct_fact') {
       store?.pushHistory?.('user', text);
       store?.pushHistory?.('assistant', kh.reply);
-      return kh.reply;
+      const wikiUrl = kh.url ?? (kh.wiki ? `https://en.wikipedia.org/wiki/${encodeURIComponent(String(text).split(/\s+/).slice(0, 4).join('_'))}` : null);
+      return withSource(kh.reply, kh.sources ?? (wikiUrl ? [{ url: wikiUrl, title: 'Wikipedia' }] : []));
     }
     // ── Multi-agent dispatcher: trained IntentNet splits the work ──
     // One bot for single-intent messages, a SQUAD for compound ones
@@ -3339,7 +3637,8 @@ export function createAgent({
         taskBrief: taskBrief(entry),
       }).catch(() => null)));
       const parts = plan.squad.map((entry, i) => ({ agent: entry.agent, text: results[i]?.text || '' }));
-      const merged = mergeSquadAnswers(parts);
+      const rankedParts = [...parts].sort((a, b) => scoreAnswer(text, b.text) - scoreAnswer(text, a.text));
+      const merged = mergeSquadAnswers(rankedParts);
       if (merged) {
         store?.pushHistory?.('user', text);
         store?.pushHistory?.('assistant', merged);
@@ -3721,7 +4020,8 @@ export function createAgent({
       return guestOut?.reply ?? null;
     }
 
-    const clean = String(text ?? '').trim();
+    let clean = String(text ?? '').trim();
+    const rawText = clean;
     if (!clean) return '🤖 I got an empty message. Try /help';
     // /stop is checked before everything else — before the dedup window and
     // before the busy flag — because it must cut in while work is running.
@@ -3734,6 +4034,16 @@ export function createAgent({
       // queue-like behaviour: tell owner we're busy, don't run in parallel (no double work)
       return '⏳ Ek kaam abhi chal raha hai — rokna ho to *\/stop* bhejo, ya khatam hone ka wait karo. (Parallel double-work blocked)';
     }
+    // ✏️ 3.6.0 — "galat, asli jawab X hai" → bot permanently seekh jata hai.
+    const corr = parseCorrection(rawText);
+    if (corr?.right && store.data.lastQuestion) {
+      saveCorrection(store.data.lastQuestion, corr.right);
+      store.data.lastQuestion = null;
+      return `✏️ *Seekh gaya!* Ab se is sawal ka jawab: *${corr.right.slice(0, 100)}*\nList: \`/corrections\``;
+    }
+    // 🧠 3.6.0 — multi-turn memory: "wo file bhejo" → last-mentioned file.
+    clean = resolveRefs(rawText);
+    absorb(rawText);
     const label = labelFor(clean);
     const task = taskRegistry.begin(label, { detail: clean.replace(/^\//, '').slice(0, 60) });
     activeSignal = task.signal;
@@ -3805,6 +4115,15 @@ export function createAgent({
         return res;
       }
 
+      // 3.6.0 safety pending (token confirm for rm/kill/panic): "haan" runs it.
+      if (pendingState()) {
+        if (AFFIRM.test(working)) {
+          const conf = confirmPending('yes');
+          if (conf.ok) return handleCommand(conf.action, conf.args, { ...effCtx, confirmed: true });
+          return conf.error;
+        }
+        if (DENY.test(working)) { cancelPending(); return '👍 Cancelled — kuch nahi kiya.'; }
+      }
       // A parked destructive action: "haan" runs it, "nahi" cancels.
       if (store.data.pending) {
         if (AFFIRM.test(working)) return toReply(await actions.runPending(effCtx));
