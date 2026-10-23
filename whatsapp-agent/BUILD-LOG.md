@@ -2040,3 +2040,30 @@ node_modules wiped mid-run (qrcode missing) — npm install restored it.
 
 Suite: 348 → 368 tests, 368/368 green. Version 3.6.0, notes (⚡ SMART
 UPGRADES), bundle 907K.
+
+## Part 12 — 3.7.0: Duet-Class Features (5 gaps closed) + speed
+Comparison with Anthropic's Claude Duet (launched 2026-10-21) left 5 gaps —
+all closed now:
+1. **mail.js + imap.js** — zero-dep IMAP-over-TLS client (injected socket,
+   testable) + digest engine: priority-first (🔴 OTP/invoice/urgent),
+   PII-redacted, /mail setup|today|on|off|status.
+2. **make.js** — /make report|slides|dashboard|csv → review-ready files
+   (self-contained HTML decks/dashboards, brain-drafted with template
+   fallback).
+3. **pii.js** — PII classifier: Luhn cards, Aadhaar (length-validated —
+   greedy group regex initially false-positived on 16-digit cards), PAN,
+   API keys, OTP/CVV/passwords. Strict secrets BLOCKED outbound; guest
+   replies + clipboard history redacted.
+4. **gcal.js** — Google Calendar sync without OAuth: ICS secret-feed pull
+   (dedupe) + .ics export (`/cal export` sends the file).
+5. **topics.js** — /topic channels with shared-memory namespaces, pins,
+   per-channel brain preamble (general stays clean → chat e2e untouched).
+
+Speed: knowledge.js lookupKnowledge result-level LRU (fastcache.js) —
+bench 553µs → 19.3µs/op (~28×), classifyIntent 4.5µs, accuracy 99.7%.
+
+Bugs caught by tests: aadhaar over-match on card numbers; OTP regex missed
+"is 445566" phrasing; batch3 clipboard history test updated for new
+redaction semantics; release-notes manual-restore bullet regex.
+
+Suite: 368 → 376 tests, 376/376 green. v3.7.0 + notes + bundle 923K.
