@@ -1937,6 +1937,27 @@ main `/shades off` bhejoon — warna galti se bhi nahi."* The auto-restore defau
 24 hours later the screen is STILL black and only `/shades off` restores it; plus opt-in timer
 still works when explicitly configured).
 
+## Part 8 — 🕶️ Shades full stealth: ShadeGuard + remote brightness (3.4.2)
+
+Owner reports two things: *"brightness control kar raha hun to screen visible ho jaarahi hai"*
+and *"shades on = remote PC control with full stealth mode — keyboard/touchpad ki zarurat nahi"*.
+
+**ShadeGuard (`src/shades.js`):** while shades are ON, EVERY brightness change — laptop
+brightness keys, touchpad, power daemons, anything — is clamped straight back to 0 within one
+600ms tick. Fork-free watchdog (sysfs `brightness` file read; `brightnessctl -m` fallback;
+xrandr gamma method re-asserts the ramp). The reveal bug is structurally gone: the only way
+back is `/shades off`. Guard re-arms automatically after an agent restart (still no
+auto-restore — the owner rule stands).
+
+**Stealth remote brightness:** `/pc brightness up|down|<0-100>` while shades are ON adjusts
+only the SAVED level (what `/shades off` will restore) — the panel stays black, the reply
+says so. Full remote control without ever breaking stealth; keyboard/touchpad never needed.
+
+**Result:** 318 → **322/322 tests green** (4 new: keypress clamped in one tick + zero forks
+when already at 0, guard re-armed after restart with tick still clamping, inert when shades
+are off, stealth brightness adjusts saved level only and `/shades off` restores the
+stealth-adjusted value).
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

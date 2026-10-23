@@ -22,7 +22,7 @@ import * as hands from './hands.js';
 import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js';
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
-import { shadesOn, shadesOff, shadesStatus, initShades } from './shades.js';
+import { shadesOn, shadesOff, shadesStatus, initShades, shadeAwareBrightness } from './shades.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -940,6 +940,10 @@ export function createAgent({
       case 'brightness': case 'bright': {
         let action = !rest ? 'get' : /^\d+$/.test(restParts[0]) ? 'set' : sub2volumeAction(restParts[0]);
         if (action === 'mute') action = 'get';
+        // 🕶️ Stealth: while shades are ON the panel stays black — this only
+        // adjusts the saved level that /shades off will restore.
+        const stealth = await shadeAwareBrightness(action, value);
+        if (stealth) return stealth;
         return pc.brightness(action, value);
       }
       case 'media': case 'music': {

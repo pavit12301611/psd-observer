@@ -1,4 +1,12 @@
 {
+  "3.4.2": {
+    "title": "🕶️ Shades: FULL STEALTH MODE — brightness keys ab screen reveal nahi kar sakti! 🛡️",
+    "bullets": [
+      "**ShadeGuard (`src/shades.js`)**: Pehle laptop ki brightness keys dabate hi screen dikh jaati thi — ab nahi. Shades ON ke dauraan har brightness change (keyboard, touchpad, power daemon, kuch bhi) turant *0 pe clamp* ho jaata hai. Screen sirf tab khulti hai jab aap `/shades off` bhejo — phone hi ek remote hai.",
+      "**Stealth Remote Brightness**: `/pc brightness 70` bhi stealth-safe hai — panel BLACK hi rehta hai, sirf *saved level* badalta hai jo `/shades off` pe apply hota hai. Keyboard/touchpad ki zarurat hi nahi — sab kuch WhatsApp se.",
+      "**Restart-proof**: Agent/PC restart ke baad ShadeGuard khud dobara lag jaata hai — blackout waise hi rehta hai (owner rule: koi auto-restore nahi)."
+    ]
+  },
   "3.4.1": {
     "title": "🕶️ Shades fix — screen ab sirf aapke `/shades off` se wapas aayega!",
     "bullets": [

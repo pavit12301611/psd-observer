@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import {
   shadesOn, shadesOff, shadesStatus, maybeAutoRestore, initShades,
-  loadShadeState,
+  loadShadeState, stopShadeGuard,
 } from '../src/shades.js';
 
 // ── fake shell runner: records calls, serves canned outputs ─────────────────
@@ -299,4 +299,104 @@ test('shades: update announcement is armed for the current release (WhatsApp wha
   assert.ok(changes.length >= 3, `announcement has bullets (${changes.length})`);
   assert.ok(changes.some((c) => /Shades|shades/i.test(c)), 'mentions shades');
   assert.ok(changes.some((c) => /shades off|auto-restore/i.test(c)), 'mentions the manual-restore rule');
+});
+
+// ── 6. ShadeGuard: brightness changes can NEVER reveal the screen ───────────
+// The bug: laptop brightness keys moved the backlight off 0 and instantly
+// revealed the panel. The guard clamps every change straight back to 0.
+
+test('guard: a brightness keypress gets clamped back to 0 within one tick', async () => {
+  const { shadeGuardTick, startShadeGuard, isGuardActive, stopShadeGuard } = await import('../src/shades.js');
+  const stateFile = tmpState();
+  // state as left by a real shadesOn (backlight method, saved 47%)
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    enabled: true, at: 0, timeoutMs: 0, method: 'backlight',
+    savedPct: 47, savedRaw: '937', device: 'intel_backlight',
+  }));
+
+  // Someone presses brightness-up → sysfs now reports 38%
+  const run = fakeRun({ 'brightnessctl set 0': '', 'brightnessctl set 937': '' });
+  let pct = 38;
+  const result = await shadeGuardTick({ run, stateFile, readPct: async () => pct });
+  assert.equal(result, 'clamped', 'guard detected the reveal attempt');
+  assert.ok(run.calls.some((c) => c.join(' ') === 'brightnessctl set 0'), 'clamped back to 0');
+
+  // Already at 0 → no commands fired
+  pct = 0;
+  const run2 = fakeRun({ 'brightnessctl set 0': '' });
+  const result2 = await shadeGuardTick({ run: run2, stateFile, readPct: async () => pct });
+  assert.equal(result2, 'ok');
+  assert.equal(run2.calls.length, 0, 'no fork when nothing to clamp');
+
+  // Lifecycle: start/stop
+  assert.equal(startShadeGuard({ run, stateFile, readPct: async () => 0, intervalMs: 60_000 }), true);
+  assert.equal(isGuardActive(), true);
+  stopShadeGuard();
+  assert.equal(isGuardActive(), false);
+});
+
+test('guard: initShades RE-ARMS the guard after an agent restart (still black)', async () => {
+  const { initShades, isGuardActive, stopShadeGuard, shadeGuardTick } = await import('../src/shades.js');
+  const stateFile = tmpState();
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify({
+    enabled: true, at: 0, timeoutMs: 0, method: 'backlight',
+    savedPct: 47, savedRaw: '937', device: 'intel_backlight',
+  }));
+  const run = fakeRun({ 'brightnessctl set 0': '' });
+  const restored = await initShades({ run, stateFile, readPct: async () => 0, intervalMs: 60_000 });
+  assert.equal(restored, false, 'no auto-restore on restart (owner rule)');
+  assert.equal(isGuardActive(), true, 'guard armed again after restart');
+  // and the tick still clamps
+  const r = await shadeGuardTick({ run, stateFile, readPct: async () => 22 });
+  assert.equal(r, 'clamped');
+  stopShadeGuard();
+});
+
+test('guard: ticks are inert once shades are off', async () => {
+  const { shadeGuardTick, startShadeGuard, isGuardActive, stopShadeGuard } = await import('../src/shades.js');
+  const stateFile = tmpState(); // no state file → shades off
+  const run = fakeRun({});
+  const result = await shadeGuardTick({ run, stateFile, readPct: async () => 55 });
+  assert.equal(result, 'off');
+  assert.equal(startShadeGuard({ run, stateFile, readPct: async () => 0 }), false);
+  assert.equal(isGuardActive(), false);
+  stopShadeGuard();
+});
+
+// ── 7. Stealth brightness: remote control without breaking stealth ─────────
+
+test('stealth: /pc brightness while shades ON adjusts the SAVED level only', async () => {
+  const { shadeAwareBrightness, shadesOn, shadesOff } = await import('../src/shades.js');
+  const stateFile = tmpState();
+  const run = fakeRun({
+    'brightnessctl -m': 'intel_backlight,backlight,937,47%,2000',
+    'brightnessctl set 0': '',
+    'brightnessctl set 52': '',
+    'brightnessctl set 937': '',
+  });
+  // shades off first → shadeAwareBrightness must defer to normal flow
+  assert.equal(await shadeAwareBrightness('set', 80, { run, stateFile }), null);
+  await shadesOn({ run, stateFile, timeoutMs: 0, now: () => 1 });
+  try {
+    const get = await shadeAwareBrightness('get', null, { run, stateFile });
+    assert.match(get, /panel \*0%\*/);
+    assert.match(get, /47%/);
+    const up = await shadeAwareBrightness('up', null, { run, stateFile });
+    assert.match(up, /52%/);
+    assert.match(up, /BLACK/, 'panel promise stays black');
+    const set = await shadeAwareBrightness('set', 80, { run, stateFile });
+    assert.match(set, /80%/);
+    // panel was NEVER touched by these commands — only the state file moved
+    const panelTouched = run.calls.some((c) => /^brightnessctl set (?!0$)/.test(c.join(' ')));
+    assert.equal(panelTouched, false, 'no live panel change during stealth');
+    // restore level now comes from the stealth-adjusted value (percent path:
+    // savedRaw was cleared when the owner moved the level remotely)
+    const off = await shadesOff({ run, stateFile, now: () => 2 });
+    assert.match(off, /80%/);
+    assert.ok(run.calls.some((c) => c.join(' ') === 'brightnessctl set 80%'), 'restores the stealth-adjusted 80%');
+  } finally {
+    stopShadeGuard();
+  }
 });
