@@ -155,3 +155,10 @@ export function pendingState({ now = Date.now } = {}) {
   if (pending && (!Number.isFinite(ts - pending.at) || ts < pending.at || ts - pending.at >= CONFIRM_TTL_MS)) pending = null;
   return pending ? { action: pending.action, args: pending.args } : null;
 }
+
+/** Mobile approval identity; opaque nonce binds identical re-created requests. */
+export function pendingTicket() {
+  if (!pendingState()) return null;
+  return { action: pending.action, args: pending.args, at: pending.at,
+    nonce: crypto.createHash('sha256').update(`${pending.token}\0${pending.at}`).digest('hex') };
+}

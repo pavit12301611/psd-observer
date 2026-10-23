@@ -95,10 +95,11 @@ const bridge = createBridgeServer({
   whatsapp,
   mailbox,
   actions: agent.actions,
+  app: agent.app,
   harness: agent.harness,
   voice: agent.voice,
   wavoip,
-  runOwner: (text) => whatsapp.runOwner(text),
+  runOwner: (text, ctx) => whatsapp.runOwner(text, ctx),
   log: console,
 });
 const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);

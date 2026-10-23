@@ -191,7 +191,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
   async function runWithModel(model, text, ctx, plan, opts, state, attemptId) {
     const selectedTools = toolsFor(text, { limit: plan.toolLimit });
     const offered = new Map(selectedTools.map((tool) => [tool.name, tool]));
-    const history = (store?.data?.history ?? []).slice(-4)
+    const history = (ctx?.appHistory ?? store?.data?.history ?? []).slice(-4)
       .filter((m) => m && ['user', 'assistant'].includes(m.role) && typeof m.content === 'string')
       .map((m) => ({ role: m.role, content: shorten(m.content, 600) }));
     const accuracyDirective = buildAccuracyDirective(text, config);

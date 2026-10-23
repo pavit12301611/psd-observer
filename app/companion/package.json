@@ -1,0 +1,41 @@
+{
+  "name": "@observer/android-companion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "catalog": "node scripts/catalog.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run catalog && npm run typecheck && vite build && node scripts/check-bundle.mjs",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "preview": "vite preview --host 0.0.0.0",
+    "android:sync": "node scripts/sync-android.mjs",
+    "android:debug": "npm run build && npm run android:sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "lucide-react": "^0.476.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@sparticuz/chromium": "^153.0.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.19.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "acorn": "^8.19.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

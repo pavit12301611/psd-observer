@@ -21,6 +21,8 @@
 // rate-limited. Sending to any number other than the owner is refused.
 
 import http from 'node:http';
+import os from 'node:os';
+import { createAppMedia } from './appbridge.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -116,8 +118,10 @@ export function createBridgeServer({
   config, store, whatsapp, mailbox, actions, harness = null, voice = null, wavoip = null, runOwner, log = console,
   // Injectable so tests never touch a real desktop, and so the number of
   // screenshots per request is explicit and measurable.
-  screen = null,
+  screen = null, app = null,
 }) {
+  const media = createAppMedia();
+  const appReply = (reply) => media.shape(reply, replyForApp);
   const scr = screen ?? {
     capture: (opts) => pc.captureScreenshot(opts),
     click: (x, y) => pc.click(x, y),
@@ -281,7 +285,26 @@ export function createBridgeServer({
         return json(res, 401, { detail: 'Bridge token required (x-bridge-token header, Bearer, or the dashboard PIN via /api/login). It is printed when the agent starts.' });
       }
 
+      if (req.method === 'GET' && /^\/api\/app\/media\/[a-f0-9]{32}$/.test(url.pathname)) {
+        const item = media.get(url.pathname.split('/').pop());
+        if (!item) return json(res, 404, { detail: 'Attachment expired. Request the file again explicitly if needed.' });
+        res.writeHead(200, { 'content-type': item.mime, 'content-length': item.buffer.length, 'content-disposition': `attachment; filename="${encodeURIComponent(item.name)}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        return res.end(item.buffer);
+      }
       switch (route) {
+        case 'GET /api/app/state':
+          if (!app) return json(res, 503, { detail: 'This agent has no structured mobile API. Update the PC agent.' });
+          return json(res, 200, { apiVersion: 1, version: VERSION, host: os.hostname(), platform: process.platform, pcControl: Boolean(config.allowPcControl), controlPinRequired: Boolean(config.controlPin), ...app.state() });
+        case 'POST /api/app/approval': {
+          if (!app) return json(res, 503, { detail: 'Structured approvals unavailable. Update the PC agent.' });
+          const body = await readJsonBody(req);
+          if (typeof body.id !== 'string' || !/^[a-f0-9]{64}$/.test(body.id) || typeof body.approve !== 'boolean') return json(res, 400, { detail: 'Exact approval id and boolean decision required.' });
+          const decision = app.decide(body.id, body.approve);
+          if (decision.busy) return json(res, 423, { detail: 'An agent task is still settling. Wait or stop it, then review this approval again.' });
+          if (decision.stale) return json(res, 409, { detail: 'That request changed, expired or was already resolved. Refresh and review the current action.' });
+          return json(res, 200, appReply(await decision.reply));
+        }
+
         case 'GET /api/brains': {
           const router = routerFor(config, console);
           return json(res, 200, {
@@ -320,14 +343,20 @@ export function createBridgeServer({
 
         case 'POST /api/chat': {
           const body = await readJsonBody(req);
-          const text = String(body.text ?? '').slice(0, 4000);
+          const text = String(body.text ?? '');
+          if (text.length > 16000) return json(res, 413, { detail: 'Message exceeds the 16000-character mobile limit; nothing was executed.' });
           if (!text.trim()) return json(res, 400, { detail: 'text is required' });
           if (body.from && normalizeNumber(body.from) !== config.ownerNumber) {
             return json(res, 403, { detail: 'This agent only listens to the owner.' });
           }
           if (!runOwner) return json(res, 503, { detail: 'Agent is still starting up.' });
-          const reply = await runOwner(text);
-          return json(res, 200, replyForApp(reply));
+          let history;
+          if (body.history !== undefined) {
+            if (!Array.isArray(body.history) || body.history.length > 12 || body.history.some((m) => !m || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 4000) || body.history.reduce((n, m) => n + m.content.length, 0) > 40000) return json(res, 400, { detail: 'Invalid bounded conversation history.' });
+            history = body.history.map(({ role, content }) => ({ role, content }));
+          }
+          const reply = await runOwner(text, { source: 'app', isOwner: true, ...(history ? { appHistory: history } : {}) });
+          return json(res, 200, appReply(reply));
         }
 
         // ── JARVIS voice call (phone app 📞 Call tab) ──────────────────────
@@ -446,6 +475,7 @@ export function createBridgeServer({
         }
 
         case 'POST /api/action': {
+          if (app?.busy?.()) return json(res, 423, { detail: 'Wait for the active agent task before starting another action.' });
           if (!actions) return json(res, 503, { detail: 'Actions are not ready yet.' });
           const body = await readJsonBody(req);
           const result = await actions.execute(String(body.name ?? ''), body.args ?? {}, { source: 'app' });
@@ -508,6 +538,9 @@ export function createBridgeServer({
         case 'POST /api/tap': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
           const body = await readJsonBody(req);
+          if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
+          if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
+          if (app?.busy?.()) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
           const rx = Number(body.x);
           const ry = Number(body.y);
           if (!Number.isFinite(rx) || !Number.isFinite(ry)) return json(res, 400, { detail: 'x and y are required (0-1000 relative, or pixels with relative:false)' });
@@ -539,6 +572,9 @@ export function createBridgeServer({
         case 'POST /api/key': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
           const body = await readJsonBody(req);
+          if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
+          if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
+          if (app?.busy?.()) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
           const key = String(body.key ?? '').trim();
           if (!key) return json(res, 400, { detail: 'key is required (e.g. "ctrl+l", "Return")' });
           await scr.key(key);
@@ -548,6 +584,9 @@ export function createBridgeServer({
         case 'POST /api/type': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
           const body = await readJsonBody(req);
+          if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
+          if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
+          if (app?.busy?.()) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
           const text = String(body.text ?? '');
           if (!text) return json(res, 400, { detail: 'text is required' });
           await scr.type(text.slice(0, 4000));
@@ -766,6 +805,6 @@ export function createBridgeServer({
         server.on('error', (err) => log.error?.(`[bridge] server error: ${err.message}`));
       });
     },
-    stop() { server.close(); },
+    stop() { media.clear(); server.close(); },
   };
 }

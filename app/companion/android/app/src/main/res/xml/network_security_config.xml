@@ -1,0 +1,5 @@
+<network-security-config>
+    <!-- Java validates every bridge origin. HTTP is allowed only after explicit
+         opt-in for a private IP; no WebView network navigation is permitted. -->
+    <base-config cleartextTrafficPermitted="true"><trust-anchors><certificates src="system" /></trust-anchors></base-config>
+</network-security-config>

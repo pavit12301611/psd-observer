@@ -1,0 +1,948 @@
+{
+  "schemaVersion": 1,
+  "source": "whatsapp-agent/src/commands.js public HELP",
+  "commands": [
+    {
+      "name": "/access",
+      "section": "Safety",
+      "description": "/access — what is allowed · /yes · /no (destructive actions ask first)",
+      "usage": "/access"
+    },
+    {
+      "name": "/accuracy",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/accuracy report — 📊 bot ka report card (kitne sawal, kitne sahi)",
+      "usage": "/accuracy report"
+    },
+    {
+      "name": "/agent",
+      "section": "Just talk (English / Hindi / Hinglish)",
+      "description": "/agent <task> — samajhta hai aur PC pe karke dikhata hai (verified, no fake \"done\")",
+      "usage": "/agent <task>"
+    },
+    {
+      "name": "/allow",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/allow <number|name> · /block <number|name> · /unblock <number|name>",
+      "usage": "/allow <number|name>"
+    },
+    {
+      "name": "/approve",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/pending · /approve [id] [custom text] · /reject [id] — pending guest messages dekho/control karo",
+      "usage": "/approve [id] [custom text]"
+    },
+    {
+      "name": "/apps",
+      "section": "Apps & windows",
+      "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
+      "usage": "/apps"
+    },
+    {
+      "name": "/arena",
+      "section": "Do things",
+      "description": "/arena <prompt> — arena.ai/agent kholo, prompt type karo, jawab padho (screenshot proof ke saath)",
+      "usage": "/arena <prompt>"
+    },
+    {
+      "name": "/audit",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/audit — 📋 security audit log (guest attempts, naye contacts)",
+      "usage": "/audit"
+    },
+    {
+      "name": "/auto",
+      "section": "Do things",
+      "description": "/auto <task> — UI autopilot (verified): open chrome | tap Search | type hello | key enter | screenshot",
+      "usage": "/auto <task>"
+    },
+    {
+      "name": "/backup",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/backup now|list|cloud — 💾 zip backup + GitHub cloud copy",
+      "usage": "/backup now|list|cloud"
+    },
+    {
+      "name": "/batch",
+      "section": "Safety",
+      "description": "/batch <question> || <question> — up to 8 tasks; bounded parallel answers, serial PC actions",
+      "usage": "/batch <question> || <question>"
+    },
+    {
+      "name": "/block",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/block [now] — 🚫 study window me sites auto-close (music allowed)",
+      "usage": "/block [now]"
+    },
+    {
+      "name": "/brains",
+      "section": "Just talk (English / Hindi / Hinglish)",
+      "description": "/brains — kaun sa model kab use hota hai (live health + power budget)",
+      "usage": "/brains"
+    },
+    {
+      "name": "/brief",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/cal add kal 4pm meeting · /cal today|week — 🗓️ calendar + /brief me reminders",
+      "usage": "/brief me reminders"
+    },
+    {
+      "name": "/broadcast",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/reply <text> — last guest sender ko turant reply bhejo · /broadcast <n1,n2> | <text>",
+      "usage": "/broadcast <n1,n2> | <text>"
+    },
+    {
+      "name": "/bt",
+      "section": "Network",
+      "description": "/bt [on|off|status] · /svc status|restart <service> · /kill <process>",
+      "usage": "/bt [on|off|status]"
+    },
+    {
+      "name": "/cal",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/cal add kal 4pm meeting · /cal today|week — 🗓️ calendar + /brief me reminders",
+      "usage": "/cal add kal 4pm meeting"
+    },
+    {
+      "name": "/calc",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/calc"
+    },
+    {
+      "name": "/call",
+      "section": "Do things",
+      "description": "/voicereply <text> — JARVIS ki awaaz me voice note · /call on — har jawab voice me",
+      "usage": "/call on"
+    },
+    {
+      "name": "/callat",
+      "section": "Do things",
+      "description": "/callme — JARVIS tumhe WhatsApp call kare · /callat at 18:30 /brief — set time pe JARVIS ki update-call · /voice — voice status",
+      "usage": "/callat at 18:30 /brief"
+    },
+    {
+      "name": "/callme",
+      "section": "Do things",
+      "description": "/callme — JARVIS tumhe WhatsApp call kare · /callat at 18:30 /brief — set time pe JARVIS ki update-call · /voice — voice status",
+      "usage": "/callme"
+    },
+    {
+      "name": "/callscript",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "📞 /callscript save <name> <text> · 🌙 /quiet 22:00-07:00 + /digest · 🎤 voice→voice reply",
+      "usage": "/callscript save <name> <text>"
+    },
+    {
+      "name": "/clip",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/clip · /copy <text> — 📋 PC↔phone clipboard sync",
+      "usage": "/clip"
+    },
+    {
+      "name": "/close",
+      "section": "Apps & windows",
+      "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
+      "usage": "/close <app>"
+    },
+    {
+      "name": "/contact",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/contact add <Name> <Number> · /contacts — contacts save/manage karo",
+      "usage": "/contact add <Name> <Number>"
+    },
+    {
+      "name": "/contacts",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/contact add <Name> <Number> · /contacts — contacts save/manage karo",
+      "usage": "/contacts"
+    },
+    {
+      "name": "/context",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🧠 Multi-turn yaad (\"wo file bhejo\") · /context · galat, asli jawab X hai se seekhta hai (/corrections) · /retrain",
+      "usage": "/context"
+    },
+    {
+      "name": "/copy",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/clip · /copy <text> — 📋 PC↔phone clipboard sync",
+      "usage": "/copy <text>"
+    },
+    {
+      "name": "/corrections",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🧠 Multi-turn yaad (\"wo file bhejo\") · /context · galat, asli jawab X hai se seekhta hai (/corrections) · /retrain",
+      "usage": "/corrections)"
+    },
+    {
+      "name": "/cp",
+      "section": "Files (anywhere under your home)",
+      "description": "/mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>",
+      "usage": "/cp <from> | <to>"
+    },
+    {
+      "name": "/cron",
+      "section": "Do things",
+      "description": "/cron add every 10m <text> · /cron add roz 9 baje <text> · /cron list|del",
+      "usage": "/cron add every 10m <text>"
+    },
+    {
+      "name": "/currency",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/currency"
+    },
+    {
+      "name": "/digest",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "📞 /callscript save <name> <text> · 🌙 /quiet 22:00-07:00 + /digest · 🎤 voice→voice reply",
+      "usage": "/digest"
+    },
+    {
+      "name": "/doc",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/doc <path> · /doc q <question> — 📄 PDF/notes se sawal ke jawab",
+      "usage": "/doc <path>"
+    },
+    {
+      "name": "/doctor",
+      "section": "Safety",
+      "description": "/doctor — kya kaam nahi kar raha, aur exact fix (screenshot/input/AI)",
+      "usage": "/doctor"
+    },
+    {
+      "name": "/download",
+      "section": "Files (anywhere under your home)",
+      "description": "/find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>",
+      "usage": "/download <url> [path]"
+    },
+    {
+      "name": "/dsh",
+      "section": "DeepSeek Harness (2.9.0 — Full Linux Coding & System Agent)",
+      "description": "/dsh <task> — poora DeepSeek Harness power (bash + coding + files + subagents + WhatsApp MCP!)",
+      "usage": "/dsh <task>"
+    },
+    {
+      "name": "/exam",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/exam add <sub> <date> · list · del — 🎯 exam countdown + auto study schedule",
+      "usage": "/exam add <sub> <date>"
+    },
+    {
+      "name": "/exp",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/exp <amt> <note> · /exp report|budget <n>|undo|list — 💰 kharcha tracker",
+      "usage": "/exp <amt> <note>"
+    },
+    {
+      "name": "/fill",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔍 /look diff — screen pe kya badla · /highlights <rec> — reel · /webcam timelapse 2h · /fill name:Rahul, phone:…",
+      "usage": "/fill name:Rahul, phone:…"
+    },
+    {
+      "name": "/find",
+      "section": "Files (anywhere under your home)",
+      "description": "/find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>",
+      "usage": "/find <name>"
+    },
+    {
+      "name": "/focus",
+      "section": "Apps & windows",
+      "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
+      "usage": "/focus <title>"
+    },
+    {
+      "name": "/fsearch",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔎 /fsearch <text> — file CONTENT search · /netwatch — wifi watchdog · /savemacro <name> — last commands → macro",
+      "usage": "/fsearch <text>"
+    },
+    {
+      "name": "/fun",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/fun quiz|riddle — 🎮 timepass GK quiz + puzzles",
+      "usage": "/fun quiz|riddle"
+    },
+    {
+      "name": "/gh",
+      "section": "Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)",
+      "description": "/gh <query or owner/repo> · /reddit <query> · /hn [query]",
+      "usage": "/gh <query or owner/repo>"
+    },
+    {
+      "name": "/go",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🤖 /plan <task> → preview → /go (plan-confirm mode) · /no cancel",
+      "usage": "/go (plan-confirm mode)"
+    },
+    {
+      "name": "/guard",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/guard on|off|status — 🛡️ webcam motion → photo alert (travel ke liye)",
+      "usage": "/guard on|off|status"
+    },
+    {
+      "name": "/guest",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/guest [approval|auto|contacts|off|status|log|clear] — guest chat policy & audit log",
+      "usage": "/guest [approval|auto|contacts|off|status|log|clear]"
+    },
+    {
+      "name": "/highlights",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔍 /look diff — screen pe kya badla · /highlights <rec> — reel · /webcam timelapse 2h · /fill name:Rahul, phone:…",
+      "usage": "/highlights <rec>"
+    },
+    {
+      "name": "/hn",
+      "section": "Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)",
+      "description": "/gh <query or owner/repo> · /reddit <query> · /hn [query]",
+      "usage": "/hn [query]"
+    },
+    {
+      "name": "/home",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/home add|light on — 🏠 smart home webhooks (Alexa/Google)",
+      "usage": "/home add|light on"
+    },
+    {
+      "name": "/hw",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/hw add maths pg 42 kal · /hw today|week|done — 📝 homework tracker",
+      "usage": "/hw add maths pg 42 kal"
+    },
+    {
+      "name": "/kill",
+      "section": "Network",
+      "description": "/bt [on|off|status] · /svc status|restart <service> · /kill <process>",
+      "usage": "/kill <process>"
+    },
+    {
+      "name": "/learn",
+      "section": "Do things",
+      "description": "/learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del",
+      "usage": "/learn <keyword> <cmds>"
+    },
+    {
+      "name": "/leaveby",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/leaveby 9am 25km — 🚗 kitne baje niklo (traffic estimate)",
+      "usage": "/leaveby 9am 25km"
+    },
+    {
+      "name": "/live",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/live [sec] — 🎥 screen mirror (live screenshots stream here)",
+      "usage": "/live [sec]"
+    },
+    {
+      "name": "/location",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/location"
+    },
+    {
+      "name": "/look",
+      "section": "PC control",
+      "description": "/screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top",
+      "usage": "/look [question]"
+    },
+    {
+      "name": "/ls",
+      "section": "Files (anywhere under your home)",
+      "description": "/ls [path] · /read <path> · /write <path> | <text> · /send <path>",
+      "usage": "/ls [path]"
+    },
+    {
+      "name": "/mail",
+      "section": "3.7.0 — Duet-Class Features",
+      "description": "📧 /mail setup imap.gmail.com user apppass · /mail today · /mail on — mail digest + priority alerts (Gmail app-password)",
+      "usage": "/mail setup imap.gmail.com user apppass"
+    },
+    {
+      "name": "/make",
+      "section": "3.7.0 — Duet-Class Features",
+      "description": "🛠️ /make report|slides|dashboard|csv <topic> — review/edit files bana deta hai",
+      "usage": "/make report|slides|dashboard|csv <topic>"
+    },
+    {
+      "name": "/mkdir",
+      "section": "Files (anywhere under your home)",
+      "description": "/mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>",
+      "usage": "/mkdir <folder>"
+    },
+    {
+      "name": "/model",
+      "section": "Just talk (English / Hindi / Hinglish)",
+      "description": "/model — brains ka setup/status (local + cloud)",
+      "usage": "/model"
+    },
+    {
+      "name": "/msg",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/msg <number|name> | <text> — kisi bhi dusre number ya saved contact ko WhatsApp message bhejo",
+      "usage": "/msg <number|name> | <text>"
+    },
+    {
+      "name": "/mv",
+      "section": "Files (anywhere under your home)",
+      "description": "/mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>",
+      "usage": "/mv <from> | <to>"
+    },
+    {
+      "name": "/near",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/near <query>"
+    },
+    {
+      "name": "/netwatch",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔎 /fsearch <text> — file CONTENT search · /netwatch — wifi watchdog · /savemacro <name> — last commands → macro",
+      "usage": "/netwatch"
+    },
+    {
+      "name": "/neural",
+      "section": "Safety",
+      "description": "/neural status · /neural learn <label> | <example> · /neural train — real local neural training",
+      "usage": "/neural status"
+    },
+    {
+      "name": "/news",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/news"
+    },
+    {
+      "name": "/nmirror",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/nmirror on|off|allow <apps> — 🔔 PC notifications yahan mirror",
+      "usage": "/nmirror on|off|allow <apps>"
+    },
+    {
+      "name": "/no",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🤖 /plan <task> → preview → /go (plan-confirm mode) · /no cancel",
+      "usage": "/no cancel"
+    },
+    {
+      "name": "/note",
+      "section": "Do things",
+      "description": "/remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>",
+      "usage": "/note <text>"
+    },
+    {
+      "name": "/notes",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/notes now|stop — 🎙️ meeting record → AI notes + transcript",
+      "usage": "/notes now|stop"
+    },
+    {
+      "name": "/notify",
+      "section": "PC control",
+      "description": "/webcam · /record [seconds] · /notify <text> · /pc locate <button>",
+      "usage": "/notify <text>"
+    },
+    {
+      "name": "/nudges",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/nudges on|off|now — 💬 proactive nudges (padhai, reminders miss)",
+      "usage": "/nudges on|off|now"
+    },
+    {
+      "name": "/observer",
+      "section": "Do things",
+      "description": "/observer <task> (optional Observer app) · /screen",
+      "usage": "/observer <task> (optional Observer app)"
+    },
+    {
+      "name": "/ocr",
+      "section": "PC control",
+      "description": "/screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top",
+      "usage": "/ocr"
+    },
+    {
+      "name": "/open",
+      "section": "Apps & windows",
+      "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
+      "usage": "/open <app>"
+    },
+    {
+      "name": "/organize",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/organize now — 📂 downloads auto-sort (Images/Docs/…)",
+      "usage": "/organize now"
+    },
+    {
+      "name": "/panic",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔒 /rm ab TRASH me (recoverable: /trash restore) · double-confirm · /panic kill-switch · /snapshot + /rollback",
+      "usage": "/panic kill-switch"
+    },
+    {
+      "name": "/pc",
+      "section": "PC control",
+      "description": "/screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top",
+      "usage": "/pc status|disk|ip|battery|top"
+    },
+    {
+      "name": "/pcs",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/pcs register <name> · /pcs — 🖥️ multi-PC fleet status",
+      "usage": "/pcs register <name>"
+    },
+    {
+      "name": "/pending",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/pending · /approve [id] [custom text] · /reject [id] — pending guest messages dekho/control karo",
+      "usage": "/pending"
+    },
+    {
+      "name": "/persona",
+      "section": "Do things",
+      "description": "/persona (ya /profile, /train) — aapki chats se seekha hua behaviour, style, goals, likes/dislikes & continuous self-training",
+      "usage": "/persona (ya /profile, /train)"
+    },
+    {
+      "name": "/pguard",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/pguard on|status|battery 20|temp 90 — 🔋 battery/temp alerts",
+      "usage": "/pguard on|status|battery 20|temp 90"
+    },
+    {
+      "name": "/photos",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/photos <query> · /photos index — 🔍 photo dhundo (meaning se)",
+      "usage": "/photos <query>"
+    },
+    {
+      "name": "/pii",
+      "section": "3.7.0 — Duet-Class Features",
+      "description": "🔐 /pii scan <text> — card/Aadhaar/PAN/API-key detect; outbound strict PII BLOCK; clipboard history redacted",
+      "usage": "/pii scan <text>"
+    },
+    {
+      "name": "/pin",
+      "section": "3.7.0 — Duet-Class Features",
+      "description": "🗂️ /topic work — channels with shared memory · /pin · /topic list",
+      "usage": "/pin"
+    },
+    {
+      "name": "/plan",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🤖 /plan <task> → preview → /go (plan-confirm mode) · /no cancel",
+      "usage": "/plan <task>"
+    },
+    {
+      "name": "/profile",
+      "section": "Do things",
+      "description": "/persona (ya /profile, /train) — aapki chats se seekha hua behaviour, style, goals, likes/dislikes & continuous self-training",
+      "usage": "/profile, /train)"
+    },
+    {
+      "name": "/qr",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/qr"
+    },
+    {
+      "name": "/quiet",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "📞 /callscript save <name> <text> · 🌙 /quiet 22:00-07:00 + /digest · 🎤 voice→voice reply",
+      "usage": "/quiet 22:00-07:00 + /digest"
+    },
+    {
+      "name": "/quiz",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/study <topic> · /revise · /quiz — 📚 flashcards + spaced repetition",
+      "usage": "/quiz"
+    },
+    {
+      "name": "/reach",
+      "section": "Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)",
+      "description": "/reach [doctor] — 16+ internet channels + AT-SPI desktop grounding health report",
+      "usage": "/reach [doctor]"
+    },
+    {
+      "name": "/read",
+      "section": "Files (anywhere under your home)",
+      "description": "/ls [path] · /read <path> · /write <path> | <text> · /send <path>",
+      "usage": "/read <path>"
+    },
+    {
+      "name": "/recap",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/recap — 🗞️ weekly recap (padhai/work/balance)",
+      "usage": "/recap"
+    },
+    {
+      "name": "/record",
+      "section": "PC control",
+      "description": "/webcam · /record [seconds] · /notify <text> · /pc locate <button>",
+      "usage": "/record [seconds]"
+    },
+    {
+      "name": "/reddit",
+      "section": "Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)",
+      "description": "/gh <query or owner/repo> · /reddit <query> · /hn [query]",
+      "usage": "/reddit <query>"
+    },
+    {
+      "name": "/reject",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/pending · /approve [id] [custom text] · /reject [id] — pending guest messages dekho/control karo",
+      "usage": "/reject [id]"
+    },
+    {
+      "name": "/remember",
+      "section": "Do things",
+      "description": "/remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>",
+      "usage": "/remember <fact>"
+    },
+    {
+      "name": "/remind",
+      "section": "Do things",
+      "description": "/remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>",
+      "usage": "/remind in 10m <text>"
+    },
+    {
+      "name": "/remote",
+      "section": "Naye (2.8.0)",
+      "description": "/remote — kahin se bhi control (WhatsApp se ya phone app se)",
+      "usage": "/remote"
+    },
+    {
+      "name": "/reply",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/reply <text> — last guest sender ko turant reply bhejo · /broadcast <n1,n2> | <text>",
+      "usage": "/reply <text>"
+    },
+    {
+      "name": "/resume",
+      "section": "PC control",
+      "description": "/resume — /stop ke baad wahin se shuru (zero se nahi)",
+      "usage": "/resume"
+    },
+    {
+      "name": "/retrain",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🧠 Multi-turn yaad (\"wo file bhejo\") · /context · galat, asli jawab X hai se seekhta hai (/corrections) · /retrain",
+      "usage": "/retrain"
+    },
+    {
+      "name": "/revise",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/study <topic> · /revise · /quiz — 📚 flashcards + spaced repetition",
+      "usage": "/revise"
+    },
+    {
+      "name": "/rm",
+      "section": "Files (anywhere under your home)",
+      "description": "/find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>",
+      "usage": "/rm <path>"
+    },
+    {
+      "name": "/role",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/role <num> kids|family — 👨‍👩‍👧 family/kids mode + /rolelimit <min>",
+      "usage": "/role <num> kids|family"
+    },
+    {
+      "name": "/rolelimit",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/role <num> kids|family — 👨‍👩‍👧 family/kids mode + /rolelimit <min>",
+      "usage": "/rolelimit <min>"
+    },
+    {
+      "name": "/rollback",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔒 /rm ab TRASH me (recoverable: /trash restore) · double-confirm · /panic kill-switch · /snapshot + /rollback",
+      "usage": "/rollback"
+    },
+    {
+      "name": "/routine",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/routine at 7am <macro> — ⏰ morning auto-routines (IST)",
+      "usage": "/routine at 7am <macro>"
+    },
+    {
+      "name": "/run",
+      "section": "Safety",
+      "description": "/run <PIN> <command> — shell, only if ALLOW_SHELL=true",
+      "usage": "/run <PIN> <command>"
+    },
+    {
+      "name": "/savemacro",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔎 /fsearch <text> — file CONTENT search · /netwatch — wifi watchdog · /savemacro <name> — last commands → macro",
+      "usage": "/savemacro <name>"
+    },
+    {
+      "name": "/screen",
+      "section": "Do things",
+      "description": "/observer <task> (optional Observer app) · /screen",
+      "usage": "/screen"
+    },
+    {
+      "name": "/screenshot",
+      "section": "PC control",
+      "description": "/screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top",
+      "usage": "/screenshot"
+    },
+    {
+      "name": "/send",
+      "section": "Files (anywhere under your home)",
+      "description": "/ls [path] · /read <path> · /write <path> | <text> · /send <path>",
+      "usage": "/send <path>"
+    },
+    {
+      "name": "/shades",
+      "section": "PC control",
+      "description": "/shades [off|status] — 🕶️ screen physically BLACK (privacy) but screenshots CLEAR",
+      "usage": "/shades [off|status]"
+    },
+    {
+      "name": "/shares",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🕶️ /shares — screen-share detect (shades kabhi auto-OFF nahi)",
+      "usage": "/shares"
+    },
+    {
+      "name": "/shots",
+      "section": "Naye (2.8.0)",
+      "description": "/shots — screenshot auto-delete (default 4 min) · /shots clean — abhi saaf",
+      "usage": "/shots"
+    },
+    {
+      "name": "/sleepnotify",
+      "section": "Do things",
+      "description": "/sleepnotify [on|off|test|set <msg>] — PC band/sleep hone se pehle auto \"Agent is sleeping\" message (active by default)",
+      "usage": "/sleepnotify [on|off|test|set <msg>]"
+    },
+    {
+      "name": "/snapshot",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔒 /rm ab TRASH me (recoverable: /trash restore) · double-confirm · /panic kill-switch · /snapshot + /rollback",
+      "usage": "/snapshot + /rollback"
+    },
+    {
+      "name": "/solve",
+      "section": "Ultra-Accuracy Question Image Solver (2.10.0 — 100% Verified)",
+      "description": "/solve [instructions] — attached ya pichli photo ke saare questions 100% verify karke solve karo",
+      "usage": "/solve [instructions]"
+    },
+    {
+      "name": "/stats",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/stats [today|week|on|off] — 📊 screen time report",
+      "usage": "/stats [today|week|on|off]"
+    },
+    {
+      "name": "/stop",
+      "section": "PC control",
+      "description": "/stop — chal raha kaam turant roko (browser/app khula rahega; stacked kaam bhi)",
+      "usage": "/stop"
+    },
+    {
+      "name": "/study",
+      "section": "3.5.0 — 15 Smart Features",
+      "description": "/study <topic> · /revise · /quiz — 📚 flashcards + spaced repetition",
+      "usage": "/study <topic>"
+    },
+    {
+      "name": "/svc",
+      "section": "Network",
+      "description": "/bt [on|off|status] · /svc status|restart <service> · /kill <process>",
+      "usage": "/svc status|restart <service>"
+    },
+    {
+      "name": "/tap",
+      "section": "PC control",
+      "description": "/tap <x y | 50% 40% | Login> — screen pe seedha click (naya screenshot saath)",
+      "usage": "/tap <x y | 50% 40% | Login>"
+    },
+    {
+      "name": "/taskstatus",
+      "section": "Safety",
+      "description": "/taskstatus · /batch status — live progress · /batch results — completed/partial outputs · /stop — cancel",
+      "usage": "/taskstatus"
+    },
+    {
+      "name": "/teach",
+      "section": "Naye (2.8.0)",
+      "description": "/teach start <naam> → commands karo → /teach stop → phir /<naam>",
+      "usage": "/teach start <naam>"
+    },
+    {
+      "name": "/timeline",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/timeline on|3pm — 🖼️ screenshot timeline / milestone recall",
+      "usage": "/timeline on|3pm"
+    },
+    {
+      "name": "/today",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/today — 📅 aaj ka full timeline (calendar + reminders + pending + HW)",
+      "usage": "/today"
+    },
+    {
+      "name": "/todo",
+      "section": "Do things",
+      "description": "/remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>",
+      "usage": "/todo add <text>"
+    },
+    {
+      "name": "/topic",
+      "section": "3.7.0 — Duet-Class Features",
+      "description": "🗂️ /topic work — channels with shared memory · /pin · /topic list",
+      "usage": "/topic work"
+    },
+    {
+      "name": "/train",
+      "section": "Do things",
+      "description": "/persona (ya /profile, /train) — aapki chats se seekha hua behaviour, style, goals, likes/dislikes & continuous self-training",
+      "usage": "/train)"
+    },
+    {
+      "name": "/trash",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "🔒 /rm ab TRASH me (recoverable: /trash restore) · double-confirm · /panic kill-switch · /snapshot + /rollback",
+      "usage": "/trash restore)"
+    },
+    {
+      "name": "/ui",
+      "section": "Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)",
+      "description": "/ui — Inspect live AT-SPI desktop widgets + OCR bounding boxes (zero coordinate guessing)",
+      "usage": "/ui"
+    },
+    {
+      "name": "/unblock",
+      "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
+      "description": "/allow <number|name> · /block <number|name> · /unblock <number|name>",
+      "usage": "/unblock <number|name>"
+    },
+    {
+      "name": "/undo",
+      "section": "Naye (2.8.0)",
+      "description": "/undo — pichhla file kaam wapas (write/move/copy/delete/mkdir/zip) · /undo list",
+      "usage": "/undo"
+    },
+    {
+      "name": "/unit",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/unit"
+    },
+    {
+      "name": "/unzip",
+      "section": "Files (anywhere under your home)",
+      "description": "/find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>",
+      "usage": "/unzip <path>"
+    },
+    {
+      "name": "/url",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/url"
+    },
+    {
+      "name": "/usage",
+      "section": "Naye (2.8.0)",
+      "description": "/usage — aaj ka AI quota: kaun sa brain kitna kharch, 80% pe warning",
+      "usage": "/usage"
+    },
+    {
+      "name": "/use",
+      "section": "Do things",
+      "description": "/use <task> — haath: screen dekho → click/type/scroll → dobara dekho (8 steps, screenshot proof)",
+      "usage": "/use <task>"
+    },
+    {
+      "name": "/voice",
+      "section": "Do things",
+      "description": "/callme — JARVIS tumhe WhatsApp call kare · /callat at 18:30 /brief — set time pe JARVIS ki update-call · /voice — voice status",
+      "usage": "/voice"
+    },
+    {
+      "name": "/voicereply",
+      "section": "Do things",
+      "description": "/voicereply <text> — JARVIS ki awaaz me voice note · /call on — har jawab voice me",
+      "usage": "/voicereply <text>"
+    },
+    {
+      "name": "/wake",
+      "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
+      "description": "/wake on|off — 🎤 wake word \"Hey JARVIS\" + voice command",
+      "usage": "/wake on|off"
+    },
+    {
+      "name": "/watch",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "👀 /watch add <url> [price<5000|contains x|release] — page/price/release alerts (brief me bhi) · /yt playlist <url> notes",
+      "usage": "/watch add <url> [price<5000|contains x|release]"
+    },
+    {
+      "name": "/weather",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/weather [city]"
+    },
+    {
+      "name": "/webcam",
+      "section": "PC control",
+      "description": "/webcam · /record [seconds] · /notify <text> · /pc locate <button>",
+      "usage": "/webcam"
+    },
+    {
+      "name": "/wifi",
+      "section": "Network",
+      "description": "/wifi [status|on|off|list] · /wifi connect <SSID> [password]",
+      "usage": "/wifi [status|on|off|list]"
+    },
+    {
+      "name": "/wiki",
+      "section": "Do things",
+      "description": "/weather [city] · /location · /near <query> · /wiki · /news · /calc · /unit · /currency · /url · /qr",
+      "usage": "/wiki"
+    },
+    {
+      "name": "/windows",
+      "section": "Apps & windows",
+      "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
+      "usage": "/windows"
+    },
+    {
+      "name": "/work",
+      "section": "Do things",
+      "description": "/learn <keyword> <cmds> — e.g. /learn work open chrome | open slack | open code  — then just /work  ·  /learn list|del",
+      "usage": "/work"
+    },
+    {
+      "name": "/write",
+      "section": "Files (anywhere under your home)",
+      "description": "/ls [path] · /read <path> · /write <path> | <text> · /send <path>",
+      "usage": "/write <path> | <text>"
+    },
+    {
+      "name": "/yes",
+      "section": "Safety",
+      "description": "/access — what is allowed · /yes · /no (destructive actions ask first)",
+      "usage": "/yes"
+    },
+    {
+      "name": "/yt",
+      "section": "3.6.0 — Smart Upgrades",
+      "description": "👀 /watch add <url> [price<5000|contains x|release] — page/price/release alerts (brief me bhi) · /yt playlist <url> notes",
+      "usage": "/yt playlist <url> notes"
+    },
+    {
+      "name": "/zip",
+      "section": "Files (anywhere under your home)",
+      "description": "/find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>",
+      "usage": "/zip <path>"
+    }
+  ]
+}

@@ -1,10 +1,10 @@
-# Deep test audit — 3.9.1
+# Deep test audit — 3.9.2
 
-Generated 2026-10-23T17:12:47.350Z. Source tree SHA-256: `4510d1da2c2a3d62042cb5c9f307edef7642c1cfe222a6624ac7e337ffa66677`.
+Generated 2026-10-23T18:58:27.880Z. Source tree SHA-256: `fed3ba6e001bc9c6d48ba5f4fb448a80441436907a241fe361f9972f20521f8c`.
 
 ## Scope, honestly
 
-144 runtime JavaScript modules (backend + browser shell), 46561 lines, **3300 static function definitions** inventoried; 35 recursively discovered Node test suites. Every definition has a file/span in [deep-audit.json](deep-audit.json). Exact AST/V8 span matches have call counts; unmapped spans remain unknown. This is not a claim that every function was manually proved correct.
+145 runtime JavaScript modules (backend + browser shell), 46687 lines, **3328 static function definitions** inventoried; 36 recursively discovered Node test suites. Every definition has a file/span in [deep-audit.json](deep-audit.json). Exact AST/V8 span matches have call counts; unmapped spans remain unknown. This is not a claim that every function was manually proved correct.
 
 Other repository components and live WhatsApp/providers/desktop hardware were **not** exhaustively tested. The runner mirrors public source, isolates HOME/TMP/data, strips credentials and desktop addresses, and blocks default external fetch; it is defense in depth, **not an OS sandbox**.
 
@@ -14,19 +14,17 @@ Backend comparison (same source scope):
 
 | Metric | Baseline | Current |
 |---|---:|---:|
-| lines | 74.84% | 75.12% |
-| branches | 62.53% | 63.32% |
-| functions | 76.31% | 76.5% |
+| lines | 74.84% | 75.2% |
+| branches | 62.53% | 63.55% |
+| functions | 76.31% | 76.8% |
 
-Browser shell (newly included): 45.18% lines / 62.58% branches / 50.98% functions. All-runtime combined: 74.31% lines / 63.31% branches. Browser tests are DOM/service-worker emulation, not real-browser or hardware validation.
+Browser shell (newly included): 45.18% lines / 62.58% branches / 50.98% functions. All-runtime combined: 74.39% lines / 63.54% branches. Browser tests are DOM/service-worker emulation, not real-browser or hardware validation.
 
 Includes unimported runtime files via c8 `--all`; no blanket 100% claim. Baseline: 477 tests, ref `339bc9e`. See [baseline evidence](baseline-3.9.0.json). The 34 targeted baseline regression failures overlap multiple symptoms of the same bugs; they are **not 34 distinct bugs**.
 
 ## Executed validation
 
-- **v22.22.3** (coverage): 560/560 passed, 0 failed, 0 cancelled, 0 skipped.
-- **v20.20.2** (full): 560/560 passed, 0 failed, 0 cancelled, 0 skipped.
-- **v24.22.1** (full): 560/560 passed, 0 failed, 0 cancelled, 0 skipped.
+- **v22.22.3** (coverage): 571/571 passed, 0 failed, 0 cancelled, 0 skipped.
 
 Original backend instrumenter: c8 10.1.3; current: c8 12.0.0 / V8. New browser coverage is reported separately; differing V8/instrumenter versions and source changes limit direct numerical comparisons.
 
@@ -48,8 +46,8 @@ Unmutated control passed; **18/18 selected injected faults detected** by intende
 | `src/neural/text.js` | 99.23% | 82.35% | 92.85% |
 | `src/persistence.js` | 100% | 87.5% | 100% |
 | `src/rollback.js` | 98.55% | 73.58% | 100% |
-| `src/safety.js` | 96.81% | 72.6% | 90.9% |
-| `src/server.js` | 75.35% | 54.19% | 77.27% |
+| `src/safety.js` | 96.95% | 73.68% | 91.66% |
+| `src/server.js` | 76.41% | 59.5% | 78.26% |
 | `src/store.js` | 86.1% | 74.15% | 78.78% |
 
 ## Remaining execution gaps for the next audit cycle

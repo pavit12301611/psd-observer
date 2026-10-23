@@ -1,0 +1,43 @@
+{
+  "recordedAt": "2026-10-23T18:59:48.671Z",
+  "androidCompanion": "1.0.0-preview",
+  "pcAgent": "3.9.2",
+  "localValidation": {
+    "frontendUnitTests": 36,
+    "browserE2EScenarios": 40,
+    "browserViewports": [
+      "1440×960 desktop",
+      "393×873 A53-size portrait",
+      "412×915 A53 larger logical viewport",
+      "360×800 compact",
+      "873×393 landscape"
+    ],
+    "backendNode22Tests": 571,
+    "selectedMutantsDetected": 18,
+    "selectedMutantsTotal": 18,
+    "backendAddedContracts": 94,
+    "publicCommands": 157,
+    "dependencyAudit": {
+      "frontend": 0,
+      "backend": 0
+    },
+    "gradients": 0,
+    "javascriptBudgetBytes": 650000
+  },
+  "toolVersions": {
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "playwright": "1.64.1"
+  },
+  "nativeValidation": "Requires the GitHub Actions Android companion workflow; no local JDK/SDK. Check the actual run/artifacts for subsequent compile/emulator results.",
+  "physicalSamsungVerification": false,
+  "liveProviderKeysUsed": false,
+  "realPCActionsExecuted": false,
+  "limits": [
+    "no background push",
+    "no continuous video/WebRTC",
+    "no bundled on-device LLM",
+    "no production signing or Play Store release",
+    "WhatsApp-specific transport features still need a linked WhatsApp account"
+  ]
+}
