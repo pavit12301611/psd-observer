@@ -3,7 +3,7 @@
   "androidCompanion": "1.0.0-preview",
   "pcAgent": "3.9.2",
   "localValidation": {
-    "frontendUnitTests": 36,
+    "frontendUnitTests": 37,
     "browserE2EScenarios": 45,
     "browserViewports": [
       "1440\u00d7960 desktop",

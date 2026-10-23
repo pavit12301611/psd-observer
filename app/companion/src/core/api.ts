@@ -19,6 +19,10 @@ export class BridgeClient {
       const data = await res.json().catch(() => ({}));
       if (generation !== this.epoch) throw new SessionChanged();
       if (!res.ok || !data.token) throw new Error(data.detail || 'PC bridge unavailable. Configure OBSERVER_BRIDGE_TARGET for browser preview.');
+      const capabilityResponse = await fetch('/bridge/api/app/state', { headers: { 'x-bridge-token': data.token }, cache: 'no-store', redirect: 'error' });
+      const capabilities = await capabilityResponse.json().catch(() => ({}));
+      if (generation !== this.epoch) throw new SessionChanged();
+      if (!capabilityResponse.ok || capabilities.apiVersion !== 1 || !Array.isArray(capabilities.active) || !Array.isArray(capabilities.pending)) throw new Error('Update the PC agent to 3.9.2+ from this branch before pairing. This app requires the structured, scoped mobile API.');
       this.token = data.token; this.profile = { baseUrl: 'Browser bridge proxy', native: false };
     }
     return this.profile;

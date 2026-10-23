@@ -58,7 +58,7 @@ Browser tests cover pairing/header auth, no token storage, all tabs/themes, exac
 
 ## Pair your PC
 
-Use PC agent **3.9.2+** from this branch for the structured task/approval API. Start the normal agent (or its existing dry-run transport mode if you deliberately do not want a WhatsApp connection; dry-run transport does **not** make enabled PC tools non-destructive). On the phone, enter the bridge origin and dashboard PIN from its console.
+Use PC agent **3.9.2+** from this branch for the structured task/approval API. Pairing performs an authenticated API-version/capability handshake and rejects old agents before retaining a credential. Start the normal agent (or its existing dry-run transport mode if you deliberately do not want a WhatsApp connection; dry-run transport does **not** make enabled PC tools non-destructive). On the phone, enter the bridge origin and dashboard PIN from its console.
 
 Prefer HTTPS or an encrypted private VPN. Explicit opt-in allows HTTP only for literal private LAN/VPN IP ranges, never public HTTP. Never expose port 8787 to the public internet. TLS validation is never disabled, redirects never receive credentials, remote pages cannot navigate inside the privileged WebView, and the phone never needs root.
 

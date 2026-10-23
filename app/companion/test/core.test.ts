@@ -60,7 +60,7 @@ it('update selection is semver-aware, Android-only, excludes drafts/prereleases 
 it('late replies from a disconnected browser session cannot mutate a fresh session; credentials never go in URLs/storage', async () => {
   const client = new BridgeClient(); let finish!: (r: Response) => void; const seen: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, options?: RequestInit) => {
-    seen.push(url); if (url.endsWith('/login')) return new Response(JSON.stringify({ token: 'fixture-private-token' }), { status: 200 });
+    seen.push(url); if (url.endsWith('/api/app/state')) return new Response(JSON.stringify({ apiVersion: 1, active: [], pending: [] }), { status: 200 }); if (url.endsWith('/login')) return new Response(JSON.stringify({ token: 'fixture-private-token' }), { status: 200 });
     expect((options?.headers as Record<string, string>)['x-bridge-token']).toBe('fixture-private-token'); return await new Promise<Response>((r) => { finish = r; });
   }));
   await client.pair('https://pc.example', '123456', false);
@@ -78,4 +78,10 @@ it('a late native restore cannot replace a newly paired profile', async () => {
   result(packets.find((p) => p.method === 'pair')!.id, { baseUrl: 'https://pc.example', native: true }); await paired;
   result(packets.find((p) => p.method === 'restore')!.id, { baseUrl: 'https://old.example' }); await rejected;
   expect(client.profile?.baseUrl).toBe('https://pc.example'); delete window.ObserverAndroid;
+});
+it('pairing rejects old/incompatible agents before retaining their credential', async () => {
+  const client = new BridgeClient();
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/login') ? new Response(JSON.stringify({ token: 'fixture-token' })) : new Response('{}', { status: 404 })));
+  await expect(client.pair('https://pc.example', '123456', false)).rejects.toThrow('3.9.2'); expect(client.profile).toBeNull();
+  expect(localStorage.length).toBe(0); vi.unstubAllGlobals();
 });

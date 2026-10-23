@@ -195,6 +195,9 @@ public final class MainActivity extends Activity {
                     String pin = p.getString("pin"); if (pin.isEmpty() || pin.length() > 128) throw new Exception("Invalid dashboard PIN.");
                     JSONObject r = NativeHttp.request(base + "/api/login", "POST", null, new JSONObject().put("pin", pin), false, null);
                     JSONObject data = r.optJSONObject("json"); if (r.getInt("status") != 200 || data == null || data.optString("token").trim().isEmpty()) throw new Exception(data == null ? "PC login failed." : data.optString("detail", "PC login failed."));
+                    JSONObject capabilityResponse = NativeHttp.request(base + "/api/app/state", "GET", data.getString("token"), null, false, null);
+                    JSONObject capability = capabilityResponse.optJSONObject("json");
+                    if (capabilityResponse.optInt("status") != 200 || capability == null || capability.optInt("apiVersion") != 1 || capability.optJSONArray("active") == null || capability.optJSONArray("pending") == null) throw new Exception("Update the PC agent to 3.9.2+ before pairing. Scoped mobile API version 1 is required.");
                     synchronized (sessionLock) { if (generation != epoch.get()) throw new Exception("Connection changed."); vault.put("profile", new JSONObject().put("baseUrl", base).put("token", data.getString("token")).put("allowLan", p.optBoolean("allowLan")).toString()); bridgeBase = base; bridgeToken = data.getString("token"); }
                     respond(id, profile(), null); return;
                 }
@@ -244,7 +247,7 @@ public final class MainActivity extends Activity {
                         if (code >= 400) throw new Exception("Provider returned HTTP " + code + ". Check the configured model, API key, quota and account. Provider error text is not echoed to protect key fragments.");
                         JSONObject response = new JSONObject(new String(NativeHttp.read(c.getInputStream(), 2 * 1024 * 1024), StandardCharsets.UTF_8));
                         if (requestCloudEpoch != cloudEpoch.get()) throw new Exception("Cloud request cancelled; late response discarded.");
-                        JSONObject message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message"); Object content = message.opt("content"); String text = content instanceof String ? ((String) content).trim() : message.optString("refusal", ""); if (text.isEmpty()) throw new Exception("Provider returned no text. Check model and usage before retrying; nothing was retried automatically."); respond(id, new JSONObject().put("ok", true).put("text", text.substring(0, Math.min(48000, text.length()))), null);
+                        JSONObject message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message"); Object content = message.opt("content"), refusal = message.opt("refusal"); String text = content instanceof String ? ((String) content).trim() : refusal instanceof String ? ((String) refusal).trim() : ""; if (text.isEmpty()) throw new Exception("Provider returned no text. Check model and usage before retrying; nothing was retried automatically."); respond(id, new JSONObject().put("ok", true).put("text", text.substring(0, Math.min(48000, text.length()))), null);
                     } finally { if (cloudConnection == c) cloudConnection = null; c.disconnect(); }
                     return;
                 }
