@@ -289,17 +289,14 @@
       "Bridge token ka comparison constant-time"
     ]
   },
-  "latest": "3.5.0",
-  "history": [
-    {
-      "version": "3.5.0",
-      "date": "2026-10-22",
-      "title": "🚀 15 SMART FEATURES — mirror, guard, study, money & more",
-      "bullets": [
-        "🎥 LIVE MIRROR + 🛡️ GUARD MODE — `/live` streams your screen here; `/guard` watches the webcam and photo-alerts on motion.",
-        "📚 STUDY + 💰 EXPENSES + 📄 DOC QA — `/study` flashcards with spaced repetition, `/exp` kharcha tracker with budget alerts, `/doc` se PDF sawal-jawab.",
-        "🔔📋🗓️🎙️🖥️ nmirror, clip/copy, cal+brief, meeting notes, photo search, focus, pguard, stats, pcs fleet, hw tracker."
-      ]
-    }
-  ]
+  "3.5.0": {
+    "title": "🚀 15 SMART FEATURES — mirror, guard, study, money & more",
+    "bullets": [
+      "🎥 LIVE MIRROR + 🛡️ GUARD MODE — `/live` streams your screen here; `/guard` watches the webcam and photo-alerts on motion.",
+      "📚 STUDY + 💰 EXPENSES + 📄 DOC QA — `/study` flashcards with spaced repetition, `/exp` kharcha tracker with budget alerts, `/doc` se PDF sawal-jawab.",
+      "🔔📋🗓️🎙️🖥️ nmirror, clip/copy, cal+brief, meeting notes, photo search, focus, pguard, stats, pcs fleet, hw tracker.",
+      "🕶️ Shades updates (3.4.1-3.4.3) is bundle me: kabhi auto-restore NAHI (sirf `/shades off` se wapas aata hai) + brightness keys ab flash nahi karte."
+    ]
+  },
+  "latest": "3.5.0"
 }
