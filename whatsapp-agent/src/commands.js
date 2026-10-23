@@ -23,6 +23,21 @@ import { tasks as globalTasks, isStopCommand, isStoppedError } from './cancel.js
 import * as ai from './ai.js';
 import * as pc from './pccontrol.js';
 import { shadesOn, shadesOff, shadesStatus, initShades, shadeAwareBrightness } from './shades.js';
+import * as liveMirror from './livemirror.js';
+import * as guardMode from './guard.js';
+import * as notifMirror from './notifmirror.js';
+import * as study from './studypack.js';
+import * as expenses from './expenses.js';
+import * as docChat from './docchat.js';
+import * as photoSearch from './photosearch.js';
+import * as calendar from './calendar.js';
+import * as focusMode from './focus.js';
+import * as powerGuard from './powerguard.js';
+import * as screenTime from './screentime.js';
+import * as meetingNotes from './meetingnotes.js';
+import * as clipSync from './clipboard.js';
+import * as fleetPcs from './fleetstatus.js';
+import * as homework from './homework.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -38,6 +53,9 @@ import { createProgress, describeHandsStep } from './progress.js';
 import { createShotJanitor, describeJanitor, cleanNow, cleanupReply } from './screenshots.js';
 import { createHarness } from './harness.js';
 import * as solver from './solver.js';
+import { imageStats } from './imaging.js';
+import { webcamPhoto } from './systemx.js';
+import { spawn } from 'node:child_process';
 import { createVoiceCall } from './voicecall.js';
 import { jarvisGreeting, spokenSummary } from './jarvis.js';
 import * as mem from './memory.js';
@@ -169,6 +187,48 @@ async function execAsyncFile(bin, args = []) {
   const { execFile } = await import('node:child_process');
   return promisify(execFile)(bin, args ?? [], { timeout: 8000 }).then((r) => r.stdout ?? '');
 }
+
+// 🔔 Notification mirror: stream the freedesktop notification bus (GNOME).
+function notifMonitorSpawner(onLine) {
+  const child = spawn('gdbus', ['monitor', '--session', '--dest', 'org.freedesktop.Notifications'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let buf = '';
+  child.stdout?.on('data', (d) => {
+    buf += String(d);
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? '';
+    for (const line of lines) onLine(line);
+  });
+  child.on('error', () => { /* no gdbus — mirror simply has nothing to show */ });
+  return child;
+}
+
+// 📚 Study pack builder: AI generates summary + flashcards + quiz JSON.
+async function buildStudyPack(topic, ctx) {
+  const prompt = [
+    `Create a study pack on "${topic}" for an Indian school student.`,
+    'Return ONLY a JSON object, no prose:',
+    '{"summary":"4-6 line crisp summary","flashcards":[{"q":"question","a":"short answer"} x 12],"quiz":[{"q":"question","options":["a","b","c","d"],"answer":"a"} x 6]}',
+  ].join('\n');
+  const raw = await ai.complete(config, prompt, log).catch(() => null);
+  const parsed = raw ? solver.extractJsonObject(solver.stripThinkBlocks(raw)) : null;
+  if (!parsed?.flashcards?.length && !parsed?.summary) {
+    return '📚 Study pack banane ke liye AI brain chahiye — `/brains` se setup karo (free: Ollama/Groq).';
+  }
+  const pack = study.buildPack(topic, parsed, Date.now());
+  study.savePack(pack);
+  store.data.lastStudyTopic = topic;
+  store.save?.();
+  return [
+    `📚 *Study pack ready — ${pack.topic}*`,
+    '',
+    pack.summary,
+    '',
+    `🃏 ${pack.flashcards.length} flashcards · 📝 ${pack.quiz.length} quiz questions`,
+    'Revise: `/revise` · Quiz: `/quiz ' + topic + '`',
+  ].join('\n');
+}
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
 
@@ -201,6 +261,23 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /ls [path] · /read <path> · /write <path> | <text> · /send <path>
 • /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
+*🚀 3.5.0 — 15 Smart Features*
+• /live [sec] — 🎥 screen mirror (live screenshots stream here)
+• /guard on|off|status — 🛡️ webcam motion → photo alert (travel ke liye)
+• /nmirror on|off|allow <apps> — 🔔 PC notifications yahan mirror
+• /study <topic> · /revise · /quiz — 📚 flashcards + spaced repetition
+• /exp <amt> <note> · /exp report|budget <n>|undo|list — 💰 kharcha tracker
+• /doc <path> · /doc q <question> — 📄 PDF/notes se sawal ke jawab
+• /photos <query> · /photos index — 🔍 photo dhundo (meaning se)
+• /cal add kal 4pm meeting · /cal today|week — 🗓️ calendar + /brief me reminders
+• /focus 25 block:youtube — 🎯 pomodoro + distraction blocker
+• /pguard on|status|battery 20|temp 90 — 🔋 battery/temp alerts
+• /stats [today|week|on|off] — 📊 screen time report
+• /notes now|stop — 🎙️ meeting record → AI notes + transcript
+• /clip · /copy <text> — 📋 PC↔phone clipboard sync
+• /pcs register <name> · /pcs — 🖥️ multi-PC fleet status
+• /hw add maths pg 42 kal · /hw today|week|done — 📝 homework tracker
+
 *🌐 Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)*
 • /reach [doctor] — 16+ internet channels + AT-SPI desktop grounding health report
 • /reach <url> — Read any webpage, YouTube transcript, GitHub repo, Tweet, or Reddit post
@@ -1629,7 +1706,17 @@ export function createAgent({
     if (!raw) {
       const baseBrief = await brief.buildBrief({ store, config });
       const addons = buildBriefing2Addons(store);
-      return addons ? `${baseBrief}\n\n${addons}` : baseBrief;
+      // 3.5.0: today's calendar events + due-soon homework join the brief.
+      const extra = [];
+      try {
+        const calToday = calendar.todayReply();
+        if (!/koi event nahi/.test(calToday)) extra.push(calToday);
+      } catch { /* brief never breaks */ }
+      try {
+        const hwToday = homework.todayReply();
+        if (!/koi homework due nahi/.test(hwToday)) extra.push(hwToday);
+      } catch { /* brief never breaks */ }
+      return [baseBrief, addons, ...extra].filter(Boolean).join('\n\n');
     }
     if (/^(off|band|stop)$/i.test(raw)) {
       return brief.unscheduleBrief(store) ? '🌅 Morning brief band kar diya.' : 'Morning brief already band tha.';
@@ -2909,6 +2996,200 @@ export function createAgent({
         return toReply(await actions.runPending(ctx));
       }
       case 'no': case 'nahi': case 'cancel': actions.clearPending(); pendingPower = null; pendingTap = null; return '👍 Cancelled — kuch nahi kiya.';
+      case 'live': {
+        // 🎥 Live screen mirror — frames keep coming to WhatsApp.
+        const arg = String(args || '').trim().toLowerCase();
+        if (arg === 'off' || arg === 'stop') return liveMirror.stopLive();
+        if (arg === 'status') return liveMirror.liveStatus();
+        const intervalSec = Number(arg) || liveMirror.DEFAULT_INTERVAL_SEC;
+        return liveMirror.startLive({
+          intervalSec,
+          capture: () => pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }),
+          send: (payload) => notifyOwner(payload),
+        });
+      }
+      case 'guard': {
+        // 🛡️ Motion-triggered webcam security camera.
+        const [sub, ...restArgs] = String(args || '').trim().toLowerCase().split(/\s+/);
+        const restJoined = restArgs.join(' ');
+        if (sub === 'off' || sub === 'stop') return guardMode.stopGuard();
+        if (sub === 'status') return guardMode.guardStatus();
+        if (sub === 'sens' || sub === 'sensitivity') return guardMode.setGuardSensitivity(restJoined);
+        return guardMode.startGuard({
+          sensitivity: Number(restJoined) || undefined,
+          capture: async () => (await webcamPhoto()).image,
+          statFn: (buf) => imageStats(buf),
+          send: (payload) => notifyOwner(payload),
+        });
+      }
+      case 'nmirror': case 'notifmirror': case 'mirror': {
+        // 🔔 Desktop notifications → WhatsApp.
+        const [sub, ...restArgs] = String(args || '').trim().split(/\s+/);
+        const restJoined = restArgs.join(' ');
+        if (sub === 'off') return notifMirror.toggleMirror(false);
+        if (sub === 'status') return notifMirror.mirrorStatus();
+        if (sub === 'allow') return notifMirror.setAllow(restJoined);
+        return notifMirror.toggleMirror(true, {
+          spawnMonitor: (onLine) => notifMonitorSpawner(onLine),
+          send: (text) => notifyOwner(text),
+        });
+      }
+      case 'study': {
+        // 📚 Study pack generator — summary + flashcards + quiz.
+        const topic = String(args || '').trim();
+        if (!topic) return '📚 Usage: `/study <topic>` — e.g. `/study photosynthesis`';
+        return buildStudyPack(topic, ctx);
+      }
+      case 'revise': {
+        const arg = String(args || '').trim().toLowerCase();
+        const topic = arg && !['ok', 'again'].includes(arg) ? arg : store.data.lastStudyTopic;
+        const pack = topic ? study.loadPack(topic) : null;
+        if (!pack) return '📚 Revision ke liye pack chahiye — `/study <topic>` pehle.';
+        return study.reviseMessage(pack, Date.now());
+      }
+      case 'quiz': {
+        const arg = String(args || '').trim();
+        if (/^answers\b/i.test(arg)) {
+          const topic = arg.replace(/^answers\s+/i, '').trim() || store.data.lastStudyTopic;
+          const pack = topic ? study.loadPack(topic) : null;
+          return pack ? study.quizAnswers(pack) : '📚 Pack nahi mila.';
+        }
+        const pack = study.loadPack(arg || store.data.lastStudyTopic);
+        return pack ? study.quizMessage(pack) : '📚 Usage: `/quiz <topic>` (pehle `/study <topic>`)';
+      }
+      case 'exp': case 'expense': case 'kharcha': {
+        // 💰 Expense tracker.
+        const raw = String(args || '').trim();
+        if (!raw) return expenses.lastEntries(5);
+        if (/^report\b/i.test(raw)) {
+          const month = raw.replace(/^report\s*/i, '').trim() || null;
+          return expenses.report({ month });
+        }
+        if (/^budget\b/i.test(raw)) return expenses.setBudget(raw.replace(/^budget\s*/i, '').trim());
+        if (/^undo\b/i.test(raw)) return expenses.undoLast();
+        if (/^list\b/i.test(raw)) return expenses.lastEntries(10);
+        return expenses.addExpense(raw).reply;
+      }
+      case 'doc': {
+        // 📄 Document Q&A — load a doc, then ask questions from it.
+        const raw = String(args || '').trim();
+        if (!raw) return docChat.docStatus();
+        if (/^clear\b/i.test(raw)) return docChat.clearDoc();
+        if (/^status\b/i.test(raw)) return docChat.docStatus();
+        if (/^q\s+/i.test(raw)) {
+          return docChat.askDoc(raw.replace(/^q\s+/i, ''), {
+            ask: (prompt) => ai.complete(config, prompt, log),
+          });
+        }
+        const loaded = await docChat.loadDoc(raw);
+        return loaded.reply ?? loaded.error;
+      }
+      case 'photos': case 'pics': {
+        // 🔍 Semantic-ish photo search over the local library.
+        const raw = String(args || '').trim();
+        if (/^index\b/i.test(raw)) {
+          const dir = raw.replace(/^index\s*/i, '').trim() || photoSearch.DEFAULT_DIR;
+          const idx = photoSearch.buildPhotoIndex({ dir });
+          return `🔍 Photo index ready — *${idx.photos.length} photos* from ${idx.dir}\nAb dhundo: \`/photos goa trip\``;
+        }
+        if (/^status\b/i.test(raw)) {
+          const idx = photoSearch.loadIndex();
+          return `🔍 Photo index: ${idx.photos.length} photos${idx.dir ? ` from ${idx.dir}` : ''} · query: \`/photos <what>\``;
+        }
+        if (!raw) return '🔍 Usage: `/photos <query>` — e.g. `/photos goa beach` · index: `/photos index`';
+        return photoSearch.photoReply(raw);
+      }
+      case 'cal': case 'calendar': {
+        // 🗓️ Calendar — events + day/week views.
+        const raw = String(args || '').trim();
+        if (!raw || /^today\b/i.test(raw)) return calendar.todayReply();
+        if (/^week\b/i.test(raw)) return calendar.weekReply();
+        if (/^del\b/i.test(raw)) return calendar.delEvent(raw.replace(/^del\s+/i, '').trim());
+        if (/^add\b/i.test(raw)) {
+          const r = calendar.addEvent(raw.replace(/^add\s+/i, ''));
+          return r.reply ?? r.error;
+        }
+        return '🗓️ Usage: `/cal add kal 4pm meeting` · `/cal today` · `/cal week` · `/cal del <id>`';
+      }
+      case 'focus': {
+        // 🎯 Focus mode — pomodoro + distraction gate.
+        const raw = String(args || '').trim();
+        if (/^stop\b/i.test(raw) || raw === 'off') return focusMode.stopFocus();
+        if (/^status\b/i.test(raw)) return focusMode.focusStatus();
+        if (/^week\b/i.test(raw)) return focusMode.weeklyReport();
+        const blockM = raw.match(/block:([\w,\s-]+)/i);
+        const blocks = (blockM?.[1] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+        const minutes = Number((raw.match(/\d+/) ?? [focusMode.DEFAULT_MINUTES])[0]);
+        return focusMode.startFocus({
+          minutes,
+          blocks,
+          closeApp: async (app) => { await handleCommand('close', app, { bypassSaved: true }); return true; },
+          onDone: (msg) => notifyOwner(msg),
+        });
+      }
+      case 'pguard': case 'powerguard': {
+        // 🔋 Power Guardian — battery/temp thresholds + alerts.
+        const [sub, ...restArgs] = String(args || '').trim().toLowerCase().split(/\s+/);
+        const restJoined = restArgs.join(' ');
+        if (!sub || sub === 'status') return powerGuard.pgStatus();
+        if (sub === 'on') return powerGuard.togglePowerGuard(true, { send: (t) => notifyOwner(t) });
+        if (sub === 'off') return powerGuard.togglePowerGuard(false);
+        if (sub === 'battery' || sub === 'temp') return powerGuard.setThreshold(sub, restJoined);
+        return '🔋 Usage: `/pguard on|off|status` · `/pguard battery 20` · `/pguard temp 90`';
+      }
+      case 'stats': {
+        // 📊 Screen time — window-title samples → daily/weekly minutes.
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'on') return screenTime.toggleSampling(true);
+        if (raw === 'off') return screenTime.toggleSampling(false);
+        if (raw === 'week') return screenTime.weekReply();
+        return screenTime.todayReply();
+      }
+      case 'notes': {
+        // 🎙️ Meeting recorder → transcript + AI notes.
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'stop') {
+          return meetingNotes.stopNotes({
+            summarize: (text) => ai.complete(config, `Make crisp meeting notes from this transcript: decisions, actions (with owners if mentioned), key points.\n\n${text.slice(0, 12_000)}`, log).catch(() => text.slice(0, 2000)),
+            onSummary: (msg) => notifyOwner(msg),
+          });
+        }
+        if (raw === 'status') return meetingNotes.notesStatus();
+        return meetingNotes.startNotes();
+      }
+      case 'clip': {
+        // 📋 PC clipboard → WhatsApp.
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'list') return clipSync.clipList();
+        return clipSync.clipPull();
+      }
+      case 'copy': {
+        // 📱 WhatsApp → PC clipboard.
+        const text = String(args || '').trim();
+        if (!text) return '📋 Usage: `/copy <text>` — PC clipboard pe set ho jayega.';
+        return clipSync.clipPush(text);
+      }
+      case 'pcs': {
+        // 🖥️ Multi-PC fleet status.
+        const raw = String(args || '').trim();
+        const [sub, ...nameParts] = raw.split(/\s+/);
+        const name = nameParts.join(' ');
+        if (sub === 'register') return fleetPcs.registerPc(name);
+        if (sub === 'remove') return fleetPcs.removePc(name);
+        return fleetPcs.fleetReply();
+      }
+      case 'hw': case 'homework': {
+        // 📝 Homework / deadline tracker.
+        const raw = String(args || '').trim();
+        if (!raw || /^today\b/i.test(raw)) return homework.todayReply();
+        if (/^week\b/i.test(raw)) return homework.weekReply();
+        if (/^done\b/i.test(raw)) return homework.doneHw(raw.replace(/^done\s+/i, '').trim());
+        if (/^add\b/i.test(raw)) {
+          const r = homework.addHw(raw.replace(/^add\s+/i, ''));
+          return r.reply ?? r.error;
+        }
+        return '📝 Usage: `/hw add maths pg 42 kal` · `/hw today` · `/hw week` · `/hw done <id>`';
+      }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
         // screenshots stay CLEAR (backlight/gamma, never the framebuffer).

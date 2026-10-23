@@ -1980,3 +1980,38 @@ panel-level tools: brightnessctl, xrandr, gsettings — never capture tools.
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._
+
+## Part 10 — 3.5.0: 15 Smart Features (`9243b85` + batch2/3)
+**User: "chal bhai sab daal de ek ek karke"** — the full approved 15-feature
+list, built feature-by-feature with tests after each batch (module seam
+style like shades.js — pure cores + injected I/O).
+
+**Batch 1** (`9243b85`) — `livemirror.js` (streaming screenshots, frame +
+duration budgets), `guard.js` (webcam motion via brightness-delta of the
+frame stats, sensitivity 1-10 curve, 60s alert cooldown), `notifmirror.js`
+(gdbus notification monitor → WhatsApp, allowlist + per-minute throttle),
+`studypack.js` (AI flashcards + quiz, spaced repetition [1,3,7,14,30] days),
+`expenses.js` (ledger, monthly report, budget alerts, undo).
+**Batch 2** — `docchat.js` (load txt/md/pdf → ask strictly from the doc),
+`photosearch.js` (keyword+MatchNet ranked local photo index), `calendar.js`
+(tiny Hinglish when-parser: "kal 4pm", "in 2h", "friday 10am"),
+`focus.js` (pomodoro + distraction-gate re-close loop), `powerguard.js`
+(battery/temp sysfs thresholds, warn-once-per-band).
+**Batch 3** — `screentime.js` (window-title samples → app minutes),
+`meetingnotes.js` (mic record → existing transcribeAudio → AI notes),
+`clipboard.js` (wl-paste/xclip both directions + history),
+`fleetstatus.js` (heartbeat registry `/pcs`), `homework.js` (deadlines on
+the calendar parser).
+
+**Bugs caught by tests (before merge):** guard.js unescaped template
+backticks (node --check clean but runtime SyntaxError on module load);
+`imagingStats` → `imageStats` name mismatch; `pc.captureWebcam` did not
+exist (actual API: `systemx.webcamPhoto()`); notifmirror parser read
+`app_icon` as app name (freedesktop signature has icon first); `now`
+function-vs-value confusion in calendar/focus (NaN dates); powerguard tick
+re-loaded state after evaluate() so warn history never persisted (spam
+loop); transcribe.js has `transcribeAudio(config, buffer)` not
+`transcribeFile`; `fleetStatus` name collision with agents.js import.
+
+**Suite:** 325 → 348 tests (batch1 8 + batch2 7 + batch3 8), 348/348 green.
+Version 3.5.0 + release notes + bundle 874K.
