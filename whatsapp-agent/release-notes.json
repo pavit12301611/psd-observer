@@ -1,4 +1,11 @@
 {
+  "3.4.1": {
+    "title": "🕶️ Shades fix — screen ab sirf aapke `/shades off` se wapas aayega!",
+    "bullets": [
+      "**No auto-restore (owner's rule)**: Pehle 30 min baad screen khud normal ho jaati thi — ab wo HATA diya. 🕶️ Shades ON = screen tab tak BLACK jab tak aap khud `/shades off` nahi bhejte — galti se bhi nahi khulega. Phone hi remote hai (screen black ho tab bhi WhatsApp se off chalega).",
+      "**Opt-in timer available**: Agar kisi ko safety timer chahiye to `SHADES_TIMEOUT_MIN=<minutes>` set kar sakta hai — default 0 = kabhi auto nahi."
+    ]
+  },
   "3.4.0": {
     "title": "🧠 Neural Brain + 🤖 Multi-Agent Fleet + 🕶️ Shades + ⚡ 40× Speed — sab ek update me!",
     "bullets": [

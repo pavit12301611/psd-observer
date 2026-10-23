@@ -1921,6 +1921,22 @@ auto-restore fires after deadline / not before, crash-recovery on startup, state
 status countdown, and an invariant that ONLY brightnessctl/xrandr are ever invoked — capture
 tools are never touched).
 
+## Part 7 — 🕶️ Shades owner-rule fix: NO auto-restore (3.4.1)
+
+Owner correction after trying it: *"30 minutes wala kyun lagaya? Screen sirf tab wapas aaye jab
+main `/shades off` bhejoon — warna galti se bhi nahi."* The auto-restore default is **removed**.
+
+- `SHADES_TIMEOUT_MIN` default **30 → 0 = NEVER** — the panel stays black until the owner's own
+  `/shades off`, full stop. Status now says exactly that ("sirf aapka /shades off screen wapas
+  laayega").
+- The timer mechanism is kept as **opt-in only** (`SHADES_TIMEOUT_MIN > 0` for people who want
+  a safety net). Crash-restart with the default leaves the shades exactly as the owner left them.
+- 3.4.1 release-notes announce the rule change on next update.
+
+**Result:** 316 → **318/318 tests green** (2 new: the OWNER RULE test — default has no timer,
+24 hours later the screen is STILL black and only `/shades off` restores it; plus opt-in timer
+still works when explicitly configured).
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

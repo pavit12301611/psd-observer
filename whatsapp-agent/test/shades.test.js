@@ -177,6 +177,48 @@ test('shades: recovery — state lost while backlight sits at 0', async () => {
 
 // ── 4. Status + invariants ──────────────────────────────────────────────────
 
+test("shades: OWNER RULE — default has NO auto-restore, only /shades off", async () => {
+  const stateFile = tmpState();
+  const run = fakeRun({
+    'brightnessctl -m': 'intel_backlight,backlight,937,47%,2000',
+    'brightnessctl set 0': '',
+    'brightnessctl set 937': '',
+  });
+  // No timeoutMs passed — must default to 0 = never.
+  let t = 1_000_000;
+  const onMsg = await shadesOn({ run, stateFile, now: () => t });
+  assert.match(onMsg, /koi auto-restore NAHI|no auto-restore/i, 'promise: nothing restores automatically');
+  assert.equal(loadShadeState(stateFile).timeoutMs, 0, 'default timer is 0');
+
+  // Hours later — still black. Only the owner's command restores it.
+  t += 24 * 60 * 60 * 1000;
+  const restored = await maybeAutoRestore({ run, stateFile, now: () => t });
+  assert.equal(restored, false, '24 hours later: STILL black');
+  assert.equal(loadShadeState(stateFile)?.enabled, true);
+  const status = await shadesStatus({ run, stateFile, now: () => t });
+  assert.match(status, /auto-restore \*off\*/i, 'status says no auto-restore');
+
+  // The ONLY way back: /shades off.
+  const offMsg = await shadesOff({ run, stateFile, now: () => t + 1 });
+  assert.match(offMsg, /SHADES OFF/);
+  assert.equal(loadShadeState(stateFile), null);
+});
+
+test('shades: opt-in timer still works when explicitly configured', async () => {
+  const stateFile = tmpState();
+  const run = fakeRun({
+    'brightnessctl -m': 'intel_backlight,backlight,937,47%,2000',
+    'brightnessctl set 0': '',
+    'brightnessctl set 937': '',
+  });
+  let t = 0;
+  const onMsg = await shadesOn({ run, stateFile, timeoutMs: 10 * 60_000, now: () => t });
+  assert.match(onMsg, /Opt-in auto-restore: 10 min/);
+  t += 11 * 60_000;
+  assert.equal(await maybeAutoRestore({ run, stateFile, timeoutMs: 10 * 60_000, now: () => t }), true);
+  assert.equal(loadShadeState(stateFile), null);
+});
+
 test('shades: status reflects state and counts down to auto-restore', async () => {
   const stateFile = tmpState();
   const run = fakeRun({
@@ -249,11 +291,12 @@ test('shades: /shades routes end-to-end through createAgent.handle()', async () 
   assert.match(String(help), /\/shades/, 'help lists /shades');
 });
 
-test('shades: update announcement is armed for 3.4.0 (WhatsApp what\'s-new)', async () => {
+test('shades: update announcement is armed for the current release (WhatsApp what\'s-new)', async () => {
   const u = await import('../src/updates.js');
-  assert.equal(u.packageVersion(), '3.4.0');
-  const changes = u.changesFor('3.4.0');
-  assert.ok(changes.length >= 4, `announcement has bullets (${changes.length})`);
-  assert.ok(changes.some((c) => /Neural/i.test(c)), 'mentions neural brain');
-  assert.ok(changes.some((c) => /Shades/i.test(c)), 'mentions shades');
+  const version = u.packageVersion();
+  assert.ok(version >= '3.4.0', `version ${version}`);
+  const changes = u.changesFor(version);
+  assert.ok(changes.length >= 3, `announcement has bullets (${changes.length})`);
+  assert.ok(changes.some((c) => /Shades|shades/i.test(c)), 'mentions shades');
+  assert.ok(changes.some((c) => /shades off|auto-restore/i.test(c)), 'mentions the manual-restore rule');
 });

@@ -11,11 +11,13 @@
 // Both leave the framebuffer untouched → /screenshot, /look, OCR and the
 // vision brain keep seeing the real screen. Only human eyes are locked out.
 //
-// SAFETY: the screen cannot stay black forever by accident — an auto-restore
-// timer (default 30 min) turns it back on, and /shades off from WhatsApp
-// works even while the screen is black. If the state file is ever lost while
-// the backlight sits at 0, shadesOff recovers to 50% instead of leaving the
-// owner staring at a dead panel.
+// OWNER RULE (explicit): the screen stays black until the OWNER says
+// /shades off — nothing restores it automatically, not even by mistake.
+// (SHADES_TIMEOUT_MIN exists as an OPT-IN safety for people who want it;
+// its default is 0 = never.) /shades off from WhatsApp works even while the
+// panel is black — the phone is the remote. If the state file is ever lost
+// while the backlight sits at 0, shadesOff recovers to 50% instead of
+// leaving the owner staring at a dead panel.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_STATE_FILE = path.join(ROOT, 'data', 'shades-state.json');
-export const DEFAULT_TIMEOUT_MIN = 30;
+export const DEFAULT_TIMEOUT_MIN = 0; // NEVER auto-restore — only /shades off
 
 // ── tiny injectable shell runner (tests pass a fake) ─────────────────────────
 async function defaultRun(bin, args = []) {
@@ -152,8 +154,8 @@ export async function shadesOn(opts = {}) {
     '🕶️ *SHADES ON* — screen physically *BLACK* for everyone nearby.',
     `✅ Screenshots *clear* — sirf panel dark hai (${how}), framebuffer safe.`,
     timeoutMs > 0
-      ? `⏱️ Auto-restore: ${Math.round(timeoutMs / 60000)} min · turant wapas: \`/shades off\``
-      : '⏱️ Auto-restore off · wapas: `/shades off`',
+      ? `⏱️ Opt-in auto-restore: ${Math.round(timeoutMs / 60000)} min · turant wapas: \`/shades off\``
+      : '🔒 Screen tab tak black rahega jab tak *aap* `/shades off` nahi bhejte — koi auto-restore NAHI.',
   ].join('\n');
 }
 
@@ -193,8 +195,10 @@ export async function shadesStatus(opts = {}) {
   await maybeAutoRestore({ run, stateFile, now });
   const state = loadShadeState(stateFile);
   if (!state?.enabled) return '🕶️ Shades: *OFF* — screen normal. On: `/shades`';
-  const mins = Math.max(0, Math.round((state.timeoutMs - (now() - state.at)) / 60000));
-  return `🕶️ Shades: *ON* (${state.method}) · auto-restore in ~${mins} min · off: \`/shades off\``;
+  const timeout = state.timeoutMs ?? 0;
+  if (timeout <= 0) return '🕶️ Shades: *ON* 🔒 — auto-restore *off* (sirf aapka `/shades off` screen wapas laayega)';
+  const mins = Math.max(0, Math.round((timeout - (now() - state.at)) / 60000));
+  return `🕶️ Shades: *ON* (${state.method}) · opt-in auto-restore in ~${mins} min · off: \`/shades off\``;
 }
 
 /**
@@ -212,7 +216,12 @@ export async function maybeAutoRestore(opts = {}) {
   return true;
 }
 
-/** Startup hook — a stale black screen from a crash must never persist. */
+/**
+ * Startup hook. Restores a stale blackout ONLY when the owner opted in to a
+ * timeout (state.timeoutMs > 0) and it elapsed. With the default (0) even a
+ * crash-restart leaves the shades exactly as the owner left them — black
+ * until /shades off.
+ */
 export async function initShades(opts = {}) {
   try {
     return await maybeAutoRestore(opts);
