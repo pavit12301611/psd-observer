@@ -1706,7 +1706,17 @@ export function createAgent({
     if (!raw) {
       const baseBrief = await brief.buildBrief({ store, config });
       const addons = buildBriefing2Addons(store);
-      return addons ? `${baseBrief}\n\n${addons}` : baseBrief;
+      // 3.5.0: today's calendar events + due-soon homework join the brief.
+      const extra = [];
+      try {
+        const calToday = calendar.todayReply();
+        if (!/koi event nahi/.test(calToday)) extra.push(calToday);
+      } catch { /* brief never breaks */ }
+      try {
+        const hwToday = homework.todayReply();
+        if (!/koi homework due nahi/.test(hwToday)) extra.push(hwToday);
+      } catch { /* brief never breaks */ }
+      return [baseBrief, addons, ...extra].filter(Boolean).join('\n\n');
     }
     if (/^(off|band|stop)$/i.test(raw)) {
       return brief.unscheduleBrief(store) ? '🌅 Morning brief band kar diya.' : 'Morning brief already band tha.';
