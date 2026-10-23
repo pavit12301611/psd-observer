@@ -1529,7 +1529,11 @@ export function createAgent({
       '⚠️ *Kaam nahi ho paaya — kuch bhi nahi kiya.*',
       `_Reason: ${meta.reason || 'brain ne koi usable jawab nahi diya'}_`,
       '',
-      `Work size: ${meta.tier ?? plan.tier} · tried: ${plan.candidates.slice(0, 2).map((m) => shortModel(m.label)).join(' → ') || 'none'}`,
+      `Work size: ${meta.requestedTier ?? meta.tier ?? plan.tier} · tried: ${(meta.attempts ?? []).map((attempt) => shortModel(attempt.model)).join(' → ') || 'none (cooldown/provider filter)'}`,
+      ...((meta.attempts ?? []).filter((attempt) => attempt.error).map((attempt) =>
+        `• ${shortModel(attempt.model)} — ${attempt.error.kind}${attempt.error.status ? ` / HTTP ${attempt.error.status}` : ''}: ${attempt.error.message}`)),
+      ...[...new Set((meta.attempts ?? []).filter((attempt) => attempt.error).map((attempt) => attempt.error.hint))].slice(0, 3),
+      ...(!meta.attempts?.length ? (meta.plan?.notes ?? []) : []),
       '',
       'Ye try karo:',
       '• /brains — live health + power budget',

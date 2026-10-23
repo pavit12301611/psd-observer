@@ -18,6 +18,8 @@
 //
 // Pure + injectable: nothing here touches the network, so it is fully testable.
 
+import { brainFailure } from './brainrequest.js';
+
 export const TIERS = ['tiny', 'light', 'standard', 'heavy'];
 export const TIER_RANK = { tiny: 1, light: 2, standard: 3, heavy: 4 };
 export const RANK_TIER = { 1: 'tiny', 2: 'light', 3: 'standard', 4: 'heavy' };
@@ -155,6 +157,9 @@ export function estimateComplexity(text, opts = {}) {
 /** True when the task clearly belongs on a website (needs a real browser). */
 export function looksLikeWebTask(text) {
   const t = String(text ?? '');
+  // Mentioning GitHub/a website in a coding or research task is not an
+  // instruction to blindly type the entire task into a browser search box.
+  if (/\b(debug|refactor|scrape|research|implement|coding)\b|\b(fix|review|edit|write|create|build)\b[\s\S]{0,100}\b(code|script|repo|repository|api|bug)\b/i.test(t)) return false;
   return WEB_DEST.test(t) && WEB_ACTION.test(t);
 }
 
@@ -189,12 +194,26 @@ export function inferQuality(name, fallback = 5) {
  *   minTier/maxTier = the work sizes this model should be given.
  *   cost           = 0 local · 1 free cloud · 2 paid (never used by default).
  */
+const modelList = (value) => (Array.isArray(value) ? value : String(value || '').split(','))
+  .map((name) => String(name).trim()).filter(Boolean);
+
 export function buildCatalog(config = {}) {
   const models = [];
   const add = (m) => {
     if (!m.model) return;
+    const existing = models.find((entry) => entry.provider === m.provider && entry.model === m.model && entry.baseUrl === (m.baseUrl || ''));
+    if (existing) {
+      existing.vision ||= Boolean(m.vision);
+      existing.tools ||= m.tools !== false;
+      existing.minTier = Math.min(existing.minTier, m.minTier ?? 1);
+      existing.maxTier = Math.max(existing.maxTier, m.maxTier ?? 4);
+      existing.quality = Math.max(existing.quality, m.quality ?? inferQuality(m.model, 5));
+      return;
+    }
+    const baseId = `${m.provider}:${m.model}`;
+    const id = models.some((entry) => entry.id === baseId) ? `${baseId}@endpoint-${models.length + 1}` : baseId;
     models.push({
-      id: `${m.provider}:${m.model}`,
+      id,
       provider: m.provider,
       model: m.model,
       label: m.label ?? `${m.provider} · ${m.model}`,
@@ -292,6 +311,9 @@ export function buildCatalog(config = {}) {
       provider: 'groq', model: big, label: `Groq (free) · ${big}`,
       minTier: 3, maxTier: 4, speed: 5, tools: true, vision: sees(big), cost: 1, quality: inferQuality(big, 9),
     });
+    for (const model of modelList(config.groqModelFallbacks)) {
+      add({ provider: 'groq', model, minTier: 2, maxTier: 4, speed: 5, tools: true, vision: sees(model), quality: inferQuality(model, 7) });
+    }
     if (vision && vision !== small && vision !== big) {
       add({
         provider: 'groq', model: vision, label: `Groq vision · ${vision}`,
@@ -323,8 +345,14 @@ export function buildCatalog(config = {}) {
     const sees = vision ? vision === main : looksVisionModel(main);
     add({
       provider: 'openrouter', model: main, label: `OpenRouter (free) · ${main}`,
-      minTier: 3, maxTier: 4, speed: 3, tools: true, vision: sees, cost: 1, quality: inferQuality(main, 8),
+      minTier: 3, maxTier: 4, speed: 3, tools: true, vision: sees, cost: 1, quality: main === 'openrouter/free' ? 5 : inferQuality(main, 8),
     });
+    // A named :free model can disappear or have no live tool endpoints.
+    // The free auto-router is a last-resort fallback, never a paid model.
+    const fallbacks = config.openrouterModelFallbacks === undefined ? ['openrouter/free'] : modelList(config.openrouterModelFallbacks);
+    for (const model of fallbacks) {
+      add({ provider: 'openrouter', model, minTier: 3, maxTier: 4, speed: 3, tools: true, vision: vision ? vision === model : looksVisionModel(model), quality: model === 'openrouter/free' ? 5 : inferQuality(model, 7) });
+    }
     if (vision && vision !== main) {
       add({
         provider: 'openrouter', model: vision, label: `OpenRouter vision · ${vision}`,
@@ -354,12 +382,13 @@ export function budgetFor(rank, config = {}) {
 export function createModelRouter({ config = {}, log = console } = {}) {
   const catalog = buildCatalog(config);
   const prefer = String(config.routerPrefer || 'local').toLowerCase(); // local | cloud | balanced
-  const cooldownBaseMs = Number(config.modelCooldownMs ?? 120_000) || 120_000;
-  const cooldownMaxMs = Number(config.modelCooldownMaxMs ?? 1_800_000) || 1_800_000;
-  const heavyWindowMs = Number(config.heavyWindowMs ?? 3_600_000) || 3_600_000;
+  const cooldownBaseMs = Math.max(1, Number(config.modelCooldownMs ?? 120_000) || 120_000);
+  const cooldownMaxMs = Math.max(cooldownBaseMs, Number(config.modelCooldownMaxMs ?? 1_800_000) || 1_800_000);
+  const heavyWindowMs = Math.max(1, Number(config.heavyWindowMs ?? 3_600_000) || 3_600_000);
   const maxHeavyPerHour = Math.max(0, Number(config.maxHeavyPerHour ?? 12) || 0);
 
   const health = new Map();   // id → { failures, cooldownUntil, lastError, calls, ok, fail, ms, lastUsed, lastOk }
+  const providerCooldowns = new Map(); // invalid shared credentials must not be retried for each sibling model
   const decisions = [];       // ring buffer for /brains
   const heavyCalls = [];      // timestamps of heavy-tier calls
 
@@ -379,10 +408,12 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     return model.provider === want;
   }
 
+  const providerKey = (model) => `${model.provider}:${model.baseUrl || config[`${model.provider}BaseUrl`] || ''}`;
+  const providerHealth = (model) => providerCooldowns.get(providerKey(model));
+  const cooldownUntil = (model) => Math.max(health.get(model.id)?.cooldownUntil || 0, providerHealth(model)?.cooldownUntil || 0);
+
   function isCooling(model, now = Date.now()) {
-    const entry = health.get(model.id);
-    if (!entry) return false;
-    return entry.cooldownUntil > now;
+    return cooldownUntil(model) > now;
   }
 
   function pruneHeavy(now = Date.now()) {
@@ -419,6 +450,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       if (!m.tools && needsTools) return false;
       if (!m.vision && needsVision) return false;
       if (!providerAllowed(m)) return false;
+      if (budgetHit && (m.quality >= 8 || m.minTier >= 4)) return false;
       return true;
     });
 
@@ -426,7 +458,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     const fresh = eligible.filter((m) => !isCooling(m, now));
     for (const m of eligible) {
       if (isCooling(m, now)) {
-        const left = Math.ceil((health.get(m.id).cooldownUntil - now) / 1000);
+        const left = Math.ceil((cooldownUntil(m) - now) / 1000);
         notes.push(`${m.label} cooling down (${left}s)`);
       }
     }
@@ -489,25 +521,38 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       });
     };
 
-    const ordered = [
+    // A weak local model can nominally cover every tier. Do not let that
+    // push capable standard/vision cloud fallbacks behind a tiny local brain.
+    const ordered = rank >= 4 ? sortFor(fresh, 'ideal') : [
       ...sortFor(ideal, 'ideal'),
       ...sortFor(bigger, 'up'),
       ...sortFor(smaller, 'down'),
     ];
+
+    // A tiny/light task is safe on any larger capable model. Honor an
+    // explicit cloud preference across fallback tiers too, rather than
+    // burning the final slot on an unconfigured local default first.
+    if (rank <= 2 && prefer === 'cloud') ordered.sort((a, b) => pref(a) - pref(b));
 
     // Never retry the same model twice in one plan.
     const seen = new Set();
     const candidates = ordered.filter((m) => (seen.has(m.id) ? false : seen.add(m.id)));
 
     if (!candidates.length && catalog.length) {
-      notes.push(needsVision && !catalog.some((m) => m.vision)
-        ? 'no vision model configured (set OLLAMA_VISION_MODEL or GEMINI_API_KEY)'
-        : 'every configured brain is cooling down — retrying once');
+      notes.push(!catalog.some(providerAllowed)
+        ? 'no configured brain is allowed by AI_PROVIDER'
+        : !eligible.length
+          ? budgetHit ? 'heavy power budget exhausted and no lighter compatible brain is configured'
+            : `no ${needsVision ? 'vision' : 'tool-capable'} model available for this provider`
+          : `every eligible brain is cooling down — retry after ${Math.max(1, Math.ceil((Math.min(...eligible.map(cooldownUntil)) - now) / 1000))}s`);
     }
 
-    const budget = budgetFor(rank, config);
+    // Saving model power must not also starve an inherently heavy task of
+    // the steps/tools it needs to finish.
+    const budget = budgetFor(complexity.rank, config);
     return {
       tier: RANK_TIER[rank],
+      requestedTier: complexity.tier,
       rank,
       complexity,
       candidates,
@@ -529,8 +574,10 @@ export function createModelRouter({ config = {}, log = console } = {}) {
 
   /** Record how a call went. Failures cool the model down, successes clear it. */
   function record(modelId, { ok, ms = 0, tier, error = '' } = {}) {
-    try { recordHook?.(modelId, { ok: Boolean(ok), ms, tier, error }); } catch { /* usage must never break a call */ }
+    const failure = ok ? null : brainFailure(error, config);
+    try { recordHook?.(modelId, { ok: Boolean(ok), ms, tier, error: failure?.message || '' }); } catch { /* usage must never break a call */ }
     const entry = stat(modelId);
+    const model = catalog.find((m) => m.id === modelId);
     entry.calls += 1;
     entry.lastUsed = Date.now();
     entry.lastOk = Boolean(ok);
@@ -540,6 +587,9 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       entry.failures = 0;
       entry.cooldownUntil = 0;
       entry.lastError = '';
+      entry.errorKind = '';
+      entry.hint = '';
+      if (model) providerCooldowns.delete(providerKey(model));
       const dur = Math.max(0, Number(ms) || 0);
       if (dur > 0) {
         entry.emaMs = entry.emaMs == null ? dur : Math.round(entry.emaMs * 0.7 + dur * 0.3);
@@ -547,12 +597,18 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     } else {
       entry.fail += 1;
       entry.failures += 1;
-      entry.lastError = String(error).slice(0, 160);
-      const wait = Math.min(cooldownBaseMs * 2 ** (entry.failures - 1), cooldownMaxMs);
+      entry.lastError = failure.message;
+      entry.errorKind = failure.kind;
+      entry.hint = failure.hint;
+      entry.lastStatus = failure.status;
+      const wait = Math.max(Math.min(cooldownBaseMs * 2 ** (entry.failures - 1), cooldownMaxMs), Math.min(failure.retryAfterMs, 86_400_000));
       entry.cooldownUntil = Date.now() + wait;
+      if (model && failure.providerWide) providerCooldowns.set(providerKey(model), { ...entry });
       log.warn?.(`[router] ${modelId} failed (${entry.failures}×) — cooling ${Math.round(wait / 1000)}s: ${entry.lastError}`);
     }
-    if (Number(tier) >= 4) {
+    // Failed HTTP requests never earned a heavy-model answer. Charging every
+    // fallback failure used to exhaust the hourly budget without doing work.
+    if (ok && Number(tier) >= 4) {
       pruneHeavy();
       heavyCalls.push(Date.now());
     }
@@ -590,19 +646,24 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     pruneHeavy();
     const visible = catalog.filter((m) => providerAllowed(m));
     const line = (m) => {
-      const h = health.get(m.id);
-      const cooling = h && h.cooldownUntil > Date.now();
+      const own = health.get(m.id);
+      const shared = providerHealth(m);
+      const h = shared?.cooldownUntil > Date.now() ? shared : own;
+      const cooling = isCooling(m);
       const icon = cooling ? '⏳' : h?.lastOk === false ? '⚠️' : h?.lastOk ? '✅' : '•';
       const tiers = m.minTier === m.maxTier ? RANK_TIER[m.minTier] : `${RANK_TIER[m.minTier]}→${RANK_TIER[m.maxTier]}`;
       const bits = [tiers];
       if (m.vision) bits.push('vision');
       if (m.local) bits.push(m.provider === 'local' ? 'llama.cpp' : 'ollama');
       if (m.baseUrl) {
-        try { bits.push(new URL(m.baseUrl).port || '80'); } catch { /* plain name */ }
+        try { const url = new URL(m.baseUrl); bits.push(url.port || (url.protocol === 'https:' ? '443' : '80')); } catch { /* plain name */ }
       }
-      if (h?.calls) bits.push(`${h.ok}/${h.calls} ok · ${avgMs(h)}ms`);
-      const tail = cooling ? ` · cooling ${Math.ceil((h.cooldownUntil - Date.now()) / 1000)}s` : h?.lastError && h.lastOk === false ? ` · ${h.lastError.slice(0, 50)}` : '';
-      return `${icon} ${m.label} — ${bits.join(' · ')}${tail}`;
+      if (own?.calls) bits.push(`${own.ok}/${own.calls} ok · ${avgMs(own)}ms`);
+      const tail = cooling ? ` · cooling ${Math.ceil((cooldownUntil(m) - Date.now()) / 1000)}s` : '';
+      const errorLine = h?.lastOk === false && h.lastError ? `
+   ${h.errorKind || 'error'}: ${h.lastError.slice(0, 100)}
+   ${h.hint || ''}` : '';
+      return `${icon} ${m.label} — ${bits.join(' · ')}${tail}${errorLine}`;
     };
     const local = visible.filter((m) => m.local);
     const cloud = visible.filter((m) => !m.local);
@@ -650,6 +711,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
 
   function reset() {
     health.clear();
+    providerCooldowns.clear();
     decisions.length = 0;
     heavyCalls.length = 0;
   }

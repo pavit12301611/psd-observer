@@ -14,6 +14,7 @@
 // without a description.
 
 import { routerFor } from './router.js';
+import { postBrainJson as postJson, safeBrainText } from './brainrequest.js';
 import { getOwnerAddress, getAgentName, formatMemoryForPrompt } from './memory.js';
 import { formatPersonaForPrompt, observeOwnerTurn, reflectWithAI } from './persona.js';
 import { getGuestHistory, recordGuestChatTurn } from './guests.js';
@@ -131,21 +132,6 @@ export async function raceModels(candidates, invokeModel, { hedgeDelayMs = 2200 
   });
 }
 
-async function postJson(url, body, headers = {}, timeoutMs = TIMEOUT_MS, signal = null) {
-  const timeout = AbortSignal.timeout(Math.max(5_000, timeoutMs));
-  // /stop aborts the caller's signal; the timeout still applies on top.
-  const combined = signal && typeof AbortSignal.any === 'function'
-    ? AbortSignal.any([timeout, signal])
-    : signal ?? timeout;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify(body),
-    signal: combined,
-  });
-  if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return res.json();
-}
 
 export function systemPrompt(config, store, opts = {}) {
   const memoryBlock = formatMemoryForPrompt(store, config);
@@ -321,6 +307,7 @@ export async function chat(config, store, userText, log = console, opts = {}) {
   const started = Date.now();
 
   for (const model of plan.candidates) {
+    if (router.isCooling(model)) continue;
     const attemptStart = Date.now();
     try {
       const rawResult = await callModel(model, config, messages, config.aiTimeoutMs, { userText, temperature: opts.temperature });
@@ -344,8 +331,8 @@ export async function chat(config, store, userText, log = console, opts = {}) {
       }
       return { ...result, tier: plan.tier, cached: false, ms: Date.now() - started };
     } catch (err) {
-      router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err.message });
-      log.warn?.(`[ai] ${model.label} failed: ${err.message}`);
+      router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err });
+      log.warn?.(`[ai] ${model.label} failed: ${safeBrainText(err.message, config)}`);
     }
   }
   return null;
@@ -396,6 +383,7 @@ export async function guestChat(config, store, senderNumber, userText, log = con
   const started = Date.now();
 
   for (const model of plan.candidates) {
+    if (router.isCooling(model)) continue;
     const attemptStart = Date.now();
     try {
       const rawResult = await callModel(model, config, messages, config.aiTimeoutMs, { userText });
@@ -405,8 +393,8 @@ export async function guestChat(config, store, senderNumber, userText, log = con
       recordGuestChatTurn(store, senderNumber, 'assistant', result.text, { name: opts.senderName });
       return { ...result, tier: plan.tier, ms: Date.now() - started };
     } catch (err) {
-      router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err.message });
-      log.warn?.(`[ai:guest] ${model.label} failed: ${err.message}`);
+      router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err });
+      log.warn?.(`[ai:guest] ${model.label} failed: ${safeBrainText(err.message, config)}`);
     }
   }
   return null;
@@ -431,14 +419,15 @@ export async function complete(config, prompt, log = console) {
   const messages = [{ role: 'user', content: prompt }];
   const plan = router.plan({ text: prompt, needsTools: false });
   for (const model of plan.candidates) {
+    if (router.isCooling(model)) continue;
     const attemptStart = Date.now();
     try {
       const result = await callModel(model, config, messages, config.aiTimeoutMs);
       router.record(model.id, { ok: true, ms: Date.now() - attemptStart, tier: plan.rank });
       return result;
     } catch (err) {
-      router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err.message });
-      log.warn?.(`[ai] ${model.label} failed: ${err.message}`);
+      router.record(model.id, { ok: false, ms: Date.now() - attemptStart, tier: plan.rank, error: err });
+      log.warn?.(`[ai] ${model.label} failed: ${safeBrainText(err.message, config)}`);
     }
   }
   return null;
@@ -684,6 +673,7 @@ export async function describeImage(config, imageBase64, caption = '', log = con
     : 'Describe this photo briefly: what is in it, and read any visible text.';
   const plan = router.plan({ text: caption || 'describe this photo', needsVision: true, needsTools: false });
   for (const model of plan.candidates.filter((m) => m.vision)) {
+    if (router.isCooling(model)) continue;
     const started = Date.now();
     try {
       const text = await visionCall(model, config, prompt, imageBase64);
@@ -691,8 +681,8 @@ export async function describeImage(config, imageBase64, caption = '', log = con
       router.record(model.id, { ok: true, ms: Date.now() - started, tier: plan.rank });
       return text;
     } catch (err) {
-      router.record(model.id, { ok: false, ms: Date.now() - started, tier: plan.rank, error: err.message });
-      log.warn?.(`[ai] vision ${model.label} failed: ${err.message}`);
+      router.record(model.id, { ok: false, ms: Date.now() - started, tier: plan.rank, error: err });
+      log.warn?.(`[ai] vision ${model.label} failed: ${safeBrainText(err.message, config)}`);
     }
   }
   return null;
@@ -731,6 +721,7 @@ export async function screenStep(config, prompt, imageBase64, log = console, { m
     });
   const tried = [];
   for (const model of candidates) {
+    if (router.isCooling(model)) continue;
     const started = Date.now();
     try {
       const text = await visionCall(model, config, prompt, imageBase64, mime, { signal, maxTokens });
@@ -740,8 +731,8 @@ export async function screenStep(config, prompt, imageBase64, log = console, { m
     } catch (err) {
       if (signal?.aborted) throw err; // /stop: do not burn the next provider
       tried.push(model.label);
-      router.record(model.id, { ok: false, ms: Date.now() - started, tier: plan.rank, error: err.message });
-      log.warn?.(`[ai] screen ${model.label} failed: ${err.message}`);
+      router.record(model.id, { ok: false, ms: Date.now() - started, tier: plan.rank, error: err });
+      log.warn?.(`[ai] screen ${model.label} failed: ${safeBrainText(err.message, config)}`);
     }
   }
   if (!candidates.length) {
@@ -802,7 +793,7 @@ export async function locateInImage(config, imageBase64, description, log = cons
     });
     return data.message?.content?.trim() || null;
   } catch (err) {
-    log.warn?.(`[ai] vision locate failed: ${err.message}`);
+    log.warn?.(`[ai] vision locate failed: ${safeBrainText(err.message, config)}`);
     return null;
   }
 }

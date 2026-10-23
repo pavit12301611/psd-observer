@@ -1,5 +1,15 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.8.1 — Heavy-task routing & safe failover (2026-10-23)
+
+- Replaced opaque `all brains failed` reports with actual attempted models, HTTP/error categories, redacted details and actionable hints; HTTP-200 error envelopes and Retry-After now work too.
+- Heavy routing ranks all capable fallbacks before weak local defaults, supports configured backup IDs and the free OpenRouter auto-router, and tries up to six healthy models instead of only three. Failed requests do not consume the hourly heavy-completion budget; a budget downgrade keeps the task's steps/tools.
+- Smaller, bounded prompts/tool descriptions, explicit output limits and one compact retry for context errors. Correct native Ollama tool wrappers and grouped Gemini function responses/thought signatures.
+- Verified progress and media survive handoff. Writes/messages are not replayed by another model, observations can be refreshed, tool batches run sequentially, malformed calls are repaired without executing defaults, and confirmation or `/stop` prevents later actions.
+- Step exhaustion/provider failure reports partial work rather than fabricated completion. Conversation-save errors cannot restart completed actions. Added offline HTTP-fixture regressions in `test/brain-reliability.test.js` and made the desktop-launch round-trip fixture deterministic.
+- Package/lock/release notes and the tracked curl-install bundle are synchronized so installers receive this code, not the old 3.8.0 archive. Live provider availability/quotas and the owner's desktop still require validation on the installed PC.
+
+
 ## v3.2.2 — Self-Evolving Agentic AI & Behavioral Learning Engine (`src/persona.js`)
 
 User ki maang: *"bhai ab na esa kar ki ai na meri chats se train ho ki mera behaviour kaisa hai aur woh aur bhi jyada better banata jaaaye iska main kaam na pc control nhi agentic ai banna hai with the best person who understand me"*.
