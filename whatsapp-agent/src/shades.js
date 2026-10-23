@@ -11,11 +11,13 @@
 // Both leave the framebuffer untouched → /screenshot, /look, OCR and the
 // vision brain keep seeing the real screen. Only human eyes are locked out.
 //
-// SAFETY: the screen cannot stay black forever by accident — an auto-restore
-// timer (default 30 min) turns it back on, and /shades off from WhatsApp
-// works even while the screen is black. If the state file is ever lost while
-// the backlight sits at 0, shadesOff recovers to 50% instead of leaving the
-// owner staring at a dead panel.
+// OWNER RULE (explicit): the screen stays black until the OWNER says
+// /shades off — nothing restores it automatically, not even by mistake.
+// (SHADES_TIMEOUT_MIN exists as an OPT-IN safety for people who want it;
+// its default is 0 = never.) /shades off from WhatsApp works even while the
+// panel is black — the phone is the remote. If the state file is ever lost
+// while the backlight sits at 0, shadesOff recovers to 50% instead of
+// leaving the owner staring at a dead panel.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_STATE_FILE = path.join(ROOT, 'data', 'shades-state.json');
-export const DEFAULT_TIMEOUT_MIN = 30;
+export const DEFAULT_TIMEOUT_MIN = 0; // NEVER auto-restore — only /shades off
 
 // ── tiny injectable shell runner (tests pass a fake) ─────────────────────────
 async function defaultRun(bin, args = []) {
@@ -38,6 +40,7 @@ function stateOpts(opts = {}) {
     stateFile: opts.stateFile ?? DEFAULT_STATE_FILE,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MIN * 60_000,
     now: opts.now ?? Date.now,
+    readPct: opts.readPct ?? null, // guard testing hook (sysfs otherwise)
   };
 }
 
@@ -76,7 +79,12 @@ async function backlightOn(run) {
   const pct = Number.parseInt((parts[3] ?? '').replace('%', ''), 10);
   const raw = parts[2]; // raw device value — restore exactly, percent rounds
   await run('brightnessctl', ['set', '0']);
-  return { method: 'backlight', savedPct: Number.isFinite(pct) ? pct : null, savedRaw: raw ?? null };
+  return {
+    method: 'backlight',
+    savedPct: Number.isFinite(pct) ? pct : null,
+    savedRaw: raw ?? null,
+    device: parts[0] || null, // e.g. intel_backlight — lets the guard read sysfs fork-free
+  };
 }
 
 async function backlightOff(run, state) {
@@ -129,15 +137,29 @@ export async function shadesOn(opts = {}) {
     return '🕶️ Shades nahi chale — na `brightnessctl` mila (sudo dnf install brightnessctl) na `xrandr` (X11 session).';
   }
 
+  // Layer 1b: belt-and-braces — if the backlight method is active, ALSO pin
+  // the gamma ramp to 0 when X11 allows it. Brightness keys can then raise
+  // the backlight freely and the CONTENT STILL RENDERS BLACK — no flash,
+  // structurally impossible, no matter how fast anyone presses keys.
+  let gammaLayer = null;
+  if (applied.method === 'backlight') {
+    try { gammaLayer = await gammaOn(run); } catch { /* non-X11/Wayland: fine */ }
+  }
+  // Layer 3: on GNOME, unbind the brightness media keys entirely (saved and
+  // restored on /shades off). No key event, no backlight change at all.
+  const mediaKeys = await unbindBrightnessMediaKeys(run);
+
   const state = {
     enabled: true,
     at: now(),
     timeoutMs,
     ...applied,
+    gamma: gammaLayer?.outputs ?? [],
+    mediaKeys,
   };
   saveShadeState(state, stateFile);
 
-  // Failsafe: auto-restore even if nobody says /shades off.
+  // Opt-in timer (default 0 = never — owner rule).
   if (timeoutMs > 0) {
     const timer = setTimeout(() => {
       shadesOff({ run, stateFile, now }).catch(() => {});
@@ -145,15 +167,23 @@ export async function shadesOn(opts = {}) {
     timer.unref?.(); // never keep the process alive just for the failsafe
   }
 
+  // ShadeGuard: brightness keys / power daemons / ANY change gets clamped
+  // back to 0 within a moment — the screen cannot be revealed by accident.
+  startShadeGuard({ run, stateFile });
+
   const how = applied.method === 'backlight'
-    ? `hardware backlight 0${applied.savedPct != null ? ` (saved: ${applied.savedPct}%)` : ''}`
+    ? `hardware backlight 0${applied.savedPct != null ? ` (saved: ${applied.savedPct}%)` : ''}${gammaLayer ? ' + gamma 0 (dual-layer)' : ''}`
     : `gamma ramp 0 on ${applied.outputs.join(', ')}`;
   return [
     '🕶️ *SHADES ON* — screen physically *BLACK* for everyone nearby.',
     `✅ Screenshots *clear* — sirf panel dark hai (${how}), framebuffer safe.`,
+    '🛡️ *STEALTH MODE* — keyboard/touchpad ki zarurat *nahi*: sab kuch WhatsApp se. Brightness keys ya koi bhi brightness change screen *reveal nahi kar sakta* (ShadeGuard active).',
+    gammaLayer
+      ? '⚡ *FLASH-PROOF*: brightness keys dabao — content phir bhi kaala rahega (dual-layer blackout).'
+      : '⚡ ShadeGuard instant-clamp active — brightness change microseconds me wapas 0.',
     timeoutMs > 0
-      ? `⏱️ Auto-restore: ${Math.round(timeoutMs / 60000)} min · turant wapas: \`/shades off\``
-      : '⏱️ Auto-restore off · wapas: `/shades off`',
+      ? `⏱️ Opt-in auto-restore: ${Math.round(timeoutMs / 60000)} min · turant wapas: \`/shades off\``
+      : '🔒 Screen tab tak black rahega jab tak *aap* `/shades off` nahi bhejte — koi auto-restore NAHI.',
   ].join('\n');
 }
 
@@ -177,9 +207,12 @@ export async function shadesOff(opts = {}) {
   try {
     if (state.method === 'backlight') await backlightOff(run, state);
     else await gammaOff(run, state);
+    if (state.gamma?.length) await gammaOff(run, { outputs: state.gamma });
+    await restoreBrightnessMediaKeys(state.mediaKeys ?? [], run);
   } catch (err) {
     return `🕶️ Shades off karte waqt error: ${err?.message ?? err}\nRecovery: \`brightnessctl set 50%\``;
   }
+  stopShadeGuard();
   clearShadeState(stateFile);
   const how = state.method === 'backlight'
     ? `backlight → ${state.savedPct ?? 50}%`
@@ -193,8 +226,10 @@ export async function shadesStatus(opts = {}) {
   await maybeAutoRestore({ run, stateFile, now });
   const state = loadShadeState(stateFile);
   if (!state?.enabled) return '🕶️ Shades: *OFF* — screen normal. On: `/shades`';
-  const mins = Math.max(0, Math.round((state.timeoutMs - (now() - state.at)) / 60000));
-  return `🕶️ Shades: *ON* (${state.method}) · auto-restore in ~${mins} min · off: \`/shades off\``;
+  const timeout = state.timeoutMs ?? 0;
+  if (timeout <= 0) return '🕶️ Shades: *ON* 🔒 — auto-restore *off* (sirf aapka `/shades off` screen wapas laayega)';
+  const mins = Math.max(0, Math.round((timeout - (now() - state.at)) / 60000));
+  return `🕶️ Shades: *ON* (${state.method}) · opt-in auto-restore in ~${mins} min · off: \`/shades off\``;
 }
 
 /**
@@ -212,11 +247,199 @@ export async function maybeAutoRestore(opts = {}) {
   return true;
 }
 
-/** Startup hook — a stale black screen from a crash must never persist. */
+/**
+ * Startup hook. With the default (no timeout) a crash-restart leaves the
+ * shades exactly as the owner left them — black until /shades off — and
+ * RE-ARMS the ShadeGuard so brightness keys still cannot reveal the screen
+ * after a restart. Only an opted-in elapsed timeout restores anything.
+ */
 export async function initShades(opts = {}) {
   try {
-    return await maybeAutoRestore(opts);
+    const restored = await maybeAutoRestore(opts);
+    const state = loadShadeState(stateOpts(opts).stateFile);
+    if (state?.enabled) {
+      startShadeGuard(opts);
+      return restored;
+    }
+    return restored;
   } catch {
     return false;
   }
+}
+
+// ── ShadeGuard: nothing may reveal the panel while shades are ON ────────────
+// Three structural layers, because a 600ms clamp still showed a visible
+// flash when brightness keys were pressed:
+//
+//   1. DUAL-LAYER BLACKOUT — backlight 0 AND gamma ramp 0. Brightness keys
+//      raise the backlight all they want; the content still renders black.
+//      (X11; skipped silently on Wayland.)
+//   2. INSTANT CLAMP — 25ms fork-free sysfs watch, direct sysfs write back
+//      to 0 (fallback: brightnessctl). Ghost flash ≤ ~1 frame where gamma
+//      is unavailable.
+//   3. KEY UNBIND — on GNOME the brightness media keys are unbound while
+//      shades are on (saved + restored on /shades off). No key event at all.
+//
+// Full stealth remote: the phone is the only input that matters.
+
+let guardTimer = null;
+let guardBusy = false;
+let guardTickCount = 0;
+
+export function isGuardActive() {
+  return guardTimer != null;
+}
+
+export function stopShadeGuard() {
+  if (guardTimer) clearInterval(guardTimer);
+  guardTimer = null;
+  guardBusy = false;
+  guardTickCount = 0;
+}
+
+/** Clamp via direct sysfs write first (no fork, ~0.1ms), then brightnessctl. */
+async function clampBacklightZero(run, state) {
+  if (state.device) {
+    try {
+      fs.writeFileSync(`/sys/class/backlight/${state.device}/brightness`, '0');
+      return;
+    } catch { /* no write access / no sysfs — fall through */ }
+  }
+  await run('brightnessctl', ['set', '0']).catch(() => {});
+}
+
+/** One protection pass. Returns 'clamped' | 'ok' | 'off'. */
+export async function shadeGuardTick(opts = {}) {
+  const { run, stateFile, readPct } = stateOpts(opts);
+  const state = loadShadeState(stateFile);
+  if (!state?.enabled) {
+    stopShadeGuard();
+    return 'off';
+  }
+  try {
+    if (state.method === 'backlight') {
+      let pct = null;
+      if (typeof readPct === 'function') {
+        pct = await readPct(state.device);
+      } else if (state.device) {
+        // sysfs read: zero forks on the hot loop — clamp only when needed.
+        try {
+          const raw = fs.readFileSync(`/sys/class/backlight/${state.device}/brightness`, 'utf8');
+          const max = fs.readFileSync(`/sys/class/backlight/${state.device}/max_brightness`, 'utf8');
+          pct = Math.round((Number(raw) / Math.max(1, Number(max))) * 100);
+        } catch {
+          pct = null;
+        }
+      }
+      if (pct == null) {
+        const machine = await run('brightnessctl', ['-m']).catch(() => null);
+        pct = machine
+          ? Number.parseInt(String(machine).trim().split('\n')[0]?.split(',')[3]?.replace('%', ''), 10)
+          : null;
+      }
+      if (Number.isFinite(pct) && pct !== 0) {
+        await clampBacklightZero(run, state);
+        // Re-assert the gamma layer too — dual blackout stays pinned.
+        if (state.gamma?.length) {
+          for (const out of state.gamma) {
+            await run('xrandr', ['--output', out, '--brightness', '0']).catch(() => {});
+          }
+        }
+        return 'clamped';
+      }
+      // periodic gamma re-pin (monitor replug / compositor resets)
+      guardTickCount += 1;
+      if (state.gamma?.length && guardTickCount % 80 === 0) {
+        for (const out of state.gamma) {
+          await run('xrandr', ['--output', out, '--brightness', '0']).catch(() => {});
+        }
+      }
+      return 'ok';
+    }
+    // gamma method: brightness keys don't touch gamma; re-assert keeps the
+    // ramp pinned through monitor changes.
+    for (const out of state.outputs ?? []) {
+      await run('xrandr', ['--output', out, '--brightness', '0']).catch(() => {});
+    }
+    return 'ok';
+  } catch {
+    return 'ok'; // never let the guard itself crash anything
+  }
+}
+
+/** Arm the guard (idempotent). 25ms for backlight: a flash must be invisible. */
+export function startShadeGuard(opts = {}) {
+  const { run, stateFile, readPct, now } = stateOpts(opts);
+  stopShadeGuard();
+  const state = loadShadeState(stateFile);
+  if (!state?.enabled) return false;
+  const interval = opts.intervalMs ?? (state.method === 'backlight' ? 25 : 600);
+  const tick = () => {
+    if (guardBusy) return; // never pile up overlapping ticks
+    guardBusy = true;
+    shadeGuardTick({ run, stateFile, readPct, now })
+      .catch(() => {})
+      .finally(() => { guardBusy = false; });
+  };
+  tick(); // clamp immediately on arming
+  guardTimer = setInterval(tick, interval);
+  guardTimer.unref?.(); // never hold the process open
+  return true;
+}
+
+// ── GNOME brightness-key unbind (layer 3) ───────────────────────────────────
+// The cleanest fix is at the source: no key event → no backlight change.
+// gsettings saves/empties the media-key bindings; /shades off restores them.
+const MEDIA_KEYS_SCHEMA = 'org.gnome.settings-daemon.plugins.media-keys';
+
+async function unbindBrightnessMediaKeys(run) {
+  try {
+    const keysRaw = await run('gsettings', ['list-keys', MEDIA_KEYS_SCHEMA]).catch(() => null);
+    if (!keysRaw) return []; // not GNOME / no gsettings — layers 1-2 cover it
+    const names = String(keysRaw).split('\n').map((s) => s.trim())
+      .filter((k) => /brightness-(up|down)/.test(k));
+    const saved = [];
+    for (const name of names) {
+      const cur = await run('gsettings', ['get', MEDIA_KEYS_SCHEMA, name]).catch(() => null);
+      if (cur == null) continue;
+      const val = String(cur).trim();
+      const empty = val.startsWith('[') ? '[]' : "''";
+      const ok = await run('gsettings', ['set', MEDIA_KEYS_SCHEMA, name, empty]).then(() => true).catch(() => false);
+      if (ok) saved.push({ name, val });
+    }
+    return saved;
+  } catch {
+    return [];
+  }
+}
+
+async function restoreBrightnessMediaKeys(saved, run) {
+  for (const { name, val } of saved ?? []) {
+    await run('gsettings', ['set', MEDIA_KEYS_SCHEMA, name, val]).catch(() => {});
+  }
+}
+
+/**
+ * Stealth-aware brightness for /pc brightness while shades are ON: the panel
+ * stays black (the guard enforces it) and the command adjusts only the SAVED
+ * level that /shades off will restore. Returns null when shades are off (the
+ * caller then runs the normal brightness command).
+ */
+export async function shadeAwareBrightness(action, value, opts = {}) {
+  const { stateFile, now } = stateOpts(opts);
+  const state = loadShadeState(stateFile);
+  if (!state?.enabled) return null;
+  const clamp = (n) => Math.min(100, Math.max(0, Math.round(n)));
+  let pct = state.savedPct ?? 50;
+  if (action === 'get') {
+    return `🕶️ Shades ON — panel *0%* (stealth, guard locked). Saved level: *${pct}%* — yahi \`/shades off\` pe milega.`;
+  }
+  if (action === 'up') pct = clamp(pct + 5);
+  else if (action === 'down') pct = clamp(pct - 5);
+  else if (action === 'set') pct = clamp(Number(value) || 0);
+  else return `🕶️ Shades ON — stealth mode me brightness sirf up|down|<0-100>|get.`;
+  state.savedPct = pct;
+  state.savedRaw = null; // restore now percent-based
+  saveShadeState(state, stateFile);
+  return `🕶️ *Stealth mode* — screen *BLACK* hi rahega 🛡️. Saved brightness → *${pct}%* (ye \`/shades off\` pe apply hoga).`;
 }

@@ -1921,6 +1921,62 @@ auto-restore fires after deadline / not before, crash-recovery on startup, state
 status countdown, and an invariant that ONLY brightnessctl/xrandr are ever invoked — capture
 tools are never touched).
 
+## Part 7 — 🕶️ Shades owner-rule fix: NO auto-restore (3.4.1)
+
+Owner correction after trying it: *"30 minutes wala kyun lagaya? Screen sirf tab wapas aaye jab
+main `/shades off` bhejoon — warna galti se bhi nahi."* The auto-restore default is **removed**.
+
+- `SHADES_TIMEOUT_MIN` default **30 → 0 = NEVER** — the panel stays black until the owner's own
+  `/shades off`, full stop. Status now says exactly that ("sirf aapka /shades off screen wapas
+  laayega").
+- The timer mechanism is kept as **opt-in only** (`SHADES_TIMEOUT_MIN > 0` for people who want
+  a safety net). Crash-restart with the default leaves the shades exactly as the owner left them.
+- 3.4.1 release-notes announce the rule change on next update.
+
+**Result:** 316 → **318/318 tests green** (2 new: the OWNER RULE test — default has no timer,
+24 hours later the screen is STILL black and only `/shades off` restores it; plus opt-in timer
+still works when explicitly configured).
+
+## Part 8 — 🕶️ Shades full stealth: ShadeGuard + remote brightness (3.4.2)
+
+Owner reports two things: *"brightness control kar raha hun to screen visible ho jaarahi hai"*
+and *"shades on = remote PC control with full stealth mode — keyboard/touchpad ki zarurat nahi"*.
+
+**ShadeGuard (`src/shades.js`):** while shades are ON, EVERY brightness change — laptop
+brightness keys, touchpad, power daemons, anything — is clamped straight back to 0 within one
+600ms tick. Fork-free watchdog (sysfs `brightness` file read; `brightnessctl -m` fallback;
+xrandr gamma method re-asserts the ramp). The reveal bug is structurally gone: the only way
+back is `/shades off`. Guard re-arms automatically after an agent restart (still no
+auto-restore — the owner rule stands).
+
+**Stealth remote brightness:** `/pc brightness up|down|<0-100>` while shades are ON adjusts
+only the SAVED level (what `/shades off` will restore) — the panel stays black, the reply
+says so. Full remote control without ever breaking stealth; keyboard/touchpad never needed.
+
+**Result:** 318 → **322/322 tests green** (4 new: keypress clamped in one tick + zero forks
+when already at 0, guard re-armed after restart with tick still clamping, inert when shades
+are off, stealth brightness adjusts saved level only and `/shades off` restores the
+stealth-adjusted value).
+
+## Part 9 — 🕶️ Flash-proof Shades: 3-layer reveal prevention (3.4.3)
+
+Owner reports the remaining gap: *"brightness control kar raha hun to screen thodi der ke liye
+dikh raha hai fir cover kar raha hai"* — the 600ms guard window still produced a visible flash.
+Fixed structurally, not just faster:
+
+1. **Dual-layer blackout** — backlight 0 AND gamma ramp 0 (X11). Brightness keys can raise the
+   backlight freely; content still renders black. A keypress cannot show a single frame.
+2. **25ms instant clamp** — fork-free sysfs watch (direct sysfs write first, brightnessctl
+   fallback), overlapping-tick guard. Ghost flash ≤ ~1 frame where gamma is unavailable
+   (Wayland + kernel-handled keys — honest limit).
+3. **GNOME key unbind** — brightness media keys are unbound while shades are on (saved and
+   restored exactly on `/shades off`); no key event reaches the system at all.
+
+**Result:** 322 → **325/325 tests green** (3 new: dual-layer gamma pin + re-pin on clamp +
+both-layer restore, GNOME key unbind with exact binding restore and volume keys untouched,
+25ms backlight guard clamp path). The framebuffer invariant now allows exactly three
+panel-level tools: brightnessctl, xrandr, gsettings — never capture tools.
+
 ---
 
 _Last updated with commit `5e2bbcd` (log) / code `bff22b0` · install & update always via **curl**, never git._

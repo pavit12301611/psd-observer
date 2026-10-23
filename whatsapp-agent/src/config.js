@@ -183,8 +183,10 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     wikiGrounding: e.WIKI_GROUNDING === 'off' ? false : e.WIKI_GROUNDING === 'offline' ? 'offline' : true,
     wikiBaseUrl: e.WIKI_BASE_URL || '',
     wikiTimeoutMs: int(e.WIKI_TIMEOUT_MS, 3500),
-    // 🕶️ Shades auto-restore failsafe (minutes; 0 = never auto-restore).
-    shadesTimeoutMin: int(e.SHADES_TIMEOUT_MIN, 30),
+    // 🕶️ Shades auto-restore is OFF by default (owner rule: screen stays
+    // black until /shades off). Set SHADES_TIMEOUT_MIN > 0 only if you
+    // explicitly WANT an opt-in restore timer.
+    shadesTimeoutMin: int(e.SHADES_TIMEOUT_MIN, 0),
     // Multi-agent fleet (src/agents.js): tag replies with the answering bot
     // ("— 🧑‍💻 CodeBot"). AGENT_TAG=off for plain replies.
     agentTag: bool(e.AGENT_TAG, true),
