@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -23,10 +23,10 @@ jobs:
       run:
         working-directory: whatsapp-agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -34,16 +34,16 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run check && npm test && npm run verify:bundle
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
         working-directory: app/companion
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -64,29 +64,35 @@ jobs:
           retention-days: 14
   apk:
     needs: web
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
         working-directory: app/companion
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: app/companion/package-lock.json
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6.4.0
+      - name: Install pinned SDK platform
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "::error::Hosted Android SDK command-line tools are missing at $SDK"
+            exit 1
+          fi
+          node scripts/ci-run.mjs "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
       - run: npm ci --no-audit --no-fund && npm run build && npm run android:sync
-      - run: chmod +x android/gradlew && cd android && ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
+      - run: chmod +x android/gradlew && cd android && node ../scripts/ci-run.mjs ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
       - run: |
           mkdir -p artifacts
           cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/observer-1.0.0-preview.apk
@@ -107,19 +113,19 @@ jobs:
           retention-days: 14
   emulator:
     needs: apk
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - run: npm ci --no-audit --no-fund
         working-directory: app/companion
       - uses: actions/download-artifact@v4

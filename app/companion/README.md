@@ -52,7 +52,7 @@ cd android
 ./gradlew lintDebug testDebugUnitTest assembleDebug
 ```
 
-Android build: JDK 17, Android SDK platform 35/build-tools 35.0.0, Gradle 8.11.1 / AGP 8.9.1. Minimum Android 8/API 26; Galaxy A53's supported OS versions are within this range. Builds need a current Android System WebView; old WebView versions are not supported. The sandbox may lack these tools: the `Android companion` GitHub Actions workflow builds the APK, runs JVM policy tests/lint, and then a real Android-emulator native bridge/Keystore/HTTP smoke test. An emulator is **not** a physical Samsung test. See actual run results, not only the workflow file.
+Android build: JDK 17+ (CI uses JDK 21 for current SDK command-line tools), Android SDK platform 35/build-tools 35.0.0, Gradle 8.11.1 / AGP 8.9.1. Minimum Android 8/API 26; Galaxy A53's supported OS versions are within this range. Builds need a current Android System WebView; old WebView versions are not supported. The sandbox may lack these tools: the `Android companion` GitHub Actions workflow builds the APK, runs JVM policy tests/lint, and then a real Android-emulator native bridge/Keystore/HTTP smoke test. An emulator is **not** a physical Samsung test. See actual run results, not only the workflow file.
 
 Browser tests cover pairing/header auth, no token storage, all tabs/themes, exact approval payloads, manual-input PIN, upload bytes, disconnect/privacy, stopped screen polling, gradients and overflow. The PC bridge has independent Node regression tests. Native provider inference is **not** validated with a real paid/free API key; never mistake fixture replies for a live model benchmark.
 
