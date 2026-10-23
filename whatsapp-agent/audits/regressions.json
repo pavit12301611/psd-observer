@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "originalRef": "339bc9e7075acc89d2a21f88fc5340e1f51dfd6b",
+  "finalSourceTreeSha256": "4510d1da2c2a3d62042cb5c9f307edef7642c1cfe222a6624ac7e337ffa66677",
+  "note": "Historical sequential RED stages used changing candidate source; counts overlap and are not distinct-bug totals. Raw logs are ignored scratch artifacts. Final source function/coverage and execution records are in deep-audit.json.",
+  "stages": [
+    {
+      "id": "backend-initial-corrected",
+      "node": "v22.22.3",
+      "summary": {
+        "tests": 52,
+        "pass": 19,
+        "fail": 33,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 2928.213569,
+        "exitCode": 1,
+        "passed": false
+      },
+      "failures": [
+        "deep/guard: off during a pending camera capture prevents a later alert",
+        "deep/guard: old capture cannot alter the replacement session baseline or send its image",
+        "deep/guard: overlapping ticks have one capture in flight and failed sends do not claim delivered alerts",
+        "deep/mirror: off during the first capture must not send a late screenshot or claim ON",
+        "deep/mirror: old budget completion cannot stop a new stream",
+        "deep/mirror: exhausting a one-frame budget reports OFF, not a fictional running stream",
+        "deep/batch: cancellation cannot erase a verified action that finishes despite best-effort abort",
+        "deep/batch: status-reporting errors cannot prevent execution or corrupt verified results",
+        "deep/batch: invalid lanes fail promptly before any side effect (isolated hang regression)",
+        "deep/cache: updating a full cache neither evicts a neighbour nor loses recency",
+        "deep/cache: expires at the exact TTL boundary with an injectable clock",
+        "deep/cache: zero capacity disables retention; invalid bounds fail explicitly",
+        "deep/cache: memoized keys preserve object/symbol identity and negative zero",
+        "deep/cache: rejected async work is evicted, not cached as a permanent failure",
+        "deep/property: LRU matches an independent reference model (500 operation sequences)",
+        "deep/property: truncation obeys even tiny budgets and never mutates text (1000 cases)",
+        "deep/neural: supported custom dimensions remain finite and cannot collide with default cache keys",
+        "deep/trash: same timestamp and basename never overwrite earlier trashed contents",
+        "deep/trash: restore never overwrites an existing owner file",
+        "deep/trash: traversal, absolute paths and empty names cannot move files outside trash",
+        "deep/trash: a trash directory inside the target is rejected without partial movement",
+        "deep/rollback: real nested source and package lock round-trip; stale new source is removed",
+        "deep/rollback: incomplete snapshots are never selected and failed creation cannot prune a good backup",
+        "deep/rollback: a symlink in source is rejected and cannot escape a snapshot",
+        "deep/rollback: labels stay inside the backup directory and pruning retains newest complete snapshots",
+        "deep/rollback: malformed package or an external snapshot fails before modifying live code",
+        "deep/store: damaged JSON field shapes are normalized, unrelated owner fields survive",
+        "deep/store: persisted owner conversations are private to their OS user",
+        "deep/bridge: missing or blank configured tokens fail closed, not open",
+        "deep/bridge: malformed Host cannot reject the async handler and terminate the process",
+        "deep/bridge: body must be a JSON object; malformed/scalar payloads never reach owner code",
+        "deep/bridge: failed structured replies retain their failure rather than becoming empty success",
+        "deep/bridge: health version is the installed package version, not a hard-coded old release"
+      ],
+      "note": "Original backend targeted contracts; two initial harness mistakes were corrected before this run."
+    },
+    {
+      "id": "backend-panic",
+      "node": "v22.22.3",
+      "summary": {
+        "tests": 1,
+        "pass": 0,
+        "fail": 1,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 269.863597,
+        "exitCode": 1,
+        "passed": false
+      },
+      "failures": [
+        "deep/panic: pending save cannot resurrect wiped owner history or facts"
+      ],
+      "note": "Separate pending-save PANIC reproduction."
+    },
+    {
+      "id": "browser-before-parse-fix",
+      "node": "v22.22.3",
+      "summary": {
+        "tests": 5,
+        "pass": 0,
+        "fail": 5,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 1003.18834,
+        "exitCode": 1,
+        "passed": false
+      },
+      "failures": [
+        "deep/webapp: the shipped browser entry point actually parses",
+        "deep/webapp: login boots and provider HTML remains inert text in chat",
+        "deep/webapp: damaged cached chat shapes cannot prevent boot",
+        "deep/webapp: logout cannot be undone by a late chat response repopulating local storage",
+        "deep/webapp: service worker never caches API/private routes and activates without deleting unrelated caches"
+      ],
+      "note": "First four failures were blocked by one browser parse defect; service-worker policy was independent. Not five distinct bugs."
+    },
+    {
+      "id": "browser-after-parse-fix",
+      "node": "v22.22.3",
+      "summary": {
+        "tests": 5,
+        "pass": 2,
+        "fail": 3,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 1024.734941,
+        "exitCode": 1,
+        "passed": false
+      },
+      "failures": [
+        "deep/webapp: damaged cached chat shapes cannot prevent boot",
+        "deep/webapp: logout cannot be undone by a late chat response repopulating local storage",
+        "deep/webapp: service worker never caches API/private routes and activates without deleting unrelated caches"
+      ],
+      "note": "After parsing was repaired, malformed chat cache, post-logout persistence and cache cleanup failed independently."
+    },
+    {
+      "id": "worker-parent-flags",
+      "node": "v22.22.3",
+      "summary": {
+        "tests": 1,
+        "pass": 0,
+        "fail": 1,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 119.990749,
+        "exitCode": 1,
+        "passed": false
+      },
+      "failures": [
+        "deep/neural: training worker does not inherit incompatible parent CLI/V8 flags"
+      ],
+      "note": "Focused CLI/V8 parent-flag injection reproduced the Node 24 TAP matrix failure on Node 22."
+    },
+    {
+      "id": "service-worker-follow-up",
+      "node": "v22.22.3",
+      "summary": {
+        "tests": 4,
+        "pass": 0,
+        "fail": 4,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 689.318549,
+        "exitCode": 1,
+        "passed": false
+      },
+      "failures": [
+        "deep/webapp: service worker never caches API/private routes and activates without deleting unrelated caches",
+        "deep/webapp: public shell only reads its own versioned cache, never another app cache",
+        "deep/webapp: public shell network misses persist only in the owning cache and extend event lifetime",
+        "deep/webapp: public shell offline script misses cannot return cached HTML as JavaScript"
+      ],
+      "note": "Follow-up after namespace cleanup hardening: query-token/unknown route bypass, own-cache reads, fetch-event lifetime and offline script MIME behavior. Includes a gap exposed by preserving unrelated caches."
+    }
+  ],
+  "final": {
+    "nodeTestsPerRuntime": 560,
+    "addedContracts": 83,
+    "selectedMutationsDetected": 18,
+    "selectedMutationsTotal": 18
+  },
+  "staleEvidenceRejectionExercised": true
+}

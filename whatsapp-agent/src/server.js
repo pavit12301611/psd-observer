@@ -39,7 +39,7 @@ import * as tts from './tts.js';
 import { transcribeAudio, transcriptionAvailable } from './transcribe.js';
 
 const MAX_BODY = 30 * 1024 * 1024;
-const VERSION = '3.1.11';
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const WEB_DIR = path.join(ROOT, 'webapp');
 
 const STATIC = {
@@ -53,17 +53,24 @@ const STATIC = {
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
-    let size = 0;
+    if (Number(req.headers['content-length']) > MAX_BODY) { req.resume(); reject(Object.assign(new Error('Request body too large (30 MB max)'), { status: 413 })); return; }
+    let size = 0, tooLarge = false;
     const chunks = [];
     req.on('data', (chunk) => {
+      if (tooLarge) return;
       size += chunk.length;
-      if (size > MAX_BODY) { reject(Object.assign(new Error('Request body too large (30 MB max)'), { status: 413 })); req.destroy(); return; }
+      if (size > MAX_BODY) { tooLarge = true; chunks.length = 0; reject(Object.assign(new Error('Request body too large (30 MB max)'), { status: 413 })); return; }
       chunks.push(chunk);
     });
     req.on('end', () => {
+      if (tooLarge) return;
       const raw = Buffer.concat(chunks).toString('utf8');
       if (!raw) return resolve({});
-      try { resolve(JSON.parse(raw)); } catch { reject(Object.assign(new Error('Invalid JSON body'), { status: 400 })); }
+      try {
+        const body = JSON.parse(raw);
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object required');
+        resolve(body);
+      } catch { reject(Object.assign(new Error('Invalid JSON body: expected an object'), { status: 400 })); }
     });
     req.on('error', reject);
   });
@@ -76,7 +83,7 @@ const dataUrl = (buffer, mime = 'image/png') => `data:${mime};base64,${Buffer.fr
 export function replyForApp(reply) {
   if (reply == null) return { ok: true, text: '' };
   if (typeof reply === 'string') return { ok: true, text: reply };
-  const out = { ok: true, text: reply.text ?? '' };
+  const out = { ok: reply.ok !== false, text: reply.text ?? (typeof reply.error === 'string' ? reply.error : reply.error?.message) ?? '' };
   const images = [];
   if (reply.image) images.push(dataUrl(reply.image));
   for (const extra of reply.extraImages ?? []) images.push(dataUrl(extra));
@@ -122,6 +129,7 @@ export function createBridgeServer({
   // portal's "share your screen" prompt.
   let lastFrameSize = null;
   const authed = (req, url) => {
+    if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return false;
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     // Constant-time: a plain === leaks the token a byte at a time to anything
     // that can time requests on the LAN.
@@ -195,7 +203,9 @@ export function createBridgeServer({
   }
 
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+    let url;
+    try { url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`); }
+    catch { return json(res, 400, { detail: 'Invalid request URL or Host header' }); }
     const route = `${req.method} ${url.pathname}`;
     res.setHeader('access-control-allow-origin', '*');
     res.setHeader('access-control-allow-headers', 'content-type, authorization, x-bridge-token');
@@ -244,6 +254,7 @@ export function createBridgeServer({
       }
 
       if (route === 'POST /api/login') {
+        if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return json(res, 503, { detail: 'Bridge authentication is not configured' });
         const ip = req.socket.remoteAddress ?? 'unknown';
         if (!loginAllowed(ip)) return json(res, 429, { detail: 'Too many attempts. Wait 5 minutes.' });
         const body = await readJsonBody(req);
@@ -727,6 +738,7 @@ export function createBridgeServer({
       }
     } catch (err) {
       log.error?.(`[bridge] ${route} failed: ${err.message}`);
+      if (err.status === 413) res.setHeader('connection', 'close');
       return json(res, err.status ?? 500, { detail: err.message });
     }
   });

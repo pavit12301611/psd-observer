@@ -692,3 +692,8 @@ npm run demo                        # dry-run: phone app, no WhatsApp connection
 ```
 
 Cost so far: **₹0**. No cloud accounts are required to run any of it.
+
+
+## Deep testing and audit (3.9.1 candidate)
+
+See [DEEP-TESTING.md](DEEP-TESTING.md) for safe reproduction, executed Node versions, evidenced fixes and remaining integration gaps, and [the generated audit](audits/deep-audit.md) for full-source coverage and every static function span. `npm run test:deep` runs the isolated deep pipeline. This audit covers the WhatsApp agent and phone shell, not the entire monorepo; it is not a claim of 100% correctness or live hardware/provider verification.

@@ -3,8 +3,10 @@ import { BrainError } from './brainrequest.js';
 
 export function shorten(value, max = 1800) {
   const text = String(value ?? '');
+  max = Math.max(0, Math.floor(Number(max) || 0));
   if (text.length <= max) return text;
   const marker = '\n[…shortened…]\n';
+  if (max <= marker.length) return text.slice(0, max);
   const head = Math.max(0, Math.floor((max - marker.length) * 0.7));
   return text.slice(0, head) + marker + text.slice(-(max - marker.length - head));
 }
