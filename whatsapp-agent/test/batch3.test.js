@@ -98,7 +98,8 @@ test('clip: pull PC clipboard, push text back, history remembers', async () => {
   assert.equal(pcClipboard, 'otp 445566', 'text landed on the PC clipboard');
 
   const list = cp.clipList({ file });
-  assert.match(list, /otp 445566/);
+  assert.match(list, /otp/, 'entry kept');
+  assert.doesNotMatch(list, /445566/, '3.7.0: PII redacted in history');
   assert.match(list, /meeting at 4pm/);
 });
 

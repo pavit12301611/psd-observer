@@ -306,5 +306,13 @@
       "🔒 SAFETY: /rm ab TRASH (recoverable), double-confirm + /panic kill-switch, /rollback snapshots, /quiet quiet-hours digest. (Shades rule unchanged: kabhi auto-OFF nahi — sirf /shades off se.)"
     ]
   },
-  "latest": "3.6.0"
+  "3.7.0": {
+    "title": "📬 DUET-CLASS — mail monitor, /make files, PII shield, cal sync, channels",
+    "bullets": [
+      "📧 MAIL MONITOR + 🛠️ /make: `/mail today` IMAP digest (priority mails 🔴 first), `/make report|slides|dashboard|csv <topic>` — review-ready files (Duet ke Make tab jaisa).",
+      "🔐 PII SHIELD: card/Aadhaar/PAN/Aadhaar/API-key classifier — strict secrets outbound BLOCK, clipboard history redacted, guests ko kabhi raw PII nahi.",
+      "🗓️🔄 CHANNELS: Google Calendar sync (`/cal sync <ics-url>` + `/cal export`), `/topic` channels with shared memory, aur speed: lookup cache 553µs→19µs. (Shades rule: auto-restore kabhi nahi — sirf /shades off se.)"
+    ]
+  },
+  "latest": "3.7.0"
 }

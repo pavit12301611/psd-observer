@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { redactPII } from './pii.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,7 +32,9 @@ function saveHistory(data, file) {
 
 function pushHistory(text, file) {
   const data = loadHistory(file);
-  data.entries = [{ at: Date.now(), text }, ...data.entries.filter((e) => e.text !== text)].slice(0, MAX_HISTORY);
+  // 🔐 PII kabhi history me raw nahi (clipboard pe raw jaata hai)
+  const safeText = redactPII(text);
+  data.entries = [{ at: Date.now(), text: safeText }, ...data.entries.filter((e) => e.text !== safeText)].slice(0, MAX_HISTORY);
   saveHistory(data, file);
 }
 

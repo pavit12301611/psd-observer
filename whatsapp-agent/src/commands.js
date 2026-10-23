@@ -52,6 +52,11 @@ import {
   moveToTrash, listTrash, restoreTrash, runPanic, TRASH_DIR,
 } from './safety.js';
 import { saveSnapshot, rollback as rollbackTo, snapshotList } from './rollback.js';
+import { setupMail, checkMail, mailStatus, setMonitor } from './mail.js';
+import { makeDeliverable } from './make.js';
+import { scanPII, redactPII, guardOutbound } from './pii.js';
+import { syncFromICS, exportICS } from './gcal.js';
+import { switchTopic, currentTopic, recordMessage, pinToTopic, topicContext, listTopics, deleteTopic } from './topics.js';
 import * as docChat from './docchat.js';
 import * as photoSearch from './photosearch.js';
 import * as calendar from './calendar.js';
@@ -301,6 +306,14 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /clip · /copy <text> — 📋 PC↔phone clipboard sync
 • /pcs register <name> · /pcs — 🖥️ multi-PC fleet status
 • /hw add maths pg 42 kal · /hw today|week|done — 📝 homework tracker
+
+*📬 3.7.0 — Duet-Class Features*
+• 📧 \`/mail setup imap.gmail.com user apppass\` · \`/mail today\` · \`/mail on\` — mail digest + priority alerts (Gmail app-password)
+• 🛠️ \`/make report|slides|dashboard|csv <topic>\` — review/edit files bana deta hai
+• 🔐 \`/pii scan <text>\` — card/Aadhaar/PAN/API-key detect; outbound strict PII BLOCK; clipboard history redacted
+• 🗓️ \`/cal sync <ics-url>\` (Google Calendar secret iCal) · \`/cal export\` — .ics file
+• 🗂️ \`/topic work\` — channels with shared memory · \`/pin\` · \`/topic list\`
+• ⚡ lookup cache (µs-level repeats) · guests ko kabhi raw PII nahi
 
 *⚡ 3.6.0 — Smart Upgrades*
 • 🧠 Multi-turn yaad (\"wo file bhejo\") · \`/context\` · \`galat, asli jawab X hai\` se seekhta hai (\`/corrections\`) · \`/retrain\`
@@ -3221,8 +3234,22 @@ export function createAgent({
         return photoSearch.photoReply(raw);
       }
       case 'cal': case 'calendar': {
-        // 🗓️ Calendar — events + day/week views.
+        // 🗓️ Calendar — events + day/week views + Google sync (ICS).
         const raw = String(args || '').trim();
+        if (/^sync\b/i.test(raw)) {
+          const url = raw.replace(/^sync\s+/i, '').trim();
+          if (!url) return '🗓️ Usage: `/cal sync <ics-url>` — Google Calendar → Settings → "Secret address in iCal format"';
+          return syncFromICS(url, {
+            fetchText: (u) => fetch(u, { signal: AbortSignal.timeout(15_000) }).then((r) => r.text()),
+          });
+        }
+        if (/^export\b/i.test(raw)) {
+          const ics = exportICS(calendar.loadCal().events);
+          return {
+            text: '🗓️ *Calendar export* — Google/Outlook me import karo (Settings → Import → .ics file).',
+            document: { buffer: Buffer.from(ics), fileName: 'psd-calendar.ics', mimetype: 'text/calendar' },
+          };
+        }
         if (!raw || /^today\b/i.test(raw)) return calendar.todayReply();
         if (/^week\b/i.test(raw)) return calendar.weekReply();
         if (/^del\b/i.test(raw)) return calendar.delEvent(raw.replace(/^del\s+/i, '').trim());
@@ -3285,10 +3312,12 @@ export function createAgent({
         return clipSync.clipPull();
       }
       case 'copy': {
-        // 📱 WhatsApp → PC clipboard.
+        // 📱 WhatsApp → PC clipboard (history me PII redacted).
         const text = String(args || '').trim();
         if (!text) return '📋 Usage: `/copy <text>` — PC clipboard pe set ho jayega.';
-        return clipSync.clipPush(text);
+        const pushed = await clipSync.clipPush(text);
+        const pii = scanPII(text);
+        return pii.safe ? pushed : `${pushed}\n🔐 _Sensitive info detect hui — clipboard history me redacted save kiya._`;
       }
       case 'pcs': {
         // 🖥️ Multi-PC fleet status.
@@ -3483,6 +3512,54 @@ export function createAgent({
         if (raw === 'on') { store.data.voiceReplyOff = false; store.save?.(); return '🎤 Voice→voice reply *ON* (voice aayega to main bhi bolunga).'; }
         if (raw === 'off') { store.data.voiceReplyOff = true; store.save?.(); return '🎤 Voice→voice reply *OFF*.'; }
         return `🎤 Voice reply: ${store.data.voiceReplyOff ? 'OFF' : 'ON'} · on/off toggle`;
+      }
+      case 'mail': {
+        // 📧 Mail monitor — IMAP digest (Gmail app-password works).
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (sub === 'setup') return setupMail(rest.join(' '));
+        if (sub === 'on') return setMonitor(true);
+        if (sub === 'off') return setMonitor(false);
+        if (sub === 'status') return mailStatus();
+        return checkMail();
+      }
+      case 'make': {
+        // 🛠️ Deliverables — report/slides/dashboard/csv files.
+        const raw = String(args || '').trim();
+        const [kind, ...topicParts] = raw.split(/\s+/);
+        const topic = topicParts.join(' ');
+        return makeDeliverable(kind, topic, {
+          draft: async (k, t) => {
+            const prompt = {
+              report: `Return ONLY JSON {"sections":[{"heading":"...","body":"..."} x 4-6]} for a report on: ${t}`,
+              slides: `Return ONLY JSON {"slides":[{"title":"...","bullets":["...","..."]} x 5-8]} for a slide deck on: ${t}`,
+              dashboard: `Return ONLY JSON {"metrics":[{"label":"...","value":"...","hint":"..."} x 6-10]} for a dashboard about: ${t}`,
+              csv: `Return ONLY JSON {"rows":[["col1","col2"],["v1","v2"] x 5-12]} as CSV data about: ${t}`,
+            }[k];
+            const raw2 = await ai.complete(config, prompt, log);
+            return solver.extractJsonObject(solver.stripThinkBlocks(raw2 ?? ''));
+          },
+        });
+      }
+      case 'pii': {
+        // 🔐 PII scanner — "kya is text me secret hai?"
+        const text = String(args || '').trim();
+        if (!text) return '🔐 Usage: `/pii scan <text>` — card/Aadhaar/PAN/API-key detect karta hai.';
+        const body = text.replace(/^scan\s+/i, '');
+        const scan = scanPII(body);
+        return scan.safe
+          ? '🔐 Clean — koi PII/secret nahi mili.'
+          : `🔐 *PII mili:*
+${scan.found.map((f) => `• ${f.type}: ${f.sample}${f.strict ? ' (strict — outbound block)' : ''}`).join('\n')}`;
+      }
+      case 'topic': case 'channel': {
+        // 🗂️ Topic channels — shared-memory namespaces.
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        if (!raw || sub === 'list') return listTopics();
+        if (sub === 'pin') return pinToTopic(rest.join(' '));
+        if (sub === 'del' || sub === 'delete') return deleteTopic(rest.join(' '));
+        return switchTopic(raw);
       }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
@@ -4017,7 +4094,9 @@ export function createAgent({
       || (ctx?.senderNumber && !isOwner([ctx.senderNumber], config.ownerNumber))
     ) {
       const guestOut = await handleGuest(text, ctx);
-      return guestOut?.reply ?? null;
+      const guestReply = guestOut?.reply ?? null;
+      // 🔐 3.7.0 — guests ko kabhi raw PII nahi (classifier redacts)
+      return typeof guestReply === 'string' ? redactPII(guestReply) : guestReply;
     }
 
     let clean = String(text ?? '').trim();
@@ -4044,6 +4123,7 @@ export function createAgent({
     // 🧠 3.6.0 — multi-turn memory: "wo file bhejo" → last-mentioned file.
     clean = resolveRefs(rawText);
     absorb(rawText);
+    recordMessage('user', clean); // 🗂️ 3.7.0 topic-channel memory
     const label = labelFor(clean);
     const task = taskRegistry.begin(label, { detail: clean.replace(/^\//, '').slice(0, 60) });
     activeSignal = task.signal;
@@ -4281,7 +4361,8 @@ export function createAgent({
         // askObserver already explains failures; only fall through on timeout handled there.
         return fromObserver;
       }
-      const aiRes = await askAI(working, effCtx);
+      const tCtx = topicContext();
+      const aiRes = await askAI(tCtx ? `${tCtx}\n\n${working}` : working, effCtx);
       return aiRes;
     } catch (err) {
       if (isStoppedError(err) || task.signal.aborted) {

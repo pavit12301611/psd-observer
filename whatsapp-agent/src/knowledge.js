@@ -390,11 +390,20 @@ function scoreEntry(qSide, normQuery, queryWords, queryContent, item) {
  * Look up the built-in knowledge bank. Returns { id, lang, reply, entry } or
  * null. Replies are WhatsApp-ready and language-matched (Hinglish/English).
  */
+import { FastCache } from './fastcache.js';
+const LOOKUP_CACHE = new FastCache({ max: 800, ttlMs: 15 * 60_000 });
+
 export function lookupKnowledge(rawText, store = null) {
   const s = String(rawText ?? '').trim();
   if (!s || s.length > 220) return null;
   const normQuery = normalize(s.replace(/^(?:please|plz|bhai|bro|yaar|hey|hi|hello|suno|arre|arey|batao|bata|tell me|what is|who is|kya hai|kaun hai|kab hua|kahan hai)\s+/i, '').replace(/[?!.]+$/, ''));
   if (normQuery.length < 3) return null;
+  // ⚡ 3.7.0 result cache — repeated questions answer in ~µs (LRU + TTL)
+  const langHint = /[\u0900-\u097F]/.test(s) ? 'd'
+    : /\b(kya|kaun|kab|kahan|kaise|hai|ki|ke|me|mein|batao|bata|kisne|hota|hoti)\b/.test(s.toLowerCase()) ? 'h' : 'e';
+  const cacheKey = `${normQuery}|${langHint}`;
+  const cachedHit = LOOKUP_CACHE.get(cacheKey);
+  if (cachedHit !== undefined) return cachedHit;
 
   const qSide = preparePairSide(normQuery);
   const queryWords = new Set(normQuery.split(' '));
@@ -409,7 +418,7 @@ export function lookupKnowledge(rawText, store = null) {
       if (bestScore >= 25) break; // decisive long-key hit — stop scanning
     }
   }
-  if (!bestItem || bestScore < 4) return null;
+  if (!bestItem || bestScore < 4) { LOOKUP_CACHE.set(cacheKey, null); return null; }
 
   // Language selection mirrors bilingual.js: prefer Devanagari→hindi_deva, else hinglish/english heuristic.
   let lang = 'english';
@@ -420,7 +429,9 @@ export function lookupKnowledge(rawText, store = null) {
     else if (store?.data?.preferredLanguageMode === 'hinglish') lang = 'hinglish';
   }
   const reply = lang === 'english' ? bestItem.en : bestItem.hi;
-  return { id: bestItem.id, lang, reply, entry: bestItem };
+  const out = { id: bestItem.id, lang, reply, entry: bestItem };
+  LOOKUP_CACHE.set(cacheKey, out);
+  return out;
 }
 
 /** Prompt block telling the model to treat this fact as verified ground truth. */
