@@ -33,6 +33,11 @@ import * as photoSearch from './photosearch.js';
 import * as calendar from './calendar.js';
 import * as focusMode from './focus.js';
 import * as powerGuard from './powerguard.js';
+import * as screenTime from './screentime.js';
+import * as meetingNotes from './meetingnotes.js';
+import * as clipSync from './clipboard.js';
+import * as fleetPcs from './fleetstatus.js';
+import * as homework from './homework.js';
 import * as finder from './elementfinder.js';
 import { createActions } from './actions.js';
 import { createAgentLoop } from './agentloop.js';
@@ -256,6 +261,23 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • /ls [path] · /read <path> · /write <path> | <text> · /send <path>
 • /find <name> · /zip <path> · /unzip <path> · /download <url> [path] · /rm <path>
 • /mv <from> | <to> · /cp <from> | <to> · /mkdir <folder>
+*🚀 3.5.0 — 15 Smart Features*
+• /live [sec] — 🎥 screen mirror (live screenshots stream here)
+• /guard on|off|status — 🛡️ webcam motion → photo alert (travel ke liye)
+• /nmirror on|off|allow <apps> — 🔔 PC notifications yahan mirror
+• /study <topic> · /revise · /quiz — 📚 flashcards + spaced repetition
+• /exp <amt> <note> · /exp report|budget <n>|undo|list — 💰 kharcha tracker
+• /doc <path> · /doc q <question> — 📄 PDF/notes se sawal ke jawab
+• /photos <query> · /photos index — 🔍 photo dhundo (meaning se)
+• /cal add kal 4pm meeting · /cal today|week — 🗓️ calendar + /brief me reminders
+• /focus 25 block:youtube — 🎯 pomodoro + distraction blocker
+• /pguard on|status|battery 20|temp 90 — 🔋 battery/temp alerts
+• /stats [today|week|on|off] — 📊 screen time report
+• /notes now|stop — 🎙️ meeting record → AI notes + transcript
+• /clip · /copy <text> — 📋 PC↔phone clipboard sync
+• /pcs register <name> · /pcs — 🖥️ multi-PC fleet status
+• /hw add maths pg 42 kal · /hw today|week|done — 📝 homework tracker
+
 *🌐 Agent-Reach × Agent-S (3.2.0 — Deterministic Internet & PC Grounding)*
 • /reach [doctor] — 16+ internet channels + AT-SPI desktop grounding health report
 • /reach <url> — Read any webpage, YouTube transcript, GitHub repo, Tweet, or Reddit post
@@ -3104,6 +3126,59 @@ export function createAgent({
         if (sub === 'off') return powerGuard.togglePowerGuard(false);
         if (sub === 'battery' || sub === 'temp') return powerGuard.setThreshold(sub, restJoined);
         return '🔋 Usage: `/pguard on|off|status` · `/pguard battery 20` · `/pguard temp 90`';
+      }
+      case 'stats': {
+        // 📊 Screen time — window-title samples → daily/weekly minutes.
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'on') return screenTime.toggleSampling(true);
+        if (raw === 'off') return screenTime.toggleSampling(false);
+        if (raw === 'week') return screenTime.weekReply();
+        return screenTime.todayReply();
+      }
+      case 'notes': {
+        // 🎙️ Meeting recorder → transcript + AI notes.
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'stop') {
+          return meetingNotes.stopNotes({
+            summarize: (text) => ai.complete(config, `Make crisp meeting notes from this transcript: decisions, actions (with owners if mentioned), key points.\n\n${text.slice(0, 12_000)}`, log).catch(() => text.slice(0, 2000)),
+            onSummary: (msg) => notifyOwner(msg),
+          });
+        }
+        if (raw === 'status') return meetingNotes.notesStatus();
+        return meetingNotes.startNotes();
+      }
+      case 'clip': {
+        // 📋 PC clipboard → WhatsApp.
+        const raw = String(args || '').trim().toLowerCase();
+        if (raw === 'list') return clipSync.clipList();
+        return clipSync.clipPull();
+      }
+      case 'copy': {
+        // 📱 WhatsApp → PC clipboard.
+        const text = String(args || '').trim();
+        if (!text) return '📋 Usage: `/copy <text>` — PC clipboard pe set ho jayega.';
+        return clipSync.clipPush(text);
+      }
+      case 'pcs': {
+        // 🖥️ Multi-PC fleet status.
+        const raw = String(args || '').trim();
+        const [sub, ...nameParts] = raw.split(/\s+/);
+        const name = nameParts.join(' ');
+        if (sub === 'register') return fleetPcs.registerPc(name);
+        if (sub === 'remove') return fleetPcs.removePc(name);
+        return fleetPcs.fleetReply();
+      }
+      case 'hw': case 'homework': {
+        // 📝 Homework / deadline tracker.
+        const raw = String(args || '').trim();
+        if (!raw || /^today\b/i.test(raw)) return homework.todayReply();
+        if (/^week\b/i.test(raw)) return homework.weekReply();
+        if (/^done\b/i.test(raw)) return homework.doneHw(raw.replace(/^done\s+/i, '').trim());
+        if (/^add\b/i.test(raw)) {
+          const r = homework.addHw(raw.replace(/^add\s+/i, ''));
+          return r.reply ?? r.error;
+        }
+        return '📝 Usage: `/hw add maths pg 42 kal` · `/hw today` · `/hw week` · `/hw done <id>`';
       }
       case 'shades': case 'privacy': {
         // 🕶️ SHADES — panel physically black (privacy from bystanders), but
