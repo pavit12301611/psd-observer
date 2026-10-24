@@ -150,7 +150,25 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   await expect(pad).toBeVisible();
   const box = (await pad.boundingBox())!;
   // A trackpad squeezed to a sliver by the dock is not usable, so this is part
-  // of the regression: the gesture surface keeps a real height.
+  // of the regression: the gesture surface keeps a real height, and the point
+  // the test touches is a point the user could actually touch.
+  const probe = await page.evaluate(() => {
+    const el = document.querySelector(".pc-pad") as HTMLElement | null;
+    if (!el) return { found: false };
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      r.left + r.width / 2,
+      r.top + r.height / 2,
+    );
+    return {
+      found: true,
+      covers: hit ? el.contains(hit) : false,
+      hit: (hit as HTMLElement | null)?.className || hit?.nodeName,
+      rect: [r.left, r.top, r.width, r.height].map(Math.round),
+      view: [window.innerWidth, window.innerHeight, Math.round(window.scrollY)],
+    };
+  });
+  expect(probe).toMatchObject({ found: true, covers: true });
   expect(box.height).toBeGreaterThan(24);
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
