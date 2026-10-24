@@ -41,7 +41,7 @@ jobs:
           cache: npm
           cache-dependency-path: whatsapp-agent/package-lock.json
       - run: npm ci --no-audit --no-fund
-      - run: npm run check && npm test && npm run verify:bundle
+      - run: npm run check && node scripts/ci-report.mjs npm test && npm run verify:bundle
   web:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

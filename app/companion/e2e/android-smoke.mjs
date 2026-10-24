@@ -99,4 +99,18 @@ try {
 
   fs.writeFileSync('android-smoke-results/result.json', JSON.stringify({ nativeBridge: 'passed', readOnlyStartupReattachments: reattachments, nativeAbortedAcceptanceRecovery: 'passed', nativeReadOnlyShare: 'passed', privateForegroundAlerts: 'passed', genericNotificationPrivacy: 'passed', deviceCredentialAppGate: 'passed', keystoreEncryptedCredentialsAndHistory: 'passed', restoredSession: 'passed', darkTheme: 'passed', requestCount: requests.length, jobExecutions: executions, physicalSamsungTest: 'not performed', providerCalls: 0, pcActions: 0 }, null, 2));
   console.log('Android emulator smoke: bundled UI, native HTTP, encrypted credential/history, restore and dark theme passed. No physical Samsung/provider/PC tests.');
-} catch(error) { fs.writeFileSync('android-smoke-results/failure.json',JSON.stringify({stage,message:String(error.message)},null,2)); console.error('NATIVE_SMOKE_STAGE='+stage); throw error; } finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+} catch(error) {
+  fs.writeFileSync('android-smoke-results/failure.json',JSON.stringify({stage,message:String(error.message)},null,2));
+  console.error('NATIVE_SMOKE_STAGE='+stage);
+  try {
+    const crash = adb('logcat','-d','-v','brief','-t','180','AndroidRuntime:E','chromium:E','ActivityTaskManager:W','*:S');
+    fs.writeFileSync('android-smoke-results/startup-logcat.txt',crash);
+    console.error('ANDROID_STARTUP_LOGCAT\n'+crash.slice(-12000));
+  } catch { console.error('Android crash log unavailable'); }
+  try {
+    const exits = adb('shell','dumpsys','activity','exit-info',packageName);
+    fs.writeFileSync('android-smoke-results/process-exits.txt',exits);
+    console.error('ANDROID_PROCESS_EXIT_INFO\n'+exits.slice(-4000));
+  } catch { /* Preserve the original failure. */ }
+  throw error;
+} finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
