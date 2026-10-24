@@ -56,7 +56,12 @@ import {
   submitAndWatch,
   PendingJob,
 } from "./core/jobs";
-import { api, ApiError, SessionChanged } from "./core/api";
+import {
+  api,
+  ApiError,
+  SessionChanged,
+  markUpdateHealthy,
+} from "./core/api";
 import { cancelSpeech, dictate, speak } from "./core/speech";
 import { attachment, displayRequest } from "./core/validation";
 import {
@@ -184,6 +189,8 @@ export default function App() {
         setState(saved);
         setProfile(restored);
         setLoaded(true);
+        // Confirms a PC-delivered interface booted; otherwise it rolls back next start.
+        void markUpdateHealthy();
       },
     );
     if (isNative())

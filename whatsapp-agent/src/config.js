@@ -116,6 +116,7 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     timezone: e.TIMEZONE || 'Asia/Kolkata',
     appFcmCredentials: e.APP_FCM_CREDENTIALS || '',
     appDiscovery: bool(e.APP_DISCOVERY, false),
+    packageVersion: JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
 
     aiProvider: (e.AI_PROVIDER || 'auto').toLowerCase(),
     ollamaUrl: (e.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),

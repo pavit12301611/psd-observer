@@ -9,6 +9,7 @@ import { createRTC } from './rtc.js';
 import { createAssets } from './assets.js';
 import { createDiscovery } from './discovery.js';
 import { createPush } from './push.js';
+import { createUpdateChannel } from './update.js';
 import { error } from './records.js';
 export function privateIPv4(ip) {
   const a = ip.split('.').map(Number); return a.length === 4 && a.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && (a[0] === 10 || a[0] === 192 && a[1] === 168 || a[0] === 172 && a[1] >= 16 && a[1] <= 31 || a[0] === 100 && a[1] >= 64 && a[1] <= 127);
@@ -30,6 +31,7 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
   const projects = createWorkspaces({ file: file('projects.json'), now });
   const workflows = createWorkflows({ file: file('workflows.json'), now, timezone: config.timezone || 'Asia/Kolkata', runOwner, pending: () => Boolean(app?.state?.().pending?.length) });
   const rtc = createRTC({ now });
+  const updates = createUpdateChannel({ dir: file('updates'), currentNative: () => config.packageVersion || '' });
   const discovery = createDiscovery({ file: file('discovery.json'), host: config.host, port: config.port, serverId: devices.serverId, version: config.appVersion || '3.10.0', enabled: Boolean(config.appDiscovery) });
   let timer = null, lastApproval = '';
   const jobs = createJobs({ file: file('jobs.json'), now, events, busy: () => app?.busy?.() || false, run: async (input, context) => {
@@ -50,7 +52,7 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
   const removeStop = app?.onStop?.(() => { if (jobs.active) jobs.requestStop(jobs.active); });
   const capabilities = () => ({ jobs: true, durableJobs: Boolean(root), deviceSessions: true, qrPairing: true, events: true, privateAlerts: true, push: push.status(), workspaces: true, workflows: true, rtc: true, protocol: 2 });
   return {
-    devices, events, jobs, projects, workflows, rtc, assets, discovery, capabilities,
+    devices, events, jobs, projects, workflows, rtc, assets, discovery, updates, capabilities,
     controlsAllowed: () => Boolean(config.allowPcControl),
     diagnostics() { return { serverId: devices.serverId, capabilities: capabilities(), port: config.port, host: config.host, addresses: Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === 'IPv4' && !n.internal && privateIPv4(n.address)).map((n) => n.address), loopbackOnly: config.host === '127.0.0.1', pcControl: Boolean(config.allowPcControl), note: 'Reachability cannot be proven from the PC alone. No firewall, permission or router settings were changed.' }; },
     start() {

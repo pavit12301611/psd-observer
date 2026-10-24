@@ -1,6 +1,6 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "3.10.0",
+  "version": "3.11.0",
   "private": true,
   "description": "Owner-controlled WhatsApp agent with trained local routing, safe bounded multitasking, free/local AI and guarded Linux PC tools.",
   "type": "module",
@@ -35,7 +35,9 @@
     "audit:report": "node scripts/audit-report.mjs",
     "verify:bundle": "python3 scripts/verify-bundle.py",
     "test:deep": "npm run check && npm run test:coverage && npm run test:mutation && npm run audit:deps && npm run audit:report",
-    "audit:deps": "node -e \"require('fs').mkdirSync('.cache/deep-audit',{recursive:true})\" && npm audit --json > .cache/deep-audit/dependency-after.json"
+    "audit:deps": "node -e \"require('fs').mkdirSync('.cache/deep-audit',{recursive:true})\" && npm audit --json > .cache/deep-audit/dependency-after.json",
+    "app:update": "node scripts/app-update.mjs",
+    "app:update:pack": "node scripts/app-update.mjs pack"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {

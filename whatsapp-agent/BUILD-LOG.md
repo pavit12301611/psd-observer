@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.11.0 — PC-signed interface updates, no reinstall and no repository secrets (2026-10-24)
+
+- The PC now owns the update identity. The first pairing generates `data/mobile/updates/signing/update-signing-key.pem` (RSA-3072, mode 0600, never committed or logged) and returns the public key once. The Android app pins that key; a later pairing that offers a different key is refused until the owner logs out deliberately. No GitHub secret, workflow permission or public release is involved.
+- `npm run app:update:pack -- --version X.Y.Z` packs the built web app into a deterministic store ZIP, signs a fixed-order canonical manifest (schema, version, createdAt, sha256, size, fileCount, minNative, notes) with SHA-256/RSA, and keeps the three newest releases. Symlinks, absolute or `..` paths, duplicate entries, more than 4000 files, entries over 16 MB and bundles over 32 MB (64 MB expanded) are refused.
+- New authenticated routes `GET /api/app/update/{status,key,manifest,bundle}` serve the signed channel with `no-store`; the manifest response carries the signature and key id so the phone never has to trust an unsigned field. Pairing now returns the pinned public key and key id.
+- Android `WebUpdate` verifies the signature before downloading, enforces anti-downgrade and `minNative`, streams with a hard size cap, recomputes SHA-256, extracts into staging with its own path/size/count checks, then swaps directories. The previous version is kept; a boot that is never confirmed is rolled back on the next launch, and a newer built-in interface discards an older downloaded one. Settings exposes Check / Install / Reload / Undo; the web app confirms a healthy boot through `webUpdateHealthy`.
+- The one-time install ships as `observer-1.2.0-local.apk` (debug-signed `.stable` package) so it can sit next to Preview without uninstalling anything. Native-shell changes still need an APK; only the web interface rides this channel. Honest limits: the PC must be reachable over LAN/VPN, and a bundle is interface code trusted at app level, not a firmware or sandbox boundary.
+- `Shades` is unchanged: only the owner's `/shades off` restores the display, with no auto-restore.
+
 ## 3.9.0 — Neural v2, measurable routing and safe multitasking (2026-10-23)
 
 - Fixed the neural score-array/specialist score-object mismatch, aliased early-stopping snapshots, stale result caches after corrections, and confidence being transferred from a different label. Grew IntentNet 406→64→12, added 120 curated bilingual/Hindi examples, trained and shipped an 86 KiB int8 checkpoint.
