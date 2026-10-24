@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createBridgeServer, readCrop } from '../src/server.js';
-import { parseLockedHint, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
+import { captureArgs, gnomeShellCaptureArgs, parseLockedHint, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
 import { Store } from '../src/store.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -147,4 +147,19 @@ test('parsers: lock, screensaver and battery text are read conservatively', () =
   assert.deepEqual(parseUpowerBattery('state: charging\npercentage: 88%'), { percent: 88, charging: true });
   assert.equal(parseUpowerBattery('percentage: unknown'), null);
   assert.equal(parseUpowerBattery('percentage: 140%'), null);
+});
+
+test('capture argv always asks for the mouse pointer', () => {
+  // A remote screen without the pointer is a screen you click blind.
+  assert.deepEqual(captureArgs('grim', 'shot.png'), ['-c', 'shot.png']);
+  assert.deepEqual(captureArgs('scrot', 'shot.png'), ['--silent', '-p', 'shot.png']);
+  assert.deepEqual(captureArgs('gnome-screenshot', 'shot.png'), ['--include-pointer', '-f', 'shot.png']);
+  assert.deepEqual(captureArgs('maim', 'shot.png'), ['shot.png']);
+  // GNOME Shell: (include_frame, include_cursor, file) — cursor must be true.
+  const shell = gnomeShellCaptureArgs('shot.png');
+  assert.equal(shell.at(-1), 'shot.png');
+  assert.deepEqual(shell.slice(-3, -1), ['false', 'true']);
+  for (const tool of ['grim', 'scrot', 'gnome-screenshot', 'maim']) {
+    assert.ok(captureArgs(tool, 'x.png').includes('x.png'), `${tool} keeps the output path`);
+  }
 });

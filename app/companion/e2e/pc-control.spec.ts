@@ -74,7 +74,13 @@ function fixture(page: Page) {
           : json({ text: "copied on the PC", truncated: false });
       if (path === "/api/pc/display") return json({ ok: true, woken: ["gdbus"] });
       if (path.startsWith("/api/screen"))
-        return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(PNG, "base64") });
+        return route.fulfill({
+          status: 200,
+          contentType: "image/png",
+          // The app needs the real screen size to place its pointer marker.
+          headers: { "x-screen-width": "1920", "x-screen-height": "1080" },
+          body: Buffer.from(PNG, "base64"),
+        });
       if (path === "/api/chat") {
         if (body.text === "/stop") {
           // A real /stop settles the job, which is what frees manual input.
@@ -230,6 +236,26 @@ test("zoom asks for a real crop and taps still land on the right pixel", async (
   const tap = f.requests.find((r) => r.path === "/api/tap")!;
   expect(Number(tap.body.x)).toBeGreaterThan(400);
   expect(Number(tap.body.x)).toBeLessThan(600);
+  // GNOME's screenshots have no pointer in them, so the app draws its own at the
+  // place the input actually landed: the middle of a 2x crop is the middle of
+  // the screen.
+  const ghost = page.locator(".pc-cursor");
+  await expect(ghost).toBeVisible();
+  const ghostBox = (await ghost.boundingBox())!;
+  const stageBox = (await stage.boundingBox())!;
+  expect(
+    Math.abs(ghostBox.x + ghostBox.width / 2 - (stageBox.x + stageBox.width / 2)),
+  ).toBeLessThan(30);
+  expect(
+    Math.abs(ghostBox.y + ghostBox.height / 2 - (stageBox.y + stageBox.height / 2)),
+  ).toBeLessThan(30);
+  // A nudge moves the real PC pointer, so the marker has to follow it.
+  for (let i = 0; i < 3; i++)
+    await page.getByRole("button", { name: "Nudge Right" }).click();
+  await expect
+    .poll(async () => (await ghost.boundingBox())?.x ?? 0)
+    .toBeGreaterThan(ghostBox.x + 1);
+
   // And the tap triggers a fresh frame, so the owner sees the result.
   const screens = f.requests.filter((r) => r.path.startsWith("/api/screen")).length;
   await expect

@@ -29,7 +29,9 @@ import type { AppState, PcState } from "../types";
 import { api, base64Blob } from "../core/api";
 import {
   clampZoom,
+  cursorMarkerPosition,
   frameQuery,
+  moveCursorBy,
   panCenter,
   pointToScreen,
   retryDelay,
@@ -37,6 +39,7 @@ import {
   zoomAround,
   type Center,
   type Region,
+  type Size,
 } from "../core/remote";
 import { EmptyPanel, IconButton, SectionHeading } from "./ui";
 
@@ -103,6 +106,13 @@ export default function PCControl({
     [pcError, setPcError] = useState(""),
     [takingOver, setTakingOver] = useState(false),
     [lastFrameAt, setLastFrameAt] = useState(0),
+    // GNOME's portal screenshots never contain the pointer, so the app keeps
+    // its own marker: absolute where the PC reported pixels, relative for
+    // trackpad/nudge moves (which are PC pixels too).
+    [cursor, setCursor] = useState<Center | null>(null),
+    [screenPx, setScreenPx] = useState<Size | null>(null),
+    [marker, setMarker] = useState<{ x: number; y: number } | null>(null),
+    [imgSize, setImgSize] = useState<Size>({ width: 0, height: 0 }),
     [now, setNow] = useState(() => Date.now()),
     [fullscreen, setFullscreen] = useState(false),
     [dragLine, setDragLine] = useState<{
@@ -179,6 +189,11 @@ export default function PCControl({
         },
       );
       if (!alive.current || !active.current) return;
+      const px = {
+        width: Number(res.headers?.["x-screen-width"]),
+        height: Number(res.headers?.["x-screen-height"]),
+      };
+      if (px.width > 0 && px.height > 0) setScreenPx(px);
       if (res.status !== 304 && res.base64) {
         const url = URL.createObjectURL(
           base64Blob(res.base64, res.mime || "image/png"),
@@ -226,6 +241,27 @@ export default function PCControl({
     [capture],
   );
 
+  // Keep the pointer marker glued to the image through zoom, pan and rotation.
+  useEffect(() => {
+    const place = () => {
+      const box = stage.current;
+      if (!box || !cursor || !frame) return setMarker(null);
+      setMarker(
+        cursorMarkerPosition(
+          cursor,
+          box.getBoundingClientRect(),
+          imgSize,
+          region,
+        ),
+      );
+    };
+    place();
+    if (typeof ResizeObserver === "undefined" || !stage.current) return;
+    const observer = new ResizeObserver(place);
+    observer.observe(stage.current);
+    return () => observer.disconnect();
+  }, [cursor, frame, imgSize, region, zoom, center, fullscreen]);
+
   useEffect(() => {
     if (!streaming || !connected) return;
     let cancelled = false,
@@ -265,6 +301,8 @@ export default function PCControl({
       setPin("");
       setFrame("");
       setPc(null);
+      setCursor(null);
+      setMarker(null);
       setZoom(1);
       setCenter({ x: 0.5, y: 0.5 });
       if (frameURL.current) URL.revokeObjectURL(frameURL.current);
@@ -340,7 +378,22 @@ export default function PCControl({
 
   function tapped(point: { x: number; y: number }, at: { x: number; y: number }) {
     mark(at.x, at.y);
+    setCursor({ x: point.x, y: point.y });
     void send("/api/tap", { ...point, relative: true });
+  }
+
+  /** Absolute pointer position for a client point, if it is on the image. */
+  function aimAt(clientX: number, clientY: number) {
+    const img = image.current;
+    if (!img) return;
+    const point = pointToScreen(
+      clientX,
+      clientY,
+      img.getBoundingClientRect(),
+      { width: img.naturalWidth, height: img.naturalHeight },
+      region,
+    );
+    if (point) setCursor({ x: point.x, y: point.y });
   }
 
   function rightClick() {
@@ -404,6 +457,7 @@ export default function PCControl({
           y: e.clientY - rect.top,
         };
         mark(at.x, at.y);
+        aimAt(e.clientX, e.clientY);
         rightClick();
       }, 550);
     gesture.current = g;
@@ -467,6 +521,7 @@ export default function PCControl({
     if (g.pinched) {
       if (!g.moved && elapsed < 400 && inputEnabled) {
         mark(e.clientX, e.clientY);
+        aimAt(e.clientX, e.clientY);
         rightClick();
       }
       return;
@@ -486,6 +541,7 @@ export default function PCControl({
       }, region);
       if (from && to) {
         mark(to.x, to.y);
+        setCursor({ x: to.x, y: to.y });
         void send("/api/drag", { from, to });
       }
       return;
@@ -755,7 +811,12 @@ export default function PCControl({
                   src={frame}
                   alt="Live frame from your PC"
                   draggable={false}
-                  onLoad={() => setLoading(false)}
+                  onLoad={(e) =>
+                    setImgSize({
+                      width: e.currentTarget.naturalWidth,
+                      height: e.currentTarget.naturalHeight,
+                    })
+                  }
                 />
                 {ripple && (
                   <span
@@ -763,6 +824,17 @@ export default function PCControl({
                     className="pc-ripple"
                     style={{ left: ripple.x, top: ripple.y }}
                   />
+                )}
+                {marker && (
+                  <span
+                    className="pc-cursor"
+                    style={{ left: marker.x, top: marker.y }}
+                    aria-hidden
+                  >
+                    <svg width="17" height="23" viewBox="0 0 17 23">
+                      <path d="M1.9 1.6 L1.9 18.2 L6.2 14.1 L8.9 20.6 L12 19.2 L9.3 12.9 L14.9 12.9 Z" />
+                    </svg>
+                  </span>
                 )}
                 {dragLine && (
                   <svg className="pc-drag-line" aria-hidden>
@@ -904,6 +976,7 @@ export default function PCControl({
                       if (!move.x && !move.y) return;
                       padCarry.current = { x: 0, y: 0 };
                       padSentAt.current = Date.now();
+                      setCursor((c) => moveCursorBy(c, move.x, move.y, screenPx) ?? c);
                       void api
                         .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
                         .catch(() => setInputEnabled(false));
@@ -954,6 +1027,10 @@ export default function PCControl({
                       Scroll ↓
                     </button>
                   </div>
+                  <p className="pc-muted">
+                    The arrow on the screen is your last input. GNOME never draws
+                    its own pointer into Wayland screenshots.
+                  </p>
                   <div className="pc-row">
                     <span className="pc-muted">Nudge</span>
                     {[
@@ -966,9 +1043,10 @@ export default function PCControl({
                         key={n.label}
                         label={`Nudge ${n.label}`}
                         disabled={!inputEnabled}
-                        onClick={() =>
-                          void send("/api/pointer", { op: "move", dx: n.dx, dy: n.dy })
-                        }
+                        onClick={() => {
+                          setCursor((c) => moveCursorBy(c, n.dx, n.dy, screenPx) ?? c);
+                          void send("/api/pointer", { op: "move", dx: n.dx, dy: n.dy });
+                        }}
                       >
                         {n.icon}
                       </IconButton>

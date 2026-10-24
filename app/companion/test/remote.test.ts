@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   clampCenter,
   clampZoom,
+  cursorMarkerPosition,
   frameQuery,
+  moveCursorBy,
   MAX_ZOOM,
   panCenter,
   pointToScreen,
@@ -101,5 +103,59 @@ describe("pc screen view", () => {
     expect(retryDelay(2)).toBe(2400);
     expect(retryDelay(3)).toBe(4800);
     expect(retryDelay(9)).toBe(8000);
+  });
+});
+
+describe("pointer marker", () => {
+  const screen = { width: 1920, height: 1080 };
+
+  it("moves the marker by the same PC pixels the trackpad sends", () => {
+    // 192 px across a 1920 px screen is exactly a tenth of the width.
+    expect(moveCursorBy({ x: 500, y: 500 }, 192, -108, screen)).toEqual({
+      x: 600,
+      y: 400,
+    });
+    // Clamped, never off the screen or NaN.
+    expect(moveCursorBy({ x: 990, y: 10 }, 500, -500, screen)).toEqual({
+      x: 1000,
+      y: 0,
+    });
+    // Without a known screen size or a starting point there is nothing to draw.
+    expect(moveCursorBy(null, 10, 10, screen)).toBeNull();
+    expect(moveCursorBy({ x: 1, y: 1 }, 10, 10, null)).toBeNull();
+    expect(moveCursorBy({ x: 1, y: 1 }, Number.NaN, 10, screen)).toBeNull();
+  });
+
+  it("draws the marker inside the letterboxed crop, not the stage", () => {
+    // A 2:1 image in a square stage: 100 px of empty space top and bottom.
+    const rect = { left: 10, top: 20, width: 400, height: 400 };
+    const natural = { width: 800, height: 400 };
+    const full = cursorMarkerPosition(
+      { x: 500, y: 500 },
+      rect,
+      natural,
+      { x: 0, y: 0, w: 1000, h: 1000 },
+    );
+    expect(full).toEqual({ x: 200, y: 200 });
+    // Zoomed crops only contain their own region: the middle of the crop is
+    // the middle of the drawn image, not the middle of the stage.
+    expect(
+      cursorMarkerPosition({ x: 750, y: 750 }, rect, natural, {
+        x: 500,
+        y: 500,
+        w: 500,
+        h: 500,
+      }),
+    ).toEqual({ x: 200, y: 200 });
+    // A point outside the visible crop is not drawn at all.
+    expect(
+      cursorMarkerPosition({ x: 100, y: 100 }, rect, natural, {
+        x: 500,
+        y: 500,
+        w: 500,
+        h: 500,
+      }),
+    ).toBeNull();
+    expect(cursorMarkerPosition(null, rect, natural)).toBeNull();
   });
 });

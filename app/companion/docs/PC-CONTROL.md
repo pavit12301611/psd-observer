@@ -87,3 +87,26 @@ delivers it. No APK reinstall is needed — see [PC-UPDATES.md](PC-UPDATES.md).
   (`ALLOW_PC_CONTROL`, access level, PC PIN, ydotool/xdotool on Wayland/X11).
 - True continuous streaming (10–15 fps) is still an APK-level change: it needs a
   native frame path or a Wayland portal session.
+
+## Where is the pointer?
+
+On GNOME Wayland the only screenshot path that works is
+`xdg-desktop-portal`, and the portal **never draws the mouse pointer**. That is
+the desktop being honest, not a bug in this app, and no flag changes it.
+
+So the app draws its own marker, and everything it needs is already in the
+frame:
+
+- `x-screen-width` / `x-screen-height` headers carry the PC's real screen pixels.
+- A tap or a drag gives an absolute PC coordinate (the PC told us those pixels).
+- Trackpad and nudge moves are PC pixels too, so they shift the marker by
+  `dx / screenWidth × 1000` units and clamp at the screen edges.
+- The marker hides when the point falls outside the current zoom crop, keeps its
+  last position if the PC sends no screen size, and clears on disconnect.
+
+On X11 and wlroots the **real** pointer is also in the picture, because the
+capture tools are asked for it explicitly: `grim -c`, `scrot --silent -p`,
+`gnome-screenshot --include-pointer`, and GNOME Shell's D-Bus
+`Screenshot(include_frame, include_cursor, file)` with `include_cursor=true`.
+`maim` draws it by default; ImageMagick's `import` and KDE Spectacle have no such
+switch, so there the marker is the only pointer you will see.

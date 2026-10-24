@@ -14,6 +14,8 @@ export type Region = {
   h: number;
 };
 export type Center = { x: number; y: number };
+export type Rect = { left: number; top: number; width: number; height: number };
+export type Size = { width: number; height: number };
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 4;
 
@@ -135,4 +137,53 @@ export function zoomAround(
 export function retryDelay(failures: number): number {
   if (failures <= 0) return 0;
   return Math.min(8000, 1200 * 2 ** Math.min(3, failures - 1));
+}
+
+/**
+ * The pointer problem.
+ *
+ * On GNOME Wayland the only screenshots that work come from the portal, and the
+ * portal never draws the mouse pointer. The PC reports its real screen size in
+ * the frame headers, so the app can keep its own marker: absolute on a tap or a
+ * drag (the PC told us those pixels), relative on trackpad/nudge moves (those are
+ * PC pixels too). Nobody has to guess what "hidden" means — the owner sees where
+ * their input landed.
+ */
+export function moveCursorBy(
+  cursor: Center | null,
+  dxPixels: number,
+  dyPixels: number,
+  screen: Size | null,
+): Center | null {
+  if (!cursor || !screen || screen.width <= 0 || screen.height <= 0) return null;
+  if (!Number.isFinite(dxPixels) || !Number.isFinite(dyPixels)) return null;
+  return {
+    x: Math.min(1000, Math.max(0, cursor.x + (dxPixels / screen.width) * 1000)),
+    y: Math.min(1000, Math.max(0, cursor.y + (dyPixels / screen.height) * 1000)),
+  };
+}
+
+/**
+ * Where to draw the marker inside the stage: the image is letterboxed with
+ * `object-fit: contain` and may be a crop of the screen, so both mappings have
+ * to be undone. `null` means the point is outside the visible region.
+ */
+export function cursorMarkerPosition(
+  cursor: Center | null,
+  rect: Rect,
+  natural: Size,
+  region: Region = { x: 0, y: 0, w: 1000, h: 1000 },
+): { x: number; y: number } | null {
+  if (!cursor) return null;
+  if (rect.width <= 0 || rect.height <= 0 || natural.width <= 0 || natural.height <= 0) return null;
+  const fx = (cursor.x - region.x) / (region.w || 1),
+    fy = (cursor.y - region.y) / (region.h || 1);
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null;
+  const scale = Math.min(rect.width / natural.width, rect.height / natural.height),
+    drawnWidth = natural.width * scale,
+    drawnHeight = natural.height * scale;
+  return {
+    x: (rect.width - drawnWidth) / 2 + fx * drawnWidth,
+    y: (rect.height - drawnHeight) / 2 + fy * drawnHeight,
+  };
 }

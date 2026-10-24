@@ -442,6 +442,38 @@ async function portalScreenshot(env, { timeoutMs = 60_000 } = {}) {
 }
 
 /**
+ * Exact argv for each capture tool, including the mouse pointer.
+ *
+ * The pointer is the whole point of a remote screen — without it the owner is
+ * clicking blind. Several tools hide it by default (grim, scrot) or when asked
+ * politely (gnome-screenshot), so every supported tool is asked explicitly.
+ * ImageMagick's `import` and KDE's Spectacle have no such switch; GNOME's
+ * portal screenshot never draws the pointer at all, which is why the phone also
+ * draws its own marker where the last input landed.
+ */
+export function captureArgs(tool, file) {
+  switch (tool) {
+    case 'grim': return ['-c', file];
+    case 'gnome-screenshot': return ['--include-pointer', '-f', file];
+    case 'scrot': return ['--silent', '-p', file];
+    case 'maim': return [file]; // maim draws the pointer unless --hidecursor
+    case 'spectacle': return ['-b', '-n', '-o', file];
+    case 'import': return ['-window', 'root', file];
+    default: return [file];
+  }
+}
+
+/**
+ * GNOME Shell D-Bus screenshot: Screenshot(include_frame, include_cursor, file).
+ * The second boolean used to be false, which is exactly why the captured frame
+ * on GNOME had no pointer in it.
+ */
+export function gnomeShellCaptureArgs(file) {
+  return ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell',
+    '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'true', file];
+}
+
+/**
  * Every capture path we know, best-first for the current session.
  *
  * On Wayland we only use paths that can actually work: the portal, grim
@@ -461,20 +493,20 @@ function screenshotAttempts(file, env, portalMs = 60_000) {
         return portalScreenshot(env, { timeoutMs: portalMs });
       },
     });
-    attempts.push({ label: 'grim', fn: async () => { await run('grim', [file], { timeout: 12_000 }); return file; } });
-    attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 15_000 }); return file; } });
+    attempts.push({ label: 'grim', fn: async () => { await run('grim', captureArgs('grim', file), { timeout: 12_000 }); return file; } });
+    attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', captureArgs('spectacle', file), { timeout: 15_000 }); return file; } });
     return attempts;
   }
   // X11 (or XWayland): the classic tools, GNOME shell API first.
   attempts.push({ label: 'gnome-shell', fn: async () => {
-    await run('gdbus', ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell', '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'false', file], { timeout: 12_000 });
+    await run('gdbus', gnomeShellCaptureArgs(file), { timeout: 12_000 });
     return file;
   } });
-  attempts.push({ label: 'gnome-screenshot', fn: async () => { await run('gnome-screenshot', ['-f', file], { timeout: 12_000 }); return file; } });
-  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 15_000 }); return file; } });
-  attempts.push({ label: 'scrot', fn: async () => { await run('scrot', ['--silent', file], { timeout: 12_000 }); return file; } });
-  attempts.push({ label: 'maim', fn: async () => { await run('maim', [file], { timeout: 12_000 }); return file; } });
-  attempts.push({ label: 'import', fn: async () => { await run('import', ['-window', 'root', file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'gnome-screenshot', fn: async () => { await run('gnome-screenshot', captureArgs('gnome-screenshot', file), { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', captureArgs('spectacle', file), { timeout: 15_000 }); return file; } });
+  attempts.push({ label: 'scrot', fn: async () => { await run('scrot', captureArgs('scrot', file), { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'maim', fn: async () => { await run('maim', captureArgs('maim', file), { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'import', fn: async () => { await run('import', captureArgs('import', file), { timeout: 12_000 }); return file; } });
   return attempts;
 }
 

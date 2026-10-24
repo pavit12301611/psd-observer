@@ -1,5 +1,13 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.12.1 — the pointer is back in the picture (2026-10-25)
+
+- The complaint was exact: "screenshot mein pointer dikhta hi nahi hai jaise hide ho gaya ho". On GNOME Wayland the only working capture path is `xdg-desktop-portal`, and the portal never draws the pointer — so the owner was clicking blind. The genuine system-pointer capture is fixed where the tools allow it, and the phone now draws its own marker so Wayland owners get the same information.
+- Capture argv now asks for the pointer explicitly: `grim -c`, `scrot --silent -p`, `gnome-screenshot --include-pointer`, and GNOME Shell's D-Bus `Screenshot(include_frame, include_cursor, file)` — that second boolean was `false` before, which is exactly why GNOME's shell screenshot had no cursor. `maim` already draws it; `import`/Spectacle have no such switch (documented, not faked).
+- App-side marker: the frame response already carries `x-screen-width`/`x-screen-height` (real screen pixels), so taps and drags (absolute pixels from the PC) and trackpad/nudge moves (relative PC pixels) both update one cursor position. `moveCursorBy` converts pixels → 0-1000 units and clamps; `cursorMarkerPosition` undoes the crop and the `object-fit: contain` letterboxing, so the arrow sits on the right pixel at any zoom.
+- It never lies or jumps: the marker hides when the point is outside the visible crop, keeps its old place when the PC reports no screen size, and clears on disconnect. Solid white arrow with a dark outline (no gradients) stays visible on a white document and a black terminal; the ping ring respects `prefers-reduced-motion`.
+- Tests: agent 9/9 in `pc-remote` (new assertion pins every capture argv, including the `include_cursor` boolean), companion 51/51 (pixel→unit conversion, clamping, letterbox/crop placement, off-view hiding), and the Playwright spec now asserts the marker appears where the tap landed and follows a nudge.
+
 ## 3.12.0 — PC control that works from a phone (2026-10-24)
 
 - The old PC page stacked the touchpad **below** the screenshot, so every gesture scrolled the page and pushed the PC screen out of view. It is now one fixed view: a screen stage that keeps its place, and a dock (Pad / Keys / Type / Clip / More) whose body is the only thing that can scroll.
