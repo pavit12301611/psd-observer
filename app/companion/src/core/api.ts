@@ -7,6 +7,7 @@ import type {
   Project,
   Workflow,
   AgentEvent,
+  PcUpdateCheck,
 } from "../types";
 import { isNative, nativeCall, openExternal } from "./native";
 import { supportsMobileV2 } from "./pairing";
@@ -299,6 +300,38 @@ export async function checkUpdates(beta = false) {
       });
   if (!Array.isArray(releases)) throw new Error("Invalid release metadata");
   return updateCandidate(releases, appVersion, beta);
+}
+/**
+ * PC-delivered interface updates. The paired PC signs a web bundle with a key
+ * this install pinned at pairing time, so no repository secret is needed and
+ * nothing has to be uninstalled. Native shell changes still arrive as an APK.
+ */
+export async function checkPcUpdate() {
+  if (!isNative()) return null;
+  return nativeCall<PcUpdateCheck>("webUpdateCheck", {}, 30_000);
+}
+export async function pcUpdateStatus() {
+  if (!isNative()) return null;
+  return nativeCall<PcUpdateCheck>("webUpdateStatus", {}, 10_000);
+}
+export async function applyPcUpdate() {
+  if (!isNative())
+    return Promise.reject(new Error("PC updates need the Android app."));
+  return nativeCall<PcUpdateCheck>("webUpdateApply", {}, 300_000);
+}
+export async function rollbackPcUpdate() {
+  if (!isNative())
+    return Promise.reject(new Error("PC updates need the Android app."));
+  return nativeCall<PcUpdateCheck>("webUpdateRollback", {}, 30_000);
+}
+/** Confirms this interface rendered; an unconfirmed bundle is rolled back on next start. */
+export async function markUpdateHealthy() {
+  if (!isNative()) return;
+  try {
+    await nativeCall("webUpdateHealthy", {}, 15_000);
+  } catch {
+    /* Older app shells have no update channel; nothing to confirm. */
+  }
 }
 export const openRelease = (release: Release) => {
   if (

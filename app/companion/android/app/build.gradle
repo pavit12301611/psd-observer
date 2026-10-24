@@ -16,6 +16,18 @@ android {
     buildFeatures { buildConfig true }
     buildTypes {
         debug { applicationIdSuffix '.preview'; versionNameSuffix '-preview'; manifestPlaceholders = [appLabel: 'Observer Preview']; minifyEnabled false }
+        // One-time personal install, debug-signed and installed *next to* the
+        // Preview package (never over it). It carries the PC-update channel, so
+        // later interface changes arrive as signed web bundles from the paired
+        // PC instead of another APK. It is not a public production artifact.
+        local {
+            initWith debug
+            applicationIdSuffix '.stable'
+            versionNameSuffix ''
+            debuggable false
+            minifyEnabled false
+            manifestPlaceholders = [appLabel: 'Observer']
+        }
         release {
             manifestPlaceholders = [appLabel: 'Observer']
             minifyEnabled true

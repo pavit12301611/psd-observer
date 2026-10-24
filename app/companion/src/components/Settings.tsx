@@ -21,8 +21,22 @@ import {
   Check,
   ExternalLink,
 } from "lucide-react";
-import type { Preferences, Profile, Status, AppState, Release } from "../types";
-import { checkUpdates, openRelease } from "../core/api";
+import type {
+  Preferences,
+  Profile,
+  Status,
+  AppState,
+  Release,
+  PcUpdateCheck,
+} from "../types";
+import {
+  checkUpdates,
+  openRelease,
+  checkPcUpdate,
+  applyPcUpdate,
+  pcUpdateStatus,
+  rollbackPcUpdate,
+} from "../core/api";
 import { isNative, nativeCall, openExternal } from "../core/native";
 import { Modal, SectionHeading, SettingRow } from "./ui";
 export default function Settings({
@@ -54,6 +68,73 @@ export default function Settings({
     [checking, setChecking] = useState(false),
     [release, setRelease] = useState<Release | null>(null),
     [updateMessage, setUpdateMessage] = useState("");
+  const [pc, setPc] = useState<PcUpdateCheck | null>(null),
+    [pcBusy, setPcBusy] = useState(false),
+    [pcMessage, setPcMessage] = useState(""),
+    [pcReady, setPcReady] = useState(false);
+  useEffect(() => {
+    if (!isNative()) return;
+    let alive = true;
+    void pcUpdateStatus()
+      .then((status) => {
+        if (alive && status) setPc(status);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const checkPc = async () => {
+    setPcBusy(true);
+    setPcReady(false);
+    setPcMessage("");
+    try {
+      const result = await checkPcUpdate();
+      if (!result) return;
+      setPc(result);
+      setPcMessage(
+        result.available
+          ? `Interface ${result.version} is ready. It is signed by your PC and needs no reinstall.`
+          : result.reason || "Your PC has no newer signed interface.",
+      );
+    } catch (e) {
+      setPcMessage(
+        e instanceof Error ? e.message : "PC update check unavailable",
+      );
+    } finally {
+      setPcBusy(false);
+    }
+  };
+  const installPc = async () => {
+    setPcBusy(true);
+    try {
+      const applied = await applyPcUpdate();
+      setPc(applied);
+      setPcReady(true);
+      setPcMessage(
+        `Interface ${applied?.installed || "update"} installed. Reload Observer to use it. If it cannot start, the previous version returns automatically.`,
+      );
+    } catch (e) {
+      setPcMessage(e instanceof Error ? e.message : "PC update failed");
+    } finally {
+      setPcBusy(false);
+    }
+  };
+  const undoPc = async () => {
+    setPcBusy(true);
+    try {
+      const restored = await rollbackPcUpdate();
+      setPc(restored);
+      setPcReady(true);
+      setPcMessage(
+        "Previous interface restored. Reload Observer to use it.",
+      );
+    } catch (e) {
+      setPcMessage(e instanceof Error ? e.message : "Rollback unavailable");
+    } finally {
+      setPcBusy(false);
+    }
+  };
   const [device, setDevice] = useState<{
     model: string;
     version: string;
@@ -252,6 +333,63 @@ export default function Settings({
             description="Your existing WhatsApp commands, in one searchable place."
           />
         </button>
+        {isNative() && profile && (
+          <>
+            <SettingRow
+              icon={<Laptop size={20} />}
+              title="PC interface updates"
+              description="Signed on your PC and installed in place. The APK is never replaced; native changes still need one install."
+            >
+              <button
+                className="button compact"
+                disabled={pcBusy}
+                onClick={() => void checkPc()}
+              >
+                {pcBusy ? (
+                  <LoaderCircle className="spin" size={16} />
+                ) : (
+                  <ArrowUpRight size={16} />
+                )}
+                Check
+              </button>
+            </SettingRow>
+            {pcMessage && (
+              <div className="update-note" role="status">
+                <p>{pcMessage}</p>
+                <div className="update-actions">
+                  {pc?.available && (
+                    <button
+                      className="text-button"
+                      disabled={pcBusy}
+                      onClick={() => void installPc()}
+                    >
+                      Install {pc.version}
+                      <Download size={15} />
+                    </button>
+                  )}
+                  {pcReady && (
+                    <button
+                      className="text-button"
+                      onClick={() => window.location.reload()}
+                    >
+                      Reload Observer
+                      <ArrowUpRight size={15} />
+                    </button>
+                  )}
+                  {pc?.installed && (
+                    <button
+                      className="text-button"
+                      disabled={pcBusy}
+                      onClick={() => void undoPc()}
+                    >
+                      Undo last update
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
         <SettingRow
           icon={<Download size={20} />}
           title="App updates"

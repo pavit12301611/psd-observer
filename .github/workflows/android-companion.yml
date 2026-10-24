@@ -102,15 +102,21 @@ jobs:
           fi
           node scripts/ci-run.mjs "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
       - run: npm ci --no-audit --no-fund && npm run build && npm run android:sync
-      - run: chmod +x android/gradlew && cd android && node ../scripts/ci-run.mjs ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
-      - run: |
+      - run: chmod +x android/gradlew && cd android && node ../scripts/ci-run.mjs ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug assembleLocal
+      - name: Collect installable APKs
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
           mkdir -p artifacts
-          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/observer-1.1.0-preview.apk
-          (cd artifacts && sha256sum observer-1.1.0-preview.apk > SHA256SUMS)
-          printf '%s\n' 'PREVIEW ONLY: debug-signed, separate .preview package. Not a production/update-compatible release. Do not uninstall a production app to install this. Production needs an owner-controlled stable release key.' > artifacts/README.txt
+          cp android/app/build/outputs/apk/debug/app-debug.apk "artifacts/observer-${VERSION}-preview.apk"
+          cp android/app/build/outputs/apk/local/app-local.apk "artifacts/observer-${VERSION}-local.apk"
+          (cd artifacts && sha256sum ./*.apk > SHA256SUMS)
+          printf '%s\n' \
+            'PREVIEW: debug-signed, .preview package. Cannot replace an already installed Preview built by another runner.' \
+            'LOCAL: debug-signed .stable package that installs ALONGSIDE Preview. It includes the PC-signed web update channel: pair it once, then interface updates arrive from your PC without reinstalling. Not a public production artifact.' \
+            'Neither artifact is a signed production release; that still needs the owner-controlled release key.' > artifacts/README.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: observer-android-preview
+          name: observer-android-apks
           path: app/companion/artifacts/
           retention-days: 14
       - uses: actions/upload-artifact@v4
@@ -140,9 +146,12 @@ jobs:
         working-directory: app/companion
       - uses: actions/download-artifact@v4
         with:
-          name: observer-android-preview
+          name: observer-android-apks
           path: app/companion/artifacts/
       - run: node --test scripts/android-startup.test.mjs scripts/android-credential.test.mjs
+      - name: Resolve preview APK path
+        run: echo "OBSERVER_PREVIEW_APK=app/companion/artifacts/observer-$(node -p "require('./app/companion/package.json').version")-preview.apk" >> "$GITHUB_ENV"
+
         working-directory: app/companion
       - name: Enable KVM
         run: |
@@ -160,7 +169,7 @@ jobs:
           script: |
             adb shell wm size 1080x2400
             adb shell wm density 420
-            adb install app/companion/artifacts/observer-1.1.0-preview.apk
+            adb install "$OBSERVER_PREVIEW_APK"
             adb shell am start -W -n in.observer.companion.preview/in.observer.companion.MainActivity
             cd app/companion && node scripts/ci-run.mjs node e2e/android-smoke.mjs
       - uses: actions/upload-artifact@v4

@@ -295,7 +295,11 @@ export function createBridgeServer({
         if (!allowed) { recordLogin(ip); return json(res, 401, { detail: 'Wrong PIN, or expired/used pairing QR. No device was paired.' }); }
         if (b.serverId && b.serverId !== mobile.devices.serverId) return json(res, 409, { detail: 'QR belongs to another PC identity' });
         const paired = mobile.devices.register(b); loginAttempts.delete(ip);
-        return json(res, 200, { ...paired, protocol: 2, capabilities: mobile.capabilities() });
+        // Pairing must keep working even if local signing storage cannot be prepared.
+        let update = {};
+        try { const key = mobile.updates.key(); update = { updateSigningKey: key.key, updateKeyId: key.keyId, updateKeyAlgorithm: key.algorithm }; }
+        catch { update = {}; }
+        return json(res, 200, { ...paired, protocol: 2, capabilities: mobile.capabilities(), ...update });
       }
       if (route === 'POST /api/login') {
         if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return json(res, 503, { detail: 'Bridge authentication is not configured' });

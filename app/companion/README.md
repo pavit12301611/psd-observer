@@ -75,3 +75,10 @@ Private SSE alerts work without a cloud project while Android allows the foregro
 Preview: `in.observer.companion.preview`, debug-signed; runner keys can change, so update compatibility is not guaranteed. Owner release: `in.observer.companion`, stable private PKCS12 required. No debug/unsigned fallback is allowed. Arena's repository-secret API returned 403; the owner must follow the private signing guide before an explicitly requested signed release. The signing key itself was never committed or uploaded publicly.
 
 AGPL-3.0-only, matching the repository; full license bundled. Source: https://github.com/pavit12301611/psd-observer . No upstream app-update endpoint/signing identity reused.
+
+## Updating without reinstalling
+
+From 1.2.0, the interface updates from your paired PC. The PC keeps its own
+signing key, the app pins the public key at pairing time, and the bundle is
+verified, staged and rolled back on failure. No repository secret is needed and
+the APK is not replaced. See [docs/PC-UPDATES.md](docs/PC-UPDATES.md).

@@ -1731,6 +1731,11 @@ textarea {
 .update-note button {
   margin-top: 7px;
 }
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .settings-footer {
   text-align: center;
   padding: 18px 0 12px;

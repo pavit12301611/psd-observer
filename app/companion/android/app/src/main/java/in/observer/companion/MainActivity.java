@@ -50,6 +50,7 @@ public final class MainActivity extends Activity {
     private WebView web;
     private FrameLayout root;
     private SecureVault vault;
+    private WebUpdate webUpdate;
     private TextToSpeech speech;
     private boolean speechReady = false;
     private volatile String speechRequestId;
@@ -70,6 +71,8 @@ public final class MainActivity extends Activity {
         vault = new SecureVault(this);
         try { String value = vault.get("profile"); if (value != null) { JSONObject p = new JSONObject(value); bridgeBase = OriginPolicy.base(p.getString("baseUrl"), p.optBoolean("allowLan")); bridgeToken = p.getString("token"); } }
         catch (Exception e) { bridgeBase = ""; bridgeToken = ""; vault.remove("profile"); vault.remove("state"); vault.remove("pendingJobs"); }
+        webUpdate = new WebUpdate(new java.io.File(getFilesDir(), "webupdate"));
+        webUpdate.beginBoot(BuildConfig.VERSION_NAME); // A bundle whose boot was never confirmed is swapped back out first.
         root = new FrameLayout(this); root.setBackgroundColor(Color.WHITE); setContentView(root);
         web = new WebView(this); web.setBackgroundColor(Color.WHITE); root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         if (Build.VERSION.SDK_INT >= 30) {
@@ -98,6 +101,8 @@ public final class MainActivity extends Activity {
                 if (!"https".equals(u.getScheme()) || !HOST.equals(u.getHost())) return blocked();
                 String path = u.getPath(); if (path == null || path.equals("/")) path = "/index.html";
                 if (path.contains("..") || path.contains("\\") || path.contains("\0")) return blocked();
+                InputStream updated = webUpdate.open(path);
+                if (updated != null) return new WebResourceResponse(mime(path), "UTF-8", updated);
                 try { return new WebResourceResponse(mime(path), "UTF-8", getAssets().open("public" + path)); } catch (Exception e) { return blocked(); }
             }
             // Never override SSL errors to proceed. The platform default cancels.
@@ -129,7 +134,7 @@ public final class MainActivity extends Activity {
         web.loadUrl("https://" + HOST + "/index.html");
     }
     private static String mime(String path) {
-        if (path.endsWith(".html")) return "text/html"; if (path.endsWith(".js")) return "text/javascript"; if (path.endsWith(".css")) return "text/css"; if (path.endsWith(".svg")) return "image/svg+xml"; if (path.endsWith(".png")) return "image/png"; if (path.endsWith(".json")) return "application/json"; return "application/octet-stream";
+        if (path.endsWith(".html")) return "text/html"; if (path.endsWith(".js")) return "text/javascript"; if (path.endsWith(".css")) return "text/css"; if (path.endsWith(".svg")) return "image/svg+xml"; if (path.endsWith(".png")) return "image/png"; if (path.endsWith(".webp")) return "image/webp"; if (path.endsWith(".woff2")) return "font/woff2"; if (path.endsWith(".ico")) return "image/x-icon"; if (path.endsWith(".json") || path.endsWith(".webmanifest")) return "application/json"; if (path.endsWith(".txt")) return "text/plain"; return "application/octet-stream";
     }
     private static WebResourceResponse blocked() { return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0])); }
     private void respond(String id, Object data, String error) {
@@ -141,6 +146,10 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) { /* No credentials, text, tokens or PINs in logs. */ }
     }
     private void external(String url) { if (!OriginPolicy.external(url)) return; try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) {} }
+    private String pinnedUpdateKey() throws Exception {
+        String value = vault.get("updateKey");
+        return value == null ? "" : new JSONObject(value).optString("key", "");
+    }
     private JSONObject profile() throws Exception { if(bridgeToken.isEmpty())return null;JSONObject saved=new JSONObject(vault.get("profile"));return new JSONObject().put("baseUrl",bridgeBase).put("native",true).put("deviceId",saved.optString("deviceId")).put("serverId",saved.optString("serverId")).put("protocol",saved.optInt("protocol",1)); }
     private void stopSpeech() {
         if (recognizer != null) { recognizer.cancel(); recognizer.destroy(); recognizer = null; }
@@ -191,7 +200,7 @@ public final class MainActivity extends Activity {
                 }); return; }
                 if (method.equals("minimize")) { runOnUiThread(() -> moveTaskToBack(true)); respond(id, true, null); return; }
                 if (method.equals("logout")) {
-                    synchronized (sessionLock) { epoch.incrementAndGet(); bridgeToken = ""; bridgeBase = ""; vault.remove("profile"); vault.remove("state"); vault.remove("pendingJobs"); }
+                    synchronized (sessionLock) { epoch.incrementAndGet(); bridgeToken = ""; bridgeBase = ""; vault.remove("profile"); vault.remove("state"); vault.remove("pendingJobs"); vault.remove("updateKey"); }
                     runOnUiThread(()->{stopSpeech();stopService(new Intent(MainActivity.this,AlertService.class));}); respond(responseId, true, null); return;
                 }
                 if (method.equals("clearCloud") || method.equals("cancelCloud")) {
@@ -235,7 +244,17 @@ public final class MainActivity extends Activity {
                     JSONObject r=NativeHttp.request(base+"/api/app/pair","POST",null,pair,false,null);JSONObject data=r.optJSONObject("json");
                     if(r.getInt("status")!=200||data==null||data.optString("token").trim().isEmpty())throw new Exception(data==null?"PC login failed":data.optString("detail","PC agent 3.10.0+ is required."));
                     if(data.optInt("protocol")!=2||data.optJSONObject("capabilities")==null||!data.getJSONObject("capabilities").optBoolean("jobs"))throw new Exception("Update PC agent to 3.10.0+ for recoverable requests.");
-                    synchronized(sessionLock){if(generation!=epoch.get())throw new Exception("Connection changed.");JSONObject saved=new JSONObject().put("baseUrl",base).put("token",data.getString("token")).put("allowLan",p.optBoolean("allowLan")).put("deviceId",data.getJSONObject("device").getString("id")).put("serverId",data.getString("serverId")).put("protocol",2);vault.put("profile",saved.toString());bridgeBase=base;bridgeToken=data.getString("token");}
+                    String offeredKey=data.optString("updateSigningKey",""),offeredId=data.optString("updateKeyId","");
+                    synchronized(sessionLock){
+                        if(generation!=epoch.get())throw new Exception("Connection changed.");
+                        if(!offeredKey.isEmpty()){
+                            if(!offeredKey.matches("[A-Za-z0-9+/=]{100,4096}")||!offeredId.matches("[0-9a-f]{32}"))throw new Exception("Your PC sent an invalid update key, so pairing was refused.");
+                            String existing=vault.get("updateKey");
+                            if(existing!=null&&!new JSONObject(existing).optString("keyId").equals(offeredId))throw new Exception("Observer is pinned to a different PC's update key. Log out first if you are deliberately moving to another PC.");
+                            if(existing==null)vault.put("updateKey",new JSONObject().put("key",offeredKey).put("keyId",offeredId).toString());
+                        }
+                        JSONObject saved=new JSONObject().put("baseUrl",base).put("token",data.getString("token")).put("allowLan",p.optBoolean("allowLan")).put("deviceId",data.getJSONObject("device").getString("id")).put("serverId",data.getString("serverId")).put("protocol",2);vault.put("profile",saved.toString());bridgeBase=base;bridgeToken=data.getString("token");
+                    }
                     respond(id, profile(), null); return;
                 }
                 case "logout": {
@@ -256,6 +275,19 @@ public final class MainActivity extends Activity {
                     HttpURLConnection c = NativeHttp.connection("https://api.github.com/repos/pavit12301611/psd-observer/releases?per_page=30", "GET", null);
                     try { if (c.getResponseCode() != 200) throw new Exception("Official update check unavailable. Try again later."); respond(id, new JSONArray(new String(NativeHttp.read(c.getInputStream(), 2 * 1024 * 1024), StandardCharsets.UTF_8)), null); } finally { c.disconnect(); } return;
                 }
+                case "webUpdateStatus": respond(id, webUpdate.status().put("shell", BuildConfig.VERSION_NAME), null); return;
+                case "webUpdateCheck": {
+                    if (bridgeToken.isEmpty()) throw new Exception("Pair your PC first.");
+                    respond(id, webUpdate.check(bridgeBase, bridgeToken, pinnedUpdateKey()), null); return;
+                }
+                case "webUpdateApply": {
+                    if (bridgeToken.isEmpty()) throw new Exception("Pair your PC first.");
+                    if (!foreground) throw new Exception("Open Observer before installing an interface update.");
+                    JSONObject applied = webUpdate.apply(bridgeBase, bridgeToken, pinnedUpdateKey(), BuildConfig.VERSION_NAME);
+                    respond(id, applied, null); return;
+                }
+                case "webUpdateRollback": respond(id, webUpdate.rollback(), null); return;
+                case "webUpdateHealthy": webUpdate.markHealthy(); respond(id, webUpdate.status(), null); return;
                 case "cloudStatus": {
                     String value = vault.get("cloud"); JSONObject saved = value == null ? null : new JSONObject(value);
                     respond(id, saved == null ? new JSONObject().put("configured", false) : new JSONObject().put("configured", true).put("provider", saved.getString("provider")).put("model", saved.getString("model")), null); return;

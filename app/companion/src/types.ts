@@ -152,6 +152,22 @@ export interface WireResponse {
   mime?: string;
   headers?: Record<string, string>;
 }
+export interface PcUpdateCheck {
+  installed: string;
+  available: boolean;
+  version?: string;
+  notes?: string;
+  size?: number;
+  fileCount?: number;
+  minNative?: string;
+  sha256?: string;
+  reason?: string;
+  shell?: string;
+  previous?: string;
+  pendingBoot?: boolean;
+  rolledBackFrom?: string;
+  lastError?: string;
+}
 export interface Release {
   tag_name: string;
   html_url: string;
