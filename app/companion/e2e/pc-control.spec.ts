@@ -109,6 +109,10 @@ test("PC control fits one phone screen: the stage never scrolls away from the do
   await page.goto("/");
   await connect(page);
   await go(page, "PC control");
+  // Wait for the control surface itself; a fresh mount is not instant.
+  await expect(page.locator(".pc-shell")).toBeVisible();
+  await expect(page.locator(".pc-stage")).toBeVisible();
+  await expect(page.locator(".pc-dock")).toBeVisible();
 
   const metrics = await page.evaluate(() => {
     const shell = document.querySelector(".pc-shell") as HTMLElement | null;

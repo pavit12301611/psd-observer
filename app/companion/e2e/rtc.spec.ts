@@ -89,6 +89,8 @@ test("real WebRTC signaling receives synthetic video with an authenticated devic
       .getByRole("navigation", { name: "Mobile navigation" })
       .getByRole("button", { name: "PC control", exact: true })
       .click();
+    // Live video lives in the More tab of the control dock.
+    await phone.getByRole("tab", { name: "More" }).click();
     await phone
       .getByRole("button", { name: "Connect live video", exact: true })
       .click();
