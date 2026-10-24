@@ -1,6 +1,6 @@
 # Deep test audit — 3.10.0
 
-Generated 2026-10-24T11:18:38.950Z. Source tree SHA-256: `69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e`.
+Generated 2026-10-24T15:29:28.411Z. Source tree SHA-256: `69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e`.
 
 ## Scope, honestly
 
@@ -15,16 +15,18 @@ Backend comparison (same source scope):
 | Metric | Baseline | Current |
 |---|---:|---:|
 | lines | 74.84% | 75.29% |
-| branches | 62.53% | 63.9% |
+| branches | 62.53% | 63.89% |
 | functions | 76.31% | 76.66% |
 
-Browser shell (newly included): 43.32% lines / 62.14% branches / 50% functions. All-runtime combined: 74.4% lines / 63.88% branches. Browser tests are DOM/service-worker emulation, not real-browser or hardware validation.
+Browser shell (newly included): 43.32% lines / 62.14% branches / 50% functions. All-runtime combined: 74.4% lines / 63.87% branches. Browser tests are DOM/service-worker emulation, not real-browser or hardware validation.
 
 Includes unimported runtime files via c8 `--all`; no blanket 100% claim. Baseline: 477 tests, ref `339bc9e`. See [baseline evidence](baseline-3.9.0.json). The 34 targeted baseline regression failures overlap multiple symptoms of the same bugs; they are **not 34 distinct bugs**.
 
 ## Executed validation
 
 - **v22.22.3** (coverage): 590/590 passed, 0 failed, 0 cancelled, 0 skipped.
+- **v20.20.2** (full): 590/590 passed, 0 failed, 0 cancelled, 0 skipped.
+- **v24.22.1** (full): 590/590 passed, 0 failed, 0 cancelled, 0 skipped.
 
 Original backend instrumenter: c8 10.1.3; current: c8 12.0.0 / V8. New browser coverage is reported separately; differing V8/instrumenter versions and source changes limit direct numerical comparisons.
 

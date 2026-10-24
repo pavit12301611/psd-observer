@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-24T11:18:38.950Z",
+  "generatedAt": "2026-10-24T15:29:28.411Z",
   "version": "3.10.0",
   "sourceTreeSha256": "69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e",
   "runtime": {
@@ -108,8 +108,8 @@
       "mode": "coverage",
       "scope": "all",
       "testSuites": 37,
-      "startedAt": "2026-10-24T11:14:19.983Z",
-      "finishedAt": "2026-10-24T11:15:59.890Z",
+      "startedAt": "2026-10-24T15:25:32.532Z",
+      "finishedAt": "2026-10-24T15:26:51.395Z",
       "sourceTreeSha256": "69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e",
       "sourceStable": true,
       "inputHashes": {
@@ -136,7 +136,7 @@
         "test/deep-bundle.test.js": "c0c9ae9a941db1c8be4c504eb27005117a6c651f7212c42d70b0d6ee46acac5f",
         "test/deep-commands.test.js": "011e036735192b3cd6d3e8a4982ae79270b56c3d021a9678156afd55585c32b9",
         "test/deep-core.test.js": "cfd5c261de366820aaa8717728004c2e8d8398300d0aba43f3499d31fcdc57a4",
-        "test/deep-harness.test.js": "f147793321f59b366d83002420d79f541375fb23829df67f1d114ddf729f9d44",
+        "test/deep-harness.test.js": "039ba1dde725abd39ae903c8c7b38e53a6d8ca958410d6c7b6e4000c3eaf6c4f",
         "test/deep-mobile.test.js": "91985c3a26eae7bdb7e5e935ff12a1f18efc94c7682d141f8cbe070f69bbd292",
         "test/deep-neural.test.js": "fe28b57b7a97c29fe22a33008e4033ba1645ce31a8428c437f0ab6618fb02c8f",
         "test/deep-safety.test.js": "fcffc0cdde1e3fbf45534d42aa9e30c0d1689c5b7a7c8f80846e06c3125fa6c5",
@@ -158,7 +158,7 @@
         "test/voice.test.js": "e58ee0ce1ee377cff8193f9178bd8ad47f67af0f3ea3e66604f43be0fc14ae61",
         "scripts/test-evidence.mjs": "89d35b22792311629776efaa0981661a9e9cad5b888be4e884914fa6a5ea4f92",
         "scripts/test-workspace.mjs": "a154dc69dcd436942cbf0467eb6ba6611ef7cec80a936b75c9788babdeb1e6b6",
-        "scripts/test-sandbox.mjs": "6465a7c0c23c4a52da35d16924124839b63254743ef392ac175a7ece00e05fa1",
+        "scripts/test-sandbox.mjs": "38e42a5380b82cdc8d3044285a1868b70293a46edbab4133fda84ad0ade77084",
         "scripts/test.mjs": "8855b9c27e6dcd09de3c2cbda46373e8b1fa0029c1021e1675e0ed63c40a184c",
         "scripts/audit-report.mjs": "126a631146ce25d2faeaeadec7aaf1070e19906227eac0482beed53c67758eec",
         "scripts/function-inventory.mjs": "1ec30ed81b14805f007c1c3cecafc50e2cf5890b7d004a06dc17f103a0c360bf",
@@ -171,23 +171,167 @@
       "cancelled": 0,
       "skipped": 0,
       "todo": 0,
-      "durationMs": 96843.27561,
+      "durationMs": 76335.132284,
       "exitCode": 0,
       "passed": true,
-      "coverageSummarySha256": "a79283c67ca86e5bed1d0a4d36c2dbdb1986a99e65770bb349d5d9cf3da5a845",
-      "coverageFinalSha256": "3aca13be46a5ae7676665d861f87ec74a4864250db88f0e1809a5967d844d8d7"
+      "coverageSummarySha256": "680690dfeb664383a966be0d21b64902ef62c3446769debc02ebecfc47030ef8",
+      "coverageFinalSha256": "b0a7671064d227ef12c2f8ce556e236527e60c68d9792ebe03aaf1b90c5f1ea8"
+    },
+    {
+      "node": "v20.20.2",
+      "mode": "full",
+      "scope": "all",
+      "testSuites": 37,
+      "startedAt": "2026-10-24T15:25:33.737Z",
+      "finishedAt": "2026-10-24T15:27:38.791Z",
+      "sourceTreeSha256": "69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e",
+      "sourceStable": true,
+      "inputHashes": {
+        "package.json": "315471a7c1beb1910568d7a3907a0abfb2cf5b5a6e11cdadb595bc690f0bda0f",
+        "package-lock.json": "ff1959edc5a75530e8663b4c477b68a966ea648d584dd30ba0911f6b564ed6ab",
+        "release-notes.json": "5ebc7471bc56f57450e2553470514188027299c09b6c2b32847efb5f0ceb162a",
+        "webapp/index.html": "4ac596cc5cc6d57d141ed5a55e71cfb95b6a3be197652a2de6cffa1736bc52e9",
+        "src/neural/weights.json": "e8ca026221076d0b2977dac5e4bdac15b6d58153208f42644c9671cd0c1bdff5",
+        "test/bundle_verifier_test.py": "9f5f6c5d7b60025bafc4e1222a9141f544d03344db0a99b6f0be8ba3d36199fa",
+        "test/agent.test.js": "21da13f3b746642f41aae90406cce4481f7beec29e286d089bbb8e102edfa2a6",
+        "test/agents.test.js": "be7a50ca6f01c64bed40a97631b8dec7fac7b2676d9acd954b7a80ba23884f00",
+        "test/ai-quality.test.js": "5ccc1f79f3ea909900c7173da8e7ead6676d3f92938ab79c31b6eae04d2ccc6a",
+        "test/batch1.test.js": "4f181d86bdc30f55af4f348efa38e889c462d079be1394adbaf6565552b73afb",
+        "test/batch2.test.js": "0a7a706eae40d53b6db89c71032e36bda2e8bb763822aec30130d7069f937cb4",
+        "test/batch3.test.js": "783b075a3677cd896aa75f56dd647e6df4c7c88fa10f0ad3c9beb3017c95f956",
+        "test/batch4.test.js": "3ed9d0997e402cee0e71122683375d5d3c151fb880419332a51f425eb69f9919",
+        "test/batch5.test.js": "2e4ff5e99e5160641cbe8bf9d0c2298f465df1c3c7d760401454a76dfb795f7d",
+        "test/batch6.test.js": "1e972410a3b53bac3322eb6a66eb723809fa9d156f61fbe8177a6760d092fa2c",
+        "test/brain-reliability.test.js": "e949548980fda2f01aff253f634de0fb4bac65143f9027ab22579593c70352d6",
+        "test/cloud.test.js": "6e01ce919a8b9bb2f35efb3e4ac3eb56bdef715a7406ce3bbfec46d98f14a5b0",
+        "test/control.test.js": "43a02e629ca92247e23124ecdb83d25fa6b89773542506e2964943b9f2495f12",
+        "test/deep-appbridge.test.js": "af5c264091c0c05b21bbb79b641e9d7eaa617c3f41495c5ae92cf0c711baa512",
+        "test/deep-async.test.js": "df18aa8ac53e33b358fa293b6bef2532ce9f6fd990ebf7933a825e0c73ab81ca",
+        "test/deep-bundle.test.js": "c0c9ae9a941db1c8be4c504eb27005117a6c651f7212c42d70b0d6ee46acac5f",
+        "test/deep-commands.test.js": "011e036735192b3cd6d3e8a4982ae79270b56c3d021a9678156afd55585c32b9",
+        "test/deep-core.test.js": "cfd5c261de366820aaa8717728004c2e8d8398300d0aba43f3499d31fcdc57a4",
+        "test/deep-harness.test.js": "039ba1dde725abd39ae903c8c7b38e53a6d8ca958410d6c7b6e4000c3eaf6c4f",
+        "test/deep-mobile.test.js": "91985c3a26eae7bdb7e5e935ff12a1f18efc94c7682d141f8cbe070f69bbd292",
+        "test/deep-neural.test.js": "fe28b57b7a97c29fe22a33008e4033ba1645ce31a8428c437f0ab6618fb02c8f",
+        "test/deep-safety.test.js": "fcffc0cdde1e3fbf45534d42aa9e30c0d1689c5b7a7c8f80846e06c3125fa6c5",
+        "test/deep-server.test.js": "a1c146c489b65630698d8f7f133cc47dd900fe6ea859907323226b5ebf2a7ce6",
+        "test/deep-webapp.test.js": "d895fbb6aeb27e2b6a174b2990741b2c4d48e40ed092ad584feb4faa55d7882a",
+        "test/engine-patch.test.js": "1bb9cbf9b5f4353c93c4cc6fa5f2500a8fe454a7fd83c88faf2fac2b9b6620a2",
+        "test/features.test.js": "3696f9377cfbe26db68c45605860145c6d233888686eb99c1c7b1c771090f45c",
+        "test/hands.test.js": "e41332fdb38346f48b56b3a27b8ff4178fbfebd8249594aeec4b7f000e613f36",
+        "test/harness.test.js": "0522b617e2d4485f3b42b5b6341779c55baa8982bf29579d1c8c3be70157424a",
+        "test/local.test.js": "718504be3a0e3f1e01569f506dec0e9209c322fb5a5389900d0c012cc071df89",
+        "test/multitask.test.js": "6fe8d84dab26b1fccf0fa3f3b39bf231e5b45677726cf02248bf1f2777ecb814",
+        "test/neural-v2.test.js": "904905f8bc9f04260779086aa19a84009760a5c3f054106f833e46a45b215f54",
+        "test/neural.test.js": "dd6cf358cdf339b928e52f73684b11b98164ece2d00e76b3a384a7ccc8eea9d8",
+        "test/power.test.js": "0ec5a392c7bbfe0d2986918df83e9a2a1724d7fa7f019e00d5e0634aa5f9e4b4",
+        "test/router.test.js": "5c50c51bf169cac88a6861219aabe89e63067f96313d54d3a3bb710a5f8de633",
+        "test/screens.test.js": "19b04cd6fe5f05be826f1e5b5ce320361673c2d6098484cbd602c56fd6cc12de",
+        "test/shades.test.js": "b46ac9d8cc1e73464abebe3299a797ca5f5232bbb0ce1b5ac091cd6043c05127",
+        "test/solver.test.js": "97617a27512945e9fd3a166fe5758f443481a4c4523a802eb382e8321c28754b",
+        "test/voice.test.js": "e58ee0ce1ee377cff8193f9178bd8ad47f67af0f3ea3e66604f43be0fc14ae61",
+        "scripts/test-evidence.mjs": "89d35b22792311629776efaa0981661a9e9cad5b888be4e884914fa6a5ea4f92",
+        "scripts/test-workspace.mjs": "a154dc69dcd436942cbf0467eb6ba6611ef7cec80a936b75c9788babdeb1e6b6",
+        "scripts/test-sandbox.mjs": "38e42a5380b82cdc8d3044285a1868b70293a46edbab4133fda84ad0ade77084",
+        "scripts/test.mjs": "8855b9c27e6dcd09de3c2cbda46373e8b1fa0029c1021e1675e0ed63c40a184c",
+        "scripts/audit-report.mjs": "126a631146ce25d2faeaeadec7aaf1070e19906227eac0482beed53c67758eec",
+        "scripts/function-inventory.mjs": "1ec30ed81b14805f007c1c3cecafc50e2cf5890b7d004a06dc17f103a0c360bf",
+        "scripts/mutation-check.mjs": "9caef6993d5aae6c8fbdaca526518f51542ea5b1b591aad782d2850117e4ad21",
+        "scripts/verify-bundle.py": "111c50fa4a197144c0fb0d8aa0a9491f9132dc78e5ac16df6bc202c5c25c9311"
+      },
+      "tests": 590,
+      "pass": 590,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "durationMs": 124778.868207,
+      "exitCode": 0,
+      "passed": true
+    },
+    {
+      "node": "v24.22.1",
+      "mode": "full",
+      "scope": "all",
+      "testSuites": 37,
+      "startedAt": "2026-10-24T15:25:33.894Z",
+      "finishedAt": "2026-10-24T15:27:34.553Z",
+      "sourceTreeSha256": "69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e",
+      "sourceStable": true,
+      "inputHashes": {
+        "package.json": "315471a7c1beb1910568d7a3907a0abfb2cf5b5a6e11cdadb595bc690f0bda0f",
+        "package-lock.json": "ff1959edc5a75530e8663b4c477b68a966ea648d584dd30ba0911f6b564ed6ab",
+        "release-notes.json": "5ebc7471bc56f57450e2553470514188027299c09b6c2b32847efb5f0ceb162a",
+        "webapp/index.html": "4ac596cc5cc6d57d141ed5a55e71cfb95b6a3be197652a2de6cffa1736bc52e9",
+        "src/neural/weights.json": "e8ca026221076d0b2977dac5e4bdac15b6d58153208f42644c9671cd0c1bdff5",
+        "test/bundle_verifier_test.py": "9f5f6c5d7b60025bafc4e1222a9141f544d03344db0a99b6f0be8ba3d36199fa",
+        "test/agent.test.js": "21da13f3b746642f41aae90406cce4481f7beec29e286d089bbb8e102edfa2a6",
+        "test/agents.test.js": "be7a50ca6f01c64bed40a97631b8dec7fac7b2676d9acd954b7a80ba23884f00",
+        "test/ai-quality.test.js": "5ccc1f79f3ea909900c7173da8e7ead6676d3f92938ab79c31b6eae04d2ccc6a",
+        "test/batch1.test.js": "4f181d86bdc30f55af4f348efa38e889c462d079be1394adbaf6565552b73afb",
+        "test/batch2.test.js": "0a7a706eae40d53b6db89c71032e36bda2e8bb763822aec30130d7069f937cb4",
+        "test/batch3.test.js": "783b075a3677cd896aa75f56dd647e6df4c7c88fa10f0ad3c9beb3017c95f956",
+        "test/batch4.test.js": "3ed9d0997e402cee0e71122683375d5d3c151fb880419332a51f425eb69f9919",
+        "test/batch5.test.js": "2e4ff5e99e5160641cbe8bf9d0c2298f465df1c3c7d760401454a76dfb795f7d",
+        "test/batch6.test.js": "1e972410a3b53bac3322eb6a66eb723809fa9d156f61fbe8177a6760d092fa2c",
+        "test/brain-reliability.test.js": "e949548980fda2f01aff253f634de0fb4bac65143f9027ab22579593c70352d6",
+        "test/cloud.test.js": "6e01ce919a8b9bb2f35efb3e4ac3eb56bdef715a7406ce3bbfec46d98f14a5b0",
+        "test/control.test.js": "43a02e629ca92247e23124ecdb83d25fa6b89773542506e2964943b9f2495f12",
+        "test/deep-appbridge.test.js": "af5c264091c0c05b21bbb79b641e9d7eaa617c3f41495c5ae92cf0c711baa512",
+        "test/deep-async.test.js": "df18aa8ac53e33b358fa293b6bef2532ce9f6fd990ebf7933a825e0c73ab81ca",
+        "test/deep-bundle.test.js": "c0c9ae9a941db1c8be4c504eb27005117a6c651f7212c42d70b0d6ee46acac5f",
+        "test/deep-commands.test.js": "011e036735192b3cd6d3e8a4982ae79270b56c3d021a9678156afd55585c32b9",
+        "test/deep-core.test.js": "cfd5c261de366820aaa8717728004c2e8d8398300d0aba43f3499d31fcdc57a4",
+        "test/deep-harness.test.js": "039ba1dde725abd39ae903c8c7b38e53a6d8ca958410d6c7b6e4000c3eaf6c4f",
+        "test/deep-mobile.test.js": "91985c3a26eae7bdb7e5e935ff12a1f18efc94c7682d141f8cbe070f69bbd292",
+        "test/deep-neural.test.js": "fe28b57b7a97c29fe22a33008e4033ba1645ce31a8428c437f0ab6618fb02c8f",
+        "test/deep-safety.test.js": "fcffc0cdde1e3fbf45534d42aa9e30c0d1689c5b7a7c8f80846e06c3125fa6c5",
+        "test/deep-server.test.js": "a1c146c489b65630698d8f7f133cc47dd900fe6ea859907323226b5ebf2a7ce6",
+        "test/deep-webapp.test.js": "d895fbb6aeb27e2b6a174b2990741b2c4d48e40ed092ad584feb4faa55d7882a",
+        "test/engine-patch.test.js": "1bb9cbf9b5f4353c93c4cc6fa5f2500a8fe454a7fd83c88faf2fac2b9b6620a2",
+        "test/features.test.js": "3696f9377cfbe26db68c45605860145c6d233888686eb99c1c7b1c771090f45c",
+        "test/hands.test.js": "e41332fdb38346f48b56b3a27b8ff4178fbfebd8249594aeec4b7f000e613f36",
+        "test/harness.test.js": "0522b617e2d4485f3b42b5b6341779c55baa8982bf29579d1c8c3be70157424a",
+        "test/local.test.js": "718504be3a0e3f1e01569f506dec0e9209c322fb5a5389900d0c012cc071df89",
+        "test/multitask.test.js": "6fe8d84dab26b1fccf0fa3f3b39bf231e5b45677726cf02248bf1f2777ecb814",
+        "test/neural-v2.test.js": "904905f8bc9f04260779086aa19a84009760a5c3f054106f833e46a45b215f54",
+        "test/neural.test.js": "dd6cf358cdf339b928e52f73684b11b98164ece2d00e76b3a384a7ccc8eea9d8",
+        "test/power.test.js": "0ec5a392c7bbfe0d2986918df83e9a2a1724d7fa7f019e00d5e0634aa5f9e4b4",
+        "test/router.test.js": "5c50c51bf169cac88a6861219aabe89e63067f96313d54d3a3bb710a5f8de633",
+        "test/screens.test.js": "19b04cd6fe5f05be826f1e5b5ce320361673c2d6098484cbd602c56fd6cc12de",
+        "test/shades.test.js": "b46ac9d8cc1e73464abebe3299a797ca5f5232bbb0ce1b5ac091cd6043c05127",
+        "test/solver.test.js": "97617a27512945e9fd3a166fe5758f443481a4c4523a802eb382e8321c28754b",
+        "test/voice.test.js": "e58ee0ce1ee377cff8193f9178bd8ad47f67af0f3ea3e66604f43be0fc14ae61",
+        "scripts/test-evidence.mjs": "89d35b22792311629776efaa0981661a9e9cad5b888be4e884914fa6a5ea4f92",
+        "scripts/test-workspace.mjs": "a154dc69dcd436942cbf0467eb6ba6611ef7cec80a936b75c9788babdeb1e6b6",
+        "scripts/test-sandbox.mjs": "38e42a5380b82cdc8d3044285a1868b70293a46edbab4133fda84ad0ade77084",
+        "scripts/test.mjs": "8855b9c27e6dcd09de3c2cbda46373e8b1fa0029c1021e1675e0ed63c40a184c",
+        "scripts/audit-report.mjs": "126a631146ce25d2faeaeadec7aaf1070e19906227eac0482beed53c67758eec",
+        "scripts/function-inventory.mjs": "1ec30ed81b14805f007c1c3cecafc50e2cf5890b7d004a06dc17f103a0c360bf",
+        "scripts/mutation-check.mjs": "9caef6993d5aae6c8fbdaca526518f51542ea5b1b591aad782d2850117e4ad21",
+        "scripts/verify-bundle.py": "111c50fa4a197144c0fb0d8aa0a9491f9132dc78e5ac16df6bc202c5c25c9311"
+      },
+      "tests": 590,
+      "pass": 590,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "durationMs": 120399.958935,
+      "exitCode": 0,
+      "passed": true
     }
   ],
   "coverage": {
     "lines": {
       "total": 46043,
-      "covered": 34666,
+      "covered": 34667,
       "skipped": 0,
       "pct": 75.29
     },
     "statements": {
       "total": 46043,
-      "covered": 34666,
+      "covered": 34667,
       "skipped": 0,
       "pct": 75.29
     },
@@ -198,10 +342,10 @@
       "pct": 76.66
     },
     "branches": {
-      "total": 13277,
-      "covered": 8485,
+      "total": 13276,
+      "covered": 8483,
       "skipped": 0,
-      "pct": 63.9
+      "pct": 63.89
     }
   },
   "browserCoverage": {
@@ -233,13 +377,13 @@
   "combinedCoverage": {
     "lines": {
       "total": 47354,
-      "covered": 35234,
+      "covered": 35235,
       "skipped": 0,
       "pct": 74.4
     },
     "statements": {
       "total": 47354,
-      "covered": 35234,
+      "covered": 35235,
       "skipped": 0,
       "pct": 74.4
     },
@@ -250,10 +394,10 @@
       "pct": 75.99
     },
     "branches": {
-      "total": 13417,
-      "covered": 8572,
+      "total": 13416,
+      "covered": 8570,
       "skipped": 0,
-      "pct": 63.88
+      "pct": 63.87
     },
     "branchesTrue": {
       "total": 0,
@@ -265,7 +409,7 @@
   "selectedMutations": {
     "sourceTreeSha256": "69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e",
     "schemaVersion": 1,
-    "generatedAt": "2026-10-24T11:14:20.157Z",
+    "generatedAt": "2026-10-24T15:25:32.929Z",
     "scope": "18 selected fault reintroductions; NOT exhaustive whole-program mutation coverage",
     "definitionsSha256": "890bb7bf5ee7b6021bc975c29e4d50b2189d4523118167fd6834779456606923",
     "runtime": "v22.22.3",
@@ -440,7 +584,7 @@
       "cancelled": 0,
       "skipped": 0,
       "todo": 0,
-      "durationMs": 8260.949207,
+      "durationMs": 8338.098595,
       "exitCode": 0,
       "passed": true
     },
@@ -12248,9 +12392,9 @@
       "coverage": {
         "lines": {
           "total": 159,
-          "covered": 151,
+          "covered": 152,
           "skipped": 0,
-          "pct": 94.96
+          "pct": 95.59
         },
         "functions": {
           "total": 7,
@@ -12260,15 +12404,15 @@
         },
         "statements": {
           "total": 159,
-          "covered": 151,
+          "covered": 152,
           "skipped": 0,
-          "pct": 94.96
+          "pct": 95.59
         },
         "branches": {
-          "total": 43,
+          "total": 44,
           "covered": 27,
           "skipped": 0,
-          "pct": 62.79
+          "pct": 61.36
         }
       },
       "functions": [
@@ -37543,7 +37687,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 162,
+            "calls": 163,
             "mapping": "exact source span"
           }
         },
@@ -37909,7 +38053,7 @@
           "column": 20,
           "endLine": 25,
           "endColumn": 452,
-          "calls": 162
+          "calls": 163
         },
         {
           "name": "write",
@@ -37949,7 +38093,7 @@
           "column": 4,
           "endLine": 62,
           "endColumn": 99,
-          "calls": 109
+          "calls": 110
         },
         {
           "name": "list",
@@ -38818,7 +38962,7 @@
           "column": 4,
           "endLine": 14,
           "endColumn": 32,
-          "calls": 718
+          "calls": 719
         },
         {
           "name": "replace",
@@ -38904,7 +39048,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 76,
+            "calls": 77,
             "mapping": "exact source span"
           }
         },
@@ -38991,7 +39135,7 @@
           "column": 7,
           "endLine": 56,
           "endColumn": 1,
-          "calls": 76
+          "calls": 77
         }
       ]
     },
@@ -42778,7 +42922,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 809706,
+            "calls": 809716,
             "mapping": "exact source span"
           }
         },
@@ -42913,7 +43057,7 @@
           "generator": false,
           "exportContext": false,
           "coverage": {
-            "calls": 809706,
+            "calls": 809716,
             "mapping": "exact source span"
           }
         },
@@ -43030,7 +43174,7 @@
           "column": 7,
           "endLine": 52,
           "endColumn": 1,
-          "calls": 809706
+          "calls": 809716
         },
         {
           "name": "makeLRU",
@@ -43094,7 +43238,7 @@
           "column": 14,
           "endLine": 152,
           "endColumn": 3,
-          "calls": 809706
+          "calls": 809716
         },
         {
           "name": "textFeatures",
@@ -47299,7 +47443,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 119,
+            "calls": 120,
             "mapping": "exact source span"
           }
         }
@@ -47311,7 +47455,7 @@
           "column": 7,
           "endLine": 24,
           "endColumn": 1,
-          "calls": 119
+          "calls": 120
         }
       ]
     },
@@ -50873,10 +51017,10 @@
           "pct": 73.92
         },
         "branches": {
-          "total": 253,
-          "covered": 109,
+          "total": 252,
+          "covered": 108,
           "skipped": 0,
-          "pct": 43.08
+          "pct": 42.85
         }
       },
       "functions": [
@@ -56566,10 +56710,10 @@
           "pct": 95.23
         },
         "branches": {
-          "total": 115,
-          "covered": 79,
+          "total": 114,
+          "covered": 78,
           "skipped": 0,
-          "pct": 68.69
+          "pct": 68.42
         }
       },
       "functions": [
@@ -57750,7 +57894,7 @@
           "generator": false,
           "exportContext": false,
           "coverage": {
-            "calls": 225,
+            "calls": 227,
             "mapping": "exact source span"
           }
         },
@@ -57915,7 +58059,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 166,
+            "calls": 168,
             "mapping": "exact source span"
           }
         },
@@ -57960,7 +58104,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 90,
+            "calls": 91,
             "mapping": "exact source span"
           }
         },
@@ -58005,7 +58149,7 @@
           "generator": false,
           "exportContext": true,
           "coverage": {
-            "calls": 121,
+            "calls": 122,
             "mapping": "exact source span"
           }
         },
@@ -58537,7 +58681,7 @@
           "column": 0,
           "endLine": 121,
           "endColumn": 1,
-          "calls": 225
+          "calls": 227
         },
         {
           "name": "createBridgeServer",
@@ -58625,7 +58769,7 @@
           "column": 23,
           "endLine": 169,
           "endColumn": 3,
-          "calls": 166
+          "calls": 168
         },
         {
           "name": "authed",
@@ -58633,7 +58777,7 @@
           "column": 17,
           "endLine": 171,
           "endColumn": 62,
-          "calls": 90
+          "calls": 91
         },
         {
           "name": "loginAllowed",
@@ -58657,7 +58801,7 @@
           "column": 2,
           "endLine": 192,
           "endColumn": 3,
-          "calls": 121
+          "calls": 122
         },
         {
           "name": "sendPayload",

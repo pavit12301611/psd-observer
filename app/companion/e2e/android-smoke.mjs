@@ -34,7 +34,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((resolve) => server.listen(8787, '0.0.0.0', resolve));
 fs.mkdirSync('android-smoke-results', { recursive: true });
-let browser, stage = 'startup';
+let browser, diagnosticPage = null, stage = 'startup';
 try {
   const devices = await android.devices();
   assert.ok(devices.length, 'No Android emulator connected');
@@ -52,6 +52,7 @@ try {
       await page.screenshot({ path: 'android-smoke-results/01-native-home.png' });
     },
   });
+  diagnosticPage=page;
   stage='pairing';
   await page.getByRole('button', { name: 'Connect PC', exact: true }).click();
   await page.getByLabel('PC bridge address').fill('http://10.0.2.2:8787'); await page.getByLabel('Dashboard PIN').fill('123456'); await page.getByRole('checkbox').check();
@@ -110,6 +111,14 @@ try {
 } catch(error) {
   fs.writeFileSync('android-smoke-results/failure.json',JSON.stringify({stage,message:String(error.message)},null,2));
   console.error('NATIVE_SMOKE_STAGE='+stage);
+  const escapeAnnotation = (s) => String(s).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
+  console.error(`::error title=Native smoke ${stage}::${escapeAnnotation(String(error.stack || error)).slice(0,2800)}`);
+  console.error('NATIVE_HTTP_PATHS='+JSON.stringify(requests.map(r=>r.path)));
+  if(diagnosticPage&&!diagnosticPage.isClosed())try{
+    const alerts=await diagnosticPage.locator('[role="alert"]').allTextContents();
+    if(alerts.length)console.error(`::error title=Native app alert::${escapeAnnotation(alerts.join(' | ')).slice(0,2800)}`);
+  }catch{}
+
   try {
     const crash = adb('logcat','-d','-v','brief','-t','180','AndroidRuntime:E','chromium:E','ActivityTaskManager:W','*:S');
     fs.writeFileSync('android-smoke-results/startup-logcat.txt',crash);
