@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { expect } from '@playwright/test';
 import { _android as android } from 'playwright';
 import { attachStableStartup } from './android-startup.mjs';
+import { enterEmulatorCredential } from './android-credential.mjs';
 const packageName = 'in.observer.companion.preview';
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
 const requests = []; const jobs = new Map(); let executions = 0; let abortedAcceptance = false;
@@ -39,11 +40,12 @@ try {
   assert.ok(devices.length, 'No Android emulator connected');
   const device = devices[0];
   browser = device;
-  const originalPid = adb('shell','pidof',packageName).split(' ')[0];
+  let originalPid = null;
   const { page, reattachments } = await attachStableStartup({ device, packageName,
     sameProcess: async () => { try { return adb('shell','pidof',packageName).split(' ')[0] === originalPid; } catch { return false; } },
     report: (text) => console.log(text),
     probe: async (page) => {
+      if (!originalPid) originalPid = adb('shell','pidof',packageName).split(' ')[0];
       await expect(page.getByRole('heading', { name: /Think clearly/ })).toBeVisible({ timeout: 30000 });
       assert.equal(await page.evaluate(() => Boolean(window.ObserverAndroid?.postMessage)), true);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -87,9 +89,15 @@ try {
   stage='device-credential-enable';
   adb('shell','locksettings','set-pin','4826');
   const enableLock = native('setAppLock',{enabled:true});
-  await new Promise(r=>setTimeout(r,1200));
-  adb('shell','input','text','4826');adb('shell','input','keyevent','KEYCODE_ENTER');
-  await Promise.race([enableLock,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Device-credential confirmation did not finish')),12000))]);
+  // Consume rejections immediately while native system UI owns the foreground.
+  enableLock.catch(()=>{});
+  await enterEmulatorCredential({
+    readTree: async () => { adb('shell','uiautomator','dump','--compressed','/sdcard/observer-credential.xml'); return adb('shell','cat','/sdcard/observer-credential.xml'); },
+    tap: async ({x,y}) => { adb('shell','input','tap',String(x),String(y)); },
+    typeOnce: async () => { adb('shell','input','text','4826'); },
+    submit: async () => { adb('shell','input','keyevent','KEYCODE_ENTER'); },
+  });
+  await Promise.race([enableLock,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Device-credential confirmation did not finish after system PIN entry')),15000))]);
   assert.equal((await native('getLockState')).enabled,true);
   adb('shell','input','keyevent','KEYCODE_HOME');await new Promise(r=>setTimeout(r,400));
   stage='locked-api-gate';
@@ -108,6 +116,7 @@ try {
     console.error('ANDROID_STARTUP_LOGCAT\n'+crash.slice(-12000));
   } catch { console.error('Android crash log unavailable'); }
   try {
+    try { adb('shell','uiautomator','dump','--compressed','/sdcard/observer-failure-ui.xml'); const tree=adb('shell','cat','/sdcard/observer-failure-ui.xml'); fs.writeFileSync('android-smoke-results/native-ui.xml',tree); console.error('NATIVE_SYSTEM_UI\n'+tree.slice(-7000)); } catch {}
     const exits = adb('shell','dumpsys','activity','exit-info',packageName);
     fs.writeFileSync('android-smoke-results/process-exits.txt',exits);
     console.error('ANDROID_PROCESS_EXIT_INFO\n'+exits.slice(-4000));

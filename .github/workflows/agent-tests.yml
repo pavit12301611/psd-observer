@@ -33,7 +33,7 @@ jobs:
           cache-dependency-path: whatsapp-agent/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run check
-      - run: node --test scripts/ci-report.test.mjs
+      - run: node --test scripts/ci-report.test.mjs scripts/test-sandbox.test.mjs
       - run: node scripts/ci-report.mjs npm test
         if: matrix.node != '22'
       - run: node scripts/ci-report.mjs npm run test:coverage
