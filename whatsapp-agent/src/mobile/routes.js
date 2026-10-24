@@ -6,6 +6,19 @@ import QRCode from 'qrcode';
 export async function mobileRoute({ req, res, url, principal, platform: p, json, body, runOwner }) {
   const route = `${req.method} ${url.pathname}`;
   if (url.pathname.startsWith('/api/app/rtc') && !p.controlsAllowed()) { json(res,403,{detail:'PC capture/control is disabled by owner policy.'}); return true; }
+  if (route === 'GET /api/app/update/status') { json(res, 200, { ...p.updates.status(), installed: null }); return true; }
+  if (route === 'GET /api/app/update/key') { json(res, 200, p.updates.key()); return true; }
+  if (route === 'GET /api/app/update/manifest') {
+    const manifest = p.updates.manifest(), signature = p.updates.signature(), key = p.updates.key();
+    if (!manifest || !signature) { json(res, 404, { detail: 'No signed web update has been packed on this PC yet.' }); return true; }
+    json(res, 200, { manifest, signature, keyId: key.keyId }); return true;
+  }
+  if (route === 'GET /api/app/update/bundle') {
+    const manifest = p.updates.manifest(), bundle = p.updates.bundle();
+    if (!manifest || !bundle) { json(res, 404, { detail: 'No verified signed web update is available.' }); return true; }
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-length': bundle.length, 'cache-control': 'no-store', 'x-update-version': manifest.version, 'x-update-sha256': manifest.sha256, 'content-disposition': 'attachment; filename="observer-web-update.zip"' });
+    res.end(bundle); return true;
+  }
   if (route === 'GET /api/app/discovery') { json(res, 200, p.discovery.status()); return true; }
   if (route === 'POST /api/app/discovery') { json(res, 200, await p.discovery.set((await body(req)).enabled)); return true; }
   if (route === 'GET /api/app/diagnostics') { json(res, 200, p.diagnostics()); return true; }

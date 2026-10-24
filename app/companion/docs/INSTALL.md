@@ -10,7 +10,20 @@ GitHub sign-in may be needed. Extract it in Samsung **My Files** and install **`
 
 This is a **debug-signed Preview**, not an owner-signed/Play Store release. Debug keys can change between runners; an installed older Preview may report a signature conflict. Preserve anything you need before changing test installations. Do not uninstall a production app to install this Preview. The owner-signed permanent release is blocked until private Actions secrets are configured; no debug APK will be mislabeled owner-signed.
 
-## Update the PC first — 3.10.0+ required
+## Updating from now on (no reinstall)
+
+Starting with 1.2.0, interface updates are signed by your own PC and installed in
+place. Install `observer-1.2.0-local.apk` **once**; it uses the separate
+`in.observer.companion.stable` package, so it sits next to Preview and nothing is
+deleted. After pairing, use Settings → **PC interface updates**.
+
+Details, trust model and PC commands: [PC-UPDATES.md](PC-UPDATES.md).
+
+Older Preview builds cannot be updated in place: their CI debug key is not
+recoverable, so a matching signature cannot be produced. The one-time local
+install is the replacement path, and it needs no GitHub secret.
+
+## Update the PC first — 3.11.0+ required
 
 GitHub merge/source changes do not update an installed service automatically. This feature pack is currently on `arena/ffde9465-psd-observer`; it has not been merged to main or deployed to your real PC by this work.
 
@@ -33,7 +46,7 @@ REPO=pavit12301611/psd-observer BRANCH=arena/ffde9465-psd-observer \
   bash /tmp/observer-feature-pack.sh update --dir "$HOME/observer-agent"
 ```
 
-If the service directory differs, use its actual path; do not update a second copy accidentally. Verify `http://127.0.0.1:8787/health` on the PC reports **3.10.0+**. No updater command was run on your real PC by the assistant. The script's fresh-install fallback now tracks main, while explicit/sticky branch tracking still needs review when moving between candidates.
+If the service directory differs, use its actual path; do not update a second copy accidentally. Verify `http://127.0.0.1:8787/health` on the PC reports **3.11.0+**. No updater command was run on your real PC by the assistant. The script's fresh-install fallback now tracks main, while explicit/sticky branch tracking still needs review when moving between candidates.
 
 ## Pair / use
 
