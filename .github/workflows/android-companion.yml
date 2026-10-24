@@ -160,7 +160,7 @@ jobs:
             adb shell wm density 420
             adb install app/companion/artifacts/observer-1.1.0-preview.apk
             adb shell am start -n in.observer.companion.preview/in.observer.companion.MainActivity
-            cd app/companion && node e2e/android-smoke.mjs
+            cd app/companion && node scripts/ci-run.mjs node e2e/android-smoke.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

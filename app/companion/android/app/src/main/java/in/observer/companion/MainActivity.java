@@ -226,6 +226,8 @@ public final class MainActivity extends Activity {
                 }
                 case "pair": {
                     int generation = requestEpoch; String base = OriginPolicy.base(p.getString("baseUrl"), p.optBoolean("allowLan"));
+                    JSONObject healthResponse=NativeHttp.request(base+"/health","GET",null,null,false,null,12000),health=healthResponse.optJSONObject("json");
+                    if(healthResponse.optInt("status")!=200||health==null||!"observer-whatsapp-agent".equals(health.optString("service"))||!OriginPolicy.mobileVersion(health.optString("version")))throw new Exception("Update PC agent to 3.10.0+ before pairing. No credential was sent to an incompatible service.");
                     String pin=p.optString("pin"),code=p.optString("code");if((pin.isEmpty()&&code.isEmpty())||pin.length()>128)throw new Exception("Dashboard PIN or fresh QR required.");
                     String clientId=vault.get("clientId");if(clientId==null){clientId=java.util.UUID.randomUUID().toString();vault.put("clientId",clientId);}
                     JSONObject pair=new JSONObject().put("clientId",clientId).put("name",Build.MODEL).put("model",Build.MODEL);

@@ -2,6 +2,7 @@ package in.observer.companion;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public final class OriginPolicyTest {
+    @Test public void agentMinorVersionsAreNumeric(){assertTrue(OriginPolicy.mobileVersion("3.10.0"));assertTrue(OriginPolicy.mobileVersion("4.0.0"));assertFalse(OriginPolicy.mobileVersion("3.9.2"));assertFalse(OriginPolicy.mobileVersion("3.1.11"));}
     @Test public void privateNetworksAreExactAndNeverSuffixOrOctal() {
         for (String host : new String[]{"10.0.0.1", "192.168.1.2", "172.16.0.1", "100.64.1.1", "[fd00::1]"}) assertTrue(host, OriginPolicy.privateHost(host));
         for (String host : new String[]{"10.evil.com", "10.300.0.1", "172.32.0.1", "100.128.0.1", "010.0.0.1", "127.0.0.1", "10.0.0.1.example"}) assertFalse(host, OriginPolicy.privateHost(host));

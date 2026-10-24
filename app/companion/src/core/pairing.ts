@@ -68,3 +68,10 @@ export function connectionHelp(message: string): {
     ],
   };
 }
+
+export function supportsMobileV2(version: string): boolean {
+  const m = String(version).match(/^(\d+)\.(\d+)\.(\d+)/);
+  return Boolean(
+    m && (Number(m[1]) > 3 || (Number(m[1]) === 3 && Number(m[2]) >= 10)),
+  );
+}

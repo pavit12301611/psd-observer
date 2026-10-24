@@ -13,6 +13,7 @@ const server = http.createServer((req, res) => {
   let raw = ''; req.on('data', (d) => { raw += d; }); req.on('end', () => {
     const body = raw ? JSON.parse(raw) : {}; requests.push({ path: req.url, body });
     res.setHeader('content-type', 'application/json');
+    if(req.url==='/health')return res.end(JSON.stringify({ok:true,service:'observer-whatsapp-agent',version:'3.10.0'}));
     if (req.url === '/api/app/pair') { assert.equal(body.pin, '123456'); return res.end(JSON.stringify({ token: 'emulator-fixture-token', protocol: 2, capabilities: {jobs:true}, device:{id:'fixture-device'}, serverId:'fixture-server' })); }
     if (req.headers['x-bridge-token'] !== 'emulator-fixture-token') { res.statusCode = 401; return res.end('{}'); }
     if (req.url === '/api/status') return res.end(JSON.stringify({ version: '3.10.0', whatsapp: 'fixture only', model: 'fixture model' }));
@@ -31,7 +32,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((resolve) => server.listen(8787, '0.0.0.0', resolve));
 fs.mkdirSync('android-smoke-results', { recursive: true });
-let browser;
+let browser, stage = 'startup';
 try {
   const devices = await android.devices();
   assert.ok(devices.length, 'No Android emulator connected');
@@ -43,9 +44,11 @@ try {
   assert.equal(await page.evaluate(() => Boolean(window.ObserverAndroid?.postMessage)), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({ path: 'android-smoke-results/01-native-home.png' });
+  stage='pairing';
   await page.getByRole('button', { name: 'Connect PC', exact: true }).click();
   await page.getByLabel('PC bridge address').fill('http://10.0.2.2:8787'); await page.getByLabel('Dashboard PIN').fill('123456'); await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Connect my PC', exact: true }).click(); await expect(page.getByRole('button', { name: 'PC connected', exact: true })).toBeVisible();
+  stage='native-abort-recovery';
   await page.getByLabel('Message Observer').fill('emulator fixture hello'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Native bridge round-trip succeeded. No real PC action was executed.', { exact: true })).toBeVisible();
   assert.equal(executions,1);
@@ -56,6 +59,7 @@ try {
   assert.equal(await page.evaluate(() => Object.values(localStorage).some((s) => /emulator-fixture-token|123456/.test(s))), false);
   await page.reload(); await expect(page.getByRole('button', { name: 'PC connected', exact: true })).toBeVisible(); await expect(page.getByText('Native bridge round-trip succeeded. No real PC action was executed.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Switch to dark theme' }).click(); await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark'); await page.screenshot({ path: 'android-smoke-results/02-native-dark-chat.png' });
+  stage='native-share';
   // Android-native share intent must remain a reviewed, read-only draft.
   adb('shell','am','start','-n',packageName+'/in.observer.companion.MainActivity','-a','android.intent.action.SEND','-t','text/plain','--es','android.intent.extra.TEXT','/yes');
   await expect(page.getByLabel('Message Observer')).toHaveValue('/yes');
@@ -65,6 +69,7 @@ try {
   assert.ok(requests.some(r=>r.path==='/api/app/jobs'&&r.body.kind==='reference'&&r.body.text==='/yes'));
   assert.ok(!requests.some(r=>r.path==='/api/chat'&&r.body.text==='/yes'));
   const native=async(method,payload={})=>page.evaluate(({method,payload})=>new Promise((resolve,reject)=>{const id=crypto.randomUUID();const done=e=>{const packet=typeof e.detail==='string'?JSON.parse(e.detail):e.detail;if(packet.id!==id)return;window.removeEventListener('observer-native-result',done);packet.ok?resolve(packet.data):reject(new Error(packet.error));};window.addEventListener('observer-native-result',done);window.ObserverAndroid.postMessage(JSON.stringify({id,method,payload}));}),{method,payload});
+  stage='private-alerts';
   const lock=await native('getLockState');assert.equal(lock.enabled,false);
   // Permission is synthetic emulator state, not a bypass in the shipped app.
   adb('shell','pm','grant',packageName,'android.permission.POST_NOTIFICATIONS');
@@ -73,6 +78,7 @@ try {
   const services=adb('shell','dumpsys','activity','services',packageName);assert.ok(services.includes('AlertService'));
   const notifications=adb('shell','dumpsys','notification','--noredact');assert.ok(!notifications.includes('PRIVATE-FIXTURE-CONTENT'));
   adb('shell','am','start','-n',packageName+'/in.observer.companion.MainActivity');await page.waitForTimeout(700);await native('stopAlerts');
+  stage='device-credential-enable';
   adb('shell','locksettings','set-pin','4826');
   const enableLock = native('setAppLock',{enabled:true});
   await new Promise(r=>setTimeout(r,1200));
@@ -80,8 +86,11 @@ try {
   await Promise.race([enableLock,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Device-credential confirmation did not finish')),12000))]);
   assert.equal((await native('getLockState')).enabled,true);
   adb('shell','input','keyevent','KEYCODE_HOME');await new Promise(r=>setTimeout(r,400));
+  stage='locked-api-gate';
+  adb('shell','am','start','-n',packageName+'/in.observer.companion.MainActivity');
+  await new Promise(r=>setTimeout(r,400));
   await assert.rejects(native('request',{path:'/api/app/jobs'}),/Unlock Observer first/);
 
   fs.writeFileSync('android-smoke-results/result.json', JSON.stringify({ nativeBridge: 'passed', nativeAbortedAcceptanceRecovery: 'passed', nativeReadOnlyShare: 'passed', privateForegroundAlerts: 'passed', genericNotificationPrivacy: 'passed', deviceCredentialAppGate: 'passed', keystoreEncryptedCredentialsAndHistory: 'passed', restoredSession: 'passed', darkTheme: 'passed', requestCount: requests.length, jobExecutions: executions, physicalSamsungTest: 'not performed', providerCalls: 0, pcActions: 0 }, null, 2));
   console.log('Android emulator smoke: bundled UI, native HTTP, encrypted credential/history, restore and dark theme passed. No physical Samsung/provider/PC tests.');
-} finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+} catch(error) { fs.writeFileSync('android-smoke-results/failure.json',JSON.stringify({stage,message:String(error.message)},null,2)); console.error('NATIVE_SMOKE_STAGE='+stage); throw error; } finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }

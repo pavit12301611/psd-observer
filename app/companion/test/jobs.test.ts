@@ -11,17 +11,15 @@ it("an aborted acceptance connection recovers by GET, never repeats POST or the 
   const post = vi
     .spyOn(api, "post")
     .mockRejectedValue(new Error("Software caused connection abort"));
-  const read = vi
-    .spyOn(api, "job")
-    .mockResolvedValue({
-      id: "fixture_job_id",
-      kind: "chat",
-      deviceId: "fixture",
-      label: "test",
-      state: "replied",
-      createdAt: 1,
-      result: { text: "Actual recovered AI result" },
-    });
+  const read = vi.spyOn(api, "job").mockResolvedValue({
+    id: "fixture_job_id",
+    kind: "chat",
+    deviceId: "fixture",
+    label: "test",
+    state: "replied",
+    createdAt: 1,
+    result: { text: "Actual recovered AI result" },
+  });
   const result = await submitAndWatch({
     id: "fixture_job_id",
     text: "explain recursion",
@@ -71,4 +69,11 @@ it("QR parser accepts only expiring Observer pairing data and never executes dec
     "could not reach",
   );
   expect(connectionHelp("Update 3.10.0").title).toContain("update");
+});
+it("agent version ordering is numeric and old agents are identified before PIN submission", async () => {
+  const { supportsMobileV2 } = await import("../src/core/pairing");
+  for (const v of ["3.1.11", "3.9.2", "bad"])
+    expect(supportsMobileV2(v)).toBe(false);
+  for (const v of ["3.10.0", "3.11.0", "4.0.0"])
+    expect(supportsMobileV2(v)).toBe(true);
 });

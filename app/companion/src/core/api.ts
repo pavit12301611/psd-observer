@@ -9,6 +9,7 @@ import type {
   AgentEvent,
 } from "../types";
 import { isNative, nativeCall, openExternal } from "./native";
+import { supportsMobileV2 } from "./pairing";
 import { safeApiPath, validateBase } from "./validation";
 export class SessionChanged extends Error {
   constructor() {
@@ -82,6 +83,16 @@ export class BridgeClient {
       if (generation !== this.epoch) throw new SessionChanged();
       this.profile = p;
     } else {
+      const health = await this.diagnose(raw, allowLan);
+      if (generation !== this.epoch) throw new SessionChanged();
+      if (
+        !health.reachable ||
+        health.service !== "observer-whatsapp-agent" ||
+        !supportsMobileV2(health.version || "")
+      )
+        throw new Error(
+          "Update PC agent to 3.10.0+ before sending a pairing credential.",
+        );
       let clientId = sessionStorage.getItem("observer-browser-device-id");
       if (!clientId) {
         clientId = crypto.randomUUID();

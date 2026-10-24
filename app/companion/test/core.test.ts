@@ -206,6 +206,14 @@ it("late replies from a disconnected browser session cannot mutate a fresh sessi
     "fetch",
     vi.fn(async (url: string, options?: RequestInit) => {
       seen.push(url);
+      if (url.endsWith("/health"))
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            service: "observer-whatsapp-agent",
+            version: "3.10.0",
+          }),
+        );
       if (url.endsWith("/api/app/pair"))
         return new Response(
           JSON.stringify({
@@ -272,8 +280,14 @@ it("pairing rejects old/incompatible agents before retaining their credential", 
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) =>
-      url.endsWith("/api/app/pair")
-        ? new Response(JSON.stringify({ token: "fixture-token", protocol: 1 }))
+      url.endsWith("/health")
+        ? new Response(
+            JSON.stringify({
+              ok: true,
+              service: "observer-whatsapp-agent",
+              version: "3.9.2",
+            }),
+          )
         : new Response("{}", { status: 404 }),
     ),
   );
