@@ -111,6 +111,7 @@ test("PC control fits one phone screen: the stage never scrolls away from the do
   await go(page, "PC control");
   // Wait for the control surface itself; a fresh mount is not instant.
   await expect(page.locator(".pc-shell")).toBeVisible();
+  await expect(page.locator(".pc-stage img")).toBeVisible();
   await expect(page.locator(".pc-stage")).toBeVisible();
   await expect(page.locator(".pc-dock")).toBeVisible();
 
@@ -137,6 +138,11 @@ test("PC control fits one phone screen: the stage never scrolls away from the do
   expect(metrics.stage!.height).toBeGreaterThan(40);
   expect(metrics.dock!.top).toBeGreaterThan(metrics.stage!.top + 40);
   expect(metrics.dock!.bottom).toBeLessThanOrEqual(metrics.innerHeight);
+  // The dock must be a real surface, not a strip clipped by the screen above.
+  const dockBody = await page
+    .locator(".pc-dock-body")
+    .evaluate((el) => el.clientHeight);
+  expect(dockBody).toBeGreaterThan(48);
 });
 
 test("touchpad drags move the PC cursor without scrolling the page", async ({ page }) => {

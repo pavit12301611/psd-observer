@@ -2830,7 +2830,10 @@ textarea {
 }
 .pc-stage {
   position: relative;
-  flex: 1 1 auto;
+  /* Basis 0: the screen takes what the head, the controls and the dock leave.
+     With an auto basis it could hold its natural height and squeeze the dock
+     down to a sliver on short landscape screens. */
+  flex: 1 1 0;
   min-height: 96px;
   display: flex;
   align-items: center;
@@ -2973,8 +2976,9 @@ textarea {
   padding: 0 8px;
 }
 .pc-dock {
-  /* Shrinks (and its body scrolls) instead of pushing the stage off screen. */
-  flex: 0 1 auto;
+  /* Its own height is capped; the body inside scrolls, so the stage keeps its
+     place and the dock keeps a usable height. */
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
