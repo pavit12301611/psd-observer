@@ -35,6 +35,7 @@ async function update(fn: (refs: JobRef[]) => JobRef[]) {
 }
 export const rememberJob = (ref: JobRef) =>
   update((refs) => [...refs.filter((r) => r.id !== ref.id), ref].slice(-40));
+export const clearPendingJobs = () => update(() => []);
 export const forgetJob = (id: string) =>
   update((refs) => refs.filter((r) => r.id !== id));
 export class PendingJob extends Error {

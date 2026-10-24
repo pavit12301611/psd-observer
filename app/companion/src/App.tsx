@@ -49,6 +49,7 @@ import {
   type CloudStatus,
 } from "./core/cloud";
 import {
+  clearPendingJobs,
   rememberJob,
   forgetJob,
   pendingJobs,
@@ -264,6 +265,7 @@ export default function App() {
   }, []);
   const disconnected = useCallback(() => {
     session.current++;
+    void clearPendingJobs().catch(() => {});
     setProfile(null);
     setStatus(null);
     setAgentState(null);
@@ -644,7 +646,8 @@ export default function App() {
   }
   function selectProject(project: Project) {
     const c = newConversation("agent");
-    c.projectId = project.id; c.projectName = project.name;
+    c.projectId = project.id;
+    c.projectName = project.name;
     setState((s) => ({
       ...s,
       preferences: { ...s.preferences, chatMode: "agent" },

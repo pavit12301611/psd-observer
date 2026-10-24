@@ -49,6 +49,7 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
   const capabilities = () => ({ jobs: true, durableJobs: Boolean(root), deviceSessions: true, qrPairing: true, events: true, privateAlerts: true, push: push.status(), workspaces: true, workflows: true, rtc: true, protocol: 2 });
   return {
     devices, events, jobs, projects, workflows, rtc, assets, discovery, capabilities,
+    controlsAllowed: () => Boolean(config.allowPcControl),
     diagnostics() { return { serverId: devices.serverId, capabilities: capabilities(), port: config.port, host: config.host, addresses: Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === 'IPv4' && !n.internal && privateIPv4(n.address)).map((n) => n.address), loopbackOnly: config.host === '127.0.0.1', pcControl: Boolean(config.allowPcControl), note: 'Reachability cannot be proven from the PC alone. No firewall, permission or router settings were changed.' }; },
     start() {
       if (timer) return;

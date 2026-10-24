@@ -9,6 +9,7 @@ export function createRTC({ now = Date.now } = {}) {
   return {
     publisher(principal, op) {
       expire();
+      if (principal.kind !== 'owner') throw error(403, 'Unlock the PC publisher with the owner dashboard PIN.');
       if (op === 'stop') { if (publisher && publisher.id !== principal.id && principal.kind !== 'owner') throw error(403, 'Another publisher owns this capture'); publisher = null; sessions.clear(); }
       else if (op === 'start') { if (publisher && publisher.id !== principal.id) throw error(409, 'A PC publisher is already sharing'); publisher = { id: principal.id, seen: now() }; }
       else if (op === 'heartbeat') { if (!publisher || publisher.id !== principal.id) throw error(409, 'Start a new explicit screen share'); publisher.seen = now(); }
@@ -17,7 +18,7 @@ export function createRTC({ now = Date.now } = {}) {
     },
     status() { expire(); return { ready: Boolean(publisher), active: sessions.size, transport: 'webrtc', internetRelayConfigured: false }; },
     create(principal, quality) {
-      expire(); if (!publisher) throw error(409, 'Open the PC sharing page and explicitly choose a screen first');
+      expire(); if (principal.kind !== 'device') throw error(403, 'Use a revocable paired device for the live viewer.'); if (!publisher) throw error(409, 'Open the PC sharing page and explicitly choose a screen first');
       if (sessions.size >= 1) throw error(409, 'One live viewer at a time. Stop the current view first.');
       if (!['saver', 'balanced', 'quality'].includes(quality)) throw error(400, 'Invalid video quality');
       const id = randomBytes(16).toString('hex'); sessions.set(id, { id, deviceId: principal.id, viewerName: principal.name || 'Owner', quality, created: now(), viewerSeen: now(), offer: null, answer: null, publisherCandidates: [], viewerCandidates: [] });

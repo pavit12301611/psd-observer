@@ -129,6 +129,7 @@ export class BridgeClient {
     this.requests.clear();
     this.token = "";
     this.profile = null;
+    if (!isNative()) localStorage.removeItem("observer-pending-jobs");
     if (isNative()) await nativeCall("logout");
   }
   async wire(

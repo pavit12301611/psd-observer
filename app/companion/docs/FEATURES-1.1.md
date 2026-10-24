@@ -4,7 +4,7 @@ This branch is not a production rollout. PC agent **3.10.0+** is required.
 
 ## Primary fix
 
-PC-agent chat/voice/solve/routine requests use a short accepted-job response with a stable request ID. The result is retained in a private PC journal and read through separate requests. A socket abort never automatically resubmits an action. Pending IDs survive phone UI restarts; Tasks can retrieve results. On a PC restart, unfinished work becomes **unknown**, not replayed. The journal is bounded (40 recent requests, 48-hour pruning); it is not an infinite exactly-once guarantee for external side effects. Completed-after-stop outcomes remain explicit. Direct-provider mode is separate; a provider/network error there does not imply a PC action.
+PC-agent chat/voice/solve/routine requests use a short accepted-job response with a stable request ID. The result is retained in a private PC journal and read through separate requests. A socket abort never automatically resubmits an action. Pending IDs survive phone UI restarts; Tasks can retrieve results. On a PC restart, unfinished work becomes **unknown**, not replayed. The journal is bounded (40 detailed results plus up to 2048 safety receipts, 48-hour pruning); it is not an infinite exactly-once guarantee for external side effects. Completed-after-stop outcomes remain explicit. Direct-provider mode is separate; a provider/network error there does not imply a PC action.
 
 ## New surfaces
 

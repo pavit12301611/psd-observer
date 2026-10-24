@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 /** Only called AFTER owner/device authentication. */
 export async function mobileRoute({ req, res, url, principal, platform: p, json, body, runOwner }) {
   const route = `${req.method} ${url.pathname}`;
+  if (url.pathname.startsWith('/api/app/rtc') && !p.controlsAllowed()) { json(res,403,{detail:'PC capture/control is disabled by owner policy.'}); return true; }
   if (route === 'GET /api/app/discovery') { json(res, 200, p.discovery.status()); return true; }
   if (route === 'POST /api/app/discovery') { json(res, 200, await p.discovery.set((await body(req)).enabled)); return true; }
   if (route === 'GET /api/app/diagnostics') { json(res, 200, p.diagnostics()); return true; }

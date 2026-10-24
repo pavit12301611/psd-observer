@@ -173,7 +173,7 @@ public final class MainActivity extends Activity {
                 if (!id.matches("[a-fA-F0-9-]{36}")) throw new Exception("Invalid request id.");
                 String method = packet.getString("method"); JSONObject p = packet.optJSONObject("payload"); if (p == null) p = new JSONObject();
                 final String responseId = id; final JSONObject payload = p;
-                if(appLock.isLocked() && !java.util.Arrays.asList("getLockState","unlock","appearance","deviceInfo").contains(method)){respond(responseId,null,"Unlock Observer first.");return;}
+                if(appLock.isLocked() && !java.util.Arrays.asList("getLockState","unlock","appearance","deviceInfo","logout").contains(method)){respond(responseId,null,"Unlock Observer first.");return;}
                 if(method.equals("getLockState")){respond(responseId,new JSONObject().put("enabled",appLock.isEnabled()).put("locked",appLock.isLocked()),null);return;}
                 if(method.equals("unlock")){runOnUiThread(()->appLock.authenticate(()->respond(responseId,true,null),()->respond(responseId,null,"Unlock cancelled.")));return;}
                 if(method.equals("setAppLock")){runOnUiThread(()->appLock.change(payload.optBoolean("enabled"),()->respond(responseId,true,null),()->respond(responseId,null,"Device credential/biometric confirmation is required.")));return;}

@@ -22,7 +22,7 @@ export function createJobs({ file, run, events, busy = () => false, now = Date.n
   let active = null, closed = false; const volatileErrors = new Map();
   const stranded = db.value.jobs.some((j) => !terminal.has(j.state));
   if (stranded) db.update((state) => { for (const j of state.jobs) if (!terminal.has(j.state)) { j.state = 'unknown'; j.finishedAt = now(); j.result = { ok: false, text: 'Agent restarted while this request was pending. Outcome unknown; it was NOT replayed. Inspect before repeating.' }; } return state; });
-  const publicJob = (j, withResult = true) => j ? ({ id: j.id, kind: j.kind, projectId: j.projectId, deviceId: j.deviceId, label: j.label, state: j.state, createdAt: j.createdAt, finishedAt: j.finishedAt || null, stopRequested: Boolean(j.stopRequested), ...(withResult && j.result ? { result: j.result } : {}) }) : null;
+  const publicJob = (j, withResult = true) => j ? ({ id: j.id, kind: j.kind, projectId: j.projectId, deviceId: j.deviceId, label: j.label, state: j.state, createdAt: j.createdAt, finishedAt: j.finishedAt || null, stopRequested: Boolean(j.stopRequested), ...(withResult && (j.result || terminal.has(j.state)) ? { result: j.result || {ok:false,text:'Detailed result retention expired; its safety receipt remains. Nothing was replayed.'} } : {}) }) : null;
   function write(id, patch) { db.update((state) => { const j = state.jobs.find((j) => j.id === id); if (j) Object.assign(j, patch); return state; }); }
   function publish(type, text, extra) { try { events?.publish(type, text, extra); } catch { /* a notification failure never retries a job */ } }
   return {
@@ -39,7 +39,7 @@ export function createJobs({ file, run, events, busy = () => false, now = Date.n
       // action can start. A caller can GET this ID after any socket abort.
       const sensitive = /^\/(?:run|mail|key|keys|dsh)\b/i.test(input.text) || /^\/pc\s+\S+\s+\d{4,12}\b/i.test(input.text);
       const record = { id: input.id, kind: input.kind, projectId: input.projectId, deviceId: principal.id, fingerprint: digest, label: sensitive ? 'Private command' : short(input.text, 100), state: 'accepted', createdAt: now(), result: null };
-      db.update((state) => { state.jobs = state.jobs.filter((j) => now() - j.createdAt < resultTtl).slice(-39); state.jobs.push(record); return state; });
+      db.update((state) => { state.jobs = state.jobs.filter((j) => now() - j.createdAt < resultTtl); if(state.jobs.length>=2048) throw error(507,'Safety receipt capacity reached; no action was accepted. Wait for retention expiry or export/review records.'); for(const old of state.jobs.slice(0,-39))old.result=null; state.jobs.push(record); return state; });
       active = input.id;
       const started = Promise.resolve().then(async () => {
         if (closed) return;

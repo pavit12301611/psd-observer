@@ -89,3 +89,21 @@ test('mobile/HTTP: device pairing is rate-limited and revoked sessions cannot re
  assert.equal((await f.api('/api/app/jobs',null,p.token)).status,200);
  await f.api('/api/app/devices/revoke',{id:p.device.id});assert.equal((await f.api('/api/app/jobs',null,p.token)).status,401);
 });
+
+test('mobile/private context: reference slash commands cannot consume approvals or expose global owner prompt facts',async(t)=>{
+ const {createAgent}=await import('../src/commands.js');const {Store}=await import('../src/store.js');const {systemPrompt}=await import('../src/ai.js');const dir=folder(t),store=new Store(path.join(dir,'state.json'));
+ const config={dataDir:dir,ownerNumber:'919999999999',agentNumber:'918888888888',allowPcControl:false,allowShell:false,agentTag:false,aiProvider:'none',wikiGrounding:false};
+ const agent=createAgent({config,store,log:{info(){},warn(){},error(){}}});let ran=0;agent.actions.registry.find(e=>e.name==='close_app').run=async()=>{ran++;return'fixture';};
+ await agent.actions.execute('close_app',{app:'fixture'});const original=store.data.pending;
+ await agent.handle('/yes',{readOnlyReference:true,mobileProject:{name:'Reference',privateChat:true,memories:[]}});assert.equal(ran,0);assert.equal(store.data.pending,original);
+ const prompt=systemPrompt(config,{data:{facts:{secret:'DO-NOT-LEAK'}}},{privateProject:{name:'Study',memories:['study-only']}});assert.ok(prompt.includes('study-only'));assert.ok(!prompt.includes('DO-NOT-LEAK'));store.saveNow();
+});
+test('mobile/real agent AI path: slow model completion is independent of the mobile acceptance socket',async(t)=>{
+ const {createAgent}=await import('../src/commands.js');const {Store}=await import('../src/store.js');const {loadConfig}=await import('../src/config.js');const dir=folder(t);let providerCalls=0;
+ const provider=http.createServer((req,res)=>{let text='';req.on('data',d=>text+=d);req.on('end',()=>{providerCalls++;const body=JSON.parse(text);assert.ok(body.messages.some(m=>String(m.content).includes('recursion')));setTimeout(()=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:'Delayed model fixture: recursion uses a base case.'}}]}));},100);});});provider.listen(0,'127.0.0.1');await once(provider,'listening');t.after(()=>provider.close());
+ const config=loadConfig({dryRun:true,env:{DATA_DIR:dir,OWNER_NUMBER:'919999999999',AGENT_NUMBER:'918888888888',BRIDGE_TOKEN:'fixture-ai-root',DASHBOARD_PIN:'123456',HOST:'127.0.0.1',PORT:'0',AI_PROVIDER:'groq',GROQ_API_KEY:'fixture-not-real',GROQ_BASE_URL:`http://127.0.0.1:${provider.address().port}/v1`,GROQ_MODEL:'fixture',GROQ_MODEL_SMALL:'fixture',AGENT_TOOLS:'false',WIKI_GROUNDING:'off',AI_CACHE:'false'}});
+ const store=new Store(path.join(dir,'store.json')),agent=createAgent({config,store,log:{info(){},error(){},warn(){}}});const bridge=createBridgeServer({config,store,app:agent.app,actions:agent.actions,runOwner:(text,ctx)=>agent.handle(text,ctx),whatsapp:{status:()=> 'fixture'},mailbox:{observerOnline:()=>false},log:{info(){},error(){}}});const server=await bridge.start();t.after(async()=>{server.closeAllConnections();const closed=once(server,'close');bridge.stop();await closed;store.saveNow();});const base=`http://127.0.0.1:${server.address().port}`,headers={'content-type':'application/json','x-bridge-token':'fixture-ai-root'};
+ const accepted=await fetch(base+'/api/app/jobs',{method:'POST',headers,body:JSON.stringify({id:'real_ai_job_12345',text:'explain recursion with one simple example',history:[]})});assert.equal(accepted.status,202);
+ let result;for(let n=0;n<300;n++){result=await(await fetch(base+'/api/app/jobs/real_ai_job_12345',{headers})).json();if(result.state==='replied')break;await new Promise(r=>setTimeout(r,10));}
+ assert.equal(result.state,'replied');assert.match(result.result.text,/Delayed model fixture/);assert.equal(providerCalls,1);
+});
