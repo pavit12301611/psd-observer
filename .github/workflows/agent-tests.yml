@@ -33,11 +33,12 @@ jobs:
           cache-dependency-path: whatsapp-agent/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run check
-      - run: npm test
+      - run: node --test scripts/ci-report.test.mjs
+      - run: node scripts/ci-report.mjs npm test
         if: matrix.node != '22'
-      - run: npm run test:coverage
+      - run: node scripts/ci-report.mjs npm run test:coverage
         if: matrix.node == '22'
-      - run: npm run test:mutation
+      - run: node scripts/ci-report.mjs npm run test:mutation
         if: matrix.node == '22'
       # Verify the checked-in archive before regenerating timestamped reports.
       - run: npm run verify:bundle

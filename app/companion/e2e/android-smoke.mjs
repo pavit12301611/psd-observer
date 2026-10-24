@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { expect } from '@playwright/test';
 import { _android as android } from 'playwright';
+import { attachStableStartup } from './android-startup.mjs';
 const packageName = 'in.observer.companion.preview';
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
 const requests = []; const jobs = new Map(); let executions = 0; let abortedAcceptance = false;
@@ -37,13 +38,18 @@ try {
   const devices = await android.devices();
   assert.ok(devices.length, 'No Android emulator connected');
   const device = devices[0];
-  const webview = await device.webView({ pkg: packageName, timeout: 40000 });
-  const page = await webview.page();
   browser = device;
-  await expect(page.getByRole('heading', { name: /Think clearly/ })).toBeVisible({ timeout: 30000 });
-  assert.equal(await page.evaluate(() => Boolean(window.ObserverAndroid?.postMessage)), true);
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.screenshot({ path: 'android-smoke-results/01-native-home.png' });
+  const originalPid = adb('shell','pidof',packageName).split(' ')[0];
+  const { page, reattachments } = await attachStableStartup({ device, packageName,
+    sameProcess: async () => { try { return adb('shell','pidof',packageName).split(' ')[0] === originalPid; } catch { return false; } },
+    report: (text) => console.log(text),
+    probe: async (page) => {
+      await expect(page.getByRole('heading', { name: /Think clearly/ })).toBeVisible({ timeout: 30000 });
+      assert.equal(await page.evaluate(() => Boolean(window.ObserverAndroid?.postMessage)), true);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await page.screenshot({ path: 'android-smoke-results/01-native-home.png' });
+    },
+  });
   stage='pairing';
   await page.getByRole('button', { name: 'Connect PC', exact: true }).click();
   await page.getByLabel('PC bridge address').fill('http://10.0.2.2:8787'); await page.getByLabel('Dashboard PIN').fill('123456'); await page.getByRole('checkbox').check();
@@ -91,6 +97,6 @@ try {
   await new Promise(r=>setTimeout(r,400));
   await assert.rejects(native('request',{path:'/api/app/jobs'}),/Unlock Observer first/);
 
-  fs.writeFileSync('android-smoke-results/result.json', JSON.stringify({ nativeBridge: 'passed', nativeAbortedAcceptanceRecovery: 'passed', nativeReadOnlyShare: 'passed', privateForegroundAlerts: 'passed', genericNotificationPrivacy: 'passed', deviceCredentialAppGate: 'passed', keystoreEncryptedCredentialsAndHistory: 'passed', restoredSession: 'passed', darkTheme: 'passed', requestCount: requests.length, jobExecutions: executions, physicalSamsungTest: 'not performed', providerCalls: 0, pcActions: 0 }, null, 2));
+  fs.writeFileSync('android-smoke-results/result.json', JSON.stringify({ nativeBridge: 'passed', readOnlyStartupReattachments: reattachments, nativeAbortedAcceptanceRecovery: 'passed', nativeReadOnlyShare: 'passed', privateForegroundAlerts: 'passed', genericNotificationPrivacy: 'passed', deviceCredentialAppGate: 'passed', keystoreEncryptedCredentialsAndHistory: 'passed', restoredSession: 'passed', darkTheme: 'passed', requestCount: requests.length, jobExecutions: executions, physicalSamsungTest: 'not performed', providerCalls: 0, pcActions: 0 }, null, 2));
   console.log('Android emulator smoke: bundled UI, native HTTP, encrypted credential/history, restore and dark theme passed. No physical Samsung/provider/PC tests.');
 } catch(error) { fs.writeFileSync('android-smoke-results/failure.json',JSON.stringify({stage,message:String(error.message)},null,2)); console.error('NATIVE_SMOKE_STAGE='+stage); throw error; } finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
