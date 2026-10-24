@@ -349,3 +349,6 @@ whatsapp-agent/auth_info/
 whatsapp-agent/data/
 whatsapp-agent/node_modules/
 whatsapp-agent/.env
+
+# Owner-controlled Android signing recovery kit (never publish).
+/private-signing/

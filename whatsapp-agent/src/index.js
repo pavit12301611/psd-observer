@@ -51,6 +51,8 @@ store.data.stats.startedAt = Date.now(); // uptime = this process, not first-eve
 }
 const mailbox = new Mailbox({ waitMs: config.observerWaitMs });
 
+let bridge = null;
+const deliverOwner = (reply, type = 'agent_notice') => { try { bridge?.publish(reply, type); } catch {} return whatsapp.sendToOwner(reply); };
 const agent = createAgent({
   config,
   store,
@@ -59,7 +61,7 @@ const agent = createAgent({
   observerOnline: () => mailbox.observerOnline(),
   // Live "step 2/8" lines and watch alerts come out of the agent itself, not
   // as a reply — this is the only channel for unsolicited messages.
-  notify: (message) => whatsapp.sendToOwner(message),
+  notify: (message) => deliverOwner(message, 'progress'),
   sendToNumber: (to, reply) => whatsapp.sendToNumber(to, reply),
 });
 
@@ -89,7 +91,7 @@ const wavoip = createWaVoip({
 agent.attachWaVoip(wavoip);
 whatsapp.setVoipCoordinator(wavoip);
 
-const bridge = createBridgeServer({
+bridge = createBridgeServer({
   config,
   store,
   whatsapp,
@@ -102,7 +104,8 @@ const bridge = createBridgeServer({
   runOwner: (text, ctx) => whatsapp.runOwner(text, ctx),
   log: console,
 });
-const stopReminders = startReminderLoop(store, (text) => whatsapp.sendToOwner(text), console);
+agent.attachWhatsApp({ sendToOwner: (message) => deliverOwner(message, 'progress') });
+const stopReminders = startReminderLoop(store, (text) => deliverOwner(text, 'reminder'), console);
 // /callat: at the set time JARVIS himself calls the owner with the update
 // (asli call na lage to voice note). Survives restarts via the store file.
 const callScheduleLoop = startCallScheduleLoop({ config, store, agent, wavoip, whatsapp, log: console });
@@ -110,7 +113,7 @@ const callScheduleLoop = startCallScheduleLoop({ config, store, agent, wavoip, w
 // like typing them — one code path, same safety gates.
 const stopCron = startCronLoop(
   store,
-  (text) => whatsapp.sendToOwner(text),
+  (text) => deliverOwner(text),
   console,
   (text) => agent.handle(text, { source: 'cron' }),
 );
@@ -121,7 +124,7 @@ const stopShots = startShotJanitor({ config, log: console, janitor: agent.shots 
 const stopWatch = startWatchLoop({
   config,
   store,
-  send: (message) => whatsapp.sendToOwner(message),
+  send: (message) => deliverOwner(message, 'watch'),
   log: console,
 });
 // Automatic "😴 Agent is sleeping" notification before PC shutdown, reboot,

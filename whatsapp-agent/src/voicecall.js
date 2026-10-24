@@ -122,13 +122,13 @@ export function createVoiceCall({ config = {}, store = null, runText, speak = nu
 
   /** Start (or fetch) a call. Returns the greeting + its JARVIS audio. */
 // eslint-disable-next-line no-unused-vars
-  async function start(source = 'app', sessionId = null) {
+  async function start(source = 'app', sessionId = null, options = {}) {
     const session = getOrCreate(sessionId, source);
     const greeting = jarvisGreeting(config, new Date(), store);
     session.lastSpoken = greeting;
     session.transcript.push({ who: 'jarvis', text: greeting, ts: Date.now() });
     emit(session, 'started', { text: greeting });
-    const audio = await safeSpeak(greeting);
+    const audio = options.silent ? null : await safeSpeak(greeting);
     return { sessionId: session.id, greeting, spoken: greeting, audio, state: session.state, source: session.source };
   }
 

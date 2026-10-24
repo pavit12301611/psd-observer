@@ -12,3 +12,4 @@ android/app/src/main/assets/public/
 *.jks
 artifacts/
 android-smoke-results/
+signed-artifacts/

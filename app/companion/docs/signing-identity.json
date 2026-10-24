@@ -1,0 +1,8 @@
+{
+  "alias": "observer-release",
+  "certificateSha256": "02:52:6D:8B:55:28:9C:65:93:FA:22:D4:0F:20:FB:90:E7:4D:DF:3C:60:27:98:22:88:86:47:E0:67:46:D8:16",
+  "applicationId": "in.observer.companion",
+  "privateKeyCommitted": false,
+  "githubSecretsConfigured": false,
+  "blocker": "Repository-secret API returned 403; owner must configure the private recovery kit via GitHub Settings."
+}

@@ -24,7 +24,7 @@ export const mutations = [
   { id: 'shallow-snapshot', file: 'rollback.js', before: 'for (const name of fs.readdirSync(src)) copyTree(path.join(src, name), path.join(dest, name));', after: 'for (const name of fs.readdirSync(src)) if (fs.lstatSync(path.join(src, name)).isFile()) copyTree(path.join(src, name), path.join(dest, name));', expected: 'deep/rollback: real nested source' },
   { id: 'late-guard-frame', file: 'guard.js', before: "    if (guard !== state) return 'off';", after: '', expected: 'deep/guard: old capture' },
   { id: 'late-live-frame', file: 'livemirror.js', before: '      if (live !== state) return;', after: '', expected: 'deep/mirror: off during' },
-  { id: 'empty-token-auth', file: 'server.js', before: "    if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return false;", after: '', expected: 'deep/bridge: missing or blank' },
+  { id: 'empty-token-auth', file: 'server.js', before: "    if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return null;", after: '', expected: 'deep/bridge: missing or blank' },
   { id: 'non-object-http-body', file: 'server.js', before: "        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object required');", after: '', expected: 'deep/bridge: body must be' },
   { id: 'feature-cache-key-alias', file: 'neural/text.js', before: '  const key = `${dim}:${String(text ?? \'\')}`;', after: "  const key = dim === DEFAULT_DIM ? String(text ?? '') : `d${dim}:${text ?? ''}`;", expected: 'deep/neural: supported custom dimensions' },
   { id: 'panic-retains-memory', file: 'safety.js', before: 'store.reset(); memoryCleared = true;', after: 'memoryCleared = true;', expected: 'deep/panic: pending save' },

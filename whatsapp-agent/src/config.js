@@ -114,6 +114,8 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     host: e.HOST || '0.0.0.0',
     port: int(e.PORT, 8787),
     timezone: e.TIMEZONE || 'Asia/Kolkata',
+    appFcmCredentials: e.APP_FCM_CREDENTIALS || '',
+    appDiscovery: bool(e.APP_DISCOVERY, false),
 
     aiProvider: (e.AI_PROVIDER || 'auto').toLowerCase(),
     ollamaUrl: (e.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),

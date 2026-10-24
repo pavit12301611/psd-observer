@@ -454,6 +454,7 @@ export function createAgent({
   // The signal of whatever command is running right now. Commands are
   // serialized (isProcessing), so one slot is enough; /stop does not use it.
   let activeSignal = null;
+  const appStopListeners = new Set();
   let lastBatch = null;
   // Unsolicited messages (live progress, watch alerts). index.js wires this to
   // WhatsApp; in tests it stays a no-op so nothing ever sends by accident.
@@ -1599,6 +1600,7 @@ export function createAgent({
   }
 
   function stopCommand() {
+    for (const fn of appStopListeners) { try { fn(); } catch {} }
     return stopReply(taskRegistry.stopAll('stop'));
   }
 
@@ -4523,10 +4525,12 @@ ${recapGoal()}`;
     if (!clean) return '🤖 I got an empty message. Try /help';
     // /stop is checked before everything else — before the dedup window and
     // before the busy flag — because it must cut in while work is running.
-    if (isStopCommand(clean)) return stopCommand();
+    if (!ctx.readOnlyReference && isStopCommand(clean)) return stopCommand();
+    if (!ctx.readOnlyReference) {
     if (/^\/batch\s+results\s*$/i.test(clean)) return lastBatch ? batchSummary(lastBatch) : workStatus();
     if (/^\/taskstatus\s*$/i.test(clean) || /^\/batch\s+status\s*$/i.test(clean)) return workStatus();
     if (/^\/neural(?:\s+status)?\s*$/i.test(clean)) return neuralCommand('status', ctx);
+    }
     // dedup: same exact text within 4s → ignore second copy (double tap / network retry)
     if (clean === lastHandledText && Date.now() - lastHandledTs < 4000) {
       return '⏳ Same command abhi process hua tha (4s ke andar) — duplicate ignore kiya, double kaam nahi karunga.';
@@ -4534,6 +4538,14 @@ ${recapGoal()}`;
     if (isProcessing) {
       // queue-like behaviour: tell owner we're busy, don't run in parallel (no double work)
       return '⏳ Ek kaam chal raha hai — /taskstatus se progress, /stop se roko. Multiple independent tasks ek message me: `/batch sawal 1 || sawal 2` (PC actions serialized).';
+    }
+    if (ctx.readOnlyReference || ctx.mobileProject?.privateChat && !clean.startsWith('/')) {
+      const projectTask = taskRegistry.begin('Private project answer'); isProcessing = true; activeSignal = projectTask.signal;
+      try {
+        const result = await ai.chat(config, { data: { history: [], facts: {}, notes: [], todos: [] }, save() {}, pushHistory() {} }, clean, log,
+          { signal: activeSignal, history: ctx.appHistory || [], isolated: true, privateProject: ctx.mobileProject });
+        return result?.text || 'No configured AI provider returned an answer. Check /brains in Personal; this private project did not use other owner memory.';
+      } finally { activeSignal = null; isProcessing = false; projectTask.end(); }
     }
     // ✏️ 3.6.0 — "galat, asli jawab X hai" → bot permanently seekh jata hai.
     const corr = parseCorrection(rawText);
@@ -4835,7 +4847,7 @@ ${recapGoal()}`;
 
   return {
     handle, handleGuest, HELP, actions, shots, harness, voice,
-    app: { state: appState, decide: appApprovals.decide, busy: () => isProcessing },
+    app: { state: appState, decide: appApprovals.decide, busy: () => isProcessing, onStop: (fn) => { appStopListeners.add(fn); return () => appStopListeners.delete(fn); } },
     attachWhatsApp: ({ sendToNumber: sendFn, sendToOwner: notifyFn } = {}) => {
       if (typeof sendFn === 'function') {
         sendWhatsappTo = sendFn;

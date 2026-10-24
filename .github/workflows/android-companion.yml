@@ -1,11 +1,20 @@
 name: Android companion
 on:
   push:
-    branches: [main, arena/9787e6e8-psd-observer]
+    branches: [main, arena/ffde9465-psd-observer]
     paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml', '!app/companion/docs/**', '!app/companion/README.md']
   pull_request:
     paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml', '!app/companion/docs/**', '!app/companion/README.md']
   workflow_dispatch:
+    inputs:
+      signed_release:
+        description: Build with the owner-controlled stable signing key (requires private repository secrets)
+        type: boolean
+        default: false
+      publish_beta:
+        description: Publish signed APK as a permanent public prerelease after all validation passes
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -63,7 +72,6 @@ jobs:
             app/companion/test-results/
           retention-days: 14
   apk:
-    needs: web
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -95,8 +103,8 @@ jobs:
       - run: chmod +x android/gradlew && cd android && node ../scripts/ci-run.mjs ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
       - run: |
           mkdir -p artifacts
-          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/observer-1.0.0-preview.apk
-          sha256sum artifacts/observer-1.0.0-preview.apk > artifacts/SHA256SUMS
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/observer-1.1.0-preview.apk
+          (cd artifacts && sha256sum observer-1.1.0-preview.apk > SHA256SUMS)
           printf '%s\n' 'PREVIEW ONLY: debug-signed, separate .preview package. Not a production/update-compatible release. Do not uninstall a production app to install this. Production needs an owner-controlled stable release key.' > artifacts/README.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -148,7 +156,7 @@ jobs:
           script: |
             adb shell wm size 1080x2400
             adb shell wm density 420
-            adb install app/companion/artifacts/observer-1.0.0-preview.apk
+            adb install app/companion/artifacts/observer-1.1.0-preview.apk
             adb shell am start -n in.observer.companion.preview/in.observer.companion.MainActivity
             cd app/companion && node e2e/android-smoke.mjs
       - uses: actions/upload-artifact@v4
@@ -157,3 +165,80 @@ jobs:
           name: companion-android-emulator
           path: app/companion/android-smoke-results/
           retention-days: 14
+
+  signed-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.signed_release
+    needs: [agent, web, apk, emulator]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app/companion
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6.4.0
+      - name: Prepare owner signing material privately
+        env:
+          KEYSTORE_B64: ${{ secrets.OBSERVER_ANDROID_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.OBSERVER_ANDROID_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.OBSERVER_ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.OBSERVER_ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::Owner signing secrets are not configured. No debug key/unsigned APK will be published as a signed release."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/observer-release.p12"
+      - run: npm ci --no-audit --no-fund && npm run build && npm run android:sync
+      - name: Build and verify owner-signed APK
+        env:
+          OBSERVER_KEYSTORE: ${{ runner.temp }}/observer-release.p12
+          OBSERVER_STORE_PASSWORD: ${{ secrets.OBSERVER_ANDROID_STORE_PASSWORD }}
+          OBSERVER_KEY_PASSWORD: ${{ secrets.OBSERVER_ANDROID_KEY_PASSWORD }}
+          OBSERVER_KEY_ALIAS: ${{ secrets.OBSERVER_ANDROID_KEY_ALIAS }}
+        run: |
+          cd android
+          node ../scripts/ci-run.mjs ./gradlew --no-daemon lintRelease assembleRelease
+          cd ..
+          mkdir -p signed-artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk signed-artifacts/observer-1.1.0.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs signed-artifacts/observer-1.1.0.apk > signed-artifacts/signer.txt
+          node scripts/verify-signer.mjs signed-artifacts/signer.txt
+          (cd signed-artifacts && sha256sum observer-1.1.0.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: observer-owner-signed-android
+          path: app/companion/signed-artifacts/
+          retention-days: 14
+      - name: Remove temporary private key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/observer-release.p12"
+  publish-beta:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_beta && inputs.signed_release
+    needs: signed-release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: observer-owner-signed-android
+          path: signed-artifacts
+      - name: Publish permanent beta, never silently replace an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          gh release create android-v1.1.0 --repo "$REPOSITORY" --target "$SOURCE_SHA" --prerelease --title 'Observer Android 1.1.0 Beta' --notes 'Owner-signed beta. Requires PC agent 3.10.0+. See source/docs for test scope, hardware/OS-push setup and limitations. No automatic action retries, silent permission changes or Play Store publication.' signed-artifacts/observer-1.1.0.apk signed-artifacts/SHA256SUMS signed-artifacts/signer.txt
