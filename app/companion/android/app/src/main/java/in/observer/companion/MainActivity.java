@@ -64,7 +64,10 @@ public final class MainActivity extends Activity {
     private final AtomicInteger cloudEpoch = new AtomicInteger();
     private volatile HttpURLConnection cloudConnection;
     private volatile String bridgeBase = "", bridgeToken = "";
-    private final ThreadPoolExecutor io = new ThreadPoolExecutor(3, 4, 20, TimeUnit.SECONDS, new ArrayBlockingQueue<>(12));
+    // Screen frames are slow (a Wayland portal shot can take seconds) and every
+    // tap goes through this pool, so it needs real headroom: 4 workers, 6 on
+    // burst, and a queue deep enough for a swipe's worth of requests.
+    private final ThreadPoolExecutor io = new ThreadPoolExecutor(4, 6, 20, TimeUnit.SECONDS, new ArrayBlockingQueue<>(48));
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -210,9 +213,28 @@ public final class MainActivity extends Activity {
                 final int generation = method.equals("pair") ? epoch.incrementAndGet() : epoch.get();
                 final int cloudGeneration = method.equals("configureCloud") ? cloudEpoch.incrementAndGet() : cloudEpoch.get();
                 if(java.util.Arrays.asList("readState","writeState","readPendingJobs","writePendingJobs").contains(method))stateIO.execute(()->execute(responseId,method,payload,generation,cloudGeneration));
-                else io.execute(() -> execute(responseId, method, payload, generation, cloudGeneration));
+                else dispatch(responseId, method, payload, generation, cloudGeneration);
             } catch (Exception e) { if (!id.isEmpty()) respond(id, null, e.getMessage() == null ? "Android request unavailable." : e.getMessage()); }
         }
+    }
+    /**
+     * Queue one PC request. A full pool used to throw
+     * RejectedExecutionException straight at the page ("Task ... rejected from
+     * java.util.concurrent.ThreadPoolExecutor..."), which read like a crash and
+     * silently killed input. Now it waits a moment and, if the pool is still
+     * saturated, says so in words the owner can act on.
+     */
+    private void dispatch(String id, String method, JSONObject p, int requestEpoch, int requestCloudEpoch) {
+        try { io.execute(() -> execute(id, method, p, requestEpoch, requestCloudEpoch)); return; }
+        catch (java.util.concurrent.RejectedExecutionException busy) { /* fall through to one retry */ }
+        new Thread(() -> {
+            try {
+                Thread.sleep(250);
+                io.execute(() -> execute(id, method, p, requestEpoch, requestCloudEpoch));
+            } catch (java.util.concurrent.RejectedExecutionException again) {
+                respond(id, null, "The phone is still finishing earlier PC requests. Try again in a second.");
+            } catch (InterruptedException e) { Thread.currentThread().interrupt(); respond(id, null, "Request interrupted."); }
+        }, "observer-bridge-retry").start();
     }
     private void execute(String id, String method, JSONObject p, int requestEpoch, int requestCloudEpoch) {
         try {

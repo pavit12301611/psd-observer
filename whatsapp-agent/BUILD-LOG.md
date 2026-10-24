@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.12.2 — input that survives a busy phone bridge (2026-10-25)
+
+- Owner report: "input nahi chal raha … yeh error aa raha hai `Task …AndroidBridge$$ExternalSyntheticLambda12@4eb295f rejected from java.util.concurrent.ThreadPoolExecutor[… pool size = 4, active threads = 4, queued tasks = 12 …]`". That message is the Android bridge's own pool refusing work: every `api.wire` in the app is one task on a 4-thread/12-slot pool, and the touchpad was firing a move every 24 ms — far faster than a phone round-trip. The queue filled, taps were rejected too, and each rejection hit `.catch(() => setInputEnabled(false))`, which switched manual input off and made the whole page look dead.
+- Fixes, all deliverable in the web bundle: pointer moves are now strictly one-in-flight with the rest of the swipe coalesced into the next request; a rejected move never disables input (it shows one throttled notice); `api.wire` keeps at most three native calls in flight, releases its slot before any retry, and retries a pool rejection once after 120 ms instead of surfacing the pool's internals; policy refusals (423/403) are still surfaced immediately and never retried.
+- Frame pacing is adaptive: the next frame is requested `max(1200, captureTime + 400) ms` later (2500 on low-data), because a GNOME portal screenshot can take seconds and asking sooner is what buried the pool.
+- The pointer marker's screen size now also travels in `GET /api/pc/state` (`screen: {width, height}` of the last frame). The native bridge forwards only the ETag header, so on the phone the `x-screen-width` path never arrived and trackpad moves could not move the marker; the app asks for state as soon as the first frame lands.
+- APK side (next install, not required for the above): bridge pool 4→6 threads and queue 12→48, `x-screen-width`/`x-screen-height` passed through, and a full pool now answers "The phone is still finishing earlier PC requests. Try again in a second." after one retry instead of throwing a pool dump at the page.
+- Tests: agent 606/606 (new state/screen assertion), companion 54/54 (new `native-gate` tests: max three in flight, rejection retried once, real refusals not retried).
+
 ## 3.12.1 — the pointer is back in the picture (2026-10-25)
 
 - The complaint was exact: "screenshot mein pointer dikhta hi nahi hai jaise hide ho gaya ho". On GNOME Wayland the only working capture path is `xdg-desktop-portal`, and the portal never draws the pointer — so the owner was clicking blind. The genuine system-pointer capture is fixed where the tools allow it, and the phone now draws its own marker so Wayland owners get the same information.

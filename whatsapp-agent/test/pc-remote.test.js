@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createBridgeServer, readCrop } from '../src/server.js';
-import { captureArgs, gnomeShellCaptureArgs, parseLockedHint, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
+import { captureArgs, gnomeShellCaptureArgs, parseLockedHint, parsePointerLocation, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
 import { Store } from '../src/store.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -56,6 +56,46 @@ test('pc/state: reports lock, display and busy without ever exposing a password'
   assert.equal(body.accessLevel, 'full');
   assert.equal(calls.state, 1);
   assert.equal((await f.get('/api/pc/state', {})).status, 401, 'state is not public');
+});
+
+test('pc/state: carries the screen size a pointer marker needs, and never invents one', async (t) => {
+  const f = await bridgeFor(t, {
+    system: { state: async () => ({ session: 'wayland', graphical: true, locked: false }) },
+    screen: { capture: async () => fakePng(1920, 1080) },
+  });
+  // Before the first frame there is nothing honest to report.
+  assert.equal((await (await f.get('/api/pc/state')).json()).screen, null);
+  assert.equal((await f.get('/api/screen?w=960')).status, 200);
+  const body = await (await f.get('/api/pc/state')).json();
+  assert.deepEqual(body.screen, { width: 1920, height: 1080 });
+});
+
+test('pc/pointer: reports the real cursor where the desktop can, never a guess', async (t) => {
+  const known = await bridgeFor(t, {
+    system: { pointer: async () => ({ known: true, x: 960, y: 540 }) },
+    screen: { capture: async () => fakePng(1920, 1080) },
+  });
+  await known.get('/api/screen?w=960');
+  const body = await (await known.get('/api/pc/pointer')).json();
+  assert.equal(body.known, true);
+  assert.equal(body.x, 960);
+  assert.deepEqual(body.screen, { width: 1920, height: 1080 });
+
+  const unknown = await bridgeFor(t, {
+    system: { pointer: async () => ({ known: false, reason: 'Wayland does not let an app read the pointer position' }) },
+  });
+  const no = await (await unknown.get('/api/pc/pointer')).json();
+  assert.equal(no.known, false);
+  assert.match(no.reason, /Wayland/);
+  assert.equal(no.screen, null);
+  assert.equal((await unknown.get('/api/pc/pointer', {})).status, 401, 'pointer is not public');
+});
+
+test('parsers: xdotool pointer output is read strictly', () => {
+  assert.deepEqual(parsePointerLocation('X=960\nY=540\nSCREEN=0\nWINDOW=1'), { x: 960, y: 540 });
+  assert.equal(parsePointerLocation('X=abc\nY=540'), null);
+  assert.equal(parsePointerLocation('nothing here'), null);
+  assert.equal(parsePointerLocation('X=-4\nY=10'), null);
 });
 
 test('pc/state: an unavailable desktop is a 503 with a reason, not a silent empty object', async (t) => {

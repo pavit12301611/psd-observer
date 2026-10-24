@@ -151,6 +151,7 @@ export function createBridgeServer({
     wake: () => pc.wakeDisplay(),
     clipboardRead: () => pc.clipboardRead(),
     clipboardWrite: (text) => pc.clipboardWrite(text),
+    pointer: (options) => pc.pointerPosition(options),
   };
   let mobile = null;
   try { mobile = createMobilePlatform({ config, app, runOwner, voice, normalise: replyForApp, solve: solveJob }); }
@@ -715,8 +716,21 @@ export function createBridgeServer({
             accessLevel: config.accessLevel,
             busy: Boolean(app?.busy?.() || mobile?.jobs.active),
             activeJobs: activeJobCount(),
+            // Real screen pixels of the last frame. The phone needs this to place
+            // its pointer marker, and the native bridge only forwards the ETag
+            // header, so it travels in JSON rather than in x-screen-* headers.
+            screen: lastFrameSize && lastFrameSize.width && lastFrameSize.height ? { ...lastFrameSize } : null,
             ...(error ? { detail: error } : {}),
           });
+        }
+        case 'GET /api/pc/pointer': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          let point = null;
+          try { point = await sys.pointer?.(); } catch (err) { point = { known: false, reason: err.message }; }
+          point = point || { known: false, reason: 'pointer position is unavailable' };
+          // Absolute phone pixels need the screen size, so the last frame's size
+          // travels with the answer whenever we know it.
+          return json(res, 200, { ...point, screen: lastFrameSize ? { ...lastFrameSize } : null });
         }
         case 'POST /api/pc/display': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });

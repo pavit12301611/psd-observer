@@ -35,6 +35,7 @@ function fixture(page: Page) {
     accessLevel: "full",
     busy: false,
     activeJobs: 0,
+    screen: { width: 1920, height: 1080 },
   };
   const install = () =>
     page.route("**/bridge/**", async (route) => {
@@ -68,6 +69,13 @@ function fixture(page: Page) {
       if (path === "/api/app/workflows") return json({ workflows: [] });
       if (path === "/api/app/jobs") return json({ jobs: [] });
       if (path === "/api/pc/state") return json(pcState);
+      if (path === "/api/pc/pointer")
+        return json({
+          known: true,
+          x: 960,
+          y: 540,
+          screen: { width: 1920, height: 1080 },
+        });
       if (path === "/api/clipboard")
         return route.request().method() === "POST"
           ? json({ ok: true, chars: String(body.text || "").length })
@@ -198,6 +206,10 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   });
   expect(JSON.stringify(probe)).toContain('"usable":[');
   const point = (probe as { usable: number[] }).usable;
+  // The marker starts at the PC's real pointer, which X11 can report.
+  const ghost = page.locator(".pc-cursor");
+  await expect(ghost).toBeVisible();
+  const beforeDrag = (await ghost.boundingBox())!;
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(point[0], point[1]);
   await page.mouse.down();
@@ -208,6 +220,12 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   await expect
     .poll(() => f.requests.filter((r) => r.path === "/api/pointer").length)
     .toBeGreaterThan(0);
+  // The move requests must not stack up: one in flight at a time.
+  expect(f.requests.filter((r) => r.path === "/api/pointer").length).toBeLessThan(12);
+  // Dragging the pad moves the real pointer, so the marker must follow it.
+  await expect
+    .poll(async () => (await ghost.boundingBox())?.x ?? 0)
+    .toBeGreaterThan(beforeDrag.x + 1);
   expect(await page.evaluate(() => window.scrollY)).toBe(before);
 });
 

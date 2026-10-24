@@ -163,6 +163,19 @@ export function moveCursorBy(
   };
 }
 
+/** Absolute pointer pixels → 0-1000 screen units (null when size is unknown). */
+export function pixelToUnit(
+  point: { x: number; y: number },
+  screen: Size | null,
+): Center | null {
+  if (!screen || screen.width <= 0 || screen.height <= 0) return null;
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+  return {
+    x: Math.min(1000, Math.max(0, (point.x / screen.width) * 1000)),
+    y: Math.min(1000, Math.max(0, (point.y / screen.height) * 1000)),
+  };
+}
+
 /**
  * Where to draw the marker inside the stage: the image is letterboxed with
  * `object-fit: contain` and may be a crop of the screen, so both mappings have

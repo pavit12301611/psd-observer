@@ -1252,3 +1252,37 @@ export async function cropFrame(buffer, box, { maxWidth = 1920 } = {}) {
     return { image: out, mime: 'image/jpeg', box: { left, top, width, height } };
   } catch { return null; }
 }
+
+/**
+ * Where is the pointer right now?
+ *
+ * Only X11 (and XWayland-aware stacks) can answer: `xdotool getmouselocation`
+ * reads the real cursor, so the phone can place its marker exactly without
+ * waiting for a tap. GNOME Wayland answers nothing — there is no query API —
+ * and this says so instead of guessing a coordinate.
+ */
+export function parsePointerLocation(output) {
+  const x = /(?:^|\n)X=(-?\d+)/.exec(String(output ?? ''));
+  const y = /(?:^|\n)Y=(-?\d+)/.exec(String(output ?? ''));
+  if (!x || !y) return null;
+  const px = Number(x[1]), py = Number(y[1]);
+  if (!Number.isFinite(px) || !Number.isFinite(py) || px < 0 || py < 0) return null;
+  return { x: px, y: py };
+}
+
+export async function pointerPosition(env = displayEnv()) {
+  const session = sessionInfo(env);
+  if (!session.graphical) return { known: false, reason: 'no graphical session' };
+  try {
+    const out = await run('xdotool', ['getmouselocation', '--shell'], { timeout: 4_000 });
+    const point = parsePointerLocation(out);
+    return point ? { known: true, ...point } : { known: false, reason: 'unparsable pointer location' };
+  } catch (err) {
+    return {
+      known: false,
+      reason: session.type === 'wayland'
+        ? 'Wayland does not let an app read the pointer position'
+        : String(err.stderr || err.message || 'xdotool unavailable').split('\n')[0],
+    };
+  }
+}

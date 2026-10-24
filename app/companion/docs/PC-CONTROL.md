@@ -110,3 +110,22 @@ capture tools are asked for it explicitly: `grim -c`, `scrot --silent -p`,
 `Screenshot(include_frame, include_cursor, file)` with `include_cursor=true`.
 `maim` draws it by default; ImageMagick's `import` and KDE Spectacle have no such
 switch, so there the marker is the only pointer you will see.
+
+## If input suddenly stops
+
+Two failure modes used to look identical — "the page is dead":
+
+1. **The agent is busy.** Every input route answers `423` while a job runs. The
+   page offers **Take over**, which sends `/stop` and waits for the job to
+   settle.
+2. **The phone's bridge is saturated.** The Android shell runs each HTTP call on
+   a small thread pool and *rejects* the surplus; the rejection text looks like
+   `Task …AndroidBridge… rejected from java.util.concurrent.ThreadPoolExecutor
+   [… queued tasks = 12 …]`. The bundle now prevents it: one pointer move in
+   flight (the rest of the swipe is coalesced), at most three PC requests at a
+   time, one silent retry after 120 ms, and adaptive frame pacing
+   (`max(1200, captureTime + 400) ms`). A rejected move never turns input off.
+
+On the PC side, `GET /api/pc/state` also reports `screen: {width, height}` of the
+last frame, so the pointer marker keeps working where the native bridge forwards
+only the ETag header.

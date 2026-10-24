@@ -33,6 +33,7 @@ import {
   frameQuery,
   moveCursorBy,
   panCenter,
+  pixelToUnit,
   pointToScreen,
   retryDelay,
   visibleRegion,
@@ -150,11 +151,16 @@ export default function PCControl({
       origin: { x: number; y: number } | null;
     } | null>(null),
     lastTap = useRef({ at: 0, x: 0, y: 0 }),
-    padSentAt = useRef(0),
-    padCarry = useRef({ x: 0, y: 0 });
+    pointerBusy = useRef(false),
+    pointerNoticeAt = useRef(0),
+    padCarry = useRef({ x: 0, y: 0 }),
+    captureMs = useRef(0),
+    screenPxRef = useRef<Size | null>(null),
+    pointerPixels = useRef<{ x: number; y: number } | null>(null);
 
   active.current = connected;
   view.current = { zoom, center };
+  screenPxRef.current = screenPx;
   const busyAgent = Boolean(state?.active.length || pc?.busy);
 
   useEffect(() => {
@@ -267,9 +273,15 @@ export default function PCControl({
     let cancelled = false,
       timer: ReturnType<typeof setTimeout>;
     const loop = async () => {
+      const startedAt = Date.now();
       await capture();
-      if (!cancelled && alive.current)
-        timer = setTimeout(loop, lowData ? 2500 : 1200);
+      captureMs.current = Date.now() - startedAt;
+      // Wait for the PC's own capture time plus a little air. A portal
+      // screenshot can take seconds on Wayland, and asking again before it
+      // finished is what buried the phone's request pool.
+      const base = lowData ? 2500 : 1200;
+      const wait = Math.max(base, Math.min(6000, captureMs.current + 400));
+      if (!cancelled && alive.current) timer = setTimeout(loop, wait);
     };
     void loop();
     return () => {
@@ -339,12 +351,59 @@ export default function PCControl({
       const next = await api.get<PcState>("/api/pc/state");
       if (!alive.current) return;
       setPc(next);
+      if (next.screen && next.screen.width > 0 && next.screen.height > 0)
+        setScreenPx({ width: next.screen.width, height: next.screen.height });
       setPcError("");
     } catch (e) {
       if (!alive.current) return;
       setPcError(e instanceof Error ? e.message : "PC state unavailable");
     }
   }, [connected]);
+
+  // X11 can say where the cursor actually is, so the marker starts in the right
+  // place instead of waiting for a tap. Wayland cannot answer; then the marker
+  // appears after the first tap and follows from there.
+  useEffect(() => {
+    if (!connected || !inputEnabled) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await api.get<{
+          known: boolean;
+          x?: number;
+          y?: number;
+          screen?: Size | null;
+        }>("/api/pc/pointer");
+        if (cancelled || !r.known || r.x == null || r.y == null) return;
+        if (r.screen && r.screen.width > 0 && r.screen.height > 0)
+          setScreenPx(r.screen);
+        const screen = r.screen && r.screen.width > 0 ? r.screen : screenPxRef.current;
+        const point = pixelToUnit({ x: r.x, y: r.y }, screen);
+        if (point) setCursor(point);
+        else pointerPixels.current = { x: r.x, y: r.y }; // wait for a screen size
+      } catch {
+        /* No pointer query on this desktop — the first tap seeds the marker. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, inputEnabled]);
+
+  useEffect(() => {
+    if (!screenPx || !pointerPixels.current) return;
+    const point = pixelToUnit(pointerPixels.current, screenPx);
+    pointerPixels.current = null;
+    if (point) setCursor(point);
+  }, [screenPx]);
+
+  // The bridge forwards only ETag headers, so the screen size a marker needs
+  // comes from /api/pc/state — ask again as soon as a frame exists.
+  useEffect(() => {
+    if (!lastFrameAt || screenPx) return;
+    void loadPcState();
+  }, [lastFrameAt, screenPx, loadPcState]);
 
   useEffect(() => {
     if (!connected) return;
@@ -398,6 +457,31 @@ export default function PCControl({
 
   function rightClick() {
     void send("/api/pointer", { op: "click", button: "right" });
+  }
+
+  /** Send the accumulated trackpad movement, one request at a time. */
+  function flushPointer() {
+    if (pointerBusy.current) return;
+    const move = padCarry.current;
+    if (!move.x && !move.y) return;
+    padCarry.current = { x: 0, y: 0 };
+    pointerBusy.current = true;
+    void api
+      .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
+      .catch((e) => {
+        // Keep input on: a busy bridge or a slow swipe is not a policy refusal.
+        const now = Date.now();
+        if (now - pointerNoticeAt.current > 4000) {
+          pointerNoticeAt.current = now;
+          notice(
+            e instanceof Error ? e.message : "Pointer move was not delivered",
+          );
+        }
+      })
+      .finally(() => {
+        pointerBusy.current = false;
+        if (padCarry.current.x || padCarry.current.y) flushPointer();
+      });
   }
 
   const setZoomKeepingCenter = (next: number) => {
@@ -969,17 +1053,12 @@ export default function PCControl({
                         x: Math.max(-200, Math.min(200, padCarry.current.x + dx)),
                         y: Math.max(-200, Math.min(200, padCarry.current.y + dy)),
                       };
-                      // One request per ~24ms keeps a slow ydotool call from
-                      // queueing a whole swipe behind the finger.
-                      if (Date.now() - padSentAt.current < 24) return;
-                      const move = padCarry.current;
-                      if (!move.x && !move.y) return;
-                      padCarry.current = { x: 0, y: 0 };
-                      padSentAt.current = Date.now();
-                      setCursor((c) => moveCursorBy(c, move.x, move.y, screenPx) ?? c);
-                      void api
-                        .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
-                        .catch(() => setInputEnabled(false));
+                      // Exactly one move in flight, with the rest of the swipe
+                      // coalesced into the next one. The old fixed 24ms timer
+                      // fired faster than a phone round-trip, so the Android
+                      // bridge pool filled up and rejected everything — taps
+                      // included. A dropped move must never disable input.
+                      flushPointer();
                     }}
                     onPointerUp={(e) => {
                       const el = e.currentTarget as HTMLElement;
@@ -1028,8 +1107,9 @@ export default function PCControl({
                     </button>
                   </div>
                   <p className="pc-muted">
-                    The arrow on the screen is your last input. GNOME never draws
-                    its own pointer into Wayland screenshots.
+                    {inputEnabled && !cursor
+                      ? "Tap the screen once: GNOME does not report where the pointer is, so the arrow appears after your first tap."
+                      : "The arrow on the screen is your last input. GNOME never draws its own pointer into Wayland screenshots."}
                   </p>
                   <div className="pc-row">
                     <span className="pc-muted">Nudge</span>

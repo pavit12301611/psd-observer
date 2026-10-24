@@ -166,6 +166,9 @@ export interface PcState {
   accessLevel?: string;
   busy?: boolean;
   activeJobs?: number;
+  /** Real pixels of the last captured frame; the phone needs them for its
+      pointer marker, because the native bridge only forwards the ETag header. */
+  screen?: { width: number; height: number } | null;
   detail?: string;
 }
 export interface PcUpdateCheck {

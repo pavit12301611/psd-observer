@@ -5,6 +5,7 @@ import {
   cursorMarkerPosition,
   frameQuery,
   moveCursorBy,
+  pixelToUnit,
   MAX_ZOOM,
   panCenter,
   pointToScreen,
@@ -157,5 +158,18 @@ describe("pointer marker", () => {
       }),
     ).toBeNull();
     expect(cursorMarkerPosition(null, rect, natural)).toBeNull();
+  });
+});
+
+describe("pointer seed", () => {
+  const screen = { width: 1920, height: 1080 };
+
+  it("turns the PC's absolute pointer pixels into screen units", () => {
+    expect(pixelToUnit({ x: 960, y: 540 }, screen)).toEqual({ x: 500, y: 500 });
+    expect(pixelToUnit({ x: 0, y: 0 }, screen)).toEqual({ x: 0, y: 0 });
+    expect(pixelToUnit({ x: 5000, y: -20 }, screen)).toEqual({ x: 1000, y: 0 });
+    // No screen size, no honest answer.
+    expect(pixelToUnit({ x: 10, y: 10 }, null)).toBeNull();
+    expect(pixelToUnit({ x: Number.NaN, y: 10 }, screen)).toBeNull();
   });
 });
