@@ -1,4 +1,4 @@
-> Historical 3.9.1 audit narrative. The current 3.9.2 mobile bridge adds separately tested APIs; see `../app/companion/README.md` for Android scope and current build results. Generated `audits/deep-audit.*` may reflect a newer source tree; do not treat the original numbers below as Android validation.
+> Historical 3.9.1 audit narrative. The 3.10.0 mobile feature pack adds separately tested APIs; see `../app/companion/README.md` for Android scope and current build results. The generated audit reflects current backend/legacy-browser JS, not the React/Java client. Generated `audits/deep-audit.*` may reflect a newer source tree; do not treat the original numbers below as Android validation.
 
 # Deep testing — 3.9.1 candidate
 

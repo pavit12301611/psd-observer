@@ -23,6 +23,8 @@
 import http from 'node:http';
 import os from 'node:os';
 import { createAppMedia } from './appbridge.js';
+import { createMobilePlatform } from './mobile/platform.js';
+import { mobileRoute } from './mobile/routes.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -49,6 +51,9 @@ const STATIC = {
   '/index.html': ['index.html', 'text/html; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/desktop': ['desktop.html', 'text/html; charset=utf-8'],
+  '/desktop.js': ['desktop.js', 'text/javascript; charset=utf-8'],
+  '/desktop.css': ['desktop.css', 'text/css; charset=utf-8'],
   '/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
   '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
 };
@@ -99,6 +104,7 @@ export function replyForApp(reply) {
     out.audio = dataUrl(reply.audio, reply.mimetype ?? 'audio/ogg');
     out.audioMimetype = reply.mimetype;
   }
+  if (typeof reply.spoken === 'string') out.spoken = reply.spoken.slice(0,2200);
   if (reply.poll) out.text = `📊 ${reply.poll.name}\n${reply.poll.values.map((v) => `• ${v}`).join('\n')}`;
   return out;
 }
@@ -120,11 +126,30 @@ export function createBridgeServer({
   // screenshots per request is explicit and measurable.
   screen = null, app = null,
 }) {
+  let mobile = null;
+  try { mobile = createMobilePlatform({ config, app, runOwner, voice, normalise: replyForApp, solve: solveJob }); }
+  catch { log.error?.('[mobile] Private mobile state could not be loaded; new mobile APIs fail closed. Existing owner commands are still available.'); }
+  async function solveJob(input) {
+    const upload = input.upload, buffer = Buffer.from(upload.base64, 'base64');
+    const mime = upload.mime, document = mime === 'application/pdf' || /\.(pdf|docx|txt)$/i.test(upload.name);
+    if (!config.downloadsDir) throw new Error('Downloads folder is not configured');
+    fs.mkdirSync(config.downloadsDir, { recursive: true, mode: 0o700 });
+    const clean = String(upload.name).replace(/[^\w.\- ]/g, '_'), name = `${Date.now()}-${crypto.randomBytes(5).toString('hex')}-${clean}`;
+    const savedPath = path.join(config.downloadsDir, name);
+    fs.writeFileSync(savedPath, buffer, { mode: 0o600, flag: 'wx' });
+    store.addDownload?.({ file: name, kind: document ? 'document' : 'image', ts: Date.now(), caption: input.text });
+    const result = document ? await solver.solveQuestionDocument(config, buffer, { fileName: name, mimeType: mime, caption: input.text, harness, log }) : await solver.solveQuestionImage(config, buffer, { caption: input.text, autoDetect: false, savedPath, harness, log });
+    if (!result.ok) return { ok: false, text: result.error || 'Solver could not complete. No automatic retry.' };
+    return { ok: true, text: result.text };
+  }
   const media = createAppMedia();
   const appReply = (reply) => media.shape(reply, replyForApp);
   const scr = screen ?? {
     capture: (opts) => pc.captureScreenshot(opts),
-    click: (x, y) => pc.click(x, y),
+    click: (x, y, button, repeat) => pc.click(x, y, button, repeat),
+    relative: (x,y) => pc.moveMouseRelative(x,y),
+    scroll: (direction,amount) => pc.scrollMouse(direction,amount),
+    drag: (x1,y1,x2,y2) => pc.dragMouse(x1,y1,x2,y2),
     key: (combo) => pc.keyCombo(combo),
     type: (text) => pc.typeText(text),
   };
@@ -132,15 +157,18 @@ export function createBridgeServer({
   // screenshots — important on Wayland, where every capture can pop the
   // portal's "share your screen" prompt.
   let lastFrameSize = null;
-  const authed = (req, url) => {
-    if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return false;
+  const principalFor = (req, url) => {
+    if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return null;
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     // Constant-time: a plain === leaks the token a byte at a time to anything
     // that can time requests on the LAN.
-    return [req.headers['x-bridge-token'], bearer, url.searchParams.get('t')]
-      .some((candidate) => candidate != null && safeEqual(candidate, config.bridgeToken));
+    const tokens = [req.headers['x-bridge-token'], bearer, url.searchParams.get('t')].filter((value) => typeof value === 'string');
+    if (tokens.some((candidate) => safeEqual(candidate, config.bridgeToken))) return { id: 'owner', name: 'PC owner', kind: 'owner' };
+    for (const value of tokens) { const device = mobile?.devices.authenticate(value); if (device) return device; }
+    return null;
   };
 
+  const authed = (req, url) => Boolean(principalFor(req, url));
   const loginAttempts = new Map(); // ip → {count, resetAt}
   function loginAllowed(ip) {
     const now = Date.now();
@@ -257,6 +285,18 @@ export function createBridgeServer({
         return res.end(png);
       }
 
+      if (route === 'POST /api/app/pair') {
+        if (!mobile) return json(res, 503, { detail: 'Private mobile journal unavailable; no pairing/jobs can be safely accepted. Repair PC mobile state without deleting owner data.' });
+        if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return json(res, 503, { detail: 'Bridge authentication is not configured' });
+        const ip = req.socket.remoteAddress || 'unknown';
+        if (!loginAllowed(ip)) return json(res, 429, { detail: 'Too many attempts. Wait five minutes.' });
+        const b = await readJsonBody(req);
+        const allowed = typeof b.code === 'string' ? mobile.devices.consumeCode(b.code) : typeof b.pin === 'string' && b.pin.length > 0 && safeEqual(b.pin, config.dashboardPin);
+        if (!allowed) { recordLogin(ip); return json(res, 401, { detail: 'Wrong PIN, or expired/used pairing QR. No device was paired.' }); }
+        if (b.serverId && b.serverId !== mobile.devices.serverId) return json(res, 409, { detail: 'QR belongs to another PC identity' });
+        const paired = mobile.devices.register(b); loginAttempts.delete(ip);
+        return json(res, 200, { ...paired, protocol: 2, capabilities: mobile.capabilities() });
+      }
       if (route === 'POST /api/login') {
         if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return json(res, 503, { detail: 'Bridge authentication is not configured' });
         const ip = req.socket.remoteAddress ?? 'unknown';
@@ -281,6 +321,7 @@ export function createBridgeServer({
         } catch { return json(res, 404, { detail: 'No QR right now — either already linked, or WhatsApp is still connecting.' }); }
       }
 
+      if (!mobile && !principalFor(req, url) && (req.headers['x-bridge-token'] || req.headers.authorization)) return json(res,503,{detail:'Private mobile state needs repair. The session was not invalidated and no request was replayed.'});
       if (!authed(req, url)) {
         return json(res, 401, { detail: 'Bridge token required (x-bridge-token header, Bearer, or the dashboard PIN via /api/login). It is printed when the agent starts.' });
       }
@@ -291,10 +332,11 @@ export function createBridgeServer({
         res.writeHead(200, { 'content-type': item.mime, 'content-length': item.buffer.length, 'content-disposition': `attachment; filename="${encodeURIComponent(item.name)}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
         return res.end(item.buffer);
       }
+      if (mobile && await mobileRoute({ req, res, url, principal: principalFor(req, url), platform: mobile, json, body: readJsonBody, runOwner })) return;
       switch (route) {
         case 'GET /api/app/state':
           if (!app) return json(res, 503, { detail: 'This agent has no structured mobile API. Update the PC agent.' });
-          return json(res, 200, { apiVersion: 1, version: VERSION, host: os.hostname(), platform: process.platform, pcControl: Boolean(config.allowPcControl), controlPinRequired: Boolean(config.controlPin), ...app.state() });
+          return json(res, 200, { apiVersion: 1, version: VERSION, host: os.hostname(), platform: process.platform, pcControl: Boolean(config.allowPcControl), controlPinRequired: Boolean(config.controlPin), capabilities: mobile?.capabilities() || { jobs: false, error: 'Mobile private-state repair required' }, serverId: mobile?.devices.serverId, ...app.state() });
         case 'POST /api/app/approval': {
           if (!app) return json(res, 503, { detail: 'Structured approvals unavailable. Update the PC agent.' });
           const body = await readJsonBody(req);
@@ -393,7 +435,7 @@ export function createBridgeServer({
           if (!voice) return json(res, 503, { detail: 'Voice engine is not wired in this build.' });
           if (config.voiceCall === false) return json(res, 403, { detail: 'Voice calls are off (VOICE_CALL=false).' });
           const body = await readJsonBody(req);
-          const started = await voice.start('app', body.sessionId ? String(body.sessionId) : null);
+          const started = await voice.start('app', body.sessionId ? String(body.sessionId) : null, { silent: body.silent === true });
           return json(res, 200, {
             ok: true,
             sessionId: started.sessionId,
@@ -475,7 +517,7 @@ export function createBridgeServer({
         }
 
         case 'POST /api/action': {
-          if (app?.busy?.()) return json(res, 423, { detail: 'Wait for the active agent task before starting another action.' });
+          if (app?.busy?.() || mobile?.jobs.active) return json(res, 423, { detail: 'Wait for the active agent task before starting another action.' });
           if (!actions) return json(res, 503, { detail: 'Actions are not ready yet.' });
           const body = await readJsonBody(req);
           const result = await actions.execute(String(body.name ?? ''), body.args ?? {}, { source: 'app' });
@@ -540,7 +582,7 @@ export function createBridgeServer({
           const body = await readJsonBody(req);
           if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
           if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
-          if (app?.busy?.()) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
+          if (app?.busy?.() || mobile?.jobs.active) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
           const rx = Number(body.x);
           const ry = Number(body.y);
           if (!Number.isFinite(rx) || !Number.isFinite(ry)) return json(res, 400, { detail: 'x and y are required (0-1000 relative, or pixels with relative:false)' });
@@ -569,12 +611,38 @@ export function createBridgeServer({
           return json(res, 200, { ok: true, x, y, width: size.width, height: size.height });
         }
 
+        case 'POST /api/drag': {
+          if (!config.allowPcControl || config.accessLevel === 'safe') return json(res,403,{detail:'Manual input is not permitted'});
+          if (app?.busy?.() || mobile?.jobs.active) return json(res,423,{detail:'Wait/stop the active agent operation first'});
+          const b=await readJsonBody(req);
+          if(config.controlPin&&!safeEqual(String(b.pin??''),config.controlPin))return json(res,403,{detail:'PC control PIN required.'});
+          if(!lastFrameSize||!scr.drag)return json(res,409,{detail:'Capture a current screenshot first; this input backend must support drag.'});
+          const points=[b.from,b.to];if(points.some(p=>!p||![p.x,p.y].every(Number.isFinite)||p.x<0||p.y<0||p.x>=1000||p.y>=1000))return json(res,400,{detail:'Bounded normalized screenshot coordinates required'});
+          const [a,z]=points.map(p=>({x:Math.min(lastFrameSize.width-1,Math.round(p.x/1000*lastFrameSize.width)),y:Math.min(lastFrameSize.height-1,Math.round(p.y/1000*lastFrameSize.height))}));
+          await scr.drag(a.x,a.y,z.x,z.y);return json(res,200,{ok:true});
+        }
+        case 'POST /api/pointer': {
+          if (!config.allowPcControl || config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input is not permitted by PC policy.' });
+          if (app?.busy?.() || mobile?.jobs.active) return json(res, 423, { detail: 'Wait/stop the active agent operation first.' });
+          const body = await readJsonBody(req);
+          if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
+          if (body.op === 'move') {
+            if (![body.dx,body.dy].every(Number.isFinite) || Math.abs(body.dx)>200 || Math.abs(body.dy)>200) return json(res,400,{detail:'Bounded deltas required'});
+            if (!scr.relative) return json(res,503,{detail:'Relative input unavailable'}); await scr.relative(body.dx,body.dy);
+          } else if (body.op === 'click') {
+            if (!['left','right'].includes(body.button)) return json(res,400,{detail:'Invalid button'}); await scr.click(undefined,undefined,body.button,1);
+          } else if (body.op === 'scroll') {
+            if (!['up','down','left','right'].includes(body.direction) || !Number.isInteger(body.amount) || body.amount<1 || body.amount>5) return json(res,400,{detail:'Invalid bounded scroll'});
+            if (!scr.scroll) return json(res,503,{detail:'Scroll unavailable'}); await scr.scroll(body.direction,body.amount);
+          } else return json(res,400,{detail:'Unsupported pointer operation'});
+          return json(res,200,{ok:true});
+        }
         case 'POST /api/key': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
           const body = await readJsonBody(req);
           if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
           if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
-          if (app?.busy?.()) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
+          if (app?.busy?.() || mobile?.jobs.active) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
           const key = String(body.key ?? '').trim();
           if (!key) return json(res, 400, { detail: 'key is required (e.g. "ctrl+l", "Return")' });
           await scr.key(key);
@@ -586,7 +654,7 @@ export function createBridgeServer({
           const body = await readJsonBody(req);
           if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
           if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
-          if (app?.busy?.()) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
+          if (app?.busy?.() || mobile?.jobs.active) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
           const text = String(body.text ?? '');
           if (!text) return json(res, 400, { detail: 'text is required' });
           await scr.type(text.slice(0, 4000));
@@ -800,11 +868,13 @@ export function createBridgeServer({
           log.info?.(`[bridge] phone app: http://${shownHost}:${config.port}/  (PIN: ${config.dashboardPin})`);
           log.info?.(`[bridge] direct link (keep private): http://${shownHost}:${config.port}/?t=${config.bridgeToken}`);
           log.info?.(`[bridge] token: ${config.bridgeToken}`);
+          mobile?.start();
           resolve(server);
         });
         server.on('error', (err) => log.error?.(`[bridge] server error: ${err.message}`));
       });
     },
-    stop() { media.clear(); server.close(); },
+    publish(message, type = 'agent_notice') { const text = typeof message === 'string' ? message : message?.text || 'Your PC agent has an update.'; return mobile?.events.publish(type, text); },
+    stop() { mobile?.stop(); media.clear(); server.close(); },
   };
 }

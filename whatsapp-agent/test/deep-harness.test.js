@@ -41,11 +41,12 @@ test('deep/harness: child environment drops live credentials, desktop access and
   assert.equal(env.HOME, path.join('/fixture', 'home')); assert.equal(env.TMPDIR, path.join('/fixture', 'tmp'));
 });
 
-test('deep/harness: accidental external fetches fail before a network connection', () => {
+test('deep/harness: accidental external fetches fail before a network connection', (t) => {
+  const fixture = fakeProject(t);
   const result = spawnSync(process.execPath, ['--import', path.join(root, 'scripts/test-sandbox.mjs'), '--input-type=module', '-e', `
     try { await fetch('https://provider.invalid/never-connect'); process.exitCode=9; }
     catch(e) { console.log(e.message); }
-  `], { cwd: root, env: testEnvironment('/fixture'), encoding: 'utf8', timeout: 2000 });
+  `], { cwd: root, env: testEnvironment(fixture), encoding: 'utf8', timeout: 2000 });
   assert.equal(result.status, 0); assert.match(result.stdout, /blocks external fetch/);
 });
 

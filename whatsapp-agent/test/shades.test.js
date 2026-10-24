@@ -296,7 +296,8 @@ test('shades: /shades routes end-to-end through createAgent.handle()', async () 
 test('shades: update announcement is armed for the current release (WhatsApp what\'s-new)', async () => {
   const u = await import('../src/updates.js');
   const version = u.packageVersion();
-  assert.ok(version >= '3.4.0', `version ${version}`);
+  const [major, minor] = version.split('.').map(Number);
+  assert.ok(major > 3 || major === 3 && minor >= 4, `version ${version}`);
   const changes = u.changesFor(version);
   assert.ok(changes.length >= 3, `announcement has bullets (${changes.length})`);
   assert.ok(changes.some((c) => /Shades|shades/i.test(c)), 'mentions shades');

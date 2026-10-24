@@ -1,73 +1,66 @@
-# Observer for Android — installable Preview
+# Observer Android 1.1 — verified Preview
 
-## Download
+## Download the new feature pack
 
-**[Download the Preview APK ZIP](https://github.com/pavit12301611/psd-observer/actions/runs/40010609637/artifacts/12526901125)**
+**[Download `observer-android-preview` ZIP](https://github.com/pavit12301611/psd-observer/actions/runs/40088988614/artifacts/12557804557)**
 
-GitHub sign-in may be required. The archive contains:
+GitHub sign-in may be needed. Extract it in Samsung **My Files** and install **`observer-1.1.0-preview.apk`**. The ZIP also contains an APK checksum/signing notice. Artifact expires **2026-11-07 11:13 UTC**; after expiry, rebuild from the verified branch, not unofficial mirrors.
 
-- `observer-1.0.0-preview.apk`
-- `SHA256SUMS` (checksum of the APK)
-- `README.txt` (preview/signing notice)
+[Successful native/web/backend run](https://github.com/pavit12301611/psd-observer/actions/runs/40088988614) · [Evidence](validation-ci.json) · [Private signing setup](SIGNING-SETUP.md)
 
-The Actions artifact expires **2026-11-06 19:24 UTC**. After expiry, rebuild from this branch with the `Android companion` workflow; do not download replacements from unofficial mirrors.
+This is a **debug-signed Preview**, not an owner-signed/Play Store release. Debug keys can change between runners; an installed older Preview may report a signature conflict. Preserve anything you need before changing test installations. Do not uninstall a production app to install this Preview. The owner-signed permanent release is blocked until private Actions secrets are configured; no debug APK will be mislabeled owner-signed.
 
-[Verified build and emulator run](https://github.com/pavit12301611/psd-observer/actions/runs/40010609637) · [Machine-readable evidence](validation-ci.json)
+## Update the PC first — 3.10.0+ required
 
-**Important:** this is a debug-signed, separate **Observer Preview** app (`in.observer.companion.preview`), not a production-signed/store release. Preview-to-preview updates may need uninstall because runner-generated debug signing keys can differ. Do not uninstall an existing production app to install this preview. Start with disposable test data.
+GitHub merge/source changes do not update an installed service automatically. This feature pack is currently on `arena/ffde9465-psd-observer`; it has not been merged to main or deployed to your real PC by this work.
 
-## On your Galaxy A53 5G
+Check the actual service directory and Node version on the PC:
 
-1. Download the ZIP in your browser while signed into GitHub if requested.
-2. Open Samsung **My Files**, extract the archive and tap `observer-1.0.0-preview.apk`.
-3. Review and approve Android's normal install-source/install prompts. Do not disable Play Protect or other device protections.
-4. Open **Observer Preview**. The default is a solid light theme; use the moon button or Settings for true-black/system mode.
-5. Choose **PC agent** mode for all owner tools, or configure optional **Direct AI** text chat with your own provider in the model picker. No API key is bundled or required just to explore the interface. Never paste keys or PINs in this conversation.
+```sh
+node -v
+systemctl --user show observer-whatsapp-agent -p WorkingDirectory --value
+```
 
-This build targets A53-sized layouts but has **not been tested on a physical Samsung device**. Android emulator evidence does not establish real One UI keyboard/audio/file-provider behaviour, battery life, thermals or 120Hz smoothness. Keep Android System WebView updated.
+Use supported Node 20.19+ within Node 20, 22.13+ within Node 22, or 24+. Preserve/private-backup `.env`, WhatsApp login and `data/`. Let active work settle before updating; restarting while a request runs marks its receipt unknown, never automatically replays it.
 
-## Connect the PC
+For an existing install at `$HOME/observer-agent`, review the script then use this candidate explicitly:
 
-Use **PC agent 3.9.2+** from branch `arena/9787e6e8-psd-observer`. The app rejects older/incompatible bridges at pairing rather than quietly bypassing missing policy features.
+```sh
+curl -fL --retry 3 \
+  https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/ffde9465-psd-observer/whatsapp-agent/scripts/observer.sh \
+  -o /tmp/observer-feature-pack.sh &&
+REPO=pavit12301611/psd-observer BRANCH=arena/ffde9465-psd-observer \
+  bash /tmp/observer-feature-pack.sh update --dir "$HOME/observer-agent"
+```
 
-The companion changes have not been merged into `main` or deployed to your PC automatically. Review the branch's agent update script and use the existing update process when you are ready. Updating/restarting the PC agent can interrupt work; let active tasks finish first. Preserve your private `.env`, WhatsApp login and `data/`.
+If the service directory differs, use its actual path; do not update a second copy accidentally. Verify `http://127.0.0.1:8787/health` on the PC reports **3.10.0+**. No updater command was run on your real PC by the assistant. The script's fresh-install fallback now tracks main, while explicit/sticky branch tracking still needs review when moving between candidates.
 
-For an existing installation, the branch-specific script is:
+## Pair / use
 
-<https://github.com/pavit12301611/psd-observer/blob/arena/9787e6e8-psd-observer/whatsapp-agent/scripts/observer.sh>
+1. Put phone and PC on a trusted LAN/private VPN. Prefer HTTPS or an encrypted VPN; never forward raw 8787 publicly.
+2. In the APK tap **Connect PC**, enter the actual PC origin (not phone localhost), and explicitly allow private-IP HTTP only if appropriate.
+3. Enter the dashboard PIN privately, or scan a fresh 2-minute QR generated on the PC at `http://localhost:8787/desktop` (open this URL on the PC, not the phone). A one-time QR contains no permanent bridge credential.
+4. Pairing checks health/version/protocol and saves a revocable per-device token using Android Keystore. If using a retained legacy root-token session, re-pair for individual revocation; rotate compromised legacy tokens separately.
+5. Start with `/time`, then an ordinary text question. Long AI replies use retained jobs; if the app/network interrupts, **Tasks → View result**, not blindly Send again.
+6. Manual input is opt-in. CONTROL_PIN, safe access, active-operation barriers and native OS permissions still apply. Stop cannot retract an already-started physical effect.
 
-The updater supports `BRANCH=arena/9787e6e8-psd-observer` for selecting this candidate. See the [agent quick start](../../../whatsapp-agent/QUICKSTART.md) and review commands before running them; no update command was executed on your real PC during this work.
+## Find the new tools
 
-Once the new PC agent is running:
+**Settings → Projects, routines, alerts & device security** (also Workspace tools in the drawer/sidebar):
 
-1. Keep the phone and PC on the same Wi-Fi, or use an authenticated private VPN/HTTPS endpoint. **Never expose the raw agent port publicly.**
-2. Tap **Connect PC** and enter the bridge origin printed by your PC, for example `http://192.168.1.20:8787`.
-3. For HTTP, explicitly tick the trusted private LAN/VPN option. It is not application-layer encryption; prefer HTTPS or an encrypted VPN. Public HTTP, localhost, token URLs and credential-bearing origins are blocked.
-4. Enter the **dashboard PIN** from the PC agent console. It is not saved. Android stores the resulting credential using Keystore-backed encryption.
-5. PC input is off by default. In **PC control**, request a screen preview, enable manual input deliberately and supply the separate `CONTROL_PIN` if configured.
-6. Sensitive agent actions appear in **Tasks** for exact-request approval. They cannot be approved in parallel with an active agent operation. If a connection fails, inspect the PC/task state before repeating anything.
+- Projects and selected memory/export; private text context excludes global owner prompt facts. Explicit commands/voice remain owner-wide, not sandboxed.
+- Validated routines: preview, save, explicit Run or daily trigger. No arbitrary shell, nested flow or auto-confirm. Missed/busy schedules are skipped.
+- Device list/revocation, one-time QR and optional LAN discovery. No automatic firewall setting changes.
+- Private SSE alerts with persistent notification. Android/One UI/Doze may pause this link. Optional OS-push registration needs your own client project and private PC service-account setup; no live delivery is claimed before configuration/testing.
+- Android biometric/device-credential access gate. Android handles the credential; Observer never receives your actual phone PIN/fingerprint.
+- Wake-on-LAN on local Wi-Fi for supported hardware. Sent packet does not prove wake.
 
-The PC must be awake, reachable, running the agent and have the required OS capture/input permissions. No login, sudo/UAC, secure-screen or Wayland-portal bypass is provided. App pairing is not proof that every native PC tool is installed or permitted.
+**PC control:** screenshot preview plus opt-in touchpad/right-click/scroll, supported screenshot dragging, and **Live desktop**. On the PC sharing page, explicitly choose a monitor/window through browser/OS consent. No audio/recording; LAN/private VPN by default, no TURN relay. Do not disable firewall or open arbitrary public UDP ports to force video through.
 
-## What's ready in this Preview
+**Chat:** Share-to-Observer imports reviewed drafts. Shared text is treated as read-only reference data, not executable slash commands/approvals. Crop/markup changes only a pending image until Send. Voice offers partial captions, foreground turn-taking and explicit interruption; no hidden always-on microphone. Android widgets/Quick Settings open the app/features and do not silently execute commands.
 
-- Monochrome light/true-black UI; no gradients; five navigation sections.
-- 157 searchable commands from the actual agent HELP, drafting only until Send.
-- Chat, local conversations/search, Markdown, copy/read-aloud, uploads and generated-file downloads.
-- Authenticated screenshot preview, opt-in touch/keyboard input, live task state, exact-request approvals and Stop.
-- Native encrypted credentials/history, system file picker/save flow, dictation/TTS and deliberate PC voice sessions.
-- Optional Android-only direct-provider text chat. Charges/limits apply; not a bundled offline model or a claim of Grok/Claude-level intelligence. Live provider inference was not tested with real keys.
-- Official Android-release checks that open release notes for a user-approved installation; no silent updater.
+## Safety / verification boundaries
 
-**Still not implemented/verified:** Android background push, continuous video/WebRTC, on-device LLMs, unrestricted phone-wide automation, production signing/Play Store release, and physical Galaxy A53 integration/performance. WhatsApp-specific calls/sends/guest messaging still need a linked WhatsApp channel. Long-term owner memory/action context remains shared with the PC agent; PANIC on the PC does not erase the phone/provider/backup copies—clear local conversations separately when needed.
+The verified run includes 42 frontend tests, 61 browser passes plus four intentional layout skips of the once-run synthetic WebRTC protocol case, 590 backend tests per Node 20/22/24, Android build/lint/JVM tests and native abort recovery/share/alert/privacy/device-credential checks. No actual PC desktop input, physical Galaxy A53 battery/thermal/120Hz benchmark, real fingerprint/mic/camera/NSD/WoL integration, real AI-provider key inference or live FCM test was performed.
 
-## Validation
-
-- 37 frontend unit/component tests; 45 browser fixture scenarios across five layouts.
-- PC agent: 571/571 tests on Node 20, 22 and 24 in GitHub Actions.
-- 18/18 selected mutation checks locally; not whole-program mutation coverage.
-- Android compilation, lint, Java policy-test task and emulator smoke: passed.
-- Production JS: approximately 414 kB uncompressed, lazy-loaded; no bundled large model/WASM/runtime.
-- Physical phone and real PC/provider tests: **not performed**.
-
-The sandbox cannot retrieve the artifact from GitHub's separate binary-storage host; use the official download link above in your browser. The APK was built and uploaded by the successful GitHub job, not fabricated or merely renamed from a web build.
+WhatsApp-specific calls/sends/guest messaging still require a linked WhatsApp channel. Private mobile journals/memories are additional PC data; clearing phone history or existing PANIC does not securely erase PC/provider/backup copies. Shades remains explicit-only `/shades off`. No automatic approval/action replay, global phone automation, bundled offline LLM, Play Store release or production deployment is claimed.

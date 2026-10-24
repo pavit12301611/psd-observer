@@ -29,6 +29,7 @@ public final class OriginPolicy {
         if (!path.matches("^/api/[a-zA-Z0-9/_-]+(?:\\?[^#]*)?$") || path.contains("..") || path.indexOf('\\') >= 0 || path.indexOf('\r') >= 0 || path.indexOf('\n') >= 0 || path.startsWith("/api/login")) throw new Exception("Unsafe API path blocked.");
         return path;
     }
+    public static boolean mobileVersion(String version){try{String[] p=version.split("\\.");int major=Integer.parseInt(p[0]),minor=Integer.parseInt(p[1]);return major>3||major==3&&minor>=10;}catch(Exception e){return false;}}
     public static boolean external(String url) {
         try { URI u = new URI(url); return ("https".equals(u.getScheme()) || "http".equals(u.getScheme())) && u.getHost() != null && u.getUserInfo() == null; } catch (Exception e) { return false; }
     }

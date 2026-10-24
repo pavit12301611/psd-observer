@@ -26,6 +26,7 @@ android {
             if (System.getenv('OBSERVER_KEYSTORE')) {
                 signingConfig signingConfigs.create('ownerRelease') {
                     storeFile file(System.getenv('OBSERVER_KEYSTORE'))
+                    storeType 'PKCS12'
                     storePassword System.getenv('OBSERVER_STORE_PASSWORD')
                     keyAlias System.getenv('OBSERVER_KEY_ALIAS')
                     keyPassword System.getenv('OBSERVER_KEY_PASSWORD')
@@ -36,4 +37,8 @@ android {
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     lint { abortOnError true; checkReleaseBuilds true }
 }
-dependencies { testImplementation 'junit:junit:4.13.2' }
+dependencies {
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    implementation 'com.google.firebase:firebase-messaging:24.1.1'
+    testImplementation 'junit:junit:4.13.2'
+}

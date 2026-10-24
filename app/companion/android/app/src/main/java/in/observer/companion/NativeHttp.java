@@ -14,7 +14,7 @@ final class NativeHttp {
     static final int MAX_RESPONSE = 24 * 1024 * 1024;
     static HttpURLConnection connection(String url, String method, String token) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(15_000); c.setReadTimeout(220_000); c.setInstanceFollowRedirects(false);
+        c.setConnectTimeout(15_000); c.setReadTimeout(20_000); c.setInstanceFollowRedirects(false);
         c.setRequestMethod(method); c.setUseCaches(false); c.setRequestProperty("Accept", "application/json, image/*, application/octet-stream");
         c.setRequestProperty("User-Agent", "ObserverCompanion/1.0 Android");
         if (token != null && !token.isEmpty()) c.setRequestProperty("x-bridge-token", token);
@@ -29,7 +29,11 @@ final class NativeHttp {
         }
     }
     static JSONObject request(String url, String method, String token, JSONObject body, boolean binary, String etag) throws Exception {
+        return request(url,method,token,body,binary,etag,20000);
+    }
+    static JSONObject request(String url, String method, String token, JSONObject body, boolean binary, String etag, int timeout) throws Exception {
         HttpURLConnection c = connection(url, method, token);
+        c.setReadTimeout(Math.max(3000,Math.min(30000,timeout)));
         try {
             if (etag != null && !etag.isEmpty()) c.setRequestProperty("If-None-Match", etag);
             if (body != null && method.equals("POST")) {

@@ -44,11 +44,15 @@ public final class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private static final int PICK_FILE = 31, SAVE_FILE = 32, MIC_PERMISSION = 33;
     private volatile boolean foreground = true;
+    private PhoneFeatures phone; private AppLock appLock;
+    private View customView; private WebChromeClient.CustomViewCallback customViewCallback;
+    private final java.util.concurrent.ExecutorService stateIO = java.util.concurrent.Executors.newSingleThreadExecutor();
     private WebView web;
     private FrameLayout root;
     private SecureVault vault;
     private TextToSpeech speech;
     private boolean speechReady = false;
+    private volatile String speechRequestId;
     private SpeechRecognizer recognizer;
     private String recognitionId;
     private ValueCallback<Uri[]> fileChooser;
@@ -65,13 +69,13 @@ public final class MainActivity extends Activity {
         super.onCreate(saved);
         vault = new SecureVault(this);
         try { String value = vault.get("profile"); if (value != null) { JSONObject p = new JSONObject(value); bridgeBase = OriginPolicy.base(p.getString("baseUrl"), p.optBoolean("allowLan")); bridgeToken = p.getString("token"); } }
-        catch (Exception e) { bridgeBase = ""; bridgeToken = ""; vault.remove("profile"); vault.remove("state"); }
+        catch (Exception e) { bridgeBase = ""; bridgeToken = ""; vault.remove("profile"); vault.remove("state"); vault.remove("pendingJobs"); }
         root = new FrameLayout(this); root.setBackgroundColor(Color.WHITE); setContentView(root);
         web = new WebView(this); web.setBackgroundColor(Color.WHITE); root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
             root.setOnApplyWindowInsetsListener((v, insets) -> {
-                Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 Insets ime = insets.getInsets(WindowInsets.Type.ime());
                 v.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom)); return insets;
             });
@@ -98,7 +102,14 @@ public final class MainActivity extends Activity {
             }
             // Never override SSL errors to proceed. The platform default cancels.
         });
+        phone = new PhoneFeatures(this,vault,this::respond);
+        appLock = new AppLock(this,vault,root,web,()->web.evaluateJavascript("window.dispatchEvent(new Event('observer-unlocked'));",null));
         web.setWebChromeClient(new WebChromeClient() {
+            @Override public void onShowCustomView(View view,CustomViewCallback callback){
+                if(customView!=null){callback.onCustomViewHidden();return;}customView=view;customViewCallback=callback;root.addView(view,new FrameLayout.LayoutParams(-1,-1));web.setVisibility(View.INVISIBLE);
+                if(Build.VERSION.SDK_INT>=30)getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
+            }
+            @Override public void onHideCustomView(){hideCustomView();}
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileChooser != null) fileChooser.onReceiveValue(null); fileChooser = callback;
                 Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
@@ -109,6 +120,12 @@ public final class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new AndroidBridge(), "ObserverAndroid");
         speech = new TextToSpeech(this, status -> speechReady = status == TextToSpeech.SUCCESS);
+        speech.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener(){
+            public void onStart(String utterance){}
+            public void onDone(String utterance){if(utterance.equals(speechRequestId)){speechRequestId=null;respond(utterance,true,null);}}
+            public void onStop(String utterance,boolean interrupted){if(utterance.equals(speechRequestId)){speechRequestId=null;respond(utterance,null,"Speech playback interrupted.");}}
+            public void onError(String utterance){if(utterance.equals(speechRequestId)){speechRequestId=null;respond(utterance,null,"Speech playback unavailable.");}}
+        });
         web.loadUrl("https://" + HOST + "/index.html");
     }
     private static String mime(String path) {
@@ -124,10 +141,11 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) { /* No credentials, text, tokens or PINs in logs. */ }
     }
     private void external(String url) { if (!OriginPolicy.external(url)) return; try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) {} }
-    private JSONObject profile() throws Exception { return bridgeToken.isEmpty() ? null : new JSONObject().put("baseUrl", bridgeBase).put("native", true); }
+    private JSONObject profile() throws Exception { if(bridgeToken.isEmpty())return null;JSONObject saved=new JSONObject(vault.get("profile"));return new JSONObject().put("baseUrl",bridgeBase).put("native",true).put("deviceId",saved.optString("deviceId")).put("serverId",saved.optString("serverId")).put("protocol",saved.optInt("protocol",1)); }
     private void stopSpeech() {
         if (recognizer != null) { recognizer.cancel(); recognizer.destroy(); recognizer = null; }
         if (recognitionId != null) { respond(recognitionId, null, "Speech capture stopped."); recognitionId = null; }
+        if (speechRequestId != null) {String id=speechRequestId;speechRequestId=null;respond(id,null,"Speech playback stopped.");}
         if (speech != null) speech.stop();
     }
     private void recognize(String id, String language) {
@@ -139,11 +157,11 @@ public final class MainActivity extends Activity {
         stopSpeech(); recognitionId = id;
         recognizer = SpeechRecognizer.createSpeechRecognizer(this);
         recognizer.setRecognitionListener(new RecognitionListener() {
-            public void onReadyForSpeech(Bundle b) {} public void onBeginningOfSpeech() {} public void onRmsChanged(float r) {} public void onBufferReceived(byte[] b) {} public void onEndOfSpeech() {} public void onPartialResults(Bundle b) {} public void onEvent(int t, Bundle b) {}
+            public void onReadyForSpeech(Bundle b) {} public void onBeginningOfSpeech() {} public void onRmsChanged(float r) {} public void onBufferReceived(byte[] b) {} public void onEndOfSpeech() {} public void onPartialResults(Bundle b) {if(!id.equals(recognitionId))return;ArrayList<String> words=b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);if(words!=null&&!words.isEmpty()){String text=words.get(0);web.evaluateJavascript("window.dispatchEvent(new CustomEvent('observer-speech-partial',{detail:"+JSONObject.quote(text.substring(0,Math.min(2000,text.length())))+"}));",null);}} public void onEvent(int t, Bundle b) {}
             public void onError(int code) { String responseId = id.equals(recognitionId) ? id : null; if (responseId != null) recognitionId = null; if (responseId != null) respond(responseId, null, "Speech recognition stopped (" + code + "). Check your provider, language and network."); }
             public void onResults(Bundle b) { String responseId = id.equals(recognitionId) ? id : null; if (responseId != null) recognitionId = null; ArrayList<String> list = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION); try { if (responseId != null) respond(responseId, new JSONObject().put("text", list == null || list.isEmpty() ? "" : list.get(0)), null); } catch (Exception ignored) {} }
         });
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, language).putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, language).putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true);
         recognizer.startListening(intent);
     }
     public final class AndroidBridge {
@@ -155,9 +173,14 @@ public final class MainActivity extends Activity {
                 if (!id.matches("[a-fA-F0-9-]{36}")) throw new Exception("Invalid request id.");
                 String method = packet.getString("method"); JSONObject p = packet.optJSONObject("payload"); if (p == null) p = new JSONObject();
                 final String responseId = id; final JSONObject payload = p;
+                if(appLock.isLocked() && !java.util.Arrays.asList("getLockState","unlock","appearance","deviceInfo","logout").contains(method)){respond(responseId,null,"Unlock Observer first.");return;}
+                if(method.equals("getLockState")){respond(responseId,new JSONObject().put("enabled",appLock.isEnabled()).put("locked",appLock.isLocked()),null);return;}
+                if(method.equals("unlock")){runOnUiThread(()->appLock.authenticate(()->respond(responseId,true,null),()->respond(responseId,null,"Unlock cancelled.")));return;}
+                if(method.equals("setAppLock")){runOnUiThread(()->appLock.change(payload.optBoolean("enabled"),()->respond(responseId,true,null),()->respond(responseId,null,"Device credential/biometric confirmation is required.")));return;}
+                if(java.util.Arrays.asList("consumeShare","scanQr","saveText","startAlerts","stopAlerts","appSettings","discover","configurePush").contains(method)){runOnUiThread(()->{try{phone.ui(responseId,method,payload);}catch(Exception e){respond(responseId,null,"Phone feature unavailable. Review permissions and try again.");}});return;}
                 if (method.equals("recognize")) { if (!foreground) throw new Exception("Open the app before using the microphone."); runOnUiThread(() -> recognize(responseId, payload.optString("language", "en-IN"))); return; }
                 if (method.equals("stopSpeech")) { runOnUiThread(() -> { stopSpeech(); respond(responseId, true, null); }); return; }
-                if (method.equals("speak")) { runOnUiThread(() -> { if (!foreground) { respond(responseId, null, "Playback is paused in the background."); return; } if (!speechReady) { respond(responseId, null, "Speech engine is not ready."); return; } speech.setLanguage(Locale.forLanguageTag(payload.optString("language", "en-IN"))); speech.speak(payload.optString("text").substring(0, Math.min(2400, payload.optString("text").length())), TextToSpeech.QUEUE_FLUSH, null, "observer"); respond(responseId, true, null); }); return; }
+                if (method.equals("speak")) { runOnUiThread(() -> { if (!foreground) { respond(responseId, null, "Playback is paused in the background."); return; } if (!speechReady) { respond(responseId, null, "Speech engine is not ready."); return; } speech.setLanguage(Locale.forLanguageTag(payload.optString("language", "en-IN"))); if(payload.optBoolean("wait"))speechRequestId=responseId;speech.speak(payload.optString("text").substring(0, Math.min(2400, payload.optString("text").length())), TextToSpeech.QUEUE_FLUSH, null, responseId);if(!payload.optBoolean("wait"))respond(responseId, true, null); }); return; }
                 if (method.equals("appearance")) { runOnUiThread(() -> { boolean dark = payload.optBoolean("dark"), protect = payload.optBoolean("screenPrivacy"); int color = dark ? Color.BLACK : Color.WHITE; root.setBackgroundColor(color); web.setBackgroundColor(color); getWindow().setStatusBarColor(color); getWindow().setNavigationBarColor(color); int flags = dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR; web.setSystemUiVisibility(flags); if (protect) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE); respond(responseId, true, null); }); return; }
                 if (method.equals("openExternal")) { String url = p.getString("url"); if (!OriginPolicy.external(url)) throw new Exception("Unsafe external link."); runOnUiThread(() -> { external(url); respond(responseId, true, null); }); return; }
                 if (method.equals("download")) { if (bridgeToken.isEmpty()) throw new Exception("Pair your PC first."); OriginPolicy.apiPath(p.getString("path")); runOnUiThread(() -> {
@@ -168,8 +191,8 @@ public final class MainActivity extends Activity {
                 }); return; }
                 if (method.equals("minimize")) { runOnUiThread(() -> moveTaskToBack(true)); respond(id, true, null); return; }
                 if (method.equals("logout")) {
-                    synchronized (sessionLock) { epoch.incrementAndGet(); bridgeToken = ""; bridgeBase = ""; vault.remove("profile"); vault.remove("state"); }
-                    runOnUiThread(MainActivity.this::stopSpeech); respond(responseId, true, null); return;
+                    synchronized (sessionLock) { epoch.incrementAndGet(); bridgeToken = ""; bridgeBase = ""; vault.remove("profile"); vault.remove("state"); vault.remove("pendingJobs"); }
+                    runOnUiThread(()->{stopSpeech();stopService(new Intent(MainActivity.this,AlertService.class));}); respond(responseId, true, null); return;
                 }
                 if (method.equals("clearCloud") || method.equals("cancelCloud")) {
                     synchronized (sessionLock) { cloudEpoch.incrementAndGet(); if (method.equals("clearCloud")) vault.remove("cloud"); }
@@ -177,13 +200,24 @@ public final class MainActivity extends Activity {
                 }
                 final int generation = method.equals("pair") ? epoch.incrementAndGet() : epoch.get();
                 final int cloudGeneration = method.equals("configureCloud") ? cloudEpoch.incrementAndGet() : cloudEpoch.get();
-                io.execute(() -> execute(responseId, method, payload, generation, cloudGeneration));
+                if(java.util.Arrays.asList("readState","writeState","readPendingJobs","writePendingJobs").contains(method))stateIO.execute(()->execute(responseId,method,payload,generation,cloudGeneration));
+                else io.execute(() -> execute(responseId, method, payload, generation, cloudGeneration));
             } catch (Exception e) { if (!id.isEmpty()) respond(id, null, e.getMessage() == null ? "Android request unavailable." : e.getMessage()); }
         }
     }
     private void execute(String id, String method, JSONObject p, int requestEpoch, int requestCloudEpoch) {
         try {
             switch (method) {
+                case "readPendingJobs": respond(id,vault.get("pendingJobs"),null);return;
+                case "writePendingJobs": {
+                    String value=p.getString("value");if(value.length()>64000||new JSONArray(value).length()>40)throw new Exception("Pending request budget exceeded.");
+                    synchronized(sessionLock){if(requestEpoch!=epoch.get())throw new Exception("Session changed.");vault.put("pendingJobs",value);}respond(id,true,null);return;
+                }
+                case "diagnose": {
+                    String base=OriginPolicy.base(p.getString("baseUrl"),p.optBoolean("allowLan"));JSONObject r=NativeHttp.request(base+"/health","GET",null,null,false,null,12000);JSONObject h=r.optJSONObject("json");
+                    respond(id,new JSONObject().put("reachable",r.optInt("status")==200).put("version",h==null?"unknown":h.optString("version")).put("service",h==null?"unknown":h.optString("service")),null);return;
+                }
+                case "wake": case "wakeProfile": case "pushStatus": phone.io(id,method,p);return;
                 case "restore": respond(id, profile(), null); return;
                 case "readState": respond(id, vault.get("state"), null); return;
                 case "writeState": {
@@ -192,17 +226,20 @@ public final class MainActivity extends Activity {
                 }
                 case "pair": {
                     int generation = requestEpoch; String base = OriginPolicy.base(p.getString("baseUrl"), p.optBoolean("allowLan"));
-                    String pin = p.getString("pin"); if (pin.isEmpty() || pin.length() > 128) throw new Exception("Invalid dashboard PIN.");
-                    JSONObject r = NativeHttp.request(base + "/api/login", "POST", null, new JSONObject().put("pin", pin), false, null);
-                    JSONObject data = r.optJSONObject("json"); if (r.getInt("status") != 200 || data == null || data.optString("token").trim().isEmpty()) throw new Exception(data == null ? "PC login failed." : data.optString("detail", "PC login failed."));
-                    JSONObject capabilityResponse = NativeHttp.request(base + "/api/app/state", "GET", data.getString("token"), null, false, null);
-                    JSONObject capability = capabilityResponse.optJSONObject("json");
-                    if (capabilityResponse.optInt("status") != 200 || capability == null || capability.optInt("apiVersion") != 1 || capability.optJSONArray("active") == null || capability.optJSONArray("pending") == null) throw new Exception("Update the PC agent to 3.9.2+ before pairing. Scoped mobile API version 1 is required.");
-                    synchronized (sessionLock) { if (generation != epoch.get()) throw new Exception("Connection changed."); vault.put("profile", new JSONObject().put("baseUrl", base).put("token", data.getString("token")).put("allowLan", p.optBoolean("allowLan")).toString()); bridgeBase = base; bridgeToken = data.getString("token"); }
+                    JSONObject healthResponse=NativeHttp.request(base+"/health","GET",null,null,false,null,12000),health=healthResponse.optJSONObject("json");
+                    if(healthResponse.optInt("status")!=200||health==null||!"observer-whatsapp-agent".equals(health.optString("service"))||!OriginPolicy.mobileVersion(health.optString("version")))throw new Exception("Update PC agent to 3.10.0+ before pairing. No credential was sent to an incompatible service.");
+                    String pin=p.optString("pin"),code=p.optString("code");if((pin.isEmpty()&&code.isEmpty())||pin.length()>128)throw new Exception("Dashboard PIN or fresh QR required.");
+                    String clientId=vault.get("clientId");if(clientId==null){clientId=java.util.UUID.randomUUID().toString();vault.put("clientId",clientId);}
+                    JSONObject pair=new JSONObject().put("clientId",clientId).put("name",Build.MODEL).put("model",Build.MODEL);
+                    if(!code.isEmpty())pair.put("code",code).put("serverId",p.optString("serverId"));else pair.put("pin",pin);
+                    JSONObject r=NativeHttp.request(base+"/api/app/pair","POST",null,pair,false,null);JSONObject data=r.optJSONObject("json");
+                    if(r.getInt("status")!=200||data==null||data.optString("token").trim().isEmpty())throw new Exception(data==null?"PC login failed":data.optString("detail","PC agent 3.10.0+ is required."));
+                    if(data.optInt("protocol")!=2||data.optJSONObject("capabilities")==null||!data.getJSONObject("capabilities").optBoolean("jobs"))throw new Exception("Update PC agent to 3.10.0+ for recoverable requests.");
+                    synchronized(sessionLock){if(generation!=epoch.get())throw new Exception("Connection changed.");JSONObject saved=new JSONObject().put("baseUrl",base).put("token",data.getString("token")).put("allowLan",p.optBoolean("allowLan")).put("deviceId",data.getJSONObject("device").getString("id")).put("serverId",data.getString("serverId")).put("protocol",2);vault.put("profile",saved.toString());bridgeBase=base;bridgeToken=data.getString("token");}
                     respond(id, profile(), null); return;
                 }
                 case "logout": {
-                    synchronized (sessionLock) { epoch.incrementAndGet(); bridgeToken = ""; bridgeBase = ""; vault.remove("profile"); vault.remove("state"); }
+                    synchronized (sessionLock) { epoch.incrementAndGet(); bridgeToken = ""; bridgeBase = ""; vault.remove("profile"); vault.remove("state"); vault.remove("pendingJobs"); }
                     runOnUiThread(this::stopSpeech); respond(id, true, null); return;
                 }
                 case "request": {
@@ -212,7 +249,7 @@ public final class MainActivity extends Activity {
                     if (token.isEmpty()) throw new Exception("Pair your PC first.");
                     String verb = p.optString("method", "GET"); if (!verb.equals("GET") && !verb.equals("POST")) throw new Exception("Unsupported request method.");
                     JSONObject headers = p.optJSONObject("headers"); String etag = headers == null ? null : headers.optString("if-none-match", "");
-                    JSONObject result = NativeHttp.request(base + path, verb, token, p.optJSONObject("body"), p.optBoolean("binary"), etag);
+                    JSONObject result = NativeHttp.request(base + path, verb, token, p.optJSONObject("body"), p.optBoolean("binary"), etag, p.optInt("timeout",20000));
                     if (generation != epoch.get() || !foreground && screenOrInput) throw new Exception("Session or foreground changed. Late result discarded."); respond(id, result, null); return;
                 }
                 case "checkUpdates": {
@@ -266,6 +303,8 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if(appLock!=null&&appLock.result(request,result))return;
+        if(phone!=null&&phone.result(request,result,data))return;
         if (request == PICK_FILE && fileChooser != null) { fileChooser.onReceiveValue(result == RESULT_OK && data != null && data.getData() != null ? new Uri[]{data.getData()} : null); fileChooser = null; }
         if (request == SAVE_FILE && pendingSave != null) {
             JSONObject p = pendingSave; String id = pendingSaveId; pendingSave = null; pendingSaveId = null;
@@ -287,8 +326,10 @@ public final class MainActivity extends Activity {
             });
         }
     }
+    private void hideCustomView(){if(customView!=null){root.removeView(customView);customView=null;web.setVisibility(View.VISIBLE);if(customViewCallback!=null)customViewCallback.onCustomViewHidden();customViewCallback=null;if(Build.VERSION.SDK_INT>=30)getWindow().getInsetsController().show(WindowInsets.Type.systemBars());}}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(phone!=null)phone.accept(intent);if(web!=null)web.evaluateJavascript("window.dispatchEvent(new Event('observer-incoming'));",null);}
     @Override public void onBackPressed() { if (web != null) web.evaluateJavascript("window.dispatchEvent(new Event('observer-back'));", null); else super.onBackPressed(); }
-    @Override protected void onPause() { foreground = false; super.onPause(); stopSpeech(); if (web != null) { web.evaluateJavascript("window.dispatchEvent(new Event('observer-background'));", null); web.onPause(); } }
+    @Override protected void onPause() { foreground = false; super.onPause(); hideCustomView(); if(appLock!=null)appLock.lock(); stopSpeech(); if (web != null) { web.evaluateJavascript("window.dispatchEvent(new Event('observer-background'));", null); web.onPause(); } }
     @Override protected void onResume() { foreground = true; super.onResume(); if (web != null) web.onResume(); }
-    @Override protected void onDestroy() { stopSpeech(); if (speech != null) speech.shutdown(); if (cloudConnection != null) cloudConnection.disconnect(); io.shutdownNow(); if (fileChooser != null) fileChooser.onReceiveValue(null); if (web != null) { web.removeJavascriptInterface("ObserverAndroid"); web.destroy(); web = null; } super.onDestroy(); }
+    @Override protected void onDestroy() { stopSpeech(); if (speech != null) speech.shutdown(); if (cloudConnection != null) cloudConnection.disconnect(); stateIO.shutdownNow(); io.shutdownNow(); if (fileChooser != null) fileChooser.onReceiveValue(null); if (web != null) { web.removeJavascriptInterface("ObserverAndroid"); web.destroy(); web = null; } super.onDestroy(); }
 }

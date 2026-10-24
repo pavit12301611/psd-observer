@@ -1,10 +1,18 @@
 {
-  "schemaVersion": 1,
-  "codeCommit": "122e5369049c043d4307e737ed4c5fef7d33e3d6",
-  "runId": 40010609637,
-  "runUrl": "https://github.com/pavit12301611/psd-observer/actions/runs/40010609637",
+  "schemaVersion": 2,
+  "codeCommit": "423b81fcd6c4b49aaff298baf912efe77443aa6d",
+  "runId": 40088988614,
+  "runUrl": "https://github.com/pavit12301611/psd-observer/actions/runs/40088988614",
   "conclusion": "success",
   "jobs": [
+    {
+      "name": "apk",
+      "conclusion": "success"
+    },
+    {
+      "name": "agent (20)",
+      "conclusion": "success"
+    },
     {
       "name": "agent (22)",
       "conclusion": "success"
@@ -18,42 +26,58 @@
       "conclusion": "success"
     },
     {
-      "name": "agent (20)",
-      "conclusion": "success"
-    },
-    {
-      "name": "apk",
-      "conclusion": "success"
-    },
-    {
       "name": "emulator",
       "conclusion": "success"
+    },
+    {
+      "name": "signed-release",
+      "conclusion": "skipped"
+    },
+    {
+      "name": "publish-beta",
+      "conclusion": "skipped"
     }
   ],
   "apk": {
-    "filename": "observer-1.0.0-preview.apk",
-    "distribution": "debug-signed preview in a ZIP; not production release",
+    "filename": "observer-1.1.0-preview.apk",
     "applicationId": "in.observer.companion.preview",
-    "artifactId": 12526901125,
-    "downloadUrl": "https://github.com/pavit12301611/psd-observer/actions/runs/40010609637/artifacts/12526901125",
-    "zipSizeBytes": 208588,
-    "zipDigest": "sha256:4c4b65c89328729112d5da17e62e5a592e1079f7c4895547fb9efaa54f70c49a",
-    "expiresAt": "2026-11-06T19:24:32Z"
+    "distribution": "debug-signed preview; not owner-signed production",
+    "artifactId": 12557804557,
+    "downloadUrl": "https://github.com/pavit12301611/psd-observer/actions/runs/40088988614/artifacts/12557804557",
+    "zipSizeBytes": 2968133,
+    "zipDigest": "sha256:af6fb93835437f93710e94c639bd4d9d9b3ab10d93b55ac0f81aaf1c9b4da805",
+    "expiresAt": "2026-11-07T11:13:59Z"
   },
   "validation": {
-    "frontendUnit": 37,
-    "browserE2E": 45,
-    "backendEachRuntime": 571,
+    "frontendUnit": 42,
+    "browserPassed": 61,
+    "browserIntentionallySkipped": 4,
+    "browserSkipReason": "WebRTC protocol exercised once on desktop; responsive scenarios cover five layouts.",
+    "backendEachRuntime": 590,
     "backendRuntimes": [
       "20",
       "22",
       "24"
     ],
-    "javaPolicyTestTask": "passed",
-    "androidLint": "passed",
-    "androidEmulator": "passed: local bundled UI, native HTTP, encrypted profile/history, page/session restore, dark theme",
+    "javaPolicyAndLint": "passed",
+    "nativeAbortedAcceptanceRecovery": "passed",
+    "nativeReadOnlyShare": "passed",
+    "privateForegroundAlertsAndNotificationPrivacy": "passed",
+    "deviceCredentialAppGate": "passed",
+    "nativeEncryptedSessionAndHistoryRestore": "passed",
+    "syntheticBrowserWebRTC": "passed",
     "physicalSamsung": false,
-    "liveCloudProviders": false,
-    "realPCDesktopActions": false
-  }
+    "liveProviderKeys": false,
+    "liveFcmDelivery": false,
+    "realPCDesktopInput": false
+  },
+  "signing": {
+    "privateKeyGenerated": true,
+    "publicIdentity": "signing-identity.json",
+    "repoSecretManagement": "403 Resource not accessible by integration",
+    "ownerSetupRequired": true,
+    "signedReleaseExecuted": false,
+    "publicReleasePublished": false
+  },
+  "scope": "Source implemented; external cloud setup and physical integration are not implied by fixture/emulator results."
 }

@@ -1050,3 +1050,12 @@ export function schedulePower(action) {
 
 export const PC_CONTROL_INSTALL_HINT =
   'sudo dnf install grim gnome-screenshot scrot playerctl brightnessctl ydotool xdotool wl-clipboard libnotify';
+
+/** Owner manual touchpad movement. No shell, bounded relative deltas. */
+export async function moveMouseRelative(dx, dy) {
+  if (!hasGraphicalSession()) throw new Error(NO_SESSION);
+  const x = Math.max(-200, Math.min(200, Math.round(Number(dx)))), y = Math.max(-200, Math.min(200, Math.round(Number(dy))));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Finite relative deltas required');
+  const used = await runInput({ ydotool: ['mousemove', '-x', String(x), '-y', String(y)], xdotool: ['mousemove_relative', '--', String(x), String(y)] });
+  return `Pointer moved via ${used}.`;
+}
