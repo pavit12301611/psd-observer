@@ -3026,6 +3026,8 @@ textarea {
   width: 34px;
 }
 .pc-pad {
+  /* Never let the dock's rows squeeze the trackpad to a sliver. */
+  flex: 0 0 auto;
   height: 132px;
   border: 1px solid var(--border);
   border-radius: 10px;

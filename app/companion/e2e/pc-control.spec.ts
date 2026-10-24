@@ -149,6 +149,9 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   const pad = page.getByRole("application", { name: "PC touchpad" });
   await expect(pad).toBeVisible();
   const box = (await pad.boundingBox())!;
+  // A trackpad squeezed to a sliver by the dock is not usable, so this is part
+  // of the regression: the gesture surface keeps a real height.
+  expect(box.height).toBeGreaterThan(24);
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
