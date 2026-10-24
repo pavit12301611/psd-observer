@@ -8,7 +8,7 @@ import { expect } from '@playwright/test';
 import { _android as android } from 'playwright';
 const packageName = 'in.observer.companion.preview';
 const adb = (...args) => execFileSync('adb', args, { encoding: 'utf8' }).trim();
-const requests = []; const jobs = new Map(); let executions = 0;
+const requests = []; const jobs = new Map(); let executions = 0; let abortedAcceptance = false;
 const server = http.createServer((req, res) => {
   let raw = ''; req.on('data', (d) => { raw += d; }); req.on('end', () => {
     const body = raw ? JSON.parse(raw) : {}; requests.push({ path: req.url, body });
@@ -20,7 +20,8 @@ const server = http.createServer((req, res) => {
     if(req.url.startsWith('/api/app/events/stream')) {res.setHeader('content-type','text/event-stream');res.write('event: ready\ndata: '+JSON.stringify({epoch:'fixture-events',latest:0})+'\n\n');setTimeout(()=>{if(!res.destroyed)res.write('id: 1\ndata: '+JSON.stringify({epoch:'fixture-events',id:1,type:'job_result',text:'PRIVATE-FIXTURE-CONTENT'})+'\n\n');},500);return;}
     if(req.url==='/api/app/jobs'&&req.method==='POST'){
       if(!jobs.has(body.id)){executions++;jobs.set(body.id,{id:body.id,kind:'chat',deviceId:'fixture-device',label:'fixture',state:'running',createdAt:Date.now()});setTimeout(()=>{const j=jobs.get(body.id);j.state='replied';j.result={ok:true,text:'Native bridge round-trip succeeded. No real PC action was executed.'};},150);}
-      if(!body.deliveredOnce){res.writeHead(202);res.end(JSON.stringify(jobs.get(body.id)));}return;
+      if(!abortedAcceptance&&body.kind==='chat'){abortedAcceptance=true;res.destroy();return;}
+      res.writeHead(202);res.end(JSON.stringify(jobs.get(body.id)));return;
     }
     if(req.url==='/api/app/jobs')return res.end(JSON.stringify({jobs:[...jobs.values()]}));
     if(req.url.startsWith('/api/app/jobs/'))return res.end(JSON.stringify(jobs.get(req.url.split('/').pop())));
@@ -72,6 +73,15 @@ try {
   const services=adb('shell','dumpsys','activity','services',packageName);assert.ok(services.includes('AlertService'));
   const notifications=adb('shell','dumpsys','notification','--noredact');assert.ok(!notifications.includes('PRIVATE-FIXTURE-CONTENT'));
   adb('shell','am','start','-n',packageName+'/in.observer.companion.MainActivity');await page.waitForTimeout(700);await native('stopAlerts');
-  fs.writeFileSync('android-smoke-results/result.json', JSON.stringify({ nativeBridge: 'passed', nativeReadOnlyShare: 'passed', privateForegroundAlerts: 'passed', genericNotificationPrivacy: 'passed', keystoreEncryptedCredentialsAndHistory: 'passed', restoredSession: 'passed', darkTheme: 'passed', requestCount: requests.length, jobExecutions: executions, physicalSamsungTest: 'not performed', providerCalls: 0, pcActions: 0 }, null, 2));
+  adb('shell','locksettings','set-pin','4826');
+  const enableLock = native('setAppLock',{enabled:true});
+  await new Promise(r=>setTimeout(r,1200));
+  adb('shell','input','text','4826');adb('shell','input','keyevent','KEYCODE_ENTER');
+  await Promise.race([enableLock,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Device-credential confirmation did not finish')),12000))]);
+  assert.equal((await native('getLockState')).enabled,true);
+  adb('shell','input','keyevent','KEYCODE_HOME');await new Promise(r=>setTimeout(r,400));
+  await assert.rejects(native('request',{path:'/api/app/jobs'}),/Unlock Observer first/);
+
+  fs.writeFileSync('android-smoke-results/result.json', JSON.stringify({ nativeBridge: 'passed', nativeAbortedAcceptanceRecovery: 'passed', nativeReadOnlyShare: 'passed', privateForegroundAlerts: 'passed', genericNotificationPrivacy: 'passed', deviceCredentialAppGate: 'passed', keystoreEncryptedCredentialsAndHistory: 'passed', restoredSession: 'passed', darkTheme: 'passed', requestCount: requests.length, jobExecutions: executions, physicalSamsungTest: 'not performed', providerCalls: 0, pcActions: 0 }, null, 2));
   console.log('Android emulator smoke: bundled UI, native HTTP, encrypted credential/history, restore and dark theme passed. No physical Samsung/provider/PC tests.');
 } finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
