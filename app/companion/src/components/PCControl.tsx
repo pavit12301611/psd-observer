@@ -466,6 +466,8 @@ export default function PCControl({
     if (!move.x && !move.y) return;
     padCarry.current = { x: 0, y: 0 };
     pointerBusy.current = true;
+    // Move the marker by exactly the pixels we are sending the PC.
+    setCursor((c) => moveCursorBy(c, move.x, move.y, screenPxRef.current) ?? c);
     void api
       .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
       .catch((e) => {
