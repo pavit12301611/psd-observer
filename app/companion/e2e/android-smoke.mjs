@@ -53,6 +53,15 @@ try {
     },
   });
   diagnosticPage=page;
+  // Emulator networking can lag the first UI frame. Probe the host fixture
+  // port best-effort so a slow network does not look like a pairing regression
+  // (this never retries the actual pairing or relaxes an assertion).
+  let hostReachable = false;
+  for (let attempt = 0; attempt < 20 && !hostReachable; attempt++) {
+    try { adb('shell', 'ping', '-c', '1', '-W', '1', '10.0.2.2'); hostReachable = true; }
+    catch { await new Promise((resolve) => setTimeout(resolve, 500)); }
+  }
+  console.log('NATIVE_HOST_PROBE=' + (hostReachable ? 'reachable' : 'no-icmp-reply'));
   stage='pairing';
   await page.getByRole('button', { name: 'Connect PC', exact: true }).click();
   await page.getByLabel('PC bridge address').fill('http://10.0.2.2:8787'); await page.getByLabel('Dashboard PIN').fill('123456'); await page.getByRole('checkbox').check();
