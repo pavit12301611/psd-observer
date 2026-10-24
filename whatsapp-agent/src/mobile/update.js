@@ -98,7 +98,7 @@ export function createUpdateChannel({ dir, signingDir, now = Date.now, currentNa
       const total = entries.reduce((sum, e) => sum + e.data.length, 0);
       if (total > MAX_UNCOMPRESSED) throw error(413, 'Bundle exceeds the uncompressed limit');
       const bundle = zipStore(entries), k = keys(true);
-      const manifest = { schema: 1, version, createdAt: new Date(now()).toISOString(), sha256: sha256(bundle), size: bundle.length, fileCount: entries.length, minNative, notes: String(notes).slice(0, 1000) };
+      const manifest = { schema: 1, version, createdAt: new Date(now()).toISOString(), sha256: sha256(bundle), size: bundle.length, fileCount: entries.length, minNative, notes: String(notes).slice(0, 1000).replace(/[\u2028\u2029]/g, ' ') };
       const signature = sign('sha256', Buffer.from(canonicalManifest(manifest)), k.privateKey).toString('base64');
       const target = path.join(dir, version); fs.mkdirSync(target, { recursive: true, mode: 0o700 });
       fs.writeFileSync(path.join(target, 'bundle.zip'), bundle, { mode: 0o600 }); fs.writeFileSync(path.join(target, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 }); fs.writeFileSync(path.join(target, 'manifest.sig'), signature + '\n', { mode: 0o600 });
