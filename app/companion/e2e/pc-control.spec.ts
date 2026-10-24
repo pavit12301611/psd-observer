@@ -165,11 +165,23 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
       for (const fx of [0.5, 0.3, 0.7])
         points.push([r.left + r.width * fx, r.top + r.height * fy]);
     const usable = points.find(([x, y]) => hit(x, y));
+    const chain: Record<string, unknown> = {};
+    for (const sel of [".pc-page", ".pc-shell", ".pc-stage", ".pc-dock", ".pc-dock-body", ".bottom-nav"]) {
+      const node = document.querySelector(sel) as HTMLElement | null;
+      if (!node) continue;
+      const b = node.getBoundingClientRect();
+      chain[sel] = {
+        box: [b.left, b.top, b.width, b.height].map(Math.round),
+        scroll: [node.clientHeight, node.scrollHeight],
+        style: [getComputedStyle(node).flex, getComputedStyle(node).maxHeight, getComputedStyle(node).overflowY],
+      };
+    }
     return {
       found: true,
       rect: [r.left, r.top, r.width, r.height].map(Math.round),
       view: [window.innerWidth, window.innerHeight, Math.round(window.scrollY)],
       usable: usable ? usable.map(Math.round) : null,
+      chain,
     };
   });
   expect(JSON.stringify(probe)).toContain('"usable":[');
