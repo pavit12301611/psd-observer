@@ -152,6 +152,22 @@ export interface WireResponse {
   mime?: string;
   headers?: Record<string, string>;
 }
+export interface PcState {
+  session?: string;
+  graphical?: boolean;
+  locked?: boolean | null;
+  lockBackend?: string | null;
+  display?: string;
+  battery?: { percent: number; charging: boolean } | null;
+  diskFreeMb?: number | null;
+  host?: string;
+  pcControl?: boolean;
+  controlPinRequired?: boolean;
+  accessLevel?: string;
+  busy?: boolean;
+  activeJobs?: number;
+  detail?: string;
+}
 export interface PcUpdateCheck {
   installed: string;
   available: boolean;

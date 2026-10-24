@@ -1059,3 +1059,164 @@ export async function moveMouseRelative(dx, dy) {
   const used = await runInput({ ydotool: ['mousemove', '-x', String(x), '-y', String(y)], xdotool: ['mousemove_relative', '--', String(x), String(y)] });
   return `Pointer moved via ${used}.`;
 }
+
+// ── remote-session awareness ────────────────────────────────────────────────
+// When the owner drives this PC from a phone, "nothing happened" is the worst
+// answer. These helpers separate the three common causes — the screen is
+// locked, the display went to sleep, or the session is not there at all — so the
+// app can say which one instead of showing a generic capture error.
+// They only ever report state and wake the *display*; no password is typed,
+// stored or transmitted.
+
+/** loginctl prints `LockedHint=yes|no`; anything else means "unknown". */
+export function parseLockedHint(text) {
+  const m = String(text ?? '').match(/LockedHint\s*=\s*(yes|no|true|false)/i);
+  if (!m) return null;
+  return /^(yes|true)$/i.test(m[1]);
+}
+
+/** gdbus returns `(true,)` / `(false,)` from GNOME's ScreenSaver.GetActive. */
+export function parseScreensaverActive(text) {
+  const m = String(text ?? '').match(/\(\s*(true|false)\s*,\s*\)/i);
+  return m ? /^true$/i.test(m[1]) : null;
+}
+
+/** "Battery 0: Discharging, 87%" → { percent, charging }. */
+export function parseUpowerBattery(text) {
+  const s = String(text ?? '');
+  const percent = Number((s.match(/(\d{1,3})%/) ?? [])[1]);
+  if (!Number.isInteger(percent) || percent < 0 || percent > 100) return null;
+  return { percent, charging: /charging/i.test(s) && !/discharging/i.test(s) };
+}
+
+/** A cheap, cached read of what the phone needs to explain a blank screen. */
+let stateCache = { at: 0, value: null };
+export async function remoteSessionState() {
+  if (Date.now() - stateCache.at < 1_500 && stateCache.value) return stateCache.value;
+  const session = sessionInfo();
+  let locked = null, lockBackend = null;
+  if (session.graphical) {
+    // GNOME's own answer first: it is immediate and does not need a TTY.
+    try {
+      locked = parseScreensaverActive(await run('gdbus', [
+        'call', '--session', '--dest', 'org.gnome.ScreenSaver',
+        '--object-path', '/org/gnome/ScreenSaver', '--method', 'org.gnome.ScreenSaver.GetActive',
+      ], { timeout: 3_000 }));
+      lockBackend = locked === null ? null : 'gnome-screensaver';
+    } catch { /* not GNOME, or gdbus missing — fall through */ }
+    if (locked === null) {
+      try {
+        const sid = String(await run('loginctl', ['show-user', '--property=Display', '--value'])).trim();
+        const id = String(await run('loginctl', ['list-sessions', '--no-legend'])).trim().split('\n').at(-1)?.split(/\s+/)[0];
+        const target = sid || id;
+        if (target) {
+          locked = parseLockedHint(await run('loginctl', ['show-session', target, '-p', 'LockedHint'], { timeout: 3_000 }));
+          lockBackend = locked === null ? null : 'loginctl';
+        }
+      } catch { /* reported as unknown */ }
+    }
+  }
+  let display = 'unknown';
+  if (session.type === 'x11') {
+    try {
+      const out = await run('xset', ['q'], { timeout: 2_000 });
+      display = /Monitor is (On|Off)/i.test(out) ? (/Monitor is On/i.test(out) ? 'on' : 'off') : 'unknown';
+    } catch { /* xset missing */ }
+  }
+  let battery = null;
+  try {
+    const out = await run('upower', ['-i', '/org/freedesktop/UPower/devices/DisplayDevice'], { timeout: 2_500 });
+    battery = parseUpowerBattery(out);
+  } catch {
+    try {
+      const base = '/sys/class/power_supply';
+      const name = fs.readdirSync(base).find((entry) => entry.startsWith('BAT'));
+      if (name) {
+        const percent = Number(fs.readFileSync(path.join(base, name, 'capacity'), 'utf8').trim());
+        const status = fs.readFileSync(path.join(base, name, 'status'), 'utf8').trim();
+        if (Number.isInteger(percent)) battery = { percent, charging: /charging/i.test(status) };
+      }
+    } catch { /* desktops report no battery */ }
+  }
+  let diskFreeMb = null;
+  try {
+    const out = await run('df', ['-Pk', os.homedir()], { timeout: 2_500 });
+    const last = out.trim().split('\n').at(-1)?.split(/\s+/);
+    const availableKb = Number(last?.[3]);
+    if (Number.isFinite(availableKb)) diskFreeMb = Math.round(availableKb / 1024);
+  } catch { /* best effort */ }
+  const value = {
+    session: session.type, graphical: session.graphical, locked, lockBackend, display,
+    battery, diskFreeMb, host: os.hostname(),
+  };
+  stateCache = { at: Date.now(), value };
+  return value;
+}
+
+/** Wake the *display* only. Returns what was actually done, never a fake success. */
+export async function wakeDisplay() {
+  const session = sessionInfo();
+  if (!session.graphical) throw new Error(NO_SESSION);
+  const attempts = [];
+  // GNOME: the same call the desktop itself makes; it does not unlock the session.
+  attempts.push(['gdbus', ['call', '--session', '--dest', 'org.gnome.ScreenSaver', '--object-path', '/org/gnome/ScreenSaver', '--method', 'org.gnome.ScreenSaver.SetActive', 'false']]);
+  if (session.type === 'x11') {
+    attempts.push(['xset', ['dpms', 'force', 'on']]);
+    attempts.push(['xset', ['s', 'on']]);
+  }
+  const done = [];
+  let lastError = null;
+  for (const [bin, args] of attempts) {
+    try { await run(bin, args, { timeout: 3_000 }); done.push(bin); } catch (err) { lastError = err; }
+  }
+  if (!done.length) throw new Error(`Could not wake the display${lastError ? `: ${String(lastError.stderr || lastError.message).trim().split('\n').at(-1)?.slice(0, 160)}` : ''}. Unlock the PC on the machine itself.`);
+  const state = await remoteSessionState();
+  return { woken: done, ...state };
+}
+
+/** Raw clipboard text (no emoji decoration) for the phone's clipboard field. */
+export async function clipboardRead({ maxChars = 20_000 } = {}) {
+  const out = await tryBins(
+    [['wl-paste', ['--no-newline']], ['xclip', ['-selection', 'clipboard', '-o']], ['xsel', ['--clipboard', '--output']]],
+    'No clipboard tool found. Wayland: sudo dnf install wl-clipboard · X11: sudo dnf install xclip',
+  );
+  const text = String(out);
+  return { text: text.slice(0, maxChars), truncated: text.length > maxChars };
+}
+
+/** Replace the PC clipboard with plain text. */
+export async function clipboardWrite(text) {
+  const payload = String(text ?? '');
+  if (!payload) throw new Error('Clipboard text is required.');
+  if (payload.length > 20_000) throw new Error('Clipboard text is limited to 20000 characters.');
+  await tryBins(
+    [['wl-copy', [], { input: payload }], ['xclip', ['-selection', 'clipboard', '-i'], { input: payload }], ['xsel', ['--clipboard', '--input'], { input: payload }]],
+    'No clipboard tool found. Wayland: sudo dnf install wl-clipboard · X11: sudo dnf install xclip',
+  );
+  return { ok: true, chars: payload.length };
+}
+
+/**
+ * Crop a region out of a captured frame for the phone's zoom view.
+ * `box` is normalised (0-1000) so the phone never has to know real pixels.
+ * Returns null when sharp is unavailable, and the caller sends the full frame.
+ */
+export async function cropFrame(buffer, box, { maxWidth = 1920 } = {}) {
+  if (!box) return null;
+  let sharp;
+  try { sharp = (await import('sharp')).default; } catch { return null; }
+  try {
+    const meta = await sharp(buffer).metadata();
+    if (!meta.width || !meta.height) return null;
+    const clamp = (v) => Math.max(0, Math.min(1000, Math.round(Number(v))));
+    const left = Math.round((clamp(box.x) / 1000) * meta.width);
+    const top = Math.round((clamp(box.y) / 1000) * meta.height);
+    const width = Math.min(meta.width - left, Math.max(16, Math.round((clamp(box.x + box.w) / 1000) * meta.width) - left));
+    const height = Math.min(meta.height - top, Math.max(16, Math.round((clamp(box.y + box.h) / 1000) * meta.height) - top));
+    if (width < 16 || height < 16) return null;
+    let image = sharp(buffer).extract({ left, top, width, height });
+    if (width > maxWidth) image = image.resize({ width: maxWidth });
+    const out = await image.jpeg({ quality: 82 }).toBuffer();
+    return { image: out, mime: 'image/jpeg', box: { left, top, width, height } };
+  } catch { return null; }
+}

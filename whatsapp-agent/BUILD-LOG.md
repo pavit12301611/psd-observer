@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.12.0 — PC control that works from a phone (2026-10-24)
+
+- The old PC page stacked the touchpad **below** the screenshot, so every gesture scrolled the page and pushed the PC screen out of view. It is now one fixed view: a screen stage that keeps its place, and a dock (Pad / Keys / Type / Clip / More) whose body is the only thing that can scroll.
+- Zoom is real, not a bigger thumbnail: pinch or double-tap to zoom, drag to pan, and the phone asks for `?cx&cy&cw&ch` so the server returns an actual cropped frame at 1:1 (`x-screen-crop: region`). Taps are mapped back through the crop, so a zoomed tap still lands on the intended pixel.
+- Feedback while working: every tap draws a ripple and pulls one fresh frame, so the owner sees the click land. Long-press is a right-click, two-finger tap is a right-click, keys keep held modifiers (Ctrl + C is two taps), and a bounded nudge pad moves by 10px without guessing coordinates.
+- New authenticated routes: `GET /api/pc/state` (session, locked, display, battery, disk, agent busy), `POST /api/pc/display` (wake the display only — never types a password), `GET|POST /api/clipboard` (text in and out, PIN and access-level gated). The state/capture layer is injectable, so tests never touch a real desktop.
+- "Take over" stops the running agent job and then hands manual input back, instead of the page silently refusing every tap with `423`. Frame requests time out in 8s (not 25s) and back off 1.2→8s; opening the page starts a preview and backgrounding the app stops it.
+- Honest limits: zoom crops need `sharp` on the PC (otherwise the full frame is sent and labelled `x-screen-crop: full`); waking a display does not unlock the PC; native/portal streaming is still an APK-level change.
+
 ## 3.11.0 — PC-signed interface updates, no reinstall and no repository secrets (2026-10-24)
 
 - The PC now owns the update identity. The first pairing generates `data/mobile/updates/signing/update-signing-key.pem` (RSA-3072, mode 0600, never committed or logged) and returns the public key once. The Android app pins that key; a later pairing that offers a different key is refused until the owner logs out deliberately. No GitHub secret, workflow permission or public release is involved.

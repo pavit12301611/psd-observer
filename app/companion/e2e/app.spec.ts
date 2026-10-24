@@ -214,7 +214,7 @@ test("theme and all five functional pages work and fit each phone orientation", 
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   for (const [nav, heading] of [
-    ["PC control", "A little closer."],
+    ["PC control", "PC control"],
     ["Tasks", "Room to focus."],
     ["Files", "Bring it together."],
     ["Settings", "On your terms."],
@@ -319,6 +319,8 @@ test("manual PC input is opt-in, sends the control PIN, and screen polling stops
   await page.goto("/");
   await connect(page);
   await go(page, "PC control");
+  // Keys live in their own dock tab so the screenshot never scrolls away.
+  await page.getByRole("tab", { name: "Keys" }).click();
   await expect(
     page.getByRole("button", { name: "Enter", exact: true }),
   ).toBeDisabled();
@@ -332,14 +334,14 @@ test("manual PC input is opt-in, sends the control PIN, and screen polling stops
     key: "Return",
     pin: "5678",
   });
-  await page.getByRole("button", { name: "Start screen preview" }).click();
+  // Preview starts when the page opens; pausing stays one tap.
   await expect(
-    page.getByAltText("Latest screenshot from your connected PC"),
+    page.getByAltText("Live frame from your PC"),
   ).toBeVisible();
   await go(page, "Chat");
-  const captures = f.requests.filter((r) => r.path === "/api/screen").length;
+  const captures = f.requests.filter((r) => r.path.startsWith("/api/screen")).length;
   await page.waitForTimeout(2700);
-  expect(f.requests.filter((r) => r.path === "/api/screen").length).toBe(
+  expect(f.requests.filter((r) => r.path.startsWith("/api/screen")).length).toBe(
     captures,
   );
 });
