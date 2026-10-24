@@ -1,10 +1,10 @@
-# Deep test audit — 3.9.2
+# Deep test audit — 3.10.0
 
-Generated 2026-10-23T18:58:27.880Z. Source tree SHA-256: `fed3ba6e001bc9c6d48ba5f4fb448a80441436907a241fe361f9972f20521f8c`.
+Generated 2026-10-24T11:18:38.950Z. Source tree SHA-256: `69ff6a5569595383790313fcf97bee14b043de37828a34bf2c2ceeae9542e93e`.
 
 ## Scope, honestly
 
-145 runtime JavaScript modules (backend + browser shell), 46687 lines, **3328 static function definitions** inventoried; 36 recursively discovered Node test suites. Every definition has a file/span in [deep-audit.json](deep-audit.json). Exact AST/V8 span matches have call counts; unmapped spans remain unknown. This is not a claim that every function was manually proved correct.
+158 runtime JavaScript modules (backend + browser shell), 47355 lines, **3531 static function definitions** inventoried; 37 recursively discovered Node test suites. Every definition has a file/span in [deep-audit.json](deep-audit.json). Exact AST/V8 span matches have call counts; unmapped spans remain unknown. This is not a claim that every function was manually proved correct.
 
 Other repository components and live WhatsApp/providers/desktop hardware were **not** exhaustively tested. The runner mirrors public source, isolates HOME/TMP/data, strips credentials and desktop addresses, and blocks default external fetch; it is defense in depth, **not an OS sandbox**.
 
@@ -14,17 +14,17 @@ Backend comparison (same source scope):
 
 | Metric | Baseline | Current |
 |---|---:|---:|
-| lines | 74.84% | 75.2% |
-| branches | 62.53% | 63.55% |
-| functions | 76.31% | 76.8% |
+| lines | 74.84% | 75.29% |
+| branches | 62.53% | 63.9% |
+| functions | 76.31% | 76.66% |
 
-Browser shell (newly included): 45.18% lines / 62.58% branches / 50.98% functions. All-runtime combined: 74.39% lines / 63.54% branches. Browser tests are DOM/service-worker emulation, not real-browser or hardware validation.
+Browser shell (newly included): 43.32% lines / 62.14% branches / 50% functions. All-runtime combined: 74.4% lines / 63.88% branches. Browser tests are DOM/service-worker emulation, not real-browser or hardware validation.
 
 Includes unimported runtime files via c8 `--all`; no blanket 100% claim. Baseline: 477 tests, ref `339bc9e`. See [baseline evidence](baseline-3.9.0.json). The 34 targeted baseline regression failures overlap multiple symptoms of the same bugs; they are **not 34 distinct bugs**.
 
 ## Executed validation
 
-- **v22.22.3** (coverage): 571/571 passed, 0 failed, 0 cancelled, 0 skipped.
+- **v22.22.3** (coverage): 590/590 passed, 0 failed, 0 cancelled, 0 skipped.
 
 Original backend instrumenter: c8 10.1.3; current: c8 12.0.0 / V8. New browser coverage is reported separately; differing V8/instrumenter versions and source changes limit direct numerical comparisons.
 
@@ -47,13 +47,14 @@ Unmutated control passed; **18/18 selected injected faults detected** by intende
 | `src/persistence.js` | 100% | 87.5% | 100% |
 | `src/rollback.js` | 98.55% | 73.58% | 100% |
 | `src/safety.js` | 96.95% | 73.68% | 91.66% |
-| `src/server.js` | 76.41% | 59.5% | 78.26% |
+| `src/server.js` | 74.2% | 60.1% | 65.51% |
 | `src/store.js` | 86.1% | 74.15% | 78.78% |
 
 ## Remaining execution gaps for the next audit cycle
 
 - `src/index.js`: 0% lines, 0% branches.
 - `src/mcp-server.js`: 0% lines, 0% branches.
+- `webapp/desktop.js`: 0% lines, 0% branches.
 - `src/systemx.js`: 23.48% lines, 100% branches.
 - `src/imap.js`: 31.16% lines, 22.22% branches.
 - `src/ocr.js`: 33.82% lines, 100% branches.
@@ -62,8 +63,7 @@ Unmutated control passed; **18/18 selected injected faults detected** by intende
 - `webapp/app.js`: 43.89% lines, 56.66% branches.
 - `src/location.js`: 45.99% lines, 39.25% branches.
 - `src/cron.js`: 50.96% lines, 40.62% branches.
-- `src/tts.js`: 56.52% lines, 49.42% branches.
-- `src/autopilot.js`: 56.54% lines, 55.92% branches.
+- `src/mobile/assets.js`: 55.88% lines, 50% branches.
 
 Hardware, real permissions/portals, actual WhatsApp sessions, live provider quotas/quality and remote-service failures still need dedicated integration environments. Successful command exit is not proof of a physical desktop outcome. PANIC unlinks local selected files and resets owner state; it cannot securely erase disks or retract remote/backed-up copies.
 

@@ -1,6 +1,6 @@
-# 1.1 feature pack — verification in progress
+# 1.1 feature pack — verified Preview, external setup gates remain
 
-This branch is not a production rollout. PC agent **3.10.0+** is required.
+This branch is not a production rollout. PC agent **3.10.0+** is required. Functional code `423b81f` passed the [native/web/backend workflow](https://github.com/pavit12301611/psd-observer/actions/runs/40088988614); see validation-ci.json for scope. Stable signing and live OS-push still require private owner configuration.
 
 ## Primary fix
 
