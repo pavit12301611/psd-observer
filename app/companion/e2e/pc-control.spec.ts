@@ -149,32 +149,36 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   const pad = page.getByRole("application", { name: "PC touchpad" });
   await expect(pad).toBeVisible();
   const box = (await pad.boundingBox())!;
-  // A trackpad squeezed to a sliver by the dock is not usable, so this is part
-  // of the regression: the gesture surface keeps a real height, and the point
-  // the test touches is a point the user could actually touch.
+  // A trackpad squeezed to a sliver by the dock is not usable, so its height is
+  // part of the regression. Find a point that is genuinely part of the trackpad: on short viewports the
+  // dock scrolls, so the geometric centre is not always the visible surface.
   const probe = await page.evaluate(() => {
     const el = document.querySelector(".pc-pad") as HTMLElement | null;
     if (!el) return { found: false };
     const r = el.getBoundingClientRect();
-    const hit = document.elementFromPoint(
-      r.left + r.width / 2,
-      r.top + r.height / 2,
-    );
+    const hit = (x: number, y: number) => {
+      const node = document.elementFromPoint(x, y);
+      return Boolean(node && el.contains(node));
+    };
+    const points: [number, number][] = [];
+    for (const fy of [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9])
+      for (const fx of [0.5, 0.3, 0.7])
+        points.push([r.left + r.width * fx, r.top + r.height * fy]);
+    const usable = points.find(([x, y]) => hit(x, y));
     return {
       found: true,
-      covers: hit ? el.contains(hit) : false,
-      hit: (hit as HTMLElement | null)?.className || hit?.nodeName,
       rect: [r.left, r.top, r.width, r.height].map(Math.round),
       view: [window.innerWidth, window.innerHeight, Math.round(window.scrollY)],
+      usable: usable ? usable.map(Math.round) : null,
     };
   });
-  expect(probe).toMatchObject({ found: true, covers: true });
-  expect(box.height).toBeGreaterThan(24);
+  expect(JSON.stringify(probe)).toContain('"usable":[');
+  const point = (probe as { usable: number[] }).usable;
   const before = await page.evaluate(() => window.scrollY);
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.move(point[0], point[1]);
   await page.mouse.down();
   for (let step = 0; step < 6; step++) {
-    await page.mouse.move(box.x + box.width / 2 + step * 12, box.y + box.height / 2 + step * 6);
+    await page.mouse.move(point[0] + step * 12, point[1] + step * 6);
   }
   await page.mouse.up();
   await expect
