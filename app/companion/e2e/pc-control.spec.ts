@@ -211,7 +211,8 @@ test("take over, clipboard and display wake are one tap each", async ({ page }) 
     .toBe(1);
 
   await page.getByRole("tab", { name: "More" }).click();
-  await expect(page.getByText("wayland")).toBeVisible();
+  // Exact text on purpose: the status chip above already says "Wayland".
+  await expect(page.getByText("wayland", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Wake display" }).first().click();
   await expect.poll(() => f.requests.filter((r) => r.path === "/api/pc/display").length).toBe(1);
 

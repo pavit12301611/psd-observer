@@ -11,8 +11,20 @@ const ANSI = /\u001b\[[0-9;]*m/g;
 /** Pull the interesting part of a Playwright run: failing tests + their errors. */
 export function failureDetails(output, limit = 24000) {
   const lines = String(output).replace(ANSI, '').split('\n');
+  // Playwright prints "  1) [project] › file:line › title" followed by the
+  // error and the call log. That detail block is what a human needs, so it wins
+  // over the run list at the top.
+  const detail = /^\s{1,3}\d+\)\s/;
+  const firstDetail = lines.findIndex((l) => detail.test(l));
+  if (firstDetail !== -1) {
+    const summaryIndex = lines.findIndex(
+      (l, i) => i > firstDetail && /^\s*\d+ (?:failed|passed|flaky|skipped)/.test(l),
+    );
+    const body = lines.slice(firstDetail, summaryIndex === -1 ? firstDetail + 400 : summaryIndex + 3);
+    return body.join('\n').trim().slice(0, limit);
+  }
   const blocks = [];
-  const starts = /^\s*(?:✘|✗|\d+\)\s|Error:|expect\(|Test timeout)/;
+  const starts = /^\s*(?:✘|✗|Error:|Test timeout)/;
   for (let i = 0; i < lines.length; i++) {
     if (!starts.test(lines[i])) continue;
     const block = [lines[i]];
