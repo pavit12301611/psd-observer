@@ -314,7 +314,7 @@
       "🗓️🔄 CHANNELS: Google Calendar sync (`/cal sync <ics-url>` + `/cal export`), `/topic` channels with shared memory, aur speed: lookup cache 553µs→19µs. (Shades rule: auto-restore kabhi nahi — sirf /shades off se.)"
     ]
   },
-  "latest": "3.9.1",
+  "latest": "3.9.2",
   "3.8.0": "🆕 *PSD_Ai v3.8.0 — Complete Feature Suite (29 upgrades!)*\n\nHar suggestion complete: 11 shelf + 18 naye features.\n\n*Padhai & Voice*\n• /revise call — JARVIS khud call karta hai + revision (voice segments)\n• /today — aaj ka complete timeline\n• /exam add <sub> <date> — exam countdown + auto study schedule\n• /study scan — flashcards photo → OCR → pack\n• /accuracy report — bot ka report card\n\n*Proactive & Smart*\n• /nudges — proactive messages (padh lo, reminder miss, battery)\n• /recap — weekly recap + goal tracker\n• /routine at 7am — morning auto-routines\n• /leaveby — leave-by time calculator (traffic estimate)\n• HW reminders ab escalate hote hain (48h → 24h → 2h bursts)\n\n*PC & Home*\n• /block — study window me distracting sites auto-close\n• /organize — downloads auto-sort\n• /backup now|cloud — zip backup + GitHub upload\n• /timeline — screenshot timeline recall\n• /home — smart home webhooks (lights/AC/TV)\n• /wake — \"Hey JARVIS\" wake word + voice commands\n\n*Family & Safety*\n• /role kids|family + /rolelimit — per-role modes\n• /fun quiz|riddle — timepass\n• /audit — security audit log\n• /pcs ask|all|check — fleet remote commands (queue)\n• Notes meetings se action-items auto-extract\n• /photos ab actual images bhejta hai (top match)\n\nUpdate: BRANCH=main bash <(curl -fsSL https://raw.githubusercontent.com/pavit12301611/psd-observer/main/whatsapp-agent/scripts/observer.sh) update",
   "3.8.1": {
     "title": "Heavy tasks: reliable routing & safe failover",
@@ -344,6 +344,15 @@
       "Safer trash restore and complete integrity-checked rollback; private atomic owner-state writes and a PANIC reset that cannot resurrect wiped history.",
       "Camera/mirror stop and restart races fixed, truthful batch cancellation results, bounded cache/protocol handling and fail-closed bridge validation. Updated vulnerable optional image-processing dependency.",
       "Phone dashboard parsing, cached-history validation and stale post-logout replies fixed; service-worker upgrades only clear Observer caches. Shades rule unchanged: no auto-restore, only /shades off restores the screen."
+    ]
+  },
+  "3.9.2": {
+    "title": "Android companion bridge: scoped approvals, mobile media and safe manual input",
+    "bullets": [
+      "Android companion API exposes actual task state and opaque, one-shot, exact-action approval IDs; confirmed operations still traverse the original owner and serial task gates.",
+      "Generated documents/videos get bounded, authenticated, expiring downloads without token URLs. Mobile chat supports bounded thread context and 16000-character requests without silent truncation.",
+      "Manual remote input now enforces configured CONTROL_PIN, safe-access restrictions and active-task barriers. Existing owner tools, permissions and explicit action confirmations remain in place.",
+      "Shades rule unchanged: no auto-restore; only /shades off restores the display."
     ]
   }
 }

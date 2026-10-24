@@ -1,0 +1,52 @@
+{
+  "recordedAt": "2026-10-23T18:59:48.671Z",
+  "androidCompanion": "1.0.0-preview",
+  "pcAgent": "3.9.2",
+  "localValidation": {
+    "frontendUnitTests": 37,
+    "browserE2EScenarios": 45,
+    "browserViewports": [
+      "1440\u00d7960 desktop",
+      "393\u00d7873 A53-size portrait",
+      "412\u00d7915 A53 larger logical viewport",
+      "360\u00d7800 compact",
+      "873\u00d7393 landscape"
+    ],
+    "backendNode22Tests": 571,
+    "selectedMutantsDetected": 18,
+    "selectedMutantsTotal": 18,
+    "backendAddedContracts": 94,
+    "publicCommands": 157,
+    "dependencyAudit": {
+      "frontend": 0,
+      "backend": 0
+    },
+    "gradients": 0,
+    "javascriptBudgetBytes": 650000
+  },
+  "toolVersions": {
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "playwright": "1.64.1"
+  },
+  "nativeValidation": "Successful build and emulator run 40008482181 at commit 36dc6fd. Latest code may have a newer run; see GitHub Actions checks for the final source.",
+  "physicalSamsungVerification": false,
+  "liveProviderKeysUsed": false,
+  "realPCActionsExecuted": false,
+  "limits": [
+    "no background push",
+    "no continuous video/WebRTC",
+    "no bundled on-device LLM",
+    "no production signing or Play Store release",
+    "WhatsApp-specific transport features still need a linked WhatsApp account"
+  ],
+  "firstNativeSuccess": {
+    "runId": 40008482181,
+    "url": "https://github.com/pavit12301611/psd-observer/actions/runs/40008482181",
+    "nativeJob": "success",
+    "jvmPolicyTests": "success",
+    "androidEmulator": "success",
+    "backendNode20_22_24": "success",
+    "webTests": "success"
+  }
+}

@@ -1,0 +1,39 @@
+plugins { id 'com.android.application' }
+def companionVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json')).version
+def parts = companionVersion.split('\\.').collect { it.toInteger() }
+if (parts.size() != 3 || parts[0] > 2000 || parts[1] > 999 || parts[2] > 999) throw new GradleException('Version outside Android versionCode budget')
+android {
+    namespace 'in.observer.companion'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'in.observer.companion'
+        minSdk 26
+        targetSdk 35
+        versionCode (parts[0] * 1000000 + parts[1] * 1000 + parts[2])
+        versionName companionVersion
+        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
+    }
+    buildFeatures { buildConfig true }
+    buildTypes {
+        debug { applicationIdSuffix '.preview'; versionNameSuffix '-preview'; manifestPlaceholders = [appLabel: 'Observer Preview']; minifyEnabled false }
+        release {
+            manifestPlaceholders = [appLabel: 'Observer']
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // No fallback signing key. A production release must be signed by
+            // the owner's stable private key, never a committed/debug key.
+            if (System.getenv('OBSERVER_KEYSTORE')) {
+                signingConfig signingConfigs.create('ownerRelease') {
+                    storeFile file(System.getenv('OBSERVER_KEYSTORE'))
+                    storePassword System.getenv('OBSERVER_STORE_PASSWORD')
+                    keyAlias System.getenv('OBSERVER_KEY_ALIAS')
+                    keyPassword System.getenv('OBSERVER_KEY_PASSWORD')
+                }
+            }
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true; checkReleaseBuilds true }
+}
+dependencies { testImplementation 'junit:junit:4.13.2' }

@@ -44,3 +44,32 @@ test('deep/commands: permanently emptying trash needs one-shot owner confirmatio
   assert.match(await f.agent.handle(`/confirm ${requested.match(/\/confirm (\w+)/)[1]}`), /empty kar diya/);
   assert.equal(fs.existsSync(file), false);
 });
+
+test('app/commands: approval tickets consume only the reviewed scoped trash operation and cannot replay', async (t) => {
+  const f = fixture(t), file = path.join(f.dir, 'trash/fixture.txt');
+  fs.mkdirSync(path.dirname(file)); fs.writeFileSync(file, 'owned fixture');
+  await f.agent.handle('/trash empty'); const pending = f.agent.app.state().pending[0];
+  assert.equal(pending.kind, 'safety'); assert.equal(fs.existsSync(file), true);
+  const decision = f.agent.app.decide(pending.id, true); assert.equal(decision.stale, false); assert.match(await decision.reply, /empty kar diya/);
+  assert.equal(fs.existsSync(file), false); assert.equal(f.agent.app.decide(pending.id, true).stale, true);
+});
+test('app/commands: replaced registry actions cannot be approved with the previous visible ticket', async (t) => {
+  const f = fixture(t); let ran = 0;
+  const entry = f.agent.actions.registry.find((e) => e.name === 'close_app'); entry.run = async () => { ran++; return 'fixture only'; };
+  await f.agent.actions.execute('close_app', { app: 'fixture one' }); const first = f.agent.app.state().pending[0].id;
+  await f.agent.actions.execute('close_app', { app: 'fixture two' }); assert.equal(f.agent.app.decide(first, true).stale, true); assert.equal(ran, 0);
+  const current = f.agent.app.state().pending[0].id; assert.equal((await f.agent.app.decide(current, true).reply).text, 'fixture only'); assert.equal(ran, 1);
+});
+
+test('app/commands: confirmed actions traverse the original busy barrier; no parallel approvals or PC writes', async (t) => {
+  const f = fixture(t); let release, ran = 0; const gate = new Promise((r) => { release = r; });
+  f.agent.actions.registry.find((e) => e.name === 'close_app').run = async () => { ran++; await gate; return 'fixture finished'; };
+  await f.agent.actions.execute('close_app', { app: 'first fixture' });
+  const id = f.agent.app.state().pending[0].id, first = f.agent.app.decide(id, true);
+  assert.equal(f.agent.app.busy(), true); assert.equal(ran, 1);
+  await f.agent.actions.execute('close_app', { app: 'second fixture' });
+  const second = f.agent.app.state().pending[0].id;
+  assert.equal(f.agent.app.decide(second, true).busy, true); assert.equal(ran, 1);
+  assert.match(await f.agent.handle('/calc 2+2'), /kaam chal raha/);
+  release(); await first.reply; assert.equal(f.agent.app.busy(), false);
+});

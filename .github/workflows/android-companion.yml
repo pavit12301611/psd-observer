@@ -1,0 +1,159 @@
+name: Android companion
+on:
+  push:
+    branches: [main, arena/9787e6e8-psd-observer]
+    paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml', '!app/companion/docs/**', '!app/companion/README.md']
+  pull_request:
+    paths: ['app/companion/**', 'whatsapp-agent/**', '.github/workflows/android-companion.yml', '!app/companion/docs/**', '!app/companion/README.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-companion-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  agent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    defaults:
+      run:
+        working-directory: whatsapp-agent
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: whatsapp-agent/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check && npm test && npm run verify:bundle
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app/companion
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/companion/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-web-evidence
+          path: |
+            app/companion/playwright-report/
+            app/companion/test-results/
+          retention-days: 14
+  apk:
+    needs: web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app/companion
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/companion/package-lock.json
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6.4.0
+      - name: Install pinned SDK platform
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "::error::Hosted Android SDK command-line tools are missing at $SDK"
+            exit 1
+          fi
+          node scripts/ci-run.mjs "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
+      - run: npm ci --no-audit --no-fund && npm run build && npm run android:sync
+      - run: chmod +x android/gradlew && cd android && node ../scripts/ci-run.mjs ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
+      - run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/observer-1.0.0-preview.apk
+          sha256sum artifacts/observer-1.0.0-preview.apk > artifacts/SHA256SUMS
+          printf '%s\n' 'PREVIEW ONLY: debug-signed, separate .preview package. Not a production/update-compatible release. Do not uninstall a production app to install this. Production needs an owner-controlled stable release key.' > artifacts/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: observer-android-preview
+          path: app/companion/artifacts/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-android-lint-unit
+          path: |
+            app/companion/android/app/build/reports/
+            app/companion/android/app/build/test-results/
+          retention-days: 14
+  emulator:
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --no-audit --no-fund
+        working-directory: app/companion
+      - uses: actions/download-artifact@v4
+        with:
+          name: observer-android-preview
+          path: app/companion/artifacts/
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell wm size 1080x2400
+            adb shell wm density 420
+            adb install app/companion/artifacts/observer-1.0.0-preview.apk
+            adb shell am start -n in.observer.companion.preview/in.observer.companion.MainActivity
+            cd app/companion && node e2e/android-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-android-emulator
+          path: app/companion/android-smoke-results/
+          retention-days: 14

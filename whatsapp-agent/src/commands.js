@@ -13,6 +13,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import QRCode from 'qrcode';
 import { ROOT } from './config.js';
+import { createApprovalBroker } from './appbridge.js';
 import * as tools from './tools.js';
 import * as learn from './learn.js';
 import * as cron from './cron.js';
@@ -50,7 +51,7 @@ import { setWindow as setQuietWindow, clearWindow as clearQuiet, digest as quiet
 import { shouldVoiceReply, voiceReply } from './voicereply.js';
 import {
   isDestructive, requestConfirm, confirmPending, cancelPending, pendingState,
-  moveToTrash, listTrash, restoreTrash, runPanic,
+  moveToTrash, listTrash, restoreTrash, runPanic, pendingTicket,
 } from './safety.js';
 import { saveSnapshot, rollback as rollbackTo, snapshotList } from './rollback.js';
 import { setupMail, checkMail, mailStatus, setMonitor } from './mail.js';
@@ -4124,6 +4125,7 @@ ${recapGoal()}`;
 
     const result = await ai.chat(config, turnStore, text, log, {
       voice: Boolean(ctx?.voice),
+      ...(Array.isArray(ctx.appHistory) ? { history: ctx.appHistory } : {}),
       signal: activeSignal, isolated: Boolean(taskOptions.isolated),
       squadName: taskOptions.squadName,
       skipBackgroundReflect: Boolean(taskOptions.isolated),
@@ -4805,8 +4807,35 @@ ${recapGoal()}`;
     }
   }
 
+  const appApprovals = createApprovalBroker({
+    busy: () => isProcessing,
+    candidates: () => {
+      const now = Date.now(), safety = pendingTicket();
+      // Match /yes priority exactly; expose only the action that /yes would
+      // consume. Expired state must never mask a different live approval.
+      if (safety) return [{ kind: 'safety', value: safety, nonce: safety.nonce, text: `/${safety.action} ${safety.args}`, expiresAt: safety.at + 300_000 }];
+      if (store.data.pending) {
+        const p = store.data.pending, expiry = p.ts + (config.confirmTtlMs ?? 120_000);
+        if (Number.isFinite(p.ts) && p.ts <= now && expiry > now) return [{ kind: 'action', value: p, text: p.text, expiresAt: expiry }];
+        actions.clearPending();
+      }
+      if (pendingTap && pendingTap.expires > now) return [{ kind: 'tap', value: pendingTap, text: `Click “${pendingTap.matched}” at ${pendingTap.x},${pendingTap.y}`, expiresAt: pendingTap.expires }];
+      if (pendingPower && pendingPower.expires > now) return [{ kind: 'power', value: pendingPower, text: `${pendingPower.action} the PC (unsaved work may be lost)`, expiresAt: pendingPower.expires }];
+      return [];
+    },
+    // The ID is checked synchronously, then the ORIGINAL owner dispatcher
+    // acquires its busy/task barrier before any await. Never run a side-door
+    // confirmed action in parallel with an in-progress batch or PC write.
+    resolve: (_kind, approve) => handle(approve ? '/yes' : '/no', { source: 'app', isOwner: true }),
+  });
+  const appState = () => ({
+    active: taskRegistry.active(), pending: appApprovals.list(),
+    batch: lastBatch ? { halted: lastBatch.halted || '', entries: lastBatch.entries.map((e) => ({ index: e.index, command: `/${e.task.cmd}`, status: e.status, ms: e.ms, text: String(typeof e.value === 'string' ? e.value : e.value?.text || '').slice(0, 2400), completedAfterStop: Boolean(e.completedAfterStop) })) } : null,
+  });
+
   return {
     handle, handleGuest, HELP, actions, shots, harness, voice,
+    app: { state: appState, decide: appApprovals.decide, busy: () => isProcessing },
     attachWhatsApp: ({ sendToNumber: sendFn, sendToOwner: notifyFn } = {}) => {
       if (typeof sendFn === 'function') {
         sendWhatsappTo = sendFn;

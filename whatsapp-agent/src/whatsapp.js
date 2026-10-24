@@ -1157,8 +1157,8 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
   }
 
   /** Phone app / dashboard chat: run the agent without sending to WhatsApp. */
-  async function runOwner(text) {
-    return agent.handle(text, { waStatus: status });
+  async function runOwner(text, appContext = {}) {
+    return agent.handle(text, { ...appContext, waStatus: status });
   }
 
   /** Dry-run/test hook: run the owner vs controlled guest pipeline without WhatsApp. */

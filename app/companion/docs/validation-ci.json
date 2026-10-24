@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "codeCommit": "122e5369049c043d4307e737ed4c5fef7d33e3d6",
+  "runId": 40010609637,
+  "runUrl": "https://github.com/pavit12301611/psd-observer/actions/runs/40010609637",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "agent (22)",
+      "conclusion": "success"
+    },
+    {
+      "name": "web",
+      "conclusion": "success"
+    },
+    {
+      "name": "agent (24)",
+      "conclusion": "success"
+    },
+    {
+      "name": "agent (20)",
+      "conclusion": "success"
+    },
+    {
+      "name": "apk",
+      "conclusion": "success"
+    },
+    {
+      "name": "emulator",
+      "conclusion": "success"
+    }
+  ],
+  "apk": {
+    "filename": "observer-1.0.0-preview.apk",
+    "distribution": "debug-signed preview in a ZIP; not production release",
+    "applicationId": "in.observer.companion.preview",
+    "artifactId": 12526901125,
+    "downloadUrl": "https://github.com/pavit12301611/psd-observer/actions/runs/40010609637/artifacts/12526901125",
+    "zipSizeBytes": 208588,
+    "zipDigest": "sha256:4c4b65c89328729112d5da17e62e5a592e1079f7c4895547fb9efaa54f70c49a",
+    "expiresAt": "2026-11-06T19:24:32Z"
+  },
+  "validation": {
+    "frontendUnit": 37,
+    "browserE2E": 45,
+    "backendEachRuntime": 571,
+    "backendRuntimes": [
+      "20",
+      "22",
+      "24"
+    ],
+    "javaPolicyTestTask": "passed",
+    "androidLint": "passed",
+    "androidEmulator": "passed: local bundled UI, native HTTP, encrypted profile/history, page/session restore, dark theme",
+    "physicalSamsung": false,
+    "liveCloudProviders": false,
+    "realPCDesktopActions": false
+  }
+}

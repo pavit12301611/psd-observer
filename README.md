@@ -1,3 +1,5 @@
+> **Android companion (new, installable preview):** see [`app/companion/README.md`](app/companion/README.md). A lean monochrome Android client for the same owner-controlled agent, plus optional direct-provider text chat. Preview APKs are not production-signed releases; physical Galaxy A53 verification and background push are still separate work.
+
 > ### 🟢 This fork: free WhatsApp **+ a real phone app + full PC control**
 >
 > WhatsApp here no longer needs Observer's paid Twilio cloud. The
