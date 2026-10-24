@@ -110,6 +110,24 @@ export function replyForApp(reply) {
 }
 
 /** Strong ETag for one frame, so an unchanged screen costs no bandwidth. */
+/**
+ * `?cx=&cy=&cw=&ch=` in 0-1000 normalised screen space. The `c` prefix keeps
+ * these clear of `w` (the frame width) and of old clients that send neither.
+ * Missing or nonsensical values mean "no crop", so nothing breaks.
+ */
+export function readCrop(params) {
+  const num = (name) => {
+    const raw = params.get(name);
+    if (raw === null || raw === '') return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  };
+  const x = num('cx'), y = num('cy'), w = num('cw'), h = num('ch');
+  if ([x, y, w, h].some((value) => value === null)) return null;
+  if (w < 20 || h < 20 || x < 0 || y < 0 || x > 1000 || y > 1000 || x + w > 1000 || y + h > 1000) return null;
+  return { x, y, w, h };
+}
+
 export function screenTag(buffer) {
   return `"${crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 20)}"`;
 }
@@ -124,8 +142,16 @@ export function createBridgeServer({
   config, store, whatsapp, mailbox, actions, harness = null, voice = null, wavoip = null, runOwner, log = console,
   // Injectable so tests never touch a real desktop, and so the number of
   // screenshots per request is explicit and measurable.
-  screen = null, app = null,
+  screen = null, app = null, system = null,
 }) {
+  // Remote-session awareness + clipboard. Injectable like `screen`, so tests
+  // exercise the routes without a desktop.
+  const sys = system ?? {
+    state: () => pc.remoteSessionState(),
+    wake: () => pc.wakeDisplay(),
+    clipboardRead: () => pc.clipboardRead(),
+    clipboardWrite: (text) => pc.clipboardWrite(text),
+  };
   let mobile = null;
   try { mobile = createMobilePlatform({ config, app, runOwner, voice, normalise: replyForApp, solve: solveJob }); }
   catch { log.error?.('[mobile] Private mobile state could not be loaded; new mobile APIs fail closed. Existing owner commands are still available.'); }
@@ -152,11 +178,15 @@ export function createBridgeServer({
     drag: (x1,y1,x2,y2) => pc.dragMouse(x1,y1,x2,y2),
     key: (combo) => pc.keyCombo(combo),
     type: (text) => pc.typeText(text),
+    crop: (buffer, box, opts) => pc.cropFrame(buffer, box, opts),
   };
   // Size of the last frame the phone asked for. A tap then needs ZERO extra
   // screenshots — important on Wayland, where every capture can pop the
   // portal's "share your screen" prompt.
   let lastFrameSize = null;
+  function activeJobCount() {
+    try { return (mobile?.jobs?.list?.() || []).filter((job) => job.state === 'running').length; } catch { return 0; }
+  }
   const principalFor = (req, url) => {
     if (typeof config.bridgeToken !== 'string' || !config.bridgeToken.trim()) return null;
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
@@ -569,7 +599,15 @@ export function createBridgeServer({
             return res.end();
           }
           const wanted = Math.max(480, Math.min(1920, Number(url.searchParams.get('w')) || 1280));
-          const { image, mime } = await hands.shrinkForModel(shot, wanted, 70);
+          // Zoomed view: the phone asks for a normalised region (0-1000) and
+          // gets real pixels of that region instead of an upscaled thumbnail.
+          const crop = readCrop(url.searchParams);
+          let image = null, mime = 'image/png', cropped = false;
+          if (crop && scr.crop) {
+            const region = await scr.crop(shot, crop, { maxWidth: wanted });
+            if (region) { image = region.image; mime = region.mime; cropped = true; }
+          }
+          if (!image) ({ image, mime } = await hands.shrinkForModel(shot, wanted, 70));
           res.writeHead(200, {
             'content-type': mime,
             'content-length': image.length,
@@ -577,6 +615,7 @@ export function createBridgeServer({
             etag: tag,
             'x-screen-width': size.width,
             'x-screen-height': size.height,
+            'x-screen-crop': cropped ? 'region' : 'full',
           });
           return res.end(image);
         }
@@ -663,6 +702,44 @@ export function createBridgeServer({
           if (!text) return json(res, 400, { detail: 'text is required' });
           await scr.type(text.slice(0, 4000));
           return json(res, 200, { ok: true, chars: Math.min(text.length, 4000) });
+        }
+
+        // ── session awareness, display wake and clipboard (phone parity) ───
+        case 'GET /api/pc/state': {
+          let state = null, error = null;
+          try { state = await sys.state(); } catch (err) { error = err.message; }
+          return json(res, state ? 200 : 503, {
+            ...(state || {}),
+            pcControl: Boolean(config.allowPcControl),
+            controlPinRequired: Boolean(config.controlPin),
+            accessLevel: config.accessLevel,
+            busy: Boolean(app?.busy?.() || mobile?.jobs.active),
+            activeJobs: activeJobCount(),
+            ...(error ? { detail: error } : {}),
+          });
+        }
+        case 'POST /api/pc/display': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
+          try { return json(res, 200, { ok: true, ...(await sys.wake()) }); }
+          catch (err) { return json(res, 503, { detail: err.message }); }
+        }
+        case 'GET /api/clipboard': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          try { return json(res, 200, await sys.clipboardRead()); }
+          catch (err) { return json(res, 503, { detail: err.message }); }
+        }
+        case 'POST /api/clipboard': {
+          if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
+          const body = await readJsonBody(req);
+          if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
+          if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Clipboard write requires standard/full access.' });
+          const text = String(body.text ?? '');
+          if (!text) return json(res, 400, { detail: 'text is required' });
+          if (text.length > 20_000) return json(res, 413, { detail: 'Clipboard text is limited to 20000 characters.' });
+          try { return json(res, 200, await sys.clipboardWrite(text)); }
+          catch (err) { return json(res, 503, { detail: err.message }); }
         }
 
         case 'GET /api/apps':

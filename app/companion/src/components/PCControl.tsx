@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Monitor,
   Play,
@@ -7,19 +7,67 @@ import {
   Keyboard,
   ArrowUp,
   ArrowDown,
-  CornerDownLeft,
-  Delete,
-  Maximize2,
-  LockKeyhole,
-  MousePointer2,
-  ShieldCheck,
+  ArrowLeft,
   ArrowRight,
+  CornerDownLeft,
+  Maximize2,
+  Minimize2,
+  LockKeyhole,
+  Hand,
+  LoaderCircle,
+  SunMedium,
+  ClipboardCopy,
+  ClipboardPaste,
+  Plus,
+  Minus,
+  ShieldCheck,
+  Square,
+  Gauge,
 } from "lucide-react";
 import LiveDesktop from "./LiveDesktop";
-import type { AppState } from "../types";
+import type { AppState, PcState } from "../types";
 import { api, base64Blob } from "../core/api";
-import { relativePoint } from "../core/validation";
+import {
+  clampZoom,
+  frameQuery,
+  panCenter,
+  pointToScreen,
+  retryDelay,
+  visibleRegion,
+  zoomAround,
+  type Center,
+  type Region,
+} from "../core/remote";
 import { EmptyPanel, IconButton, SectionHeading } from "./ui";
+
+const FULL: Region = { x: 0, y: 0, w: 1000, h: 1000 };
+type Tab = "pad" | "keys" | "type" | "clip" | "more";
+type Ripple = { x: number; y: number; id: number };
+const TABS: { id: Tab; label: string }[] = [
+  { id: "pad", label: "Pad" },
+  { id: "keys", label: "Keys" },
+  { id: "type", label: "Type" },
+  { id: "clip", label: "Clip" },
+  { id: "more", label: "More" },
+];
+const MODIFIERS = ["ctrl", "alt", "shift", "super"] as const;
+const KEYS: { label: string; key: string }[] = [
+  { label: "Esc", key: "Escape" },
+  { label: "Tab", key: "Tab" },
+  { label: "Enter", key: "Return" },
+  { label: "⌫", key: "BackSpace" },
+  { label: "Del", key: "Delete" },
+  { label: "Home", key: "Home" },
+  { label: "End", key: "End" },
+  { label: "PgUp", key: "PageUp" },
+  { label: "PgDn", key: "PageDown" },
+  { label: "←", key: "Left" },
+  { label: "→", key: "Right" },
+  { label: "↑", key: "Up" },
+  { label: "↓", key: "Down" },
+  { label: "F5", key: "F5" },
+];
+
 export default function PCControl({
   connected,
   state,
@@ -35,54 +83,101 @@ export default function PCControl({
   draft: (text: string) => void;
   notice: (text: string) => void;
 }) {
-  const [streaming, setStreaming] = useState(false),
-    [frame, setFrame] = useState(""),
+  const [frame, setFrame] = useState(""),
+    [region, setRegion] = useState<Region>(FULL),
+    [streaming, setStreaming] = useState(false),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(""),
-    [text, setText] = useState(""),
+    [inputEnabled, setInputEnabled] = useState(false),
     [pin, setPin] = useState(""),
-    [inputEnabled, setInputEnabled] = useState(false);
-  const touch = useRef<{
-    x: number;
-    y: number;
-    moved: boolean;
-    busy: boolean;
-  } | null>(null);
-  const dragStart = useRef<{ x: number; y: number; relative: boolean } | null>(
-    null,
-  );
-  const suppressClick = useRef(false);
-  const image = useRef<HTMLImageElement>(null),
+    [zoom, setZoom] = useState(1),
+    [center, setCenter] = useState<Center>({ x: 0.5, y: 0.5 }),
+    [tab, setTab] = useState<Tab>("pad"),
+    [ripple, setRipple] = useState<Ripple | null>(null),
+    [text, setText] = useState(""),
+    [clip, setClip] = useState(""),
+    [clipBusy, setClipBusy] = useState(false),
+    [clipNote, setClipNote] = useState(""),
+    [mods, setMods] = useState<string[]>([]),
+    [pc, setPc] = useState<PcState | null>(null),
+    [pcError, setPcError] = useState(""),
+    [takingOver, setTakingOver] = useState(false),
+    [lastFrameAt, setLastFrameAt] = useState(0),
+    [now, setNow] = useState(() => Date.now()),
+    [fullscreen, setFullscreen] = useState(false),
+    [dragLine, setDragLine] = useState<{
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    } | null>(null);
+
+  const stage = useRef<HTMLDivElement>(null),
+    image = useRef<HTMLImageElement>(null),
     frameURL = useRef(""),
     etag = useRef(""),
     capturing = useRef(false),
     alive = useRef(true),
-    control = useRef<HTMLDivElement>(null);
-  const active = useRef(false);
+    failures = useRef(0),
+    startedOnce = useRef(false),
+    retryTimer = useRef<ReturnType<typeof setTimeout>>(),
+    refreshTimer = useRef<ReturnType<typeof setTimeout>>(),
+    active = useRef(connected),
+    view = useRef({ zoom: 1, center: { x: 0.5, y: 0.5 } }),
+    pointers = useRef(new Map<number, { x: number; y: number }>()),
+    gesture = useRef<{
+      startZoom: number;
+      startCenter: Center;
+      pinchDistance: number;
+      pinchAnchor: { x: number; y: number };
+      moved: boolean;
+      lastX: number;
+      lastY: number;
+      startedAt: number;
+      longPress: ReturnType<typeof setTimeout> | null;
+      fired: boolean;
+      pinched: boolean;
+      origin: { x: number; y: number } | null;
+    } | null>(null),
+    lastTap = useRef({ at: 0, x: 0, y: 0 }),
+    padSentAt = useRef(0),
+    padCarry = useRef({ x: 0, y: 0 });
+
   active.current = connected;
+  view.current = { zoom, center };
+  const busyAgent = Boolean(state?.active.length || pc?.busy);
+
   useEffect(() => {
     alive.current = true;
+    const timer = setInterval(() => setNow(Date.now()), 5000);
     return () => {
       alive.current = false;
+      clearInterval(timer);
+      clearTimeout(retryTimer.current);
+      clearTimeout(refreshTimer.current);
       if (frameURL.current) URL.revokeObjectURL(frameURL.current);
     };
   }, []);
+
   const capture = useCallback(async () => {
-    if (
-      !active.current ||
-      document.visibilityState === "hidden" ||
-      capturing.current
-    )
-      return;
+    if (!active.current || document.visibilityState === "hidden") return;
+    if (capturing.current) return;
     capturing.current = true;
     setLoading(true);
-    setError("");
     try {
-      const res = await api.wire(`/api/screen?w=${lowData ? 960 : 1440}`, {
-        binary: true,
-        timeout: 25_000,
-        headers: etag.current ? { "if-none-match": etag.current } : {},
-      });
+      const wanted = view.current;
+      const res = await api.wire(
+        `/api/screen${frameQuery({
+          zoom: wanted.zoom,
+          center: wanted.center,
+          width: lowData ? 960 : 1440,
+        })}`,
+        {
+          binary: true,
+          timeout: 8000,
+          headers: etag.current ? { "if-none-match": etag.current } : {},
+        },
+      );
       if (!alive.current || !active.current) return;
       if (res.status !== 304 && res.base64) {
         const url = URL.createObjectURL(
@@ -91,34 +186,50 @@ export default function PCControl({
         const old = frameURL.current;
         frameURL.current = url;
         setFrame(url);
+        setRegion(
+          wanted.zoom > 1
+            ? visibleRegion(wanted.zoom, wanted.center)
+            : FULL,
+        );
         if (old) URL.revokeObjectURL(old);
         etag.current = res.headers?.etag || "";
       }
+      failures.current = 0;
+      setError("");
+      setLastFrameAt(Date.now());
     } catch (e) {
-      if (alive.current) {
-        setError(e instanceof Error ? e.message : "Capture unavailable");
-        setStreaming(false);
+      if (!alive.current) return;
+      failures.current += 1;
+      setError(
+        e instanceof Error ? e.message : "Could not capture the PC screen",
+      );
+      // Slow down instead of hammering a PC that is asleep or unreachable.
+      if (streaming) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = setTimeout(
+          () => void capture(),
+          retryDelay(failures.current),
+        );
       }
     } finally {
       capturing.current = false;
       if (alive.current) setLoading(false);
     }
-  }, [lowData]);
-  useEffect(() => {
-    if (!connected) {
-      setStreaming(false);
-      setInputEnabled(false);
-      setPin("");
-      setFrame("");
-      if (frameURL.current) URL.revokeObjectURL(frameURL.current);
-      frameURL.current = "";
-      etag.current = "";
-    }
-  }, [connected]);
+  }, [lowData, streaming]);
+
+  /** One frame after an action: proof that the tap/keystroke landed. */
+  const refreshSoon = useCallback(
+    (delay = 260) => {
+      clearTimeout(refreshTimer.current);
+      refreshTimer.current = setTimeout(() => void capture(), delay);
+    },
+    [capture],
+  );
+
   useEffect(() => {
     if (!streaming || !connected) return;
-    let timer: ReturnType<typeof setTimeout>,
-      cancelled = false;
+    let cancelled = false,
+      timer: ReturnType<typeof setTimeout>;
     const loop = async () => {
       await capture();
       if (!cancelled && alive.current)
@@ -130,49 +241,399 @@ export default function PCControl({
       clearTimeout(timer);
     };
   }, [streaming, connected, capture, lowData]);
+
+  // Re-fetch the cropped region shortly after a zoom/pan settles.
   useEffect(() => {
-    const hidden = () => {
-      if (document.hidden) {
-        setStreaming(false);
-        setInputEnabled(false);
-      }
-    };
-    const background = () => {
+    if (!connected || !frame) return;
+    const timer = setTimeout(() => void capture(), 220);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, center]);
+
+  // Opening the page is already an explicit request to see the PC, so start one
+  // preview instead of making the owner find a play button. Pausing stays one tap.
+  useEffect(() => {
+    if (!connected || startedOnce.current) return;
+    startedOnce.current = true;
+    setStreaming(true);
+  }, [connected]);
+
+  useEffect(() => {
+    if (!connected) {
       setStreaming(false);
       setInputEnabled(false);
+      setPin("");
+      setFrame("");
+      setPc(null);
+      setZoom(1);
+      setCenter({ x: 0.5, y: 0.5 });
+      if (frameURL.current) URL.revokeObjectURL(frameURL.current);
+      frameURL.current = "";
+      etag.current = "";
+    }
+  }, [connected]);
+
+  useEffect(() => {
+    const hidden = () => {
+      if (document.hidden) setStreaming(false);
+    };
+    const background = () => setStreaming(false);
+    const online = () => {
+      failures.current = 0;
+      void capture();
     };
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("observer-background", background);
+    window.addEventListener("online", online);
+    const sync = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", sync);
     return () => {
       document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("observer-background", background);
+      window.removeEventListener("online", online);
+      document.removeEventListener("fullscreenchange", sync);
     };
-  }, []);
-  async function input(path: string, body: Record<string, unknown>) {
+  }, [capture]);
+
+  const loadPcState = useCallback(async () => {
+    if (!connected) return;
+    try {
+      const next = await api.get<PcState>("/api/pc/state");
+      if (!alive.current) return;
+      setPc(next);
+      setPcError("");
+    } catch (e) {
+      if (!alive.current) return;
+      setPcError(e instanceof Error ? e.message : "PC state unavailable");
+    }
+  }, [connected]);
+
+  useEffect(() => {
+    if (!connected) return;
+    void loadPcState();
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") void loadPcState();
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [connected, loadPcState]);
+
+  async function send(path: string, body: Record<string, unknown> = {}) {
     if (!inputEnabled) {
-      notice("Enable manual input first. Every tap can change your PC.");
+      notice("Turn on manual input first. Every tap can change your PC.");
       return false;
     }
     try {
       await api.post(path, { ...body, pin });
+      refreshSoon();
       return true;
     } catch (e) {
       notice(e instanceof Error ? e.message : "Input not completed");
+      refreshSoon(600);
       return false;
     }
   }
+
+  function mark(x: number, y: number) {
+    setRipple({ x, y, id: Date.now() });
+    navigator.vibrate?.(8);
+  }
+
+  function tapped(point: { x: number; y: number }, at: { x: number; y: number }) {
+    mark(at.x, at.y);
+    void send("/api/tap", { ...point, relative: true });
+  }
+
+  function rightClick() {
+    void send("/api/pointer", { op: "click", button: "right" });
+  }
+
+  const setZoomKeepingCenter = (next: number) => {
+    const result = zoomAround(zoom, center, next, { x: 0.5, y: 0.5 });
+    setZoom(result.zoom);
+    setCenter(result.center);
+  };
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      gesture.current = {
+        startZoom: zoom,
+        startCenter: center,
+        pinchDistance: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        pinchAnchor: {
+          x: (a.x + b.x) / 2,
+          y: (a.y + b.y) / 2,
+        },
+        moved: false,
+        lastX: 0,
+        lastY: 0,
+        startedAt: Date.now(),
+        longPress: null,
+        fired: false,
+        pinched: true,
+        origin: null,
+      };
+      return;
+    }
+    if (gesture.current?.longPress) clearTimeout(gesture.current.longPress);
+    const g = {
+      startZoom: zoom,
+      startCenter: center,
+      pinchDistance: 0,
+      pinchAnchor: { x: 0, y: 0 },
+      moved: false,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      startedAt: Date.now(),
+      longPress: null as ReturnType<typeof setTimeout> | null,
+      fired: false,
+      pinched: false,
+      origin: inputEnabled && clampZoom(zoom) <= 1
+        ? { x: e.clientX, y: e.clientY }
+        : null,
+    };
+    // Held finger = right-click, the same habit as a laptop trackpad.
+    if (inputEnabled)
+      g.longPress = setTimeout(() => {
+        if (!gesture.current || gesture.current.moved) return;
+        gesture.current.fired = true;
+        const at = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        };
+        mark(at.x, at.y);
+        rightClick();
+      }, 550);
+    gesture.current = g;
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const g = gesture.current;
+    if (!g) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (pointers.current.size >= 2) {
+      g.pinched = true;
+      const [a, b] = [...pointers.current.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      if (Math.abs(distance - g.pinchDistance) > 6) g.moved = true;
+      const next = zoomAround(g.startZoom, g.startCenter, (g.startZoom * distance) / g.pinchDistance, {
+        x: (g.pinchAnchor.x - rect.left) / rect.width,
+        y: (g.pinchAnchor.y - rect.top) / rect.height,
+      });
+      setZoom(next.zoom);
+      setCenter(next.center);
+      return;
+    }
+    if (g.pinched) return; // one finger left over from a pinch must not jump the view
+    const dx = e.clientX - g.lastX,
+      dy = e.clientY - g.lastY;
+    if (!g.moved && Math.hypot(dx, dy) > 4) {
+      g.moved = true;
+      if (g.longPress) {
+        clearTimeout(g.longPress);
+        g.longPress = null;
+      }
+    }
+    if (g.moved && clampZoom(zoom) > 1) {
+      setCenter(panCenter(zoom, center, dx / rect.width, dy / rect.height));
+      g.lastX = e.clientX;
+      g.lastY = e.clientY;
+    } else if (g.moved && g.origin && inputEnabled) {
+      const box = stage.current?.getBoundingClientRect();
+      if (box) {
+        setDragLine({
+          x1: g.origin.x - box.left,
+          y1: g.origin.y - box.top,
+          x2: e.clientX - box.left,
+          y2: e.clientY - box.top,
+        });
+      }
+    }
+  }
+
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const g = gesture.current;
+    pointers.current.delete(e.pointerId);
+    if (!g) return;
+    if (g.longPress) clearTimeout(g.longPress);
+    if (pointers.current.size > 0) return; // wait for the last finger
+    gesture.current = null;
+    if (g.fired) return;
+    const elapsed = Date.now() - g.startedAt;
+    if (g.pinched) {
+      if (!g.moved && elapsed < 400 && inputEnabled) {
+        mark(e.clientX, e.clientY);
+        rightClick();
+      }
+      return;
+    }
+    setDragLine(null);
+    if (g.moved) {
+      const img = image.current;
+      if (!img || !g.origin || clampZoom(zoom) > 1) return;
+      const rect = img.getBoundingClientRect();
+      const from = pointToScreen(g.origin.x, g.origin.y, rect, {
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      }, region);
+      const to = pointToScreen(e.clientX, e.clientY, rect, {
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      }, region);
+      if (from && to) {
+        mark(to.x, to.y);
+        void send("/api/drag", { from, to });
+      }
+      return;
+    }
+    const img = image.current,
+      el = stage.current;
+    if (!img || !el) return;
+    const rect = img.getBoundingClientRect();
+    const point = pointToScreen(e.clientX, e.clientY, rect, {
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    }, region);
+    if (!point) return;
+    const stageRect = el.getBoundingClientRect();
+    // Double-tap zooms while browsing; with input on, taps are clicks.
+    const last = lastTap.current;
+    if (
+      !inputEnabled &&
+      elapsed < 300 &&
+      Date.now() - last.at < 320 &&
+      Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40
+    ) {
+      lastTap.current = { at: 0, x: 0, y: 0 };
+      setZoomKeepingCenter(clampZoom(zoom) > 1.2 ? 1 : 2.2);
+      return;
+    }
+    lastTap.current = { at: Date.now(), x: e.clientX, y: e.clientY };
+    if (!inputEnabled) return;
+    tapped(point, {
+      x: e.clientX - stageRect.left,
+      y: e.clientY - stageRect.top,
+    });
+  }
+
+  async function wakeDisplay() {
+    try {
+      await api.post("/api/pc/display", { pin });
+      notice("Display wake sent. Unlock the PC on the machine itself if it is locked.");
+      await loadPcState();
+      refreshSoon(400);
+    } catch (e) {
+      notice(e instanceof Error ? e.message : "Display wake failed");
+    }
+  }
+
+  async function takeOver() {
+    setTakingOver(true);
+    try {
+      await api.post("/api/chat", { text: "/stop" });
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const next = await api.get<PcState>("/api/pc/state");
+        setPc(next);
+        if (!next.busy) break;
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+      setInputEnabled(true);
+      notice("Agent stopped. Manual input is yours, time-limited by the PC's own policy.");
+      refreshSoon(200);
+    } catch (e) {
+      notice(e instanceof Error ? e.message : "Could not take over");
+    } finally {
+      setTakingOver(false);
+    }
+  }
+
+  async function readClipboard() {
+    setClipBusy(true);
+    setClipNote("");
+    try {
+      const value = await api.get<{ text?: string; truncated?: boolean }>(
+        "/api/clipboard",
+      );
+      setClip(value.text || "");
+      setClipNote(
+        value.truncated
+          ? "PC clipboard is long; the first part is shown."
+          : value.text
+            ? "Loaded from your PC."
+            : "PC clipboard is empty.",
+      );
+    } catch (e) {
+      setClipNote(e instanceof Error ? e.message : "Clipboard read failed");
+    } finally {
+      setClipBusy(false);
+    }
+  }
+
+  async function writeClipboard(viaPaste = false) {
+    if (!clip.trim()) return;
+    setClipBusy(true);
+    setClipNote("");
+    try {
+      await api.post("/api/clipboard", { text: clip, pin });
+      if (viaPaste) {
+        await api.post("/api/key", { key: "ctrl+v", pin });
+        setClipNote("Sent to the PC clipboard and pasted.");
+      } else setClipNote("Copied to the PC clipboard.");
+      refreshSoon(400);
+    } catch (e) {
+      setClipNote(e instanceof Error ? e.message : "Clipboard write failed");
+    } finally {
+      setClipBusy(false);
+    }
+  }
+
+  async function copyToPhone() {
+    try {
+      await navigator.clipboard.writeText(clip);
+      setClipNote("Copied to this phone.");
+    } catch {
+      setClipNote("This browser blocks clipboard access; select the text instead.");
+    }
+  }
+
+  const statusChips = useMemo(() => {
+    const chips: { label: string; tone?: "warn" | "live" }[] = [];
+    if (pcError) chips.push({ label: "PC state unavailable", tone: "warn" });
+    if (pc?.locked) chips.push({ label: "Locked", tone: "warn" });
+    if (pc?.display === "off") chips.push({ label: "Display asleep", tone: "warn" });
+    if (pc?.session && pc.session !== "headless")
+      chips.push({ label: pc.session === "wayland" ? "Wayland" : "X11" });
+    if (pc?.battery) chips.push({ label: `${pc.battery.percent}%${pc.battery.charging ? " ⚡" : ""}` });
+    if (busyAgent) chips.push({ label: "Agent busy", tone: "warn" });
+    if (inputEnabled) chips.push({ label: "Input on", tone: "live" });
+    return chips;
+  }, [pc, pcError, busyAgent, inputEnabled]);
+
+  const secondsAgo = lastFrameAt
+    ? Math.max(0, Math.round((now - lastFrameAt) / 1000))
+    : null;
+  // Without a modifier the key keeps its PC name ("Return", "PageUp"); with one
+  // it becomes a combo the agent already understands ("ctrl+shift+t").
+  const modifierCombo = (key: string) =>
+    mods.length ? [...mods, key].join("+").toLowerCase() : key;
+
   return (
-    <div className="page-content">
+    <div className="page-content pc-page">
       <SectionHeading
         eyebrow="YOUR PC, WITH YOU"
-        title="A little closer."
+        title="PC control"
         action={
           connected && (
             <span className="small-pill">{state?.host || "PC connected"}</span>
           )
         }
       >
-        A considered workspace, wherever you are.
+        Screen, trackpad and keyboard in one fixed view — nothing scrolls away
+        while you work.
       </SectionHeading>
       {!connected ? (
         <EmptyPanel
@@ -189,335 +650,571 @@ export default function PCControl({
           and put your tools to work. Nothing is captured in the background.
         </EmptyPanel>
       ) : (
-        <>
-          <div className="remote-panel" ref={control}>
-            <div className="remote-toolbar">
-              <span>
-                <span className={`status-dot ${streaming ? "live" : ""}`} />
-                {streaming ? "Screen preview on" : "Screen preview paused"}
-              </span>
-              <div>
-                <IconButton
-                  label={
-                    streaming ? "Pause screen preview" : "Start screen preview"
-                  }
-                  onClick={() => setStreaming(!streaming)}
-                >
-                  {streaming ? <Pause size={17} /> : <Play size={17} />}
-                </IconButton>
-                <IconButton
-                  label="Refresh screenshot"
-                  disabled={loading}
-                  onClick={() => void capture()}
-                >
-                  <RefreshCw size={17} className={loading ? "spin" : ""} />
-                </IconButton>
-                <IconButton
-                  label="Expand screen"
-                  onClick={() => {
-                    if (document.fullscreenElement)
-                      void document.exitFullscreen();
-                    else
-                      void control.current
-                        ?.requestFullscreen()
-                        .catch(() =>
-                          notice("Fullscreen is not available here."),
-                        );
-                  }}
-                >
-                  <Maximize2 size={17} />
-                </IconButton>
-              </div>
+        <div className="pc-shell">
+          <div className="pc-head">
+            <div className="pc-head-left">
+              <span className={`status-dot ${streaming ? "live" : ""}`} />
+              <span>{streaming ? "Live" : "Paused"}</span>
+              {secondsAgo !== null && (
+                <span className="pc-muted">
+                  {secondsAgo <= 1 ? "just now" : `${secondsAgo}s ago`}
+                </span>
+              )}
             </div>
-            <div className={`screen-view ${inputEnabled ? "input-on" : ""}`}>
-              {frame ? (
+            <div className="pc-head-actions">
+              <IconButton
+                label="Zoom out"
+                disabled={zoom <= 1}
+                onClick={() => setZoomKeepingCenter(zoom - 0.5)}
+              >
+                <Minus size={16} />
+              </IconButton>
+              <button
+                className="pc-zoom-label"
+                onClick={() => setZoomKeepingCenter(1)}
+                aria-label="Reset zoom"
+              >
+                {zoom.toFixed(1)}×
+              </button>
+              <IconButton
+                label="Zoom in"
+                disabled={zoom >= 4}
+                onClick={() => setZoomKeepingCenter(zoom + 0.5)}
+              >
+                <Plus size={16} />
+              </IconButton>
+              <IconButton
+                label={streaming ? "Pause preview" : "Start preview"}
+                onClick={() => setStreaming(!streaming)}
+              >
+                {streaming ? <Pause size={16} /> : <Play size={16} />}
+              </IconButton>
+              <IconButton
+                label="Refresh frame"
+                disabled={loading}
+                onClick={() => void capture()}
+              >
+                <RefreshCw size={16} className={loading ? "spin" : ""} />
+              </IconButton>
+              <IconButton
+                label={fullscreen ? "Leave fullscreen" : "Fullscreen"}
+                onClick={() => {
+                  if (document.fullscreenElement)
+                    void document.exitFullscreen();
+                  else
+                    void stage.current
+                      ?.requestFullscreen()
+                      .catch(() => notice("Fullscreen is not available here."));
+                }}
+              >
+                {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </IconButton>
+            </div>
+          </div>
+
+          <div className="pc-strip">
+            <div className="pc-chips">
+              {statusChips.map((chip) => (
+                <span
+                  key={chip.label}
+                  className={`pc-chip ${chip.tone || ""}`}
+                >
+                  {chip.label}
+                </span>
+              ))}
+            </div>
+            {(pc?.display === "off" || pc?.locked) && (
+              <button className="pc-chip action" onClick={() => void wakeDisplay()}>
+                <SunMedium size={13} />
+                Wake display
+              </button>
+            )}
+          </div>
+
+          <div
+            className={`pc-stage ${inputEnabled ? "input-on" : ""}`}
+            ref={stage}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={() => {
+              pointers.current.clear();
+              gesture.current = null;
+              setDragLine(null);
+            }}
+            onDoubleClick={(e) => {
+              if (inputEnabled) return;
+              e.preventDefault();
+              setZoomKeepingCenter(clampZoom(zoom) > 1.2 ? 1 : 2.2);
+            }}
+          >
+            {frame ? (
+              <>
                 <img
                   ref={image}
                   src={frame}
-                  alt="Latest screenshot from your connected PC"
+                  alt="Live frame from your PC"
                   draggable={false}
-                  onPointerDown={(e) => {
-                    const img = image.current;
-                    if (!img || !inputEnabled) return;
-                    dragStart.current = relativePoint(
-                      e.clientX,
-                      e.clientY,
-                      img.getBoundingClientRect(),
-                      { width: img.naturalWidth, height: img.naturalHeight },
-                    );
-                  }}
-                  onPointerUp={(e) => {
-                    const img = image.current,
-                      start = dragStart.current;
-                    dragStart.current = null;
-                    if (!img || !start || !inputEnabled) return;
-                    const to = relativePoint(
-                      e.clientX,
-                      e.clientY,
-                      img.getBoundingClientRect(),
-                      { width: img.naturalWidth, height: img.naturalHeight },
-                    );
-                    if (to && Math.hypot(to.x - start.x, to.y - start.y) > 20) {
-                      suppressClick.current = true;
-                      void input("/api/drag", { from: start, to });
-                    }
-                  }}
-                  onClick={(e) => {
-                    const img = image.current;
-                    if (!img || !inputEnabled) return;
-                    const point = relativePoint(
-                      e.clientX,
-                      e.clientY,
-                      img.getBoundingClientRect(),
-                      { width: img.naturalWidth, height: img.naturalHeight },
-                    );
-                    if (point) void input("/api/tap", point);
-                  }}
+                  onLoad={() => setLoading(false)}
                 />
-              ) : (
-                <div className="screen-placeholder">
-                  <Monitor size={36} strokeWidth={1.2} />
-                  <strong>Your screen stays private.</strong>
-                  <p>Press play to request a screen preview.</p>
-                </div>
-              )}
-            </div>
-            <div className="screen-caption">
-              <span>
-                {lowData
-                  ? "Battery saver · up to 1 frame / 2.5s"
-                  : "Balanced · up to 1 frame / 1.2s"}
+                {ripple && (
+                  <span
+                    key={ripple.id}
+                    className="pc-ripple"
+                    style={{ left: ripple.x, top: ripple.y }}
+                  />
+                )}
+                {dragLine && (
+                  <svg className="pc-drag-line" aria-hidden>
+                    <line
+                      x1={dragLine.x1}
+                      y1={dragLine.y1}
+                      x2={dragLine.x2}
+                      y2={dragLine.y2}
+                    />
+                  </svg>
+                )}
+                {zoom > 1 ? (
+                  <span className="pc-pan-hint">Drag to pan · pinch to zoom</span>
+                ) : (
+                  inputEnabled && (
+                    <span className="pc-pan-hint">Drag on the screen to drag on the PC</span>
+                  )
+                )}
+              </>
+            ) : (
+              <div className="screen-placeholder">
+                <Monitor size={34} strokeWidth={1.2} />
+                <strong>
+                  {error ? "Screen unavailable" : "Your screen stays private."}
+                </strong>
+                <p>
+                  {error
+                    ? error
+                    : "Press play to request a frame. Nothing is captured in the background."}
+                </p>
+                {error && (
+                  <button className="button compact" onClick={() => void capture()}>
+                    Retry
+                    <RefreshCw size={14} />
+                  </button>
+                )}
+              </div>
+            )}
+            {loading && frame && (
+              <span className="pc-frame-loading" aria-hidden>
+                <LoaderCircle size={14} className="spin" />
               </span>
-              <span>Stops when backgrounded</span>
-            </div>
+            )}
           </div>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="control-card">
-            <div className="control-card-title">
+
+          <div className="pc-control-row">
+            <label className="pc-input-toggle">
+              <input
+                aria-label="Enable manual PC input"
+                disabled={!state?.pcControl}
+                type="checkbox"
+                checked={inputEnabled}
+                onChange={(e) => setInputEnabled(e.target.checked)}
+              />
               <span>
-                <MousePointer2 size={18} />
-                Manual input
+                <Hand size={15} />
+                Input
               </span>
-              <label className="toggle">
-                <input
-                  aria-label="Enable manual PC input"
-                  disabled={!state?.pcControl || !!state?.active.length}
-                  type="checkbox"
-                  checked={inputEnabled}
-                  onChange={(e) => setInputEnabled(e.target.checked)}
-                />
-                <span />
-              </label>
-            </div>
-            <p>
-              Turn on deliberately. Screen taps and keys act directly on your
-              PC.
-            </p>
+            </label>
+            {busyAgent && (
+              <button
+                className="button compact"
+                disabled={takingOver || !state?.pcControl}
+                onClick={() => void takeOver()}
+              >
+                {takingOver ? (
+                  <LoaderCircle size={14} className="spin" />
+                ) : (
+                  <Square size={13} />
+                )}
+                Take over
+              </button>
+            )}
             {state?.controlPinRequired && (
               <input
+                className="pc-pin"
                 type="password"
                 inputMode="numeric"
                 autoComplete="off"
                 aria-label="PC control PIN"
-                placeholder="PC control PIN (kept in memory only)"
+                placeholder="PIN"
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
               />
             )}
-            <div className="keyboard-shortcuts">
-              {[
-                ["Esc", "Escape"],
-                ["Tab", "Tab"],
-                ["Ctrl + L", "ctrl+l"],
-                ["Copy", "ctrl+c"],
-                ["Paste", "ctrl+v"],
-              ].map(([label, key]) => (
+            {!state?.pcControl && (
+              <span className="pc-muted">PC control is off on the PC</span>
+            )}
+          </div>
+
+          <div className="pc-dock">
+            <div className="pc-tabs" role="tablist">
+              {TABS.map((item) => (
                 <button
-                  disabled={!inputEnabled}
-                  className="key"
-                  key={key}
-                  onClick={() => void input("/api/key", { key })}
+                  key={item.id}
+                  role="tab"
+                  aria-selected={tab === item.id}
+                  className={`pc-tab ${tab === item.id ? "active" : ""}`}
+                  onClick={() => setTab(item.id)}
                 >
-                  {label}
+                  {item.label}
                 </button>
               ))}
-              <IconButton
-                label="Arrow up"
-                disabled={!inputEnabled}
-                onClick={() => void input("/api/key", { key: "Up" })}
-              >
-                <ArrowUp size={17} />
-              </IconButton>
-              <IconButton
-                label="Arrow down"
-                disabled={!inputEnabled}
-                onClick={() => void input("/api/key", { key: "Down" })}
-              >
-                <ArrowDown size={17} />
-              </IconButton>
-              <IconButton
-                label="Backspace"
-                disabled={!inputEnabled}
-                onClick={() => void input("/api/key", { key: "BackSpace" })}
-              >
-                <Delete size={17} />
-              </IconButton>
-              <IconButton
-                label="Enter"
-                disabled={!inputEnabled}
-                onClick={() => void input("/api/key", { key: "Return" })}
-              >
-                <CornerDownLeft size={17} />
-              </IconButton>
             </div>
-            <form
-              className="inline-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (text.trim())
-                  void input("/api/type", { text }).then((ok) => {
-                    if (ok) setText("");
-                  });
-              }}
-            >
-              <Keyboard size={18} />
-              <input
-                aria-label="Type on your PC"
-                placeholder="Type something on your PC…"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                maxLength={4000}
-                disabled={!inputEnabled}
-              />
-              <button
-                className="button compact"
-                disabled={!inputEnabled || !text.trim()}
-                type="submit"
-              >
-                Type
-                <ArrowRight size={15} />
-              </button>
-            </form>
+            <div className="pc-dock-body">
+              {tab === "pad" && (
+                <>
+                  <div
+                    className={`pc-pad ${inputEnabled ? "input-on" : ""}`}
+                    role="application"
+                    aria-label="PC touchpad"
+                    onPointerDown={(e) => {
+                      if (!inputEnabled) return;
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      (e.currentTarget as HTMLElement).dataset.px = String(e.clientX);
+                      (e.currentTarget as HTMLElement).dataset.py = String(e.clientY);
+                      (e.currentTarget as HTMLElement).dataset.ox = String(e.clientX);
+                      (e.currentTarget as HTMLElement).dataset.oy = String(e.clientY);
+                    }}
+                    onPointerMove={(e) => {
+                      if (!inputEnabled) return;
+                      const el = e.currentTarget as HTMLElement;
+                      const px = Number(el.dataset.px ?? 0),
+                        py = Number(el.dataset.py ?? 0);
+                      if (!el.dataset.px) return;
+                      const dx = Math.round((e.clientX - px) * 1.4),
+                        dy = Math.round((e.clientY - py) * 1.4);
+                      if (Math.abs(dx) + Math.abs(dy) < 2) return;
+                      el.dataset.px = String(e.clientX);
+                      el.dataset.py = String(e.clientY);
+                      padCarry.current = {
+                        x: Math.max(-200, Math.min(200, padCarry.current.x + dx)),
+                        y: Math.max(-200, Math.min(200, padCarry.current.y + dy)),
+                      };
+                      // One request per ~24ms keeps a slow ydotool call from
+                      // queueing a whole swipe behind the finger.
+                      if (Date.now() - padSentAt.current < 24) return;
+                      const move = padCarry.current;
+                      if (!move.x && !move.y) return;
+                      padCarry.current = { x: 0, y: 0 };
+                      padSentAt.current = Date.now();
+                      void api
+                        .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
+                        .catch(() => setInputEnabled(false));
+                    }}
+                    onPointerUp={(e) => {
+                      const el = e.currentTarget as HTMLElement;
+                      const moved =
+                        Math.hypot(
+                          e.clientX - Number(el.dataset.ox ?? e.clientX),
+                          e.clientY - Number(el.dataset.oy ?? e.clientY),
+                        ) > 6;
+                      delete el.dataset.px;
+                      delete el.dataset.py;
+                      if (!inputEnabled || moved) return;
+                      mark(
+                        e.clientX - el.getBoundingClientRect().left,
+                        e.clientY - el.getBoundingClientRect().top,
+                      );
+                      void send("/api/pointer", { op: "click", button: "left" });
+                    }}
+                  >
+                    <span>{inputEnabled ? "Move · tap to click · hold for right" : "Turn on Input to use the trackpad"}</span>
+                  </div>
+                  <div className="pc-row">
+                    <button
+                      className="button compact"
+                      disabled={!inputEnabled}
+                      onClick={() => void send("/api/pointer", { op: "click", button: "right" })}
+                    >
+                      Right click
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={!inputEnabled}
+                      onClick={() =>
+                        void send("/api/pointer", { op: "scroll", direction: "up", amount: 3 })
+                      }
+                    >
+                      Scroll ↑
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={!inputEnabled}
+                      onClick={() =>
+                        void send("/api/pointer", { op: "scroll", direction: "down", amount: 3 })
+                      }
+                    >
+                      Scroll ↓
+                    </button>
+                  </div>
+                  <div className="pc-row">
+                    <span className="pc-muted">Nudge</span>
+                    {[
+                      { icon: <ArrowUp size={14} />, dx: 0, dy: -10, label: "Up" },
+                      { icon: <ArrowDown size={14} />, dx: 0, dy: 10, label: "Down" },
+                      { icon: <ArrowLeft size={14} />, dx: -10, dy: 0, label: "Left" },
+                      { icon: <ArrowRight size={14} />, dx: 10, dy: 0, label: "Right" },
+                    ].map((n) => (
+                      <IconButton
+                        key={n.label}
+                        label={`Nudge ${n.label}`}
+                        disabled={!inputEnabled}
+                        onClick={() =>
+                          void send("/api/pointer", { op: "move", dx: n.dx, dy: n.dy })
+                        }
+                      >
+                        {n.icon}
+                      </IconButton>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {tab === "keys" && (
+                <>
+                  <div className="pc-row">
+                    {MODIFIERS.map((name) => (
+                      <button
+                        key={name}
+                        className={`pc-key ${mods.includes(name) ? "held" : ""}`}
+                        disabled={!inputEnabled}
+                        aria-pressed={mods.includes(name)}
+                        onClick={() =>
+                          setMods((set) =>
+                            set.includes(name)
+                              ? set.filter((m) => m !== name)
+                              : [...set, name],
+                          )
+                        }
+                      >
+                        {name === "super" ? "Super" : name[0].toUpperCase() + name.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="pc-keygrid">
+                    {KEYS.map((item) => (
+                      <button
+                        key={item.label}
+                        className="pc-key"
+                        disabled={!inputEnabled}
+                        onClick={() =>
+                          void send("/api/key", { key: modifierCombo(item.key) })
+                        }
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="pc-muted">
+                    Modifiers stay held until you tap them again — Ctrl + C is two
+                    taps, not a keyboard.
+                  </p>
+                </>
+              )}
+
+              {tab === "type" && (
+                <>
+                  <textarea
+                    className="pc-text"
+                    aria-label="Type on your PC"
+                    placeholder="Type on your PC…"
+                    value={text}
+                    maxLength={4000}
+                    onChange={(e) => setText(e.target.value)}
+                  />
+                  <div className="pc-row">
+                    <button
+                      className="button compact"
+                      disabled={!inputEnabled || !text.trim()}
+                      onClick={() =>
+                        void send("/api/type", { text }).then((ok) => ok && setText(""))
+                      }
+                    >
+                      Type
+                      <Keyboard size={14} />
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={!inputEnabled || !text.trim()}
+                      onClick={async () => {
+                        const ok = await send("/api/type", { text });
+                        if (ok) {
+                          await send("/api/key", { key: "Return" });
+                          setText("");
+                        }
+                      }}
+                    >
+                      Type + Enter
+                      <CornerDownLeft size={14} />
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={!inputEnabled || text.length < 40}
+                      onClick={async () => {
+                        try {
+                          await api.post("/api/clipboard", { text, pin });
+                          await send("/api/key", { key: "ctrl+v" });
+                          setText("");
+                          notice("Long text sent through the PC clipboard.");
+                        } catch (e) {
+                          notice(e instanceof Error ? e.message : "Paste failed");
+                        }
+                      }}
+                    >
+                      Paste long text
+                    </button>
+                  </div>
+                  <p className="pc-muted">
+                    Typing is capped at 4000 characters. Use the clipboard button
+                    for anything longer.
+                  </p>
+                </>
+              )}
+
+              {tab === "clip" && (
+                <>
+                  <textarea
+                    className="pc-text"
+                    aria-label="Clipboard text"
+                    placeholder="Phone and PC clipboard in one box…"
+                    value={clip}
+                    maxLength={20_000}
+                    onChange={(e) => setClip(e.target.value)}
+                  />
+                  <div className="pc-row">
+                    <button
+                      className="button compact"
+                      disabled={clipBusy}
+                      onClick={() => void readClipboard()}
+                    >
+                      <ClipboardCopy size={14} />
+                      Read PC
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={clipBusy || !clip.trim()}
+                      onClick={() => void writeClipboard(false)}
+                    >
+                      <ClipboardPaste size={14} />
+                      Send to PC
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={clipBusy || !clip.trim() || !inputEnabled}
+                      onClick={() => void writeClipboard(true)}
+                    >
+                      Send + paste
+                    </button>
+                    <button
+                      className="button compact"
+                      disabled={!clip.trim()}
+                      onClick={() => void copyToPhone()}
+                    >
+                      Copy here
+                    </button>
+                  </div>
+                  {clipNote && <p className="pc-muted">{clipNote}</p>}
+                  <p className="pc-muted">
+                    Overwriting the PC clipboard needs the PC PIN. Nothing is
+                    stored on this phone.
+                  </p>
+                </>
+              )}
+
+              {tab === "more" && (
+                <>
+                  <div className="pc-status-grid">
+                    <div>
+                      <span>Session</span>
+                      <strong>{pc?.session || (pcError ? "unknown" : "…")}</strong>
+                    </div>
+                    <div>
+                      <span>Locked</span>
+                      <strong>
+                        {pc?.locked === null || pc?.locked === undefined
+                          ? "unknown"
+                          : pc.locked
+                            ? "yes"
+                            : "no"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Display</span>
+                      <strong>{pc?.display || "unknown"}</strong>
+                    </div>
+                    <div>
+                      <span>Battery</span>
+                      <strong>
+                        {pc?.battery ? `${pc.battery.percent}%` : "n/a"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Disk free</span>
+                      <strong>
+                        {pc?.diskFreeMb
+                          ? `${(pc.diskFreeMb / 1024).toFixed(1)} GB`
+                          : "n/a"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Agent</span>
+                      <strong>{busyAgent ? "busy" : "idle"}</strong>
+                    </div>
+                  </div>
+                  <div className="pc-row">
+                    <button className="button compact" onClick={() => void loadPcState()}>
+                      <RefreshCw size={14} />
+                      Refresh
+                    </button>
+                    <button className="button compact" onClick={() => void wakeDisplay()}>
+                      <SunMedium size={14} />
+                      Wake display
+                    </button>
+                    <button
+                      className="button compact"
+                      onClick={() => draft("/pc lock")}
+                    >
+                      <LockKeyhole size={14} />
+                      Lock PC
+                    </button>
+                    <button
+                      className="button compact"
+                      onClick={() => {
+                        setStreaming(!streaming);
+                        void capture();
+                      }}
+                    >
+                      <Gauge size={14} />
+                      New frame
+                    </button>
+                  </div>
+                  {pcError && <p className="pc-muted">{pcError}</p>}
+                  <LiveDesktop notice={notice} />
+                  <p className="trust-note">
+                    <ShieldCheck size={13} />
+                    Manual input needs PC-side permission. The PC PIN is used per
+                    request and never stored on this phone.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
-          <div className="control-card">
-            <div className="control-card-title">
-              <span>Touchpad · current PC cursor</span>
-              <span className="small-pill">Manual input only</span>
-            </div>
-            <p>
-              Move without guessing a video/window coordinate. Tap for
-              left-click; use the explicit right-click and scroll buttons.
-              Original PIN/access/task barriers apply.
-            </p>
-            <div
-              className={`touchpad ${inputEnabled ? "input-on" : ""}`}
-              role="application"
-              aria-label="PC touchpad"
-              onPointerDown={(e) => {
-                if (!inputEnabled) return;
-                e.currentTarget.setPointerCapture(e.pointerId);
-                touch.current = {
-                  x: e.clientX,
-                  y: e.clientY,
-                  moved: false,
-                  busy: false,
-                };
-              }}
-              onPointerMove={(e) => {
-                const t = touch.current;
-                if (!t || !inputEnabled || t.busy) return;
-                const dx = Math.round((e.clientX - t.x) * 1.4),
-                  dy = Math.round((e.clientY - t.y) * 1.4);
-                if (Math.abs(dx) + Math.abs(dy) < 3) return;
-                t.moved = true;
-                t.x = e.clientX;
-                t.y = e.clientY;
-                t.busy = true;
-                void input("/api/pointer", {
-                  op: "move",
-                  dx: Math.max(-200, Math.min(200, dx)),
-                  dy: Math.max(-200, Math.min(200, dy)),
-                }).then((ok) => {
-                  t.busy = false;
-                  if (!ok) setInputEnabled(false);
-                });
-              }}
-              onPointerUp={() => {
-                const t = touch.current;
-                touch.current = null;
-                if (t && !t.moved && inputEnabled)
-                  void input("/api/pointer", { op: "click", button: "left" });
-              }}
-              onPointerCancel={() => (touch.current = null)}
-            >
-              Enable manual input, then move here
-            </div>
-            <div className="button-row">
-              <button
-                className="button"
-                disabled={!inputEnabled}
-                onClick={() =>
-                  void input("/api/pointer", { op: "click", button: "right" })
-                }
-              >
-                Right click
-              </button>
-              <button
-                className="button"
-                disabled={!inputEnabled}
-                onClick={() =>
-                  void input("/api/pointer", {
-                    op: "scroll",
-                    direction: "up",
-                    amount: 3,
-                  })
-                }
-              >
-                Scroll up
-              </button>
-              <button
-                className="button"
-                disabled={!inputEnabled}
-                onClick={() =>
-                  void input("/api/pointer", {
-                    op: "scroll",
-                    direction: "down",
-                    amount: 3,
-                  })
-                }
-              >
-                Scroll down
-              </button>
-            </div>
-            <p className="small-text muted">
-              Dragging a screenshot uses the PC's actual geometry and supported
-              input backend; unsupported Wayland dragging reports an error, not
-              a fake success.
-            </p>
-          </div>
-          <LiveDesktop notice={notice} />
-          <div className="tool-grid">
-            <button className="tool-card" onClick={() => draft("/apps")}>
-              <Monitor size={20} />
-              <strong>Applications</strong>
-              <span>Find and open a PC app</span>
-            </button>
-            <button className="tool-card" onClick={() => draft("/pc lock")}>
-              <LockKeyhole size={20} />
-              <strong>Lock session</strong>
-              <span>Review the command in chat</span>
-            </button>
-          </div>
-          <p className="trust-note">
-            <ShieldCheck size={14} />
-            Manual controls require PC-side permissions. AI commands retain
-            their original confirmation gates.
-          </p>
-        </>
+        </div>
+      )}
+      {error && frame && (
+        <p className="form-error pc-error" role="alert">
+          {error}
+          <button className="text-button" onClick={() => void capture()}>
+            Retry
+          </button>
+        </p>
       )}
     </div>
   );

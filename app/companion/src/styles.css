@@ -2706,3 +2706,493 @@ textarea {
 .crop-fields input {
   margin-top: 7px;
 }
+
+/* ── PC control: one fixed screen, everything else in the dock ──────────────
+   The old page put the touchpad *below* the screenshot, so every gesture
+   scrolled the page away. Here the page itself never scrolls: the stage takes
+   the free space, and only the dock body scrolls when a tab is long. */
+.pc-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 12px 10px;
+  gap: 8px;
+  scrollbar-width: none;
+  overscroll-behavior: none;
+}
+.pc-page .section-heading {
+  margin-bottom: 0;
+  gap: 8px;
+}
+.pc-page .section-heading h1 {
+  font-size: 24px;
+  margin-top: 2px;
+}
+.pc-page .section-heading p {
+  display: none;
+}
+.pc-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.pc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.pc-head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pc-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.pc-head-actions .icon-button {
+  min-height: 34px;
+  min-width: 34px;
+  width: 34px;
+}
+.pc-zoom-label {
+  min-width: 42px;
+  min-height: 34px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.pc-muted {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.pc-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+.pc-chips {
+  display: flex;
+  gap: 5px;
+  overflow: hidden;
+  flex-wrap: nowrap;
+}
+.pc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 9px;
+  line-height: 1.6;
+  white-space: nowrap;
+  color: var(--muted);
+  background: var(--surface);
+}
+.pc-chip.warn {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.pc-chip.live {
+  color: var(--bg);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.pc-chip.action {
+  cursor: pointer;
+  color: var(--ink);
+  border-color: var(--ink);
+  flex: 0 0 auto;
+}
+.pc-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.pc-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+.pc-stage.input-on {
+  cursor: crosshair;
+}
+.pc-pan-hint {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 9px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.pc-frame-loading {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  color: var(--muted);
+}
+.pc-drag-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+.pc-drag-line line {
+  stroke: var(--ink);
+  stroke-width: 0.4;
+  stroke-dasharray: 2 1.4;
+  vector-effect: non-scaling-stroke;
+}
+.pc-ripple {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: pc-ripple 520ms ease-out forwards;
+}
+@keyframes pc-ripple {
+  from {
+    opacity: 0.9;
+    transform: scale(0.45);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+.pc-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+.pc-control-row .button.compact {
+  min-height: 32px;
+  font-size: 10px;
+  padding: 0 10px;
+}
+.pc-input-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px 4px 8px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pc-input-toggle > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pc-input-toggle input {
+  appearance: none;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  position: relative;
+  margin: 0;
+  transition: background 120ms linear;
+}
+.pc-input-toggle input::after {
+  content: "";
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: 11px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 120ms linear;
+}
+.pc-input-toggle input:checked {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.pc-input-toggle input:checked::after {
+  transform: translateX(13px);
+  background: var(--bg);
+}
+.pc-pin {
+  width: 74px;
+  min-height: 32px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 8px;
+}
+.pc-dock {
+  /* Shrinks (and its body scrolls) instead of pushing the stage off screen. */
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 56%;
+}
+.pc-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 0;
+  flex: 0 0 auto;
+}
+.pc-tab {
+  flex: 1 1 0;
+  min-height: 34px;
+  font-size: 11px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.pc-tab.active {
+  color: var(--ink);
+  border-bottom: 2px solid var(--ink);
+}
+.pc-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.pc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pc-row .button.compact,
+.pc-row .pc-key {
+  min-height: 34px;
+  font-size: 11px;
+  padding: 0 10px;
+}
+.pc-row .icon-button {
+  min-height: 34px;
+  min-width: 34px;
+  width: 34px;
+}
+.pc-pad {
+  height: 132px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 10px;
+  font-size: 10px;
+  color: var(--muted);
+  touch-action: none;
+  overscroll-behavior: contain;
+  user-select: none;
+}
+.pc-pad.input-on {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.pc-keygrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.pc-key {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+  background: var(--surface);
+}
+.pc-key.held {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+.pc-text {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pc-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pc-status-grid > div {
+  background: var(--bg);
+  padding: 7px 9px;
+  min-width: 0;
+}
+.pc-status-grid span {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pc-status-grid strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-error {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
+  z-index: 4;
+  background: var(--bg);
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+}
+.pc-page .trust-note {
+  margin: 0;
+}
+@media (max-width: 960px) {
+  .pc-page {
+    padding: 8px 8px 6px;
+    gap: 6px;
+  }
+  .pc-page .section-heading h1 {
+    font-size: 20px;
+  }
+  .pc-page .eyebrow {
+    display: none;
+  }
+  .pc-dock {
+    max-height: 52%;
+  }
+}
+@media (max-height: 700px) {
+  .pc-pad {
+    height: 96px;
+  }
+  .pc-page .section-heading {
+    margin-bottom: 0;
+  }
+  .pc-page .section-heading h1 {
+    font-size: 18px;
+  }
+  .pc-page .section-heading p {
+    display: none;
+  }
+}
+/* Landscape phones: the same fixed split, just shorter. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .pc-page {
+    padding: 4px 6px;
+    gap: 4px;
+  }
+  .pc-page .section-heading {
+    margin-bottom: 0;
+  }
+  .pc-page .section-heading h1 {
+    font-size: 16px;
+    margin: 0;
+  }
+  .pc-page .section-heading .small-pill {
+    display: none;
+  }
+  .pc-head {
+    padding: 1px 4px 1px 8px;
+  }
+  .pc-head-actions .icon-button {
+    min-height: 28px;
+    min-width: 28px;
+    width: 28px;
+  }
+  .pc-zoom-label {
+    min-height: 28px;
+  }
+  .pc-strip {
+    display: none;
+  }
+  .pc-stage {
+    min-height: 44px;
+  }
+  .pc-control-row {
+    min-height: 34px;
+    padding: 2px 6px;
+  }
+  .pc-dock {
+    max-height: 46%;
+  }
+  .pc-pad {
+    height: 68px;
+  }
+}

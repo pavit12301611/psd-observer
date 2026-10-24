@@ -314,7 +314,7 @@
       "🗓️🔄 CHANNELS: Google Calendar sync (`/cal sync <ics-url>` + `/cal export`), `/topic` channels with shared memory, aur speed: lookup cache 553µs→19µs. (Shades rule: auto-restore kabhi nahi — sirf /shades off se.)"
     ]
   },
-  "latest": "3.11.0",
+  "latest": "3.12.0",
   "3.8.0": "🆕 *PSD_Ai v3.8.0 — Complete Feature Suite (29 upgrades!)*\n\nHar suggestion complete: 11 shelf + 18 naye features.\n\n*Padhai & Voice*\n• /revise call — JARVIS khud call karta hai + revision (voice segments)\n• /today — aaj ka complete timeline\n• /exam add <sub> <date> — exam countdown + auto study schedule\n• /study scan — flashcards photo → OCR → pack\n• /accuracy report — bot ka report card\n\n*Proactive & Smart*\n• /nudges — proactive messages (padh lo, reminder miss, battery)\n• /recap — weekly recap + goal tracker\n• /routine at 7am — morning auto-routines\n• /leaveby — leave-by time calculator (traffic estimate)\n• HW reminders ab escalate hote hain (48h → 24h → 2h bursts)\n\n*PC & Home*\n• /block — study window me distracting sites auto-close\n• /organize — downloads auto-sort\n• /backup now|cloud — zip backup + GitHub upload\n• /timeline — screenshot timeline recall\n• /home — smart home webhooks (lights/AC/TV)\n• /wake — \"Hey JARVIS\" wake word + voice commands\n\n*Family & Safety*\n• /role kids|family + /rolelimit — per-role modes\n• /fun quiz|riddle — timepass\n• /audit — security audit log\n• /pcs ask|all|check — fleet remote commands (queue)\n• Notes meetings se action-items auto-extract\n• /photos ab actual images bhejta hai (top match)\n\nUpdate: BRANCH=main bash <(curl -fsSL https://raw.githubusercontent.com/pavit12301611/psd-observer/main/whatsapp-agent/scripts/observer.sh) update",
   "3.8.1": {
     "title": "Heavy tasks: reliable routing & safe failover",
@@ -371,6 +371,16 @@
       "Signed interface updates install in place with rollback, anti-downgrade, size/path limits and an unconfirmed-boot restore; no APK is deleted or reinstalled.",
       "New endpoints /api/app/update/manifest, /bundle and /key are authenticated per device; signing keys never leave the PC and never enter Git.",
       "Shades remains explicit-only: only /shades off restores the display; there is no auto-restore."
+    ]
+  },
+  "3.12.0": {
+    "title": "A PC control screen you can actually work from",
+    "bullets": [
+      "PC control is now one fixed view: the live screen keeps its place, and the trackpad, keys, typing, clipboard and status live in a dock that never scrolls it away.",
+      "Pinch/double-tap zoom with a real cropped 1:1 frame, tap feedback and an automatic follow-up frame, long-press right-click, two-finger right-click, nudge, held modifiers and a bounded key grid.",
+      "New authenticated /api/pc/state (session, lock, display, battery, disk, agent busy), /api/pc/display to wake the display, and /api/clipboard for phone-to-PC text; every write keeps the PC PIN and policy gates.",
+      "Take over stops the running agent job and hands input back on request, frame failures back off instead of hanging for 25s, and preview starts when the page opens and pauses when the app is backgrounded.",
+      "Shades unchanged: only the owner's /shades off restores the display."
     ]
   }
 }

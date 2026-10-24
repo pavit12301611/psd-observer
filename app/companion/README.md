@@ -82,3 +82,10 @@ From 1.2.0, the interface updates from your paired PC. The PC keeps its own
 signing key, the app pins the public key at pairing time, and the bundle is
 verified, staged and rolled back on failure. No repository secret is needed and
 the APK is not replaced. See [docs/PC-UPDATES.md](docs/PC-UPDATES.md).
+
+## PC control
+
+One fixed screen plus a dock (Pad, Keys, Type, Clip, More): the screenshot never
+scrolls away while you drive the PC. Zoom returns real cropped pixels, taps give
+feedback, and "Take over" stops a running agent job. See
+[docs/PC-CONTROL.md](docs/PC-CONTROL.md).
