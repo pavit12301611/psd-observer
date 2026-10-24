@@ -68,12 +68,12 @@ test('mobile/rtc: explicit publisher, viewer ownership, bounded SDP, timeout and
  assert.throws(()=>r.signal(s.id,phone,{description:{type:'offer',sdp:'bad'}}),/Invalid/);
  now+=26000;assert.equal(r.status().ready,true);assert.equal(r.status().active,0);assert.throws(()=>r.signal(s.id,phone),/expired/);now+=91000;assert.equal(r.status().ready,false);
 });
-async function bridgeFixture(t){
+async function bridgeFixture(t,overrides={}){
  const dir=folder(t);let finish,calls=0;const gate=new Promise(r=>finish=r);
- const bridge=createBridgeServer({config:{dataDir:dir,host:'127.0.0.1',port:0,bridgeToken:'mobile-fixture-root',dashboardPin:'123456',ownerNumber:'919999999999'},store:{data:{stats:{}}},whatsapp:{status:()=> 'fixture'},mailbox:{observerOnline:()=>false},app:{state:()=>({active:[],pending:[]}),busy:()=>false},runOwner:async()=>{calls++;await gate;return'slow AI result';},log:{info(){},error(){}}});
+ const bridge=createBridgeServer({config:{dataDir:dir,host:'127.0.0.1',port:0,bridgeToken:'mobile-fixture-root',dashboardPin:'123456',ownerNumber:'919999999999',...overrides},store:{data:{stats:{}}},whatsapp:{status:()=> 'fixture'},mailbox:{observerOnline:()=>false},app:{state:()=>({active:[],pending:[]}),busy:()=>false},runOwner:async()=>{calls++;await gate;return'slow AI result';},log:{info(){},error(){}}});
  const server=await bridge.start();t.after(async()=>{server.closeAllConnections();const p=once(server,'close');bridge.stop();await p;});const url=`http://127.0.0.1:${server.address().port}`;
  const api=async(path,body,token='mobile-fixture-root')=>fetch(url+path,{method:body?'POST':'GET',headers:{'x-bridge-token':token,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
- return{url,api,calls:()=>calls,finish};
+ return{url,api,calls:()=>calls,finish,publish:(text)=>bridge.publish(text)};
 }
 test('mobile/HTTP regression: closing an AI request socket cannot lose its result or execute twice',async t=>{
  const f=await bridgeFixture(t);const payload=request('socket_abort_1234');
@@ -106,4 +106,40 @@ test('mobile/real agent AI path: slow model completion is independent of the mob
  const accepted=await fetch(base+'/api/app/jobs',{method:'POST',headers,body:JSON.stringify({id:'real_ai_job_12345',text:'explain recursion with one simple example',history:[]})});assert.equal(accepted.status,202);
  let result;for(let n=0;n<300;n++){result=await(await fetch(base+'/api/app/jobs/real_ai_job_12345',{headers})).json();if(result.state==='replied')break;await new Promise(r=>setTimeout(r,10));}
  assert.equal(result.state,'replied');assert.match(result.result.text,/Delayed model fixture/);assert.equal(providerCalls,1);
+});
+
+test('mobile/jobs: safety receipts outlive the 40-result window and cannot silently execute an old ID again',async()=>{
+ let calls=0;const j=createJobs({run:async()=>{calls++;return{text:'reply'};}});
+ for(let n=0;n<45;n++){const id='retained_receipt_'+n;j.submit(request(id));await waitUntil(()=>j.get(id).state==='replied');}
+ assert.equal(calls,45);assert.equal(j.submit(request('retained_receipt_0')).existing,true);assert.equal(calls,45);assert.match(j.get('retained_receipt_0').result.text,/retention expired/);
+});
+test('mobile/workflows: daily schedule receipt survives restart and is never caught up/replayed',t=>{
+ const dir=folder(t),file=path.join(dir,'workflows.json'),now=()=>Date.parse('2026-10-24T08:30:20Z');
+ const w=createWorkflows({file,now,timezone:'Asia/Kolkata'});const saved=w.save({name:'Daily',steps:[{tool:'time'}],trigger:{type:'daily',time:'14:00'}});
+ const due=w.scheduled();assert.equal(due.length,1);w.markScheduled(saved.id,due[0].day);assert.equal(w.scheduled().length,0);
+ assert.equal(createWorkflows({file,now,timezone:'Asia/Kolkata'}).scheduled().length,0);
+});
+test('mobile/HTTP: native video honors disabled PC-control policy and device PIN failures are rate-limited',async t=>{
+ const f=await bridgeFixture(t,{allowPcControl:false});assert.equal((await f.api('/api/app/rtc')).status,403);
+ for(let n=0;n<12;n++)assert.equal((await f.api('/api/app/pair',{pin:'wrong',clientId:'abcdef0123456789'})).status,401);
+ assert.equal((await f.api('/api/app/pair',{pin:'123456',clientId:'abcdef0123456789'})).status,429);
+});
+test('mobile/HTTP: an invalid optional push file cannot disable ordinary mobile jobs',async t=>{
+ const f=await bridgeFixture(t,{appFcmCredentials:'/no/such/fixture/file'});const state=await(await f.api('/api/app/state')).json();assert.equal(state.capabilities.jobs,true);assert.equal(state.capabilities.push.configured,false);
+});
+test('mobile/HTTP: a revoked event-stream device is closed before another event can leak',async t=>{
+ const f=await bridgeFixture(t);const paired=await(await f.api('/api/app/pair',{pin:'123456',clientId:'abcdef0123456789'})).json();
+ const response=await fetch(f.url+'/api/app/events/stream',{headers:{'x-bridge-token':paired.token}});const reader=response.body.getReader();await reader.read();
+ await f.api('/api/app/devices/revoke',{id:paired.device.id});const next=await reader.read();assert.equal(next.done,true);
+});
+
+test('mobile/push: optional OS delivery sends opaque metadata only, uses fixed HTTPS endpoints and caches auth',async t=>{
+ const {generateKeyPairSync}=await import('node:crypto');const {createPush}=await import('../src/mobile/push.js');const dir=folder(t),file=path.join(dir,'fake-service-account.json');const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});fs.writeFileSync(file,JSON.stringify({client_email:'fixture@fixture.invalid',project_id:'fixture-project',private_key:privateKey.export({type:'pkcs8',format:'pem'})}),{mode:0o600});
+ let oauth=0,delivery=0;const p=createPush({credentialsFile:file,targets:()=>[{id:'device',token:'fixture-registration'}],fetchImpl:async(url,options)=>{assert.ok(url.startsWith('https://'));if(url==='https://oauth2.googleapis.com/token'){oauth++;assert.equal(new URLSearchParams(options.body).get('grant_type'),'urn:ietf:params:oauth:grant-type:jwt-bearer');return new Response(JSON.stringify({access_token:'fixture-oauth'}));}assert.equal(url,'https://fcm.googleapis.com/v1/projects/fixture-project/messages:send');const body=JSON.parse(options.body);assert.deepEqual(Object.keys(body.message.data).sort(),['epoch','id','serverId','type']);assert.ok(!JSON.stringify(body).includes('TOP SECRET'));delivery++;return new Response('{}');}});
+ await p.send({id:1,type:'job_result',epoch:'epoch',serverId:'server',text:'TOP SECRET'});await p.send({id:2,type:'approval',epoch:'epoch',serverId:'server'});assert.equal(oauth,1);assert.equal(delivery,2);
+});
+test('mobile/discovery: user opt-in controls only metadata advertisement; loopback-only bridges are never advertised',async()=>{
+ const {createDiscovery}=await import('../src/mobile/discovery.js');let starts=0,stops=0;const fake=()=>({publish:()=>{starts++;return{stop(){stops++;},on(){}}},destroy(){}});
+ const d=createDiscovery({host:'0.0.0.0',port:8787,serverId:'fixture',factory:fake});assert.equal(d.status().enabled,false);await d.start();assert.equal(starts,0);await d.set(true);assert.equal(d.status().advertising,true);await d.set(false);assert.equal(stops,1);
+ const loop=createDiscovery({host:'127.0.0.1',factory:fake});await assert.rejects(loop.set(true),/loopback/);
 });

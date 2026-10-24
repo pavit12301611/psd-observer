@@ -2,6 +2,16 @@ import { test, expect, type Page } from "@playwright/test";
 async function fixture(page: Page) {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   const jobs = new Map<string, Record<string, unknown>>();
+  let dropped = false;
+  const projectRecords = [
+    {
+      id: "personal00",
+      name: "Personal",
+      privateChat: false,
+      memories: [] as string[],
+    },
+  ];
+  const routineRecords: Record<string, unknown>[] = [];
   const state = {
     apiVersion: 1,
     version: "3.10.0",
@@ -68,6 +78,10 @@ async function fixture(page: Page) {
           result: { ok: true, text },
         });
       }
+      if (String(body.text).includes("abort acceptance fixture") && !dropped) {
+        dropped = true;
+        return route.abort("connectionreset");
+      }
       return json(jobs.get(id), 202);
     }
     if (path === "/api/app/jobs") return json({ jobs: [...jobs.values()] });
@@ -76,18 +90,25 @@ async function fixture(page: Page) {
         jobs.get(path.split("/").pop() || "") || { detail: "No retained job" },
         jobs.has(path.split("/").pop() || "") ? 200 : 404,
       );
-    if (path === "/api/app/projects")
+    if (path === "/api/app/projects" && route.request().method() === "POST") {
+      const item = { ...body, id: String(body.id || "fixture_project_study") };
+      projectRecords.push(item as (typeof projectRecords)[0]);
+      return json(item);
+    }
+    if (path === "/api/app/projects") return json({ projects: projectRecords });
+    if (path === "/api/app/workflows/preview")
       return json({
-        projects: [
-          {
-            id: "personal00",
-            name: "Personal",
-            privateChat: false,
-            memories: [],
-          },
-        ],
+        name: body.name,
+        steps: body.steps,
+        notice: "Preview only. No action executed.",
       });
-    if (path === "/api/app/workflows") return json({ workflows: [] });
+    if (path === "/api/app/workflows" && route.request().method() === "POST") {
+      const item = { ...body, id: "fixture_workflow_123" };
+      routineRecords.push(item);
+      return json(item);
+    }
+    if (path === "/api/app/workflows")
+      return json({ workflows: routineRecords });
     if (path === "/api/app/devices") return json({ devices: [] });
     if (path.startsWith("/api/app/events"))
       return json({ epoch: "fixture", latest: 0, events: [] });
@@ -328,13 +349,11 @@ test("upload connects to the solver with exact file bytes and no input permissio
   const f = await fixture(page);
   await page.goto("/");
   await connect(page);
-  await page
-    .getByLabel("Choose attachment")
-    .setInputFiles({
-      name: "question.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("what is 2+2?"),
-    });
+  await page.getByLabel("Choose attachment").setInputFiles({
+    name: "question.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("what is 2+2?"),
+  });
   await expect(page.locator(".attachment-preview")).toContainText(
     "question.txt",
   );
@@ -446,4 +465,101 @@ test("PC tool selection leaves Direct AI in a fresh thread and never forwards to
       ),
     ),
   ).toEqual([]);
+});
+
+test("normal text survives an aborted acceptance response and recovers without a second execution POST", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  await page.goto("/");
+  await connect(page);
+  await page
+    .getByLabel("Message Observer")
+    .fill("abort acceptance fixture: explain recursion");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(
+    page.getByText("A clear answer.", { exact: true }),
+  ).toBeVisible();
+  expect(
+    f.requests.filter(
+      (r) =>
+        r.path === "/api/app/jobs" &&
+        r.body.text === "abort acceptance fixture: explain recursion",
+    ),
+  ).toHaveLength(1);
+  expect(f.requests.some((r) => r.path.startsWith("/api/app/jobs/"))).toBe(
+    true,
+  );
+  await expect(
+    page.getByText("Could not receive the result.", { exact: false }),
+  ).toHaveCount(0);
+});
+test("workspace hub is monochrome and usable in every layout; project memory saves only on explicit request", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  await page.goto("/");
+  await connect(page);
+  await go(page, "Settings");
+  await page
+    .getByRole("button", { name: /Projects, routines, alerts/ })
+    .click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByLabel("Project name").fill("Study");
+  await page.getByLabel("Project memories").fill("Only this project memory");
+  expect(
+    f.requests.filter(
+      (r) => r.path === "/api/app/projects" && r.body.name === "Study",
+    ),
+  ).toHaveLength(0);
+  await page.getByRole("button", { name: "Save project", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /Study.*Private chat context/ }),
+  ).toBeVisible();
+  for (const name of [
+    "Routines",
+    "Devices",
+    "Alerts",
+    "Privacy",
+    "Connection",
+    "Wake PC",
+  ]) {
+    await page.getByRole("button", { name, exact: true }).click();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await expect(
+    page.getByRole("button", { name: "Send one wake packet" }),
+  ).toBeDisabled();
+});
+test("routine editor preview and save do not run the PC; Run creates one bounded workflow job", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  await page.goto("/");
+  await connect(page);
+  await go(page, "Settings");
+  await page
+    .getByRole("button", { name: /Projects, routines, alerts/ })
+    .click();
+  await page.getByRole("button", { name: "Routines", exact: true }).click();
+  await page.getByLabel("Routine name").fill("Morning read");
+  await page.getByRole("button", { name: "Preview only", exact: true }).click();
+  await expect(
+    page.getByText(/Preview only. No action executed/),
+  ).toBeVisible();
+  expect(f.requests.filter((r) => r.path === "/api/app/jobs")).toHaveLength(0);
+  await page.getByRole("button", { name: "Save routine", exact: true }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(
+    page.getByText("A clear answer.", { exact: true }),
+  ).toBeVisible();
+  expect(
+    f.requests.filter(
+      (r) => r.path === "/api/app/jobs" && r.body.kind === "workflow",
+    ),
+  ).toHaveLength(1);
 });

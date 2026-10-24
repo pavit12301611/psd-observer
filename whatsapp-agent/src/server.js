@@ -321,6 +321,7 @@ export function createBridgeServer({
         } catch { return json(res, 404, { detail: 'No QR right now — either already linked, or WhatsApp is still connecting.' }); }
       }
 
+      if (!mobile && !principalFor(req, url) && (req.headers['x-bridge-token'] || req.headers.authorization)) return json(res,503,{detail:'Private mobile state needs repair. The session was not invalidated and no request was replayed.'});
       if (!authed(req, url)) {
         return json(res, 401, { detail: 'Bridge token required (x-bridge-token header, Bearer, or the dashboard PIN via /api/login). It is printed when the agent starts.' });
       }

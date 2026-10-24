@@ -22,7 +22,9 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
   const root = config.dataDir ? path.join(config.dataDir, 'mobile') : null;
   const file = (name) => root ? path.join(root, name) : null;
   const devices = createDevices({ file: file('devices.json'), now });
-  const push = createPush({ credentialsFile: config.appFcmCredentials || null, targets: () => devices.pushTargets(), fetchImpl: pushFetch, now });
+  let push;
+  try { push = createPush({ credentialsFile: config.appFcmCredentials || null, targets: () => devices.pushTargets(), fetchImpl: pushFetch, now }); }
+  catch { push = { status: () => ({ configured: false, provider: 'fcm', error: 'Private PC push credentials could not be loaded; other mobile features remain available.' }), send: async () => ({ configured: false }) }; }
   const events = createEvents({ file: file('events.json'), now, push: (event) => push.send({ ...event, serverId: devices.serverId }) });
   const assets = createAssets({ dir: root ? path.join(root, 'assets') : null, now });
   const projects = createWorkspaces({ file: file('projects.json'), now });
