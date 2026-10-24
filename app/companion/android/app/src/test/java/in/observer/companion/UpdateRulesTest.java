@@ -11,7 +11,7 @@ public final class UpdateRulesTest {
         assertFalse(UpdateRules.newer("1.1.9", "1.2.0"));
         for (String bad : new String[]{null, "", "1.2", "1.2.3.4", "v1.2.3", "1.2.3-preview", "1.2.x", "../1.2.3", "99999.0.0"}) assertFalse(String.valueOf(bad), UpdateRules.newer(bad, "0.0.0"));
         assertTrue("an unreadable installed version must not block a real update", UpdateRules.newer("1.2.3", "not a version"));
-        assertFalse(UpdateRules.newer("0.0.9", "bad"));
+        assertTrue("an unreadable installed version also lets a signed update through", UpdateRules.newer("0.0.9", "bad"));
     }
     @Test public void archiveNamesCannotEscapeOrDuplicateStructure() {
         for (String name : new String[]{"index.html", "assets/app-1.2.3.js", "assets/fonts/inter.woff2", "a/b/c.png"}) assertTrue(name, UpdateRules.safeEntry(name));
