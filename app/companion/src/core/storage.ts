@@ -5,6 +5,7 @@ import type {
   Message,
   Preferences,
 } from "../types";
+import { MAX_ROUTE_FIXES } from "./route";
 import { isNative, nativeCall } from "./native";
 export const defaultPreferences: Preferences = {
   theme: "dark",
@@ -57,6 +58,21 @@ export function normaliseState(input: unknown): LocalState {
       "autoAppUpdate",
     ] as const)
       if (typeof prefs[key] === "boolean") fresh.preferences[key] = prefs[key];
+    // The owner's own engine corrections, newest last, bounded on the device.
+    if (Array.isArray(prefs.routeFixes))
+      fresh.preferences.routeFixes = prefs.routeFixes
+        .filter(
+          (f) =>
+            f &&
+            typeof f.text === "string" &&
+            (f.route === "agent" || f.route === "cloud"),
+        )
+        .map((f) => ({
+          text: f.text.slice(0, 500),
+          route: f.route,
+          at: Number(f.at) || 0,
+        }))
+        .slice(-MAX_ROUTE_FIXES);
   }
   fresh.conversations[0].mode = fresh.preferences.chatMode;
   if (!Array.isArray(p.conversations)) return fresh;
@@ -64,7 +80,9 @@ export function normaliseState(input: unknown): LocalState {
     .slice(-20)
     .filter((c) => c && typeof c.id === "string" && Array.isArray(c.messages))
     .map((c) => ({
-      mode: c.mode === "cloud" ? ("cloud" as const) : ("agent" as const),
+      mode: (["agent", "cloud", "auto"].includes(c.mode)
+        ? c.mode
+        : "agent") as ChatMode,
       id: c.id.slice(0, 100),
       projectName: typeof c.projectName === "string" ? c.projectName.slice(0,80) : "Personal",
       projectId:
@@ -87,6 +105,8 @@ export function normaliseState(input: unknown): LocalState {
           jobId:
             typeof m.jobId === "string" ? m.jobId.slice(0, 100) : undefined,
           role: m.role,
+          route:
+            m.route === "cloud" || m.route === "agent" ? m.route : undefined,
           text: m.text.slice(0, 48_000),
           ts: Number(m.ts) || Date.now(),
         })),

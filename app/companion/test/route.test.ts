@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   cloudContext,
+  compactContext,
+  fixFor,
+  learnFix,
   looksLikeCommand,
   mentionsPc,
   pickRoute,
@@ -138,5 +141,85 @@ describe("cloudContext", () => {
     const original = [msg("assistant", "ran the backup", "agent")];
     cloudContext(original);
     expect(original[0].text).toBe("ran the backup");
+  });
+});
+
+describe("owner corrections", () => {
+  it("a correction beats the classifier in auto mode", () => {
+    // "notepad kholo" reads as a command, so the classifier says PC. The owner
+    // who wanted a Direct AI answer instead is remembered.
+    expect(pickRoute("notepad kholo", { mode: "auto" })).toBe("agent");
+    const fixes = learnFix([], "notepad kholo", "cloud");
+    expect(pickRoute("notepad kholo", { mode: "auto", fixes })).toBe("cloud");
+  });
+
+  it("matches case and spacing only, never a different sentence", () => {
+    const fixes = learnFix([], "  What   time is it  ", "cloud");
+    expect(fixFor(fixes, "what time is it")).toBe("cloud");
+    expect(fixFor(fixes, "what time is it in tokyo")).toBeNull();
+  });
+
+  it("keeps the newest choice for a sentence", () => {
+    let fixes = learnFix([], "kaam khatam?", "cloud");
+    fixes = learnFix(fixes, "kaam khatam?", "agent");
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0].route).toBe("agent");
+  });
+
+  it("stays bounded, so the phone never grows forever", () => {
+    let fixes: ReturnType<typeof learnFix> = [];
+    for (let i = 0; i < 90; i++) fixes = learnFix(fixes, `sentence ${i}`, "cloud");
+    expect(fixes).toHaveLength(60);
+    expect(fixes[0].text).toBe("sentence 30");
+    expect(fixFor(fixes, "sentence 0")).toBeNull();
+  });
+
+  it("a manual pin still beats a correction", () => {
+    const fixes = learnFix([], "pc band karo", "cloud");
+    expect(pickRoute("pc band karo", { mode: "agent", fixes })).toBe("agent");
+  });
+
+  it("ignores empty and near-empty noise", () => {
+    expect(learnFix([], "  ", "cloud")).toEqual([]);
+    expect(learnFix([], "hi", "cloud")).toEqual([]);
+    expect(learnFix([], "ok", "agent")).toEqual([]);
+    expect(learnFix([], "notepad kholo", "cloud")).toHaveLength(1);
+  });
+});
+
+describe("compactContext", () => {
+  const chat = Array.from({ length: 14 }, (_, i) =>
+    msg("user", `message number ${i}`, "agent"),
+  );
+  it("short threads are left alone", () => {
+    const short = [msg("user", "hello"), msg("assistant", "hi", "cloud")];
+    expect(compactContext(short)).toEqual(short);
+  });
+
+  it("folds older turns into one summary and keeps the recent ones", () => {
+    const out = compactContext(chat);
+    expect(out).toHaveLength(7);
+    expect(out[0].id).toBe("context-summary");
+    expect(out[0].text).toContain("8 messages");
+    expect(out.slice(1).map((m) => m.text)).toEqual([
+      "message number 8",
+      "message number 9",
+      "message number 10",
+      "message number 11",
+      "message number 12",
+      "message number 13",
+    ]);
+  });
+
+  it("counts PC answers but never quotes them", () => {
+    const mixed = [
+      ...chat,
+      msg("assistant", "PC said: the wifi key is hunter2", "agent"),
+      msg("user", "aur ek baat"),
+      msg("user", "and the last thing"),
+    ];
+    const out = compactContext(mixed, { keep: 2 });
+    expect(out[0].text).toContain("handled on the PC");
+    expect(JSON.stringify(out)).not.toContain("hunter2");
   });
 });

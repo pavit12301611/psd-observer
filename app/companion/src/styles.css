@@ -758,6 +758,36 @@ time,
   color: var(--ink);
   border-color: var(--muted);
 }
+/* Where this message is going, before it is sent. */
+.route-hint {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.route-hint.agent {
+  color: var(--ink);
+  border-style: solid;
+  border-color: var(--muted);
+}
+.usage-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.usage-note.warn {
+  color: var(--warn);
+}
 .markdown,
 .plain-message {
   font-size: var(--t-body);

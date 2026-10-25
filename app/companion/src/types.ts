@@ -35,6 +35,8 @@ export interface Reply {
   media?: Media[];
   stopped?: boolean;
   awaitingConfirm?: boolean;
+  /** Direct AI only: what the provider says this turn cost. */
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
 }
 export type Delivery = "sending" | "sent" | "failed";
 export interface Message extends Reply {
@@ -77,6 +79,22 @@ export interface Preferences {
    * machine or is a command. "agent"/"cloud" pin the whole app.
    */
   chatMode: ChatMode;
+  /**
+   * The owner's own engine corrections, newest last. In "auto" mode one of
+   * these beats the classifier, so a sentence is never mis-routed twice.
+   * Device-local only: never sent to the PC or to a provider.
+   */
+  routeFixes?: RouteFix[];
+  /** Tokens spent on the owner's own Direct AI key, per day (YYYY-MM-DD). */
+  usage?: Record<string, number>;
+  /** Monthly Direct AI token budget; 0 disables the warning. */
+  usageCap?: number;
+}
+/** One owner correction: "this sentence belongs on that engine". */
+export interface RouteFix {
+  text: string;
+  route: Route;
+  at: number;
 }
 export interface LocalState {
   conversations: Conversation[];
