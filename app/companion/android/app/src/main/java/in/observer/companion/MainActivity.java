@@ -248,7 +248,7 @@ public final class MainActivity extends Activity {
                     String base=OriginPolicy.base(p.getString("baseUrl"),p.optBoolean("allowLan"));JSONObject r=NativeHttp.request(base+"/health","GET",null,null,false,null,12000);JSONObject h=r.optJSONObject("json");
                     respond(id,new JSONObject().put("reachable",r.optInt("status")==200).put("version",h==null?"unknown":h.optString("version")).put("service",h==null?"unknown":h.optString("service")),null);return;
                 }
-                case "wake": case "wakeProfile": case "pushStatus": phone.io(id,method,p);return;
+                case "wake": case "wakeProfile": case "pushStatus": case "shareFile": phone.io(id,method,p);return;
                 case "restore": respond(id, profile(), null); return;
                 case "readState": respond(id, vault.get("state"), null); return;
                 case "writeState": {

@@ -18,7 +18,11 @@ if (command === 'status') {
   console.log(`Update key id: ${key.keyId}\nPublic key written to ${path.join(dataDir, 'mobile', 'update-public-key.pem')}\nPrivate key stays owner-only in data/mobile/updates/signing/.`);
 } else if (command === 'pack') {
   const dist = flag('--dist', path.join(root, '..', 'app', 'companion', 'dist'));
-  const version = flag('--version'); const notes = flag('--notes'); const minNative = flag('--min-native', '1.1.0');
+  const notes = flag('--notes'); const minNative = flag('--min-native', '1.1.0');
+  // The bundle version is the app's own version by default, so packing right
+  // after a build cannot ship a bundle that claims to be something else.
+  const appVersion = () => { try { return JSON.parse(fs.readFileSync(path.join(root, '..', 'app', 'companion', 'package.json'), 'utf8')).version; } catch { return ''; } };
+  const version = flag('--version') || appVersion();
   if (!version) { console.error('Usage: npm run app:update:pack -- --version 1.1.1 [--dist ./dist] [--notes "text"] [--min-native 1.1.0]'); process.exit(2); }
   const result = channel.pack({ dist, version, notes, minNative });
   console.log(JSON.stringify({ packed: result.manifest, keyId: result.keyId, directory: path.join(updates, version) }, null, 2));

@@ -179,6 +179,46 @@ jobs:
           path: app/companion/android-smoke-results/
           retention-days: 14
 
+  # A signed web bundle is the only update a phone gets without an APK, so it
+  # is packed and verified here on every push: the packer must produce a
+  # manifest the phone's own rules accept, or the release is broken before it
+  # ever reaches a device.
+  ota:
+    needs: web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: whatsapp-agent
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: whatsapp-agent/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Build the web bundle this pack would ship
+        run: npm ci --no-audit --no-fund && npm run build
+        working-directory: app/companion
+      - name: Resolve the bundle version
+        run: echo "OTA_VERSION=$(node -p "require('../app/companion/package.json').version")" >> "$GITHUB_ENV"
+      - name: Pack a signed OTA bundle from that build
+        run: |
+          set -euo pipefail
+          node scripts/app-update.mjs pack --version "$OTA_VERSION" --notes "CI pack check" > pack.json
+          node scripts/verify-ota-pack.mjs pack.json "$OTA_VERSION"
+      - name: A phone can see it, and the manifest it reads is signed
+        run: node scripts/app-update.mjs status > status.json && node scripts/verify-ota-pack.mjs --status status.json "$OTA_VERSION"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-ota-pack
+          path: whatsapp-agent/data/mobile/updates/
+          retention-days: 7
+
   signed-release:
     if: github.event_name == 'workflow_dispatch' && inputs.signed_release
     needs: [agent, web, apk, emulator]

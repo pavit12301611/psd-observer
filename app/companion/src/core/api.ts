@@ -267,6 +267,11 @@ export class BridgeClient {
   async post<T>(path: string, body: unknown) {
     return (await this.wire(path, { method: "POST", body })).json as T;
   }
+  /** Raw bytes of a bridge file, for the share sheet. Never cached. */
+  async bytes(path: string) {
+    const r = await this.wire(path, { binary: true, timeout: 60_000 });
+    return base64Blob(r.base64 || "", r.mime || "application/octet-stream");
+  }
   async download(path: string, name: string) {
     safeApiPath(path);
     if (isNative()) return nativeCall("download", { path, name });

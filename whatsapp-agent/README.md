@@ -642,8 +642,21 @@ Everything the Observer app does in the cloud also works locally:
 | `POST /api/chat` | phone app chat |
 | `POST /api/action` | run one action by name |
 | `GET /api/files` · `GET /api/apps` | files / installed apps |
+| `GET /api/app/audit` | read-only audit trail, newest first (same log as `/audit`) |
 | `POST /api/send` | send a message to the owner |
 | `GET /health` | public liveness (masked numbers only) |
+
+A signed web bundle is verified before it is installed:
+
+```bash
+cd ~/observer-agent
+node scripts/app-update.mjs pack --version 1.5.1 --notes "what changed"
+node scripts/verify-ota-pack.mjs pack.json 1.5.1
+```
+
+The pack step defaults to the companion app's own version, so packing straight
+after a build cannot ship a bundle that claims to be something else. `--version`
+still overrides it. CI runs the same pack-and-verify on every push.
 
 All except `/health`, the app shell and icons need `x-bridge-token`,
 `Authorization: Bearer`, or `?t=` (the private dashboard URL). The bridge

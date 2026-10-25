@@ -21,6 +21,8 @@
         <service android:name=".AlertService" android:exported="false" android:foregroundServiceType="remoteMessaging" />
         <service android:name=".QuickActionService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name=".ObserverMessagingService" android:exported="false"><intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter></service>
+        <!-- Only the share sheet reads this, one file at a time, from cache/shared. -->
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.shared" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_paths" /></provider>
         <provider android:name=".ObserverInitProvider" android:authorities="${applicationId}.observer-init" android:exported="false" android:initOrder="101" />
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />

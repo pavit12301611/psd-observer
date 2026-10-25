@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowRight,
   FileText,
+  Share2,
   FolderOpen,
   Search,
   Upload,
@@ -13,6 +14,7 @@ import {
 import type { Files as FilesData, FileEntry } from "../types";
 import { api } from "../core/api";
 import { humanBytes } from "../core/storage";
+import { isNative, nativeCall } from "../core/native";
 import { EmptyPanel, IconButton, SectionHeading } from "./ui";
 export default function Files({
   connected,
@@ -64,6 +66,29 @@ export default function Files({
       );
     } catch (e) {
       notice(e instanceof Error ? e.message : "Download failed");
+    }
+  }
+  // Sending a PC file to WhatsApp or Drive is the second half of "bring it
+  // together", and it used to need a download first. The phone fetches the
+  // bytes itself, so nothing extra is written to storage by the app.
+  async function share(file: FileEntry) {
+    const name = file.name || file.file || "download";
+    try {
+      if (isNative()) {
+        await nativeCall("shareFile", { path: file.path, name });
+        return;
+      }
+      const blob = await api.bytes(
+        "/api/download?path=" + encodeURIComponent(file.path),
+      );
+      if (navigator.canShare?.({ files: [new File([blob], name)] })) {
+        await navigator.share({ files: [new File([blob], name)] });
+        return;
+      }
+      await api.download("/api/download?path=" + encodeURIComponent(file.path), name);
+      notice("This browser has no share sheet, so the file was saved instead.");
+    } catch (e) {
+      notice(e instanceof Error ? e.message : "Share failed");
     }
   }
   return (
@@ -154,6 +179,12 @@ export default function Files({
                   onClick={() => void download(f)}
                 >
                   <ArrowDownToLine size={18} />
+                </IconButton>
+                <IconButton
+                  label={`Share ${f.name || f.file || "file"}`}
+                  onClick={() => void share(f)}
+                >
+                  <Share2 size={18} />
                 </IconButton>
               </div>
             ))}
