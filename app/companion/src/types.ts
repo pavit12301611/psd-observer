@@ -1,4 +1,4 @@
-export type Page = "chat" | "pc" | "tasks" | "files" | "settings";
+export type Page = "chat" | "pc" | "tasks" | "files" | "settings" | "more";
 export type Theme = "light" | "dark" | "system";
 export interface Profile {
   deviceId?: string;
@@ -36,6 +36,7 @@ export interface Reply {
   stopped?: boolean;
   awaitingConfirm?: boolean;
 }
+export type Delivery = "sending" | "sent" | "failed";
 export interface Message extends Reply {
   jobId?: string;
   id: string;
@@ -43,6 +44,8 @@ export interface Message extends Reply {
   text: string;
   ts: number;
   private?: boolean;
+  /** Only for the owner's own messages: did the PC actually take it? */
+  delivery?: Delivery;
 }
 export interface Conversation {
   projectId?: string; projectName?: string;

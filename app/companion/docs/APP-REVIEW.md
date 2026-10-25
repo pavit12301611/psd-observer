@@ -1,6 +1,7 @@
 # Whole-app review — layout, design and feature recommendations
 
-Status: **proposal only.** Nothing here is implemented. Every item names the file
+Status: **implemented for Phases A–C** (tokens, navigation, chat polish). Phases
+D (tasks & files) and E (features 6–10) are still proposals — see §9. Every item names the file
 it touches, why it matters on a Galaxy A53, and how it is accepted, so we can pick
 phases instead of doing one giant rewrite.
 
@@ -265,3 +266,28 @@ anything gated by PC policy.
 3. Design language: stay **white/black with one ink accent** (my recommendation,
    matches Claude) or allow a single accent colour for primary actions?
 4. Which phase first — **A (tokens)** is the cheapest and makes B–E faster.
+
+
+---
+
+## 9. What shipped on `arena/4128a21c-psd-observer`
+
+**Phase A — tokens.** Token block in `:root` (spacing, radius, type, states,
+motion). `--muted` light `#6e6e67` → `#65655e`. `IconButton`, `Button`, `Modal`,
+`EmptyPanel`, `SectionHeading`, `SettingRow` now read tokens; `.icon-button` and
+`.button` take `--tap` (44px); captions moved up to an 11px floor.
+
+**Phase B — navigation.** Four phone destinations (Chat · Tasks · PC control ·
+More) and a desktop sidebar that keeps Files. `More.tsx` is one list where each
+row prints its own value; the seven-tab `WorkspaceHub` opens directly on the row
+you tapped (`initialTab`). Files moved to More → Files *and* the composer's
+attach sheet (photo/document · files from your PC). Command palette got a topbar
+button (hidden under 560px, where the composer and drawer already expose it).
+
+**Phase C — chat.** Per-message `sending → sent → failed` from the journal
+(`Message.delivery`), a "Latest" pill instead of yanking the view while reading,
+copy on every code block, drafts that survive a reload per thread, and a 30-turn
+render window with "Show N earlier messages".
+
+Not yet done: Phase D (Tasks segments, Files search/sort/preview) and Phase E
+(label tap, phone→PC upload, clipboard, lock/power hold, push-to-talk).
