@@ -166,6 +166,14 @@ export interface PcState {
   accessLevel?: string;
   busy?: boolean;
   activeJobs?: number;
+  /** Real pixels of the last captured frame; the phone needs them for its
+      pointer marker, because the native bridge only forwards the ETag header. */
+  screen?: { width: number; height: number } | null;
+  /** Does the last frame already contain the PC's own mouse pointer? */
+  pointerInFrame?: boolean | null;
+  /** Was the pointer painted into the frame by the PC (guaranteed visible)? */
+  pointerBurned?: boolean | null;
+  captureTool?: string | null;
   detail?: string;
 }
 export interface PcUpdateCheck {

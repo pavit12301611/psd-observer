@@ -442,6 +442,47 @@ async function portalScreenshot(env, { timeoutMs = 60_000 } = {}) {
 }
 
 /**
+ * Exact argv for each capture tool, including the mouse pointer.
+ *
+ * The pointer is the whole point of a remote screen — without it the owner is
+ * clicking blind. Several tools hide it by default (grim, scrot) or when asked
+ * politely (gnome-screenshot), so every supported tool is asked explicitly.
+ * ImageMagick's `import` and KDE's Spectacle have no such switch; GNOME's
+ * portal screenshot never draws the pointer at all, which is why the phone also
+ * draws its own marker where the last input landed.
+ */
+export function captureArgs(tool, file) {
+  switch (tool) {
+    case 'grim': return ['-c', file];
+    case 'gnome-screenshot': return ['--include-pointer', '-f', file];
+    case 'scrot': return ['--silent', '-p', file];
+    case 'maim': return [file]; // maim draws the pointer unless --hidecursor
+    case 'spectacle': return ['-b', '-n', '-o', file];
+    case 'import': return ['-window', 'root', file];
+    default: return [file];
+  }
+}
+
+/**
+ * Which capture tools actually draw the mouse pointer into the image?
+ *
+ * If the frame already contains the real cursor, the phone must not draw a
+ * second one on top: two arrows in different places is worse than none.
+ */
+const POINTER_TOOLS = new Set(['grim', 'scrot', 'gnome-screenshot', 'maim', 'gnome-shell']);
+export const capturesPointer = (tool) => POINTER_TOOLS.has(String(tool ?? ''));
+
+/**
+ * GNOME Shell D-Bus screenshot: Screenshot(include_frame, include_cursor, file).
+ * The second boolean used to be false, which is exactly why the captured frame
+ * on GNOME had no pointer in it.
+ */
+export function gnomeShellCaptureArgs(file) {
+  return ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell',
+    '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'true', file];
+}
+
+/**
  * Every capture path we know, best-first for the current session.
  *
  * On Wayland we only use paths that can actually work: the portal, grim
@@ -461,20 +502,20 @@ function screenshotAttempts(file, env, portalMs = 60_000) {
         return portalScreenshot(env, { timeoutMs: portalMs });
       },
     });
-    attempts.push({ label: 'grim', fn: async () => { await run('grim', [file], { timeout: 12_000 }); return file; } });
-    attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 15_000 }); return file; } });
+    attempts.push({ label: 'grim', fn: async () => { await run('grim', captureArgs('grim', file), { timeout: 12_000 }); return file; } });
+    attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', captureArgs('spectacle', file), { timeout: 15_000 }); return file; } });
     return attempts;
   }
   // X11 (or XWayland): the classic tools, GNOME shell API first.
   attempts.push({ label: 'gnome-shell', fn: async () => {
-    await run('gdbus', ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell', '--method', 'org.gnome.Shell.Screenshot.Screenshot', 'false', 'false', file], { timeout: 12_000 });
+    await run('gdbus', gnomeShellCaptureArgs(file), { timeout: 12_000 });
     return file;
   } });
-  attempts.push({ label: 'gnome-screenshot', fn: async () => { await run('gnome-screenshot', ['-f', file], { timeout: 12_000 }); return file; } });
-  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', ['-b', '-n', '-o', file], { timeout: 15_000 }); return file; } });
-  attempts.push({ label: 'scrot', fn: async () => { await run('scrot', ['--silent', file], { timeout: 12_000 }); return file; } });
-  attempts.push({ label: 'maim', fn: async () => { await run('maim', [file], { timeout: 12_000 }); return file; } });
-  attempts.push({ label: 'import', fn: async () => { await run('import', ['-window', 'root', file], { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'gnome-screenshot', fn: async () => { await run('gnome-screenshot', captureArgs('gnome-screenshot', file), { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'spectacle', fn: async () => { await run('spectacle', captureArgs('spectacle', file), { timeout: 15_000 }); return file; } });
+  attempts.push({ label: 'scrot', fn: async () => { await run('scrot', captureArgs('scrot', file), { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'maim', fn: async () => { await run('maim', captureArgs('maim', file), { timeout: 12_000 }); return file; } });
+  attempts.push({ label: 'import', fn: async () => { await run('import', captureArgs('import', file), { timeout: 12_000 }); return file; } });
   return attempts;
 }
 
@@ -497,7 +538,7 @@ async function waylandHint(env, tried) {
   return lines.join('\n');
 }
 
-export async function captureScreenshot({ portalTimeoutMs } = {}) {
+export async function captureScreenshot({ portalTimeoutMs, onCapture } = {}) {
   const env = displayEnv();
   const session = sessionInfo(env);
   if (!session.graphical) throw new Error(NO_SESSION);
@@ -523,6 +564,9 @@ export async function captureScreenshot({ portalTimeoutMs } = {}) {
         try { fs.unlinkSync(produced); } catch { /* noop */ }
         continue;
       }
+      // Tell the caller what produced this frame: the portal never draws the
+      // pointer, and whoever draws it next needs to know whether to.
+      try { onCapture?.({ tool: attempt.label, pointer: capturesPointer(attempt.label) }); } catch { /* a stale callback must not break capture */ }
       if (produced === file) {
         // Our own temp copy: the caller only needs the Buffer, so the file is
         // dead the moment it is read. No reason to wait for the janitor.
@@ -1219,4 +1263,109 @@ export async function cropFrame(buffer, box, { maxWidth = 1920 } = {}) {
     const out = await image.jpeg({ quality: 82 }).toBuffer();
     return { image: out, mime: 'image/jpeg', box: { left, top, width, height } };
   } catch { return null; }
+}
+
+/**
+ * Where is the pointer right now?
+ *
+ * Only X11 (and XWayland-aware stacks) can answer: `xdotool getmouselocation`
+ * reads the real cursor, so the phone can place its marker exactly without
+ * waiting for a tap. GNOME Wayland answers nothing — there is no query API —
+ * and this says so instead of guessing a coordinate.
+ */
+export function parsePointerLocation(output) {
+  const x = /(?:^|\n)X=(-?\d+)/.exec(String(output ?? ''));
+  const y = /(?:^|\n)Y=(-?\d+)/.exec(String(output ?? ''));
+  if (!x || !y) return null;
+  const px = Number(x[1]), py = Number(y[1]);
+  if (!Number.isFinite(px) || !Number.isFinite(py) || px < 0 || py < 0) return null;
+  return { x: px, y: py };
+}
+
+export async function pointerPosition(env = displayEnv()) {
+  const session = sessionInfo(env);
+  if (!session.graphical) return { known: false, reason: 'no graphical session' };
+  // On Wayland xdotool talks to XWayland, whose pointer is NOT the compositor's
+  // pointer: answering from it put the phone's marker far from the real cursor.
+  if (session.type === 'wayland')
+    return { known: false, reason: 'Wayland does not let an app read the pointer position' };
+  try {
+    const out = await run('xdotool', ['getmouselocation', '--shell'], { timeout: 4_000 });
+    const point = parsePointerLocation(out);
+    return point ? { known: true, ...point } : { known: false, reason: 'unparsable pointer location' };
+  } catch (err) {
+    return {
+      known: false,
+      reason: session.type === 'wayland'
+        ? 'Wayland does not let an app read the pointer position'
+        : String(err.stderr || err.message || 'xdotool unavailable').split('\n')[0],
+    };
+  }
+}
+
+/**
+ * Draw the pointer into the frame ourselves.
+ *
+ * The GNOME portal never includes the cursor, and an app-side marker has proven
+ * fragile (it depends on a screen-size round trip, a zoom crop and a live
+ * position). Painting the arrow into the pixels is a guarantee: whatever shows
+ * the frame — the phone, a saved screenshot, WhatsApp — the pointer is there.
+ */
+export function cursorArrowSvg({ size = 40, fill = '#ffffff', stroke = '#000000' } = {}) {
+  const width = Math.max(6, Math.round((size * 17) / 23));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${size}" viewBox="0 0 17 23">`
+    + `<path d="M1.9 1.6 L1.9 18.2 L6.2 14.1 L8.9 20.6 L12 19.2 L9.3 12.9 L14.9 12.9 Z" fill="${fill}" stroke="${stroke}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+/** A ring around the arrow so it is findable on white documents and dark terminals. */
+export function cursorHaloSvg({ size = 76 } = {}) {
+  const r = Math.max(4, Math.round(size / 2) - 3);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`
+    + `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#000000" stroke-opacity="0.55" stroke-width="4"/>`
+    + `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#ffffff" stroke-opacity="0.95" stroke-width="2"/></svg>`;
+}
+
+/** How big the painted arrow is, in image pixels: it must survive a phone preview. */
+export function pointerMarkSize(imageWidth) {
+  const width = Number(imageWidth || 0);
+  if (!Number.isFinite(width) || width <= 0) return 32;
+  return Math.max(28, Math.min(96, Math.round(width / 26)));
+}
+
+/**
+ * Composite the arrow (+ halo) at image pixel `x,y`. Returns a PNG buffer, or
+ * null when sharp is unavailable — the caller then keeps the plain frame.
+ */
+export async function burnPointer(buffer, { x, y, size } = {}) {
+  let sharp;
+  try { sharp = (await import('sharp')).default; } catch { return null; }
+  try {
+    const meta = await sharp(buffer).metadata();
+    if (!meta.width || !meta.height) return null;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const mark = pointerMarkSize(size ?? meta.width);
+    const arrowWidth = Math.round((mark * 17) / 23);
+    const halo = Math.round(mark * 1.9);
+    const left = Math.max(0, Math.min(meta.width - 1, Math.round(x)));
+    const top = Math.max(0, Math.min(meta.height - 1, Math.round(y)));
+    const clampLeft = (value, width) => Math.max(0, Math.min(meta.width - width, Math.round(value)));
+    const clampTop = (value, height) => Math.max(0, Math.min(meta.height - height, Math.round(value)));
+    return await sharp(buffer)
+      .composite([
+        { input: Buffer.from(cursorHaloSvg({ size: halo })), left: clampLeft(left - halo / 2, halo), top: clampTop(top - halo / 2, halo) },
+        { input: Buffer.from(cursorArrowSvg({ size: mark })), left: clampLeft(left, arrowWidth), top: clampTop(top, mark) },
+      ])
+      .png()
+      .toBuffer();
+  } catch { return null; }
+}
+
+/** Keep a pointer estimate inside the screen while moves arrive. */
+export function moveTrackedPointer(pointer, dx, dy, screen) {
+  if (!pointer || !screen || !screen.width || !screen.height) return pointer;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return pointer;
+  return {
+    x: Math.max(0, Math.min(screen.width - 1, pointer.x + dx)),
+    y: Math.max(0, Math.min(screen.height - 1, pointer.y + dy)),
+  };
 }

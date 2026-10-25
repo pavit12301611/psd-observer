@@ -613,7 +613,9 @@ test('pccontrol: a black capture is rejected and explained (Wayland reality)', a
     fs.writeFileSync(p, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   };
   // grim "succeeds" and hands back a black frame — exactly what Wayland does.
-  shim('grim', `node -e "process.stdout.write('')" ; printf '%s' "${makePng(8, [0, 0, 0]).toString('base64')}" | base64 -d > "$1"`);
+  // grim is called with flags (`-c` keeps the pointer in the picture), so the
+  // shim writes to the LAST argument — the output path — exactly like grim.
+  shim('grim', `node -e "process.stdout.write('')" ; for f; do :; done; printf '%s' "${makePng(8, [0, 0, 0]).toString('base64')}" | base64 -d > "$f"`);
 
   const saved = {
     PATH: process.env.PATH,
@@ -637,7 +639,7 @@ test('pccontrol: a black capture is rejected and explained (Wayland reality)', a
     });
 
     // Swap in a shim that returns a real (white) screenshot: it must be accepted.
-    shim('grim', `printf '%s' "${makePng(8, [255, 255, 255]).toString('base64')}" | base64 -d > "$1"`);
+    shim('grim', `for f; do :; done; printf '%s' "${makePng(8, [255, 255, 255]).toString('base64')}" | base64 -d > "$f"`);
     const shot = await pc.captureScreenshot();
     assert.ok(shot.length > 0);
     assert.equal(imageStats(shot).blank, false);

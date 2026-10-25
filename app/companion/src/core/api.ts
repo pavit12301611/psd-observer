@@ -144,6 +144,55 @@ export class BridgeClient {
     if (!isNative()) localStorage.removeItem("observer-pending-jobs");
     if (isNative()) await nativeCall("logout");
   }
+  /**
+   * The Android bridge runs every HTTP call on a 4-thread pool with a 12-slot
+   * queue, and *rejects* (not queues forever) once that is full: an input tap
+   * then fails with "rejected from ThreadPoolExecutor" and the page looks dead.
+   * So the web bundle never has more than a few calls in flight, and it retries
+   * a rejected call once instead of surfacing the pool's internals.
+   */
+  private inflight = 0;
+  private waitingSlots: (() => void)[] = [];
+  private async takeSlot() {
+    // `while`, not `if`: a woken waiter and a fresh caller must not both take
+    // the same freed slot.
+    while (this.inflight >= 3)
+      await new Promise<void>((resolve) => this.waitingSlots.push(resolve));
+    this.inflight += 1;
+  }
+  private freeSlot() {
+    this.inflight = Math.max(0, this.inflight - 1);
+    const next = this.waitingSlots.shift();
+    if (next) next();
+  }
+  private async nativeRequest(
+    path: string,
+    options: Record<string, unknown>,
+    timeout: number,
+  ): Promise<WireResponse> {
+    const busy = (e: unknown) =>
+      /rejected from|ThreadPoolExecutor|bridge unavailable/i.test(
+        e instanceof Error ? e.message : String(e),
+      );
+    for (let attempt = 0; ; attempt++) {
+      await this.takeSlot();
+      let failure: unknown = null;
+      try {
+        return await nativeCall<WireResponse>(
+          "request",
+          { path, ...options, timeout },
+          timeout + 5000,
+        );
+      } catch (e) {
+        failure = e;
+      } finally {
+        this.freeSlot(); // release before pausing, so other calls keep flowing
+      }
+      if (attempt >= 1 || !busy(failure)) throw failure;
+      // One short pause is enough: the pool drains in milliseconds.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }
   async wire(
     path: string,
     options: {
@@ -160,11 +209,7 @@ export class BridgeClient {
     const timeout = options.timeout || 20_000;
     let result: WireResponse;
     if (isNative())
-      result = await nativeCall<WireResponse>(
-        "request",
-        { path, ...options, timeout },
-        timeout + 5000,
-      );
+      result = await this.nativeRequest(path, { ...options }, timeout);
     else {
       const controller = new AbortController();
       this.requests.add(controller);

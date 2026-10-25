@@ -29,14 +29,18 @@ import type { AppState, PcState } from "../types";
 import { api, base64Blob } from "../core/api";
 import {
   clampZoom,
+  cursorMarkerPosition,
   frameQuery,
+  moveCursorBy,
   panCenter,
+  pixelToUnit,
   pointToScreen,
   retryDelay,
   visibleRegion,
   zoomAround,
   type Center,
   type Region,
+  type Size,
 } from "../core/remote";
 import { EmptyPanel, IconButton, SectionHeading } from "./ui";
 
@@ -103,6 +107,38 @@ export default function PCControl({
     [pcError, setPcError] = useState(""),
     [takingOver, setTakingOver] = useState(false),
     [lastFrameAt, setLastFrameAt] = useState(0),
+    // GNOME's portal screenshots never contain the pointer, so the app keeps
+    // its own marker: absolute where the PC reported pixels, relative for
+    // trackpad/nudge moves (which are PC pixels too).
+    [cursor, setCursor] = useState<Center | null>(null),
+    [screenPx, setScreenPx] = useState<Size | null>(null),
+    [marker, setMarker] = useState<{
+      x: number;
+      y: number;
+      size: number;
+      // "arrow" = our own pointer, "ring" = halo around the PC's own (usually
+      // tiny) cursor, "ghost" = nothing is known yet, tap to place it.
+      kind: "arrow" | "ring" | "ghost";
+    } | null>(null),
+    // "auto" hides the arrow only when the frame already has the PC's cursor.
+    // The owner can force it either way — a cursor you cannot see is worse than
+    // a duplicated one.
+    [markerMode, setMarkerMode] = useState<"auto" | "always" | "never">(() => {
+      try {
+        const saved = localStorage.getItem("observer-pointer-marker");
+        return saved === "always" || saved === "never" ? saved : "auto";
+      } catch {
+        return "auto";
+      }
+    }),
+    [pointerApi, setPointerApi] = useState<"unknown" | "ok" | "none">("unknown"),
+    [lastInput, setLastInput] = useState<{
+      what: string;
+      ok: boolean;
+      at: number;
+      detail?: string;
+    } | null>(null),
+    [imgSize, setImgSize] = useState<Size>({ width: 0, height: 0 }),
     [now, setNow] = useState(() => Date.now()),
     [fullscreen, setFullscreen] = useState(false),
     [dragLine, setDragLine] = useState<{
@@ -140,11 +176,19 @@ export default function PCControl({
       origin: { x: number; y: number } | null;
     } | null>(null),
     lastTap = useRef({ at: 0, x: 0, y: 0 }),
-    padSentAt = useRef(0),
-    padCarry = useRef({ x: 0, y: 0 });
+    pointerBusy = useRef(false),
+    pointerNoticeAt = useRef(0),
+    lastMoveAt = useRef(0),
+    padCarry = useRef({ x: 0, y: 0 }),
+    captureMs = useRef(0),
+    screenPxRef = useRef<Size | null>(null),
+    pointerPixels = useRef<{ x: number; y: number } | null>(null),
+    pointerApiRef = useRef<"unknown" | "ok" | "none">("unknown");
 
   active.current = connected;
   view.current = { zoom, center };
+  pointerApiRef.current = pointerApi;
+  screenPxRef.current = screenPx;
   const busyAgent = Boolean(state?.active.length || pc?.busy);
 
   useEffect(() => {
@@ -179,6 +223,11 @@ export default function PCControl({
         },
       );
       if (!alive.current || !active.current) return;
+      const px = {
+        width: Number(res.headers?.["x-screen-width"]),
+        height: Number(res.headers?.["x-screen-height"]),
+      };
+      if (px.width > 0 && px.height > 0) setScreenPx(px);
       if (res.status !== 304 && res.base64) {
         const url = URL.createObjectURL(
           base64Blob(res.base64, res.mime || "image/png"),
@@ -226,14 +275,70 @@ export default function PCControl({
     [capture],
   );
 
+  // Keep the pointer marker glued to the image through zoom, pan and rotation.
+  useEffect(() => {
+    const place = () => {
+      const box = stage.current;
+      if (markerMode === "never" || !box || !frame) return setMarker(null);
+      // The PC can paint the pointer into the frame itself; then the pixels are
+      // the truth and a second arrow would be a lie.
+      if (markerMode === "auto" && pc?.pointerBurned === true) return setMarker(null);
+      const inFrame = pc?.pointerInFrame === true;
+      // Nothing known yet: show a dashed ghost in the middle instead of nothing,
+      // so the owner always has something to aim with.
+      const position = cursor ?? { x: 500, y: 500 };
+      // Ring only in Auto: "Always" means the owner's own arrow, always.
+      const kind: "arrow" | "ring" | "ghost" = !cursor
+        ? "ghost"
+        : markerMode === "auto" && inFrame && pointerApiRef.current === "ok"
+          ? "ring"
+          : "arrow";
+      const rect = box.getBoundingClientRect();
+      const point = cursorMarkerPosition(position, rect, imgSize, region);
+      if (!point) return setMarker(null);
+      // Size it like a real cursor: ~20 PC pixels tall, scaled to how big this
+      // image actually is on the phone. A fixed 23px banner looked enormous.
+      const scale = Math.min(rect.width / imgSize.width, rect.height / imgSize.height),
+        perPcPixel = screenPx?.width
+          ? (imgSize.width * scale) / screenPx.width
+          : scale;
+      // Never smaller than a fingertip-sized arrow: 12px is the floor where it
+      // is still findable on a phone.
+      const size = Math.min(26, Math.max(12, 22 * perPcPixel));
+      setMarker({ ...point, size, kind });
+    };
+    place();
+    if (typeof ResizeObserver === "undefined" || !stage.current) return;
+    const observer = new ResizeObserver(place);
+    observer.observe(stage.current);
+    return () => observer.disconnect();
+  }, [
+    cursor,
+    frame,
+    imgSize,
+    region,
+    zoom,
+    center,
+    fullscreen,
+    screenPx,
+    pc?.pointerInFrame,
+    markerMode,
+  ]);
+
   useEffect(() => {
     if (!streaming || !connected) return;
     let cancelled = false,
       timer: ReturnType<typeof setTimeout>;
     const loop = async () => {
+      const startedAt = Date.now();
       await capture();
-      if (!cancelled && alive.current)
-        timer = setTimeout(loop, lowData ? 2500 : 1200);
+      captureMs.current = Date.now() - startedAt;
+      // Wait for the PC's own capture time plus a little air. A portal
+      // screenshot can take seconds on Wayland, and asking again before it
+      // finished is what buried the phone's request pool.
+      const base = lowData ? 2500 : 1200;
+      const wait = Math.max(base, Math.min(6000, captureMs.current + 400));
+      if (!cancelled && alive.current) timer = setTimeout(loop, wait);
     };
     void loop();
     return () => {
@@ -265,6 +370,8 @@ export default function PCControl({
       setPin("");
       setFrame("");
       setPc(null);
+      setCursor(null);
+      setMarker(null);
       setZoom(1);
       setCenter({ x: 0.5, y: 0.5 });
       if (frameURL.current) URL.revokeObjectURL(frameURL.current);
@@ -301,12 +408,71 @@ export default function PCControl({
       const next = await api.get<PcState>("/api/pc/state");
       if (!alive.current) return;
       setPc(next);
+      if (next.screen && next.screen.width > 0 && next.screen.height > 0)
+        setScreenPx({ width: next.screen.width, height: next.screen.height });
       setPcError("");
     } catch (e) {
       if (!alive.current) return;
       setPcError(e instanceof Error ? e.message : "PC state unavailable");
     }
   }, [connected]);
+
+  // X11 can say where the cursor actually is, so the marker starts in the right
+  // place and re-syncs whenever the phone has been idle: any drift (a dropped
+  // move, the PC's own acceleration) corrects itself within a few seconds.
+  // Wayland cannot answer at all — then the marker starts at the first tap.
+  useEffect(() => {
+    if (!connected || !inputEnabled) return;
+    let cancelled = false;
+    const sync = async (force: boolean) => {
+      // Never fight an in-flight move: our own deltas are more recent.
+      if (!force && Date.now() - lastMoveAt.current < 3000) return;
+      try {
+        const r = await api.get<{
+          known: boolean;
+          x?: number;
+          y?: number;
+          screen?: Size | null;
+        }>("/api/pc/pointer");
+        if (cancelled) return;
+        if (!r.known || r.x == null || r.y == null) {
+          setPointerApi("none");
+          return;
+        }
+        setPointerApi("ok");
+        if (r.screen && r.screen.width > 0 && r.screen.height > 0)
+          setScreenPx(r.screen);
+        const screen = r.screen && r.screen.width > 0 ? r.screen : screenPxRef.current;
+        const point = pixelToUnit({ x: r.x, y: r.y }, screen);
+        if (point) setCursor(point);
+        else pointerPixels.current = { x: r.x, y: r.y }; // wait for a screen size
+      } catch {
+        /* No pointer query on this desktop — the tap seeds the marker. */
+        if (!cancelled) setPointerApi("none");
+      }
+    };
+    void sync(true);
+    const timer = setInterval(() => void sync(false), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, inputEnabled]);
+
+  useEffect(() => {
+    if (!screenPx || !pointerPixels.current) return;
+    const point = pixelToUnit(pointerPixels.current, screenPx);
+    pointerPixels.current = null;
+    if (point) setCursor(point);
+  }, [screenPx]);
+
+  // The bridge forwards only ETag headers, so the screen size a marker needs
+  // comes from /api/pc/state — ask again as soon as a frame exists.
+  useEffect(() => {
+    if (!lastFrameAt || screenPx) return;
+    void loadPcState();
+  }, [lastFrameAt, screenPx, loadPcState]);
 
   useEffect(() => {
     if (!connected) return;
@@ -340,12 +506,89 @@ export default function PCControl({
 
   function tapped(point: { x: number; y: number }, at: { x: number; y: number }) {
     mark(at.x, at.y);
-    void send("/api/tap", { ...point, relative: true });
+    // Show the arrow at once: waiting for the round-trip made it look like
+    // nothing happened at all. A refusal is reported in words and in the More
+    // tab, and the arrow stays where the owner actually touched.
+    setCursor({ x: point.x, y: point.y });
+    void send("/api/tap", { ...point, relative: true }).then((ok) => {
+      setLastInput({
+        what: `tap ${point.x},${point.y}`,
+        ok,
+        at: Date.now(),
+        detail: ok ? undefined : "The PC refused the tap (see the notice).",
+      });
+    });
   }
 
-  function rightClick() {
+  /** Right click exactly where the finger is, not where the PC cursor was. */
+  function rightClickAt(clientX: number, clientY: number, at: { x: number; y: number }) {
+    const img = image.current;
+    if (!img) return;
+    const point = pointToScreen(
+      clientX,
+      clientY,
+      img.getBoundingClientRect(),
+      { width: img.naturalWidth, height: img.naturalHeight },
+      region,
+    );
+    if (!point) return;
+    mark(at.x, at.y);
+    setCursor({ x: point.x, y: point.y });
+    void send("/api/tap", { ...point, relative: true, button: "right" }).then(
+      (ok) =>
+        setLastInput({
+          what: `right click ${point.x},${point.y}`,
+          ok,
+          at: Date.now(),
+          detail: ok ? undefined : "The PC refused the click (see the notice).",
+        }),
+    );
+  }
+
+  /** Right click at the pointer's current PC position (the dock button). */
+  function rightClickHere() {
     void send("/api/pointer", { op: "click", button: "right" });
   }
+
+  /** Send the accumulated trackpad movement, one request at a time. */
+  function flushPointer() {
+    if (pointerBusy.current) return;
+    const move = padCarry.current;
+    if (!move.x && !move.y) return;
+    padCarry.current = { x: 0, y: 0 };
+    pointerBusy.current = true;
+    void api
+      .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
+      .then(() => {
+        // Only move the marker for a move the PC accepted: the pointer really
+        // moved by exactly these pixels.
+        lastMoveAt.current = Date.now();
+        setCursor((c) => moveCursorBy(c, move.x, move.y, screenPxRef.current) ?? c);
+      })
+      .catch((e) => {
+        // Keep input on: a busy bridge or a slow swipe is not a policy refusal.
+        const now = Date.now();
+        if (now - pointerNoticeAt.current > 4000) {
+          pointerNoticeAt.current = now;
+          notice(
+            e instanceof Error ? e.message : "Pointer move was not delivered",
+          );
+        }
+      })
+      .finally(() => {
+        pointerBusy.current = false;
+        if (padCarry.current.x || padCarry.current.y) flushPointer();
+      });
+  }
+
+  const chooseMarkerMode = (mode: "auto" | "always" | "never") => {
+    setMarkerMode(mode);
+    try {
+      localStorage.setItem("observer-pointer-marker", mode);
+    } catch {
+      /* private mode: the choice just does not survive a reload */
+    }
+  };
 
   const setZoomKeepingCenter = (next: number) => {
     const result = zoomAround(zoom, center, next, { x: 0.5, y: 0.5 });
@@ -403,8 +646,7 @@ export default function PCControl({
           x: e.clientX - rect.left,
           y: e.clientY - rect.top,
         };
-        mark(at.x, at.y);
-        rightClick();
+        rightClickAt(e.clientX, e.clientY, at);
       }, 550);
     gesture.current = g;
   }
@@ -466,8 +708,11 @@ export default function PCControl({
     const elapsed = Date.now() - g.startedAt;
     if (g.pinched) {
       if (!g.moved && elapsed < 400 && inputEnabled) {
-        mark(e.clientX, e.clientY);
-        rightClick();
+        const stageRect = e.currentTarget?.getBoundingClientRect?.() ?? null;
+        rightClickAt(e.clientX, e.clientY, {
+          x: e.clientX - (stageRect?.left ?? 0),
+          y: e.clientY - (stageRect?.top ?? 0),
+        });
       }
       return;
     }
@@ -486,7 +731,15 @@ export default function PCControl({
       }, region);
       if (from && to) {
         mark(to.x, to.y);
-        void send("/api/drag", { from, to });
+        setCursor({ x: to.x, y: to.y });
+        void send("/api/drag", { from, to }).then((ok) =>
+          setLastInput({
+            what: "drag",
+            ok,
+            at: Date.now(),
+            detail: ok ? undefined : "The PC refused the drag (see the notice).",
+          }),
+        );
       }
       return;
     }
@@ -755,7 +1008,12 @@ export default function PCControl({
                   src={frame}
                   alt="Live frame from your PC"
                   draggable={false}
-                  onLoad={() => setLoading(false)}
+                  onLoad={(e) =>
+                    setImgSize({
+                      width: e.currentTarget.naturalWidth,
+                      height: e.currentTarget.naturalHeight,
+                    })
+                  }
                 />
                 {ripple && (
                   <span
@@ -763,6 +1021,38 @@ export default function PCControl({
                     className="pc-ripple"
                     style={{ left: ripple.x, top: ripple.y }}
                   />
+                )}
+                {marker?.kind === "ring" ? (
+                  <span
+                    className="pc-cursor ring"
+                    style={{ left: marker.x, top: marker.y, width: marker.size, height: marker.size }}
+                    aria-hidden
+                  />
+                ) : marker?.kind === "ghost" ? (
+                  <span
+                    className="pc-cursor ghost"
+                    style={{ left: marker.x, top: marker.y, width: 26, height: 26 }}
+                    aria-hidden
+                  >
+                    <span>tap to place</span>
+                  </span>
+                ) : (
+                  marker && (
+                    <span
+                      className="pc-cursor"
+                      style={{
+                        left: marker.x,
+                        top: marker.y,
+                        width: marker.size * 0.74,
+                        height: marker.size,
+                      }}
+                      aria-hidden
+                    >
+                      <svg viewBox="0 0 17 23" width="100%" height="100%">
+                        <path d="M1.9 1.6 L1.9 18.2 L6.2 14.1 L8.9 20.6 L12 19.2 L9.3 12.9 L14.9 12.9 Z" />
+                      </svg>
+                    </span>
+                  )
                 )}
                 {dragLine && (
                   <svg className="pc-drag-line" aria-hidden>
@@ -897,16 +1187,12 @@ export default function PCControl({
                         x: Math.max(-200, Math.min(200, padCarry.current.x + dx)),
                         y: Math.max(-200, Math.min(200, padCarry.current.y + dy)),
                       };
-                      // One request per ~24ms keeps a slow ydotool call from
-                      // queueing a whole swipe behind the finger.
-                      if (Date.now() - padSentAt.current < 24) return;
-                      const move = padCarry.current;
-                      if (!move.x && !move.y) return;
-                      padCarry.current = { x: 0, y: 0 };
-                      padSentAt.current = Date.now();
-                      void api
-                        .post("/api/pointer", { op: "move", dx: move.x, dy: move.y, pin })
-                        .catch(() => setInputEnabled(false));
+                      // Exactly one move in flight, with the rest of the swipe
+                      // coalesced into the next one. The old fixed 24ms timer
+                      // fired faster than a phone round-trip, so the Android
+                      // bridge pool filled up and rejected everything — taps
+                      // included. A dropped move must never disable input.
+                      flushPointer();
                     }}
                     onPointerUp={(e) => {
                       const el = e.currentTarget as HTMLElement;
@@ -931,7 +1217,7 @@ export default function PCControl({
                     <button
                       className="button compact"
                       disabled={!inputEnabled}
-                      onClick={() => void send("/api/pointer", { op: "click", button: "right" })}
+                      onClick={rightClickHere}
                     >
                       Right click
                     </button>
@@ -954,6 +1240,23 @@ export default function PCControl({
                       Scroll ↓
                     </button>
                   </div>
+                  <p className="pc-muted">
+                    {markerMode === "never"
+                      ? "Your arrow is turned off. More → Arrow → Auto or Always brings it back."
+                      : pc?.pointerBurned
+                        ? "The PC paints the pointer into the image itself — it is part of the picture, at the real position."
+                        : !cursor
+                          ? "Tap the screen once to place the arrow; after that it follows every move."
+                          : "The arrow marks where your input landed and follows every move."}
+                  </p>
+                  {markerMode === "auto" && pc?.pointerInFrame && !pc?.pointerBurned && (
+                    <button
+                      className="button compact"
+                      onClick={() => chooseMarkerMode("always")}
+                    >
+                      Show my arrow anyway
+                    </button>
+                  )}
                   <div className="pc-row">
                     <span className="pc-muted">Nudge</span>
                     {[
@@ -966,9 +1269,10 @@ export default function PCControl({
                         key={n.label}
                         label={`Nudge ${n.label}`}
                         disabled={!inputEnabled}
-                        onClick={() =>
-                          void send("/api/pointer", { op: "move", dx: n.dx, dy: n.dy })
-                        }
+                        onClick={() => {
+                          setCursor((c) => moveCursorBy(c, n.dx, n.dy, screenPx) ?? c);
+                          void send("/api/pointer", { op: "move", dx: n.dx, dy: n.dy });
+                        }}
                       >
                         {n.icon}
                       </IconButton>
@@ -1167,7 +1471,85 @@ export default function PCControl({
                       <span>Agent</span>
                       <strong>{busyAgent ? "busy" : "idle"}</strong>
                     </div>
+                    <div>
+                      <span>Cursor in frame</span>
+                      <strong>
+                        {pc?.pointerInFrame === true
+                          ? "yes"
+                          : pc?.pointerInFrame === false
+                            ? "no"
+                            : "unknown"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Capture tool</span>
+                      <strong>{pc?.captureTool || "unknown"}</strong>
+                    </div>
+                    <div>
+                      <span>Screen</span>
+                      <strong>
+                        {screenPx ? `${screenPx.width}×${screenPx.height}` : "unknown"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Cursor painted</span>
+                      <strong>
+                        {pc?.pointerBurned === true
+                          ? "yes (in the pixels)"
+                          : pc?.pointerBurned === false
+                            ? "no"
+                            : "unknown"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Pointer query</span>
+                      <strong>
+                        {pointerApi === "ok"
+                          ? "works"
+                          : pointerApi === "none"
+                            ? "not available"
+                            : "…"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>My arrow</span>
+                      <strong>
+                        {marker
+                          ? `${marker.kind === "ring" ? "highlighting the PC cursor" : "shown"} at ${Math.round(marker.x)},${Math.round(marker.y)}`
+                          : markerMode === "never"
+                            ? "off by choice"
+                            : cursor
+                              ? "hidden (outside the visible crop)"
+                              : "waiting for a tap"}
+                      </strong>
+                    </div>
                   </div>
+                  <div className="pc-row" role="group" aria-label="Pointer arrow">
+                    <span className="pc-muted">Arrow</span>
+                    {(
+                      [
+                        ["auto", "Auto"],
+                        ["always", "Always"],
+                        ["never", "Off"],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        className="button compact"
+                        aria-pressed={markerMode === mode}
+                        onClick={() => chooseMarkerMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {lastInput && (
+                    <p className="pc-muted">
+                      Last input: {lastInput.what} —{" "}
+                      {lastInput.ok ? "accepted by the PC" : "refused"}
+                      {lastInput.detail ? ` (${lastInput.detail})` : ""}
+                    </p>
+                  )}
                   <div className="pc-row">
                     <button className="button compact" onClick={() => void loadPcState()}>
                       <RefreshCw size={14} />

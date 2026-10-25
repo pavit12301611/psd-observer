@@ -1,5 +1,50 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.13.0 — paint the pointer into the frame (2026-10-25)
+
+- Three versions of app-side markers still left the owner without a cursor, so this stops depending on the app at all: when the capture tool cannot draw the pointer (GNOME's portal, ImageMagick, Spectacle), the PC now **paints the arrow into the PNG itself** with `sharp` (already a dependency) before cropping and shrinking. Whatever displays the frame — the phone, a zoomed crop, a screenshot sent to WhatsApp — has the cursor in its pixels.
+- `burnPointer` composites a white arrow with a black outline plus a contrast ring at the real position; the mark is `clamp(imageWidth / 26, 28, 96)` px, i.e. ~1/26 of the frame, so it stays readable after the image is scaled to a phone (a raw 20px cursor became 3-4px, which is what "cursor dikh hi nahi raha" actually was).
+- Position: `xdotool` where the desktop can report it (X11), otherwise an estimate the bridge maintains from its own input — `moveTrackedPointer` for every accepted `/api/pointer` move, exact for `/api/tap` and the end of `/api/drag`, clamped to the screen. Unknown is still unknown: nothing is painted rather than a guess.
+- No double cursor: burning only happens when the capture tool reports `pointer: false`. `GET /api/pc/state` exposes `pointerBurned`, the app hides its marker in Auto when it is true, and More shows "Cursor painted: yes (in the pixels)". `POINTER_IN_FRAME=false` disables it.
+- App: the dead-end that made everything invisible (frame has the pointer, but its position is unknown, so the marker was suppressed) is gone — Auto now draws a halo around a known real cursor, our arrow otherwise, and a dashed "tap to place" ghost when nothing is known yet. `Always` still forces the arrow.
+- Tests: agent 614/614 (burned pixels are really dark, clamped positions, no burn when the tool already draws the cursor, state flag), companion 55/55, Playwright: a painted frame draws no marker, More says so, `Always` overrides.
+
+## 3.12.4 — "cursor dikh hi nahi raha": make it visible, and make the reason visible (2026-10-25)
+
+- The trap we walked into ourselves: once the capture tools started drawing the real pointer, the *real* cursor is in the frame at **PC scale**. A 1920-px screen shown on a phone is a few hundred pixels wide, so a 20 px cursor becomes 3-4 px — invisible. Hiding our own arrow in that case (3.12.3) made it worse.
+- Fix: when the frame already has the PC's cursor, the app now draws a small black-and-white **halo** around it (position from `/api/pc/pointer` on X11) instead of nothing. It is not a second cursor: it marks the real one. Where even that position is unknowable, nothing is drawn and the pad tab offers "Show my arrow anyway".
+- The arrow is now a real choice, not a guess: More → **Arrow → Auto / Always / Off**, persisted in `localStorage`. `Always` guarantees a visible pointer on any desktop.
+- The arrow appears **immediately** on tap/drag (it used to wait for the PC's confirmation, so a slow or refused request looked like "nothing happened"); the confirmation still updates the More tab as accepted/refused.
+- New diagnostics in More: Cursor in frame (yes/no/unknown), Capture tool, Screen size, Pointer query (works / not available), My arrow (shown at x,y / hidden and why), Last input (accepted/refused). This is the panel that ends "cursor kahan gaya" guessing games.
+- Marker floor is 12 px (was 9) and the ceiling 26 px, so it reads as a cursor without becoming the banner of 3.12.2.
+- Tests: companion 55/55, agent 611/611, and a new Playwright test: a frame with `pointerInFrame` draws the halo (never a second arrow), the More tab reports the tool and the frame state, and "Always" switches to our own arrow.
+
+## 3.12.3 — the marker now matches the real cursor (2026-10-25)
+
+- Report: "jo cursor hai woh screen ke cursor se bahut bada hai aur na sync mein — bilkul hi door". Three separate causes, all fixed:
+  1. **Two cursors.** On X11 (and grim/wlroots) the capture tools now *do* draw the real pointer, so the phone's arrow was a second, unrelated one. `captureScreenshot` reports `{tool, pointer}` through `onCapture`, `/api/pc/state` exposes `pointerInFrame`/`captureTool`, and the app draws nothing when the frame already has the cursor.
+  2. **Too big.** The arrow was a fixed 23 px CSS shape regardless of how big the screen was on the phone. It is now `clamp(20 × drawnWidth ÷ screenWidth, 9, 22)` px — the scale a ~20 PC-pixel cursor would have — so it reads like a cursor, not a banner.
+  3. **Out of sync.** The seed came from `xdotool` even on Wayland, where it talks to **XWayland** and reports a pointer that has nothing to do with the compositor's — hence "bilkul door". `pointerPosition` now refuses on Wayland, the marker only moves for input the PC accepted (a refused move no longer drags the arrow away), and on X11 it re-syncs from the real position every 5 s while the phone is idle (skipped for 3 s after any move, so it never fights the owner's own motion).
+- Long-press and two-finger tap now send `POST /api/tap` with `button: "right"`, so the right click lands on the touched pixel instead of wherever the PC cursor happened to be; the dock's "Right click" button keeps its old "click at the cursor" meaning.
+- Tests: agent 611/611 (pointer-tool table, `pointerInFrame` state, right-click-at-pixel), companion 55/55, and the Playwright spec asserts the marker is small (8–26 px) and follows a pad drag.
+
+## 3.12.2 — input that survives a busy phone bridge (2026-10-25)
+
+- Owner report: "input nahi chal raha … yeh error aa raha hai `Task …AndroidBridge$$ExternalSyntheticLambda12@4eb295f rejected from java.util.concurrent.ThreadPoolExecutor[… pool size = 4, active threads = 4, queued tasks = 12 …]`". That message is the Android bridge's own pool refusing work: every `api.wire` in the app is one task on a 4-thread/12-slot pool, and the touchpad was firing a move every 24 ms — far faster than a phone round-trip. The queue filled, taps were rejected too, and each rejection hit `.catch(() => setInputEnabled(false))`, which switched manual input off and made the whole page look dead.
+- Fixes, all deliverable in the web bundle: pointer moves are now strictly one-in-flight with the rest of the swipe coalesced into the next request; a rejected move never disables input (it shows one throttled notice); `api.wire` keeps at most three native calls in flight, releases its slot before any retry, and retries a pool rejection once after 120 ms instead of surfacing the pool's internals; policy refusals (423/403) are still surfaced immediately and never retried.
+- Frame pacing is adaptive: the next frame is requested `max(1200, captureTime + 400) ms` later (2500 on low-data), because a GNOME portal screenshot can take seconds and asking sooner is what buried the pool.
+- The pointer marker's screen size now also travels in `GET /api/pc/state` (`screen: {width, height}` of the last frame). The native bridge forwards only the ETag header, so on the phone the `x-screen-width` path never arrived and trackpad moves could not move the marker; the app asks for state as soon as the first frame lands.
+- APK side (next install, not required for the above): bridge pool 4→6 threads and queue 12→48, `x-screen-width`/`x-screen-height` passed through, and a full pool now answers "The phone is still finishing earlier PC requests. Try again in a second." after one retry instead of throwing a pool dump at the page.
+- Tests: agent 606/606 (new state/screen assertion), companion 54/54 (new `native-gate` tests: max three in flight, rejection retried once, real refusals not retried).
+
+## 3.12.1 — the pointer is back in the picture (2026-10-25)
+
+- The complaint was exact: "screenshot mein pointer dikhta hi nahi hai jaise hide ho gaya ho". On GNOME Wayland the only working capture path is `xdg-desktop-portal`, and the portal never draws the pointer — so the owner was clicking blind. The genuine system-pointer capture is fixed where the tools allow it, and the phone now draws its own marker so Wayland owners get the same information.
+- Capture argv now asks for the pointer explicitly: `grim -c`, `scrot --silent -p`, `gnome-screenshot --include-pointer`, and GNOME Shell's D-Bus `Screenshot(include_frame, include_cursor, file)` — that second boolean was `false` before, which is exactly why GNOME's shell screenshot had no cursor. `maim` already draws it; `import`/Spectacle have no such switch (documented, not faked).
+- App-side marker: the frame response already carries `x-screen-width`/`x-screen-height` (real screen pixels), so taps and drags (absolute pixels from the PC) and trackpad/nudge moves (relative PC pixels) both update one cursor position. `moveCursorBy` converts pixels → 0-1000 units and clamps; `cursorMarkerPosition` undoes the crop and the `object-fit: contain` letterboxing, so the arrow sits on the right pixel at any zoom.
+- It never lies or jumps: the marker hides when the point is outside the visible crop, keeps its old place when the PC reports no screen size, and clears on disconnect. Solid white arrow with a dark outline (no gradients) stays visible on a white document and a black terminal; the ping ring respects `prefers-reduced-motion`.
+- Tests: agent 9/9 in `pc-remote` (new assertion pins every capture argv, including the `include_cursor` boolean), companion 51/51 (pixel→unit conversion, clamping, letterbox/crop placement, off-view hiding), and the Playwright spec now asserts the marker appears where the tap landed and follows a nudge.
+
 ## 3.12.0 — PC control that works from a phone (2026-10-24)
 
 - The old PC page stacked the touchpad **below** the screenshot, so every gesture scrolled the page and pushed the PC screen out of view. It is now one fixed view: a screen stage that keeps its place, and a dock (Pad / Keys / Type / Clip / More) whose body is the only thing that can scroll.

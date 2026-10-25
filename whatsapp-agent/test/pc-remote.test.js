@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createBridgeServer, readCrop } from '../src/server.js';
-import { parseLockedHint, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
+import { burnPointer, captureArgs, capturesPointer, gnomeShellCaptureArgs, moveTrackedPointer, parseLockedHint, parsePointerLocation, parseScreensaverActive, parseUpowerBattery, pointerMarkSize } from '../src/pccontrol.js';
 import { Store } from '../src/store.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -56,6 +56,85 @@ test('pc/state: reports lock, display and busy without ever exposing a password'
   assert.equal(body.accessLevel, 'full');
   assert.equal(calls.state, 1);
   assert.equal((await f.get('/api/pc/state', {})).status, 401, 'state is not public');
+});
+
+test('pc/state: carries the screen size a pointer marker needs, and never invents one', async (t) => {
+  const f = await bridgeFor(t, {
+    system: { state: async () => ({ session: 'wayland', graphical: true, locked: false }) },
+    screen: { capture: async () => fakePng(1920, 1080) },
+  });
+  // Before the first frame there is nothing honest to report.
+  assert.equal((await (await f.get('/api/pc/state')).json()).screen, null);
+  assert.equal((await f.get('/api/screen?w=960')).status, 200);
+  const body = await (await f.get('/api/pc/state')).json();
+  assert.deepEqual(body.screen, { width: 1920, height: 1080 });
+});
+
+test('only the tools that draw the pointer are allowed to hide the phone marker', () => {
+  // Two arrows in different places is worse than one, so this table decides
+  // whether the app draws its own.
+  for (const tool of ['grim', 'scrot', 'gnome-screenshot', 'maim', 'gnome-shell'])
+    assert.equal(capturesPointer(tool), true, `${tool} draws the pointer`);
+  for (const tool of ['xdg-desktop-portal', 'spectacle', 'import', '', null, undefined])
+    assert.equal(capturesPointer(tool), false, `${String(tool)} cannot`);
+});
+
+test('pc/state: says whether the frame already contains the real cursor', async (t) => {
+  const f = await bridgeFor(t, {
+    system: { state: async () => ({ session: 'x11', graphical: true, locked: false }) },
+    screen: {
+      capture: async (opts) => {
+        opts?.onCapture?.({ tool: 'scrot', pointer: true });
+        return fakePng(1280, 800);
+      },
+    },
+  });
+  assert.equal((await (await f.get('/api/pc/state')).json()).pointerInFrame, null);
+  await f.get('/api/screen?w=960');
+  const body = await (await f.get('/api/pc/state')).json();
+  assert.equal(body.pointerInFrame, true);
+  assert.equal(body.captureTool, 'scrot');
+});
+
+test('pc/tap: a right click lands on the touched pixel, not on the old cursor', async (t) => {
+  const clicks = [];
+  const f = await bridgeFor(t, {
+    screen: { capture: async () => fakePng(1000, 500), click: async (...args) => clicks.push(args) },
+  });
+  await f.get('/api/screen?w=800');
+  assert.equal((await f.post('/api/tap', { x: 250, y: 250, relative: true, button: 'right' })).status, 200);
+  assert.deepEqual(clicks.at(-1), [250, 125, 'right']);
+  await f.post('/api/tap', { x: 500, y: 500, relative: true });
+  assert.deepEqual(clicks.at(-1), [500, 250, 'left']);
+  assert.equal((await f.post('/api/tap', { x: 1, y: 1, button: 'middle' })).status, 400);
+});
+
+test('pc/pointer: reports the real cursor where the desktop can, never a guess', async (t) => {
+  const known = await bridgeFor(t, {
+    system: { pointer: async () => ({ known: true, x: 960, y: 540 }) },
+    screen: { capture: async () => fakePng(1920, 1080) },
+  });
+  await known.get('/api/screen?w=960');
+  const body = await (await known.get('/api/pc/pointer')).json();
+  assert.equal(body.known, true);
+  assert.equal(body.x, 960);
+  assert.deepEqual(body.screen, { width: 1920, height: 1080 });
+
+  const unknown = await bridgeFor(t, {
+    system: { pointer: async () => ({ known: false, reason: 'Wayland does not let an app read the pointer position' }) },
+  });
+  const no = await (await unknown.get('/api/pc/pointer')).json();
+  assert.equal(no.known, false);
+  assert.match(no.reason, /Wayland/);
+  assert.equal(no.screen, null);
+  assert.equal((await unknown.get('/api/pc/pointer', {})).status, 401, 'pointer is not public');
+});
+
+test('parsers: xdotool pointer output is read strictly', () => {
+  assert.deepEqual(parsePointerLocation('X=960\nY=540\nSCREEN=0\nWINDOW=1'), { x: 960, y: 540 });
+  assert.equal(parsePointerLocation('X=abc\nY=540'), null);
+  assert.equal(parsePointerLocation('nothing here'), null);
+  assert.equal(parsePointerLocation('X=-4\nY=10'), null);
 });
 
 test('pc/state: an unavailable desktop is a 503 with a reason, not a silent empty object', async (t) => {
@@ -147,4 +226,78 @@ test('parsers: lock, screensaver and battery text are read conservatively', () =
   assert.deepEqual(parseUpowerBattery('state: charging\npercentage: 88%'), { percent: 88, charging: true });
   assert.equal(parseUpowerBattery('percentage: unknown'), null);
   assert.equal(parseUpowerBattery('percentage: 140%'), null);
+});
+
+test('capture argv always asks for the mouse pointer', () => {
+  // A remote screen without the pointer is a screen you click blind.
+  assert.deepEqual(captureArgs('grim', 'shot.png'), ['-c', 'shot.png']);
+  assert.deepEqual(captureArgs('scrot', 'shot.png'), ['--silent', '-p', 'shot.png']);
+  assert.deepEqual(captureArgs('gnome-screenshot', 'shot.png'), ['--include-pointer', '-f', 'shot.png']);
+  assert.deepEqual(captureArgs('maim', 'shot.png'), ['shot.png']);
+  // GNOME Shell: (include_frame, include_cursor, file) — cursor must be true.
+  const shell = gnomeShellCaptureArgs('shot.png');
+  assert.equal(shell.at(-1), 'shot.png');
+  assert.deepEqual(shell.slice(-3, -1), ['false', 'true']);
+  for (const tool of ['grim', 'scrot', 'gnome-screenshot', 'maim']) {
+    assert.ok(captureArgs(tool, 'x.png').includes('x.png'), `${tool} keeps the output path`);
+  }
+});
+
+test('burnPointer paints a findable arrow at the real position', async () => {
+  const sharp = (await import('sharp')).default;
+  const base = await sharp({ create: { width: 400, height: 240, channels: 3, background: '#ffffff' } }).png().toBuffer();
+  const out = await burnPointer(base, { x: 200, y: 120 });
+  assert.ok(out && out.length > 0, 'a painted frame comes back');
+  const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+  assert.equal(info.width, 400);
+  let dark = 0;
+  for (let i = 0; i < data.length; i += info.channels) if (data[i] < 60) dark += 1;
+  // The arrow and its halo are actually in the pixels now.
+  assert.ok(dark > 100, `expected a visible mark, saw ${dark} dark pixels`);
+  // Out-of-range positions are clamped, never throw.
+  assert.ok(await burnPointer(base, { x: -50, y: 9999 }));
+  assert.equal(await burnPointer(base, { x: Number.NaN, y: 10 }), null);
+  // The mark must stay readable once the frame is scaled to a phone.
+  assert.ok(pointerMarkSize(1440) >= 28);
+  assert.ok(pointerMarkSize(1440) / 1440 > 1 / 40);
+});
+
+test("the pointer estimate follows the bridge's own moves and stays on screen", () => {
+  const screen = { width: 1920, height: 1080 };
+  assert.deepEqual(moveTrackedPointer({ x: 100, y: 100 }, 40, -20, screen), { x: 140, y: 80 });
+  assert.deepEqual(moveTrackedPointer({ x: 1900, y: 10 }, 400, -400, screen), { x: 1919, y: 0 });
+  assert.equal(moveTrackedPointer(null, 10, 10, screen), null);
+  assert.deepEqual(moveTrackedPointer({ x: 5, y: 5 }, Number.NaN, 1, screen), { x: 5, y: 5 });
+});
+
+test('screen: the PC paints the pointer when its capture tool cannot', async (t) => {
+  const painted = [];
+  const f = await bridgeFor(t, {
+    screen: {
+      capture: async (opts) => {
+        opts?.onCapture?.({ tool: 'xdg-desktop-portal', pointer: false });
+        return fakePng(800, 600);
+      },
+      burnPointer: async (buffer, at) => { painted.push(at); return buffer; },
+    },
+    system: { state: async () => ({ session: 'wayland', graphical: true }), pointer: async () => ({ known: true, x: 400, y: 300 }) },
+  });
+  assert.equal((await f.get('/api/screen?w=400')).status, 200);
+  assert.deepEqual(painted, [{ x: 400, y: 300 }], 'painted at the real pointer position');
+  assert.equal((await (await f.get('/api/pc/state')).json()).pointerBurned, true);
+
+  // A tool that already draws the cursor must not get a second one.
+  const clean = [];
+  const g = await bridgeFor(t, {
+    screen: {
+      capture: async (opts) => { opts?.onCapture?.({ tool: 'scrot', pointer: true }); return fakePng(800, 600); },
+      burnPointer: async (buffer) => { clean.push(1); return buffer; },
+    },
+    system: { state: async () => ({ session: 'x11', graphical: true }) },
+  });
+  await g.get('/api/screen?w=400');
+  assert.equal(clean.length, 0);
+  const state = await (await g.get('/api/pc/state')).json();
+  assert.equal(state.pointerBurned, false);
+  assert.equal(state.pointerInFrame, true);
 });

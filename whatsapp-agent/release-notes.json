@@ -314,7 +314,7 @@
       "🗓️🔄 CHANNELS: Google Calendar sync (`/cal sync <ics-url>` + `/cal export`), `/topic` channels with shared memory, aur speed: lookup cache 553µs→19µs. (Shades rule: auto-restore kabhi nahi — sirf /shades off se.)"
     ]
   },
-  "latest": "3.12.0",
+  "latest": "3.13.0",
   "3.8.0": "🆕 *PSD_Ai v3.8.0 — Complete Feature Suite (29 upgrades!)*\n\nHar suggestion complete: 11 shelf + 18 naye features.\n\n*Padhai & Voice*\n• /revise call — JARVIS khud call karta hai + revision (voice segments)\n• /today — aaj ka complete timeline\n• /exam add <sub> <date> — exam countdown + auto study schedule\n• /study scan — flashcards photo → OCR → pack\n• /accuracy report — bot ka report card\n\n*Proactive & Smart*\n• /nudges — proactive messages (padh lo, reminder miss, battery)\n• /recap — weekly recap + goal tracker\n• /routine at 7am — morning auto-routines\n• /leaveby — leave-by time calculator (traffic estimate)\n• HW reminders ab escalate hote hain (48h → 24h → 2h bursts)\n\n*PC & Home*\n• /block — study window me distracting sites auto-close\n• /organize — downloads auto-sort\n• /backup now|cloud — zip backup + GitHub upload\n• /timeline — screenshot timeline recall\n• /home — smart home webhooks (lights/AC/TV)\n• /wake — \"Hey JARVIS\" wake word + voice commands\n\n*Family & Safety*\n• /role kids|family + /rolelimit — per-role modes\n• /fun quiz|riddle — timepass\n• /audit — security audit log\n• /pcs ask|all|check — fleet remote commands (queue)\n• Notes meetings se action-items auto-extract\n• /photos ab actual images bhejta hai (top match)\n\nUpdate: BRANCH=main bash <(curl -fsSL https://raw.githubusercontent.com/pavit12301611/psd-observer/main/whatsapp-agent/scripts/observer.sh) update",
   "3.8.1": {
     "title": "Heavy tasks: reliable routing & safe failover",
@@ -371,6 +371,56 @@
       "Signed interface updates install in place with rollback, anti-downgrade, size/path limits and an unconfirmed-boot restore; no APK is deleted or reinstalled.",
       "New endpoints /api/app/update/manifest, /bundle and /key are authenticated per device; signing keys never leave the PC and never enter Git.",
       "Shades remains explicit-only: only /shades off restores the display; there is no auto-restore."
+    ]
+  },
+  "3.13.0": {
+    "title": "Cursor ab picture ke andar hi paint hota hai (pakka workaround)",
+    "bullets": [
+      "Jab PC ka capture tool cursor nahi deta (GNOME Wayland portal — wahi tumhara case), ab PC khud screenshot me pointer paint karta hai: asli position par, white arrow + black outline + ring, size ~1/26 image width — phone par saaf dikhta hai. Ye pixels me hota hai, isliye zoom, app, ya saved screenshot — har jagah dikhega.",
+      "Position kahan se: X11 par xdotool se asli cursor, warna bridge ke apne moves/taps se estimate (har move/tap par update, screen ke andar clamp).",
+      "PNG me paint hota hai sharp se (already dependency) — crop se pehle, isliye zoomed frame me bhi pointer dikhta hai. Naya switch: POINTER_IN_FRAME=false (default true).",
+      "Jahan capture tool pehle se cursor deta hai (scrot -p, grim -c, gnome-screenshot --include-pointer), wahan paint nahi hota — do cursor nahi.",
+      "More tab me naya row: Cursor painted (yes — in the pixels / no). App ka apna arrow Auto me tab chhup jata hai; Always se forced dikhaya ja sakta hai; aur jab kuch bhi pata na ho to dashed 'tap to place' ghost dikhta hai — ab kabhi kuch invisible nahi.",
+      "Shades unchanged: sirf owner ka /shades off display wapas laata hai."
+    ]
+  },
+  "3.12.4": {
+    "title": "Cursor: halo, ek tap me apna arrow, aur poora diagnostic",
+    "bullets": [
+      "Jin PCs par screenshot me asli cursor aata hai, wo PC scale par hota hai — phone par poora screen chhota hone se cursor 3-4 pixel ka reh jata hai, isliye 'dikhta hi nahi'. Ab app us cursor ke aas-paas ek chhota halo (black+white ring) banati hai (X11 par position /api/pc/pointer se aati hai).",
+      "Agar halo na chahiye to PC control → More → Arrow → Always: apna arrow hamesha dikhega; Off se band. Choice phone par yaad rehti hai.",
+      "Arrow ab thoda bada floor (12px minimum) hai aur tap karte hi turant dikhta hai (PC ka jawab aane ka intezaar nahi) — isliye 'kuch hua hi nahi' jaisa nahi lagta; refuse hone par notice + More tab me 'refused' likha aata hai.",
+      "Naya diagnostic: More tab me Cursor in frame (yes/no), Capture tool, Screen (1920×1080), Pointer query (works / not available), My arrow (shown/hidden + jagah) aur Last input (accepted/refused). Isse turant pata chal jata hai ki cursor kahan gaya.",
+      "Shades unchanged: sirf owner ka /shades off display wapas laata hai."
+    ]
+  },
+  "3.12.3": {
+    "title": "Cursor ab sahi jagah aur sahi size ka",
+    "bullets": [
+      "Jab screenshot me PC ka asli cursor pehle se aata hai (X11: gnome-shell/gnome-screenshot/scrot/maim, wlroots: grim), ab app apna arrow banata hi nahi — do cursor ek saath hokar door dikhne ki dikkat khatam. /api/pc/state me pointerInFrame + captureTool aata hai.",
+      "Jahan app khud arrow banata hai (GNOME Wayland portal) wahan ab wo chhota hai — asli cursor jitna (~20 PC pixel), image ke size ke hisaab se 9-22px tak — pehle fix 23px ka banner tha jo screen ke cursor se bahut bada lagta tha.",
+      "Arrow sirf accepted input par move hota hai (PC ne mana kiya to nahi), aur X11 par jab 3 second tak koi move nahi hua to /api/pc/pointer se asli cursor position se re-sync hota hai — isliye wo kabhi 'bilkul door' nahi bhatakta. Wayland par galat XWayland pointer se seed nahi hota (wahi doori ki wajah tha).",
+      "Long-press / two-finger tap ab usi pixel par right click karta hai jahan ungli hai (POST /api/tap + button=right) — pehle click wahan hota tha jahan PC cursor tha.",
+      "Shades unchanged: sirf owner ka /shades off display wapas laata hai."
+    ]
+  },
+  "3.12.2": {
+    "title": "Input wapas chalu: phone ka request pool overflow fix",
+    "bullets": [
+      "Jo error aata tha — \"Task … rejected from java.util.concurrent.ThreadPoolExecutor\" — wo phone ke bridge ka pool full hone se tha: touchpad har 24ms me naya request bhej raha tha, pool (4 thread + 12 queue) bharta tha, aur tap bhi reject ho jata tha. Ab ek waqt me sirf ek pointer move chalta hai aur bachi hui movement agle move me merge ho jati hai.",
+      "Ek reject hone par input band nahi hota (pehle ho jata tha, isliye screen 'dead' lagti thi): request ek baar 120ms baad retry hoti hai, aur pool full hone par saaf message aata hai.",
+      "App ab kisi bhi waqt 3 se zyada PC requests nahi rakhta; screen frame ke baad agla frame PC ke apne capture time + 400ms ke baad maanga jata hai (portal screenshot slow hota hai), isliye queue bharti nahi.",
+      "Pointer marker ke liye screen ka asli pixel size ab /api/pc/state me bhi aata hai (native bridge sirf ETag header aage bhejta hai), aur APK side pool 4→6 threads + 48 queue ho gaya hai.",
+      "Shades unchanged: sirf owner ka /shades off display wapas laata hai."
+    ]
+  },
+  "3.12.1": {
+    "title": "Pointer ab screenshot me dikhta hai",
+    "bullets": [
+      "GNOME Wayland ka portal screenshot me mouse pointer kabhi nahi aata — isliye phone ab khud ek arrow dikhata hai wahan jahan tumhara aakhri input landa (tap/drag = exact pixel, trackpad/nudge = usi PC pixel ke hisaab se).",
+      "X11 aur wlroots par asli pointer bhi frame me aata hai: grim ab -c se, scrot -p se, gnome-screenshot --include-pointer se, aur GNOME Shell ka D-Bus screenshot pehli baar include_cursor=true se capture hota hai.",
+      "Marker zoom/pan ke saath chipka rehta hai, screen ke bahar ho to chhup jata hai, aur screen size na mile to purani jagah par hi rukta hai (koi jump nahi).",
+      "Shades unchanged: sirf owner ka /shades off display wapas laata hai."
     ]
   },
   "3.12.0": {

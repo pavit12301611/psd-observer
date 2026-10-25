@@ -45,6 +45,11 @@ final class NativeHttp {
             int status = c.getResponseCode();
             if (status >= 300 && status < 400 && status != 304) throw new Exception("Redirect blocked. Enter the final HTTPS bridge address; credentials were not forwarded.");
             JSONObject headers = new JSONObject(); String tag = c.getHeaderField("ETag"); if (tag != null) headers.put("etag", tag);
+            // The screen size lets the page place its pointer marker even where
+            // the compositor never draws a cursor (GNOME Wayland portal).
+            String screenWidth = c.getHeaderField("x-screen-width"), screenHeight = c.getHeaderField("x-screen-height");
+            if (screenWidth != null) headers.put("x-screen-width", screenWidth);
+            if (screenHeight != null) headers.put("x-screen-height", screenHeight);
             String mime = c.getContentType(); if (mime == null) mime = "application/octet-stream";
             JSONObject response = new JSONObject().put("status", status).put("headers", headers).put("mime", mime);
             if (status == 304) return response;

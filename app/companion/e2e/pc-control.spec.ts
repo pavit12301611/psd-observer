@@ -35,6 +35,12 @@ function fixture(page: Page) {
     accessLevel: "full",
     busy: false,
     activeJobs: 0,
+    screen: { width: 1920, height: 1080 },
+    // The PC paints the pointer into the frame when its tool cannot, but the
+    // default fixture keeps that off so marker behaviour can be asserted.
+    pointerInFrame: false,
+    pointerBurned: false,
+    captureTool: "xdg-desktop-portal",
   };
   const install = () =>
     page.route("**/bridge/**", async (route) => {
@@ -68,13 +74,26 @@ function fixture(page: Page) {
       if (path === "/api/app/workflows") return json({ workflows: [] });
       if (path === "/api/app/jobs") return json({ jobs: [] });
       if (path === "/api/pc/state") return json(pcState);
+      if (path === "/api/pc/pointer")
+        return json({
+          known: true,
+          x: 960,
+          y: 540,
+          screen: { width: 1920, height: 1080 },
+        });
       if (path === "/api/clipboard")
         return route.request().method() === "POST"
           ? json({ ok: true, chars: String(body.text || "").length })
           : json({ text: "copied on the PC", truncated: false });
       if (path === "/api/pc/display") return json({ ok: true, woken: ["gdbus"] });
       if (path.startsWith("/api/screen"))
-        return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(PNG, "base64") });
+        return route.fulfill({
+          status: 200,
+          contentType: "image/png",
+          // The app needs the real screen size to place its pointer marker.
+          headers: { "x-screen-width": "1920", "x-screen-height": "1080" },
+          body: Buffer.from(PNG, "base64"),
+        });
       if (path === "/api/chat") {
         if (body.text === "/stop") {
           // A real /stop settles the job, which is what frees manual input.
@@ -192,6 +211,13 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   });
   expect(JSON.stringify(probe)).toContain('"usable":[');
   const point = (probe as { usable: number[] }).usable;
+  // The marker starts at the PC's real pointer, which X11 can report.
+  const ghost = page.locator(".pc-cursor");
+  await expect(ghost).toBeVisible();
+  const beforeDrag = (await ghost.boundingBox())!;
+  // A real cursor is small: the marker is scaled to the image, never a banner.
+  expect(beforeDrag.height).toBeLessThan(26);
+  expect(beforeDrag.height).toBeGreaterThanOrEqual(8);
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(point[0], point[1]);
   await page.mouse.down();
@@ -202,7 +228,59 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   await expect
     .poll(() => f.requests.filter((r) => r.path === "/api/pointer").length)
     .toBeGreaterThan(0);
+  // The move requests must not stack up: one in flight at a time.
+  expect(f.requests.filter((r) => r.path === "/api/pointer").length).toBeLessThan(12);
+  // Dragging the pad moves the real pointer, so the marker must follow it.
+  await expect
+    .poll(async () => (await ghost.boundingBox())?.x ?? 0)
+    .toBeGreaterThan(beforeDrag.x + 1);
   expect(await page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+test("a painted cursor needs no marker, and Always still forces one", async ({ page }) => {
+  const f = fixture(page);
+  // Wayland portal + the PC paints the arrow into the pixels: that is the
+  // dependable workaround, so the app stays out of the way by default.
+  f.pcState.pointerBurned = true;
+  await f.install();
+  await page.goto("/");
+  await connect(page);
+  await go(page, "PC control");
+  await page.getByLabel("Enable manual PC input").check();
+  await expect(page.locator(".pc-stage img")).toBeVisible();
+  await expect(page.locator(".pc-cursor")).toHaveCount(0);
+  await page.getByRole("tab", { name: "More" }).click();
+  await expect(page.getByText("yes (in the pixels)")).toBeVisible();
+  await page.getByRole("button", { name: "Always", exact: true }).click();
+  await page.getByRole("tab", { name: "Pad" }).click();
+  await expect(page.locator(".pc-cursor")).toHaveCount(1);
+});
+
+test("a frame with the PC's own cursor gets a halo, and Always forces my arrow", async ({
+  page,
+}) => {
+  const f = fixture(page);
+  // On X11 the capture tools draw the real pointer — at PC scale, so it is a few
+  // pixels on a phone. The app must highlight it instead of hiding everything.
+  f.pcState.pointerInFrame = true;
+  f.pcState.captureTool = "scrot";
+  await f.install();
+  await page.goto("/");
+  await connect(page);
+  await go(page, "PC control");
+  await page.getByLabel("Enable manual PC input").check();
+  const halo = page.locator(".pc-cursor.ring");
+  await expect(halo).toBeVisible();
+  // A halo, not a second arrow.
+  await expect(page.locator(".pc-cursor:not(.ring)")).toHaveCount(0);
+  // Diagnostics say exactly what is going on.
+  await page.getByRole("tab", { name: "More" }).click();
+  await expect(page.getByText("Cursor in frame")).toBeVisible();
+  await expect(page.getByText("scrot", { exact: true })).toBeVisible();
+  // One tap and the owner gets their own arrow regardless.
+  await page.getByRole("button", { name: "Always", exact: true }).click();
+  await page.getByRole("tab", { name: "Pad" }).click();
+  await expect(page.locator(".pc-cursor:not(.ring)")).toBeVisible();
 });
 
 test("zoom asks for a real crop and taps still land on the right pixel", async ({ page }) => {
@@ -230,6 +308,26 @@ test("zoom asks for a real crop and taps still land on the right pixel", async (
   const tap = f.requests.find((r) => r.path === "/api/tap")!;
   expect(Number(tap.body.x)).toBeGreaterThan(400);
   expect(Number(tap.body.x)).toBeLessThan(600);
+  // GNOME's screenshots have no pointer in them, so the app draws its own at the
+  // place the input actually landed: the middle of a 2x crop is the middle of
+  // the screen.
+  const ghost = page.locator(".pc-cursor");
+  await expect(ghost).toBeVisible();
+  const ghostBox = (await ghost.boundingBox())!;
+  const stageBox = (await stage.boundingBox())!;
+  expect(
+    Math.abs(ghostBox.x + ghostBox.width / 2 - (stageBox.x + stageBox.width / 2)),
+  ).toBeLessThan(30);
+  expect(
+    Math.abs(ghostBox.y + ghostBox.height / 2 - (stageBox.y + stageBox.height / 2)),
+  ).toBeLessThan(30);
+  // A nudge moves the real PC pointer, so the marker has to follow it.
+  for (let i = 0; i < 3; i++)
+    await page.getByRole("button", { name: "Nudge Right" }).click();
+  await expect
+    .poll(async () => (await ghost.boundingBox())?.x ?? 0)
+    .toBeGreaterThan(ghostBox.x + 1);
+
   // And the tap triggers a fresh frame, so the owner sees the result.
   const screens = f.requests.filter((r) => r.path.startsWith("/api/screen")).length;
   await expect

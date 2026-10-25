@@ -87,3 +87,106 @@ delivers it. No APK reinstall is needed — see [PC-UPDATES.md](PC-UPDATES.md).
   (`ALLOW_PC_CONTROL`, access level, PC PIN, ydotool/xdotool on Wayland/X11).
 - True continuous streaming (10–15 fps) is still an APK-level change: it needs a
   native frame path or a Wayland portal session.
+
+## Where is the pointer?
+
+**The dependable path: the PC paints the pointer into the frame.** When the
+capture tool cannot draw a cursor (GNOME's portal), the server composites a white
+arrow with a black outline and a contrast ring into the PNG — before cropping, so
+zoomed frames keep it too — at the real position, sized `clamp(imageWidth/26,
+28, 96)` px. It is part of the picture, so nothing downstream can lose it:
+not the zoom crop, not the native bridge, not a screenshot saved to disk. Turn it
+off with `POINTER_IN_FRAME=false`.
+
+**Something is always findable.** A real cursor drawn at PC scale is 3-4 px on a
+phone, so "the frame already has it" is not the same as "the owner can see it".
+
+- **Arrow → Auto** (default): a halo around the PC's own cursor when the frame
+  contains it and its position is known (`/api/pc/pointer`, X11); our own arrow
+  when it does not; nothing at all when even the position is unknowable — then
+  the pad tab offers *Show my arrow anyway*.
+- **Arrow → Always**: always our own arrow. **Arrow → Off**: never. The choice is
+  kept on the phone, so a desktop this app cannot read still gets a usable
+  pointer.
+
+Two rules behind that:
+
+1. **If the frame already has the real cursor, no marker is drawn.** The PC
+   reports `pointerInFrame` (and `captureTool`) in `GET /api/pc/state`, derived
+   from whichever tool produced the frame. Two arrows in different places is
+   worse than none, so on X11 (gnome-shell, gnome-screenshot, scrot, maim) or
+   wlroots (grim) the app stays out of the way.
+2. **Otherwise the marker is scaled and honest.** Its height follows the image:
+   a real cursor is about 20 PC pixels, so the marker is
+   `clamp(20 × drawnWidth ÷ screenWidth, 9, 22)` px, not a fixed banner. It only
+   moves for input the PC accepted, and on desktops that can report the cursor
+   (`/api/pc/pointer`, X11 only) it re-syncs whenever the phone has been idle for
+   three seconds — so a dropped move or the PC's own acceleration cannot leave it
+   drifting away from the real pointer.
+
+On GNOME Wayland the only screenshot path that works is
+`xdg-desktop-portal`, and the portal **never draws the mouse pointer**. That is
+the desktop being honest, not a bug in this app, and no flag changes it.
+
+So the app draws its own marker, and everything it needs is already in the
+frame:
+
+- `x-screen-width` / `x-screen-height` headers carry the PC's real screen pixels.
+- A tap or a drag gives an absolute PC coordinate (the PC told us those pixels).
+- Trackpad and nudge moves are PC pixels too, so they shift the marker by
+  `dx / screenWidth × 1000` units and clamp at the screen edges.
+- The marker hides when the point falls outside the current zoom crop, keeps its
+  last position if the PC sends no screen size, and clears on disconnect.
+
+On X11 and wlroots the **real** pointer is also in the picture, because the
+capture tools are asked for it explicitly: `grim -c`, `scrot --silent -p`,
+`gnome-screenshot --include-pointer`, and GNOME Shell's D-Bus
+`Screenshot(include_frame, include_cursor, file)` with `include_cursor=true`.
+`maim` draws it by default; ImageMagick's `import` and KDE Spectacle have no such
+switch, so there the marker is the only pointer you will see.
+
+## If input suddenly stops
+
+Two failure modes used to look identical — "the page is dead":
+
+1. **The agent is busy.** Every input route answers `423` while a job runs. The
+   page offers **Take over**, which sends `/stop` and waits for the job to
+   settle.
+2. **The phone's bridge is saturated.** The Android shell runs each HTTP call on
+   a small thread pool and *rejects* the surplus; the rejection text looks like
+   `Task …AndroidBridge… rejected from java.util.concurrent.ThreadPoolExecutor
+   [… queued tasks = 12 …]`. The bundle now prevents it: one pointer move in
+   flight (the rest of the swipe is coalesced), at most three PC requests at a
+   time, one silent retry after 120 ms, and adaptive frame pacing
+   (`max(1200, captureTime + 400) ms`). A rejected move never turns input off.
+
+On the PC side, `GET /api/pc/state` also reports `screen: {width, height}` of the
+last frame, so the pointer marker keeps working where the native bridge forwards
+only the ETag header.
+
+### Reading the symptoms
+
+`More` (the last dock tab) is the status panel, and it answers
+"my cursor went where?" without guessing:
+
+| Row | Meaning |
+|---|---|
+| Cursor in frame | `yes` — the capture tool drew the PC's real pointer |
+| Capture tool | which tool produced the frame (`xdg-desktop-portal`, `scrot`, `grim`, …) |
+| Screen | real PC pixels of the frame (used for the marker's size and position) |
+| Pointer query | `works` — the PC can report the cursor position (X11) |
+| My arrow | `shown at x,y`, or where it is hidden and why |
+| Cursor painted | `yes (in the pixels)` — the arrow is part of the image |
+| Last input | the last tap/drag and whether the PC accepted it |
+
+### If you still cannot see a cursor
+
+1. **More → Cursor painted** should say `yes (in the pixels)`. If it says `no`,
+   the frame comes from a tool that draws its own cursor (fine) or `sharp` is
+   missing on the PC — `npm install sharp` in the agent folder fixes that.
+2. **More → Arrow → Always** draws the app's own arrow on top of whatever the
+   frame contains. On `Auto` the app stays out of the way when the PC already
+   drew one.
+3. **More → Pointer query** tells you whether the PC can report the real cursor
+   position. Wayland cannot; the position is then estimated from your own moves
+   and taps, which is correct for everything you do on the phone.

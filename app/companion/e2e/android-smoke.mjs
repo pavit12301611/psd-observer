@@ -102,7 +102,22 @@ try {
   // Consume rejections immediately while native system UI owns the foreground.
   enableLock.catch(()=>{});
   await enterEmulatorCredential({
-    readTree: async () => { adb('shell','uiautomator','dump','--compressed','/sdcard/observer-credential.xml'); return adb('shell','cat','/sdcard/observer-credential.xml'); },
+    // uiautomator occasionally dies with a Binder "Bad file descriptor" on the
+    // emulator (UiAutomation crash, nothing to do with the app). Retry the dump
+    // rather than failing the whole smoke for a flaky system service.
+    readTree: async () => {
+      let lastError = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          adb('shell','uiautomator','dump','--compressed','/sdcard/observer-credential.xml');
+          const tree = adb('shell','cat','/sdcard/observer-credential.xml');
+          if (tree && tree.includes('<hierarchy')) return tree;
+          lastError = new Error('uiautomator produced an empty tree');
+        } catch (error) { lastError = error; }
+        await new Promise((r) => setTimeout(r, 800));
+      }
+      throw lastError;
+    },
     tap: async ({x,y}) => { adb('shell','input','tap',String(x),String(y)); },
     typeOnce: async () => { adb('shell','input','text','4826'); },
     submit: async () => { adb('shell','input','keyevent','KEYCODE_ENTER'); },
