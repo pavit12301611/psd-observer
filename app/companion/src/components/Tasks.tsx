@@ -232,7 +232,19 @@ export default function Tasks({
                             : "Waiting for the agent’s result."}
                     </span>
                   </div>
-                  <small>{t.state}</small>
+                  <small
+                    className={`small-pill ${
+                      t.state === "running"
+                        ? "pill-run"
+                        : t.state === "replied"
+                          ? "pill-ok"
+                          : t.state === "unknown"
+                            ? "pill-bad"
+                            : ""
+                    }`}
+                  >
+                    {t.state}
+                  </small>
                 </div>
               ))
             ) : (

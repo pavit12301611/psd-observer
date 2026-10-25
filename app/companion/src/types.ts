@@ -46,25 +46,37 @@ export interface Message extends Reply {
   private?: boolean;
   /** Only for the owner's own messages: did the PC actually take it? */
   delivery?: Delivery;
+  /** Which engine answered this turn: the paired PC or Direct AI. */
+  route?: Route;
 }
+export type Route = "agent" | "cloud";
 export interface Conversation {
   projectId?: string; projectName?: string;
-  mode: "agent" | "cloud";
+  mode: ChatMode;
   id: string;
   title: string;
   updated: number;
   messages: Message[];
 }
+/** "auto" routes every message on its own; the others pin the whole app. */
+export type ChatMode = "agent" | "cloud" | "auto";
 export interface Preferences {
   appLock?: boolean;
   betaUpdates?: boolean;
+  /** Install PC-delivered signed interface bundles automatically (no APK). */
+  autoAppUpdate?: boolean;
   theme: Theme;
   language: "en-IN" | "hi-IN";
   saveHistory: boolean;
   readAloud: boolean;
   lowData: boolean;
   screenPrivacy: boolean;
-  chatMode: "agent" | "cloud";
+  /**
+   * "auto" (default): every message is routed on its own — Direct AI answers
+   * normally, and the paired PC takes over the moment the message is about the
+   * machine or is a command. "agent"/"cloud" pin the whole app.
+   */
+  chatMode: ChatMode;
 }
 export interface LocalState {
   conversations: Conversation[];

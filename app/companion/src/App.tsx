@@ -63,6 +63,8 @@ import {
   ApiError,
   SessionChanged,
   markUpdateHealthy,
+  applyPcUpdate,
+  checkPcUpdate,
 } from "./core/api";
 import { cancelSpeech, dictate, speak } from "./core/speech";
 import { attachment, displayRequest } from "./core/validation";
@@ -72,6 +74,7 @@ import {
   newConversation,
   saveState,
 } from "./core/storage";
+import { pickRoute, cloudContext } from "./core/route";
 import { isNative, nativeCall } from "./core/native";
 import type {
   Delivery,
@@ -85,6 +88,7 @@ import type {
   Preferences,
   Profile,
   Reply,
+  Route,
   Status,
 } from "./types";
 import { IconButton, Mark, Modal } from "./components/ui";
@@ -356,6 +360,44 @@ export default function App() {
     if (atBottom) end.current?.scrollIntoView({ block: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, busy, page]);
+  // ── PC-delivered interface updates (no APK, no uninstall) ────────────────
+  // `observer.sh update --app` on the PC packs a signed web bundle; paired
+  // phones are offered it here and install it themselves. Applied only while
+  // nothing is in flight, and the app reloads once the new bundle is active —
+  // a bundle that fails to boot is swapped back natively (WebUpdate).
+  useEffect(() => {
+    if (!profile || !isNative() || state.preferences.autoAppUpdate === false)
+      return;
+    let alive = true;
+    const autoUpdate = async () => {
+      // Never interrupt a request, a dictation or a voice turn.
+      if (document.hidden || sending.current || busy || voiceOpen) return;
+      try {
+        const check = await checkPcUpdate();
+        if (!alive || !check?.available) return;
+        const applied = await applyPcUpdate();
+        if (!alive) return;
+        notify(
+          `Interface ${applied?.installed || check.version} installed — reloading.`,
+        );
+        window.setTimeout(() => window.location.reload(), 1500);
+      } catch {
+        /* Silent on purpose: Settings keeps the manual path and the reason. */
+      }
+    };
+    const boot = window.setTimeout(() => void autoUpdate(), 3000);
+    const timer = window.setInterval(() => void autoUpdate(), 30 * 60 * 1000);
+    const visible = () => {
+      if (!document.hidden) void autoUpdate();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      alive = false;
+      window.clearTimeout(boot);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [profile, busy, voiceOpen, state.preferences.autoAppUpdate, notify]);
   const toBottom = () => {
     setAtBottom(true);
     end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -489,11 +531,12 @@ export default function App() {
       ),
     }));
   }
-  const addReply = useCallback((reply: Reply) => {
+  const addReply = useCallback((reply: Reply, route: Route = "agent") => {
     const message: Message = {
       ...reply,
       id: crypto.randomUUID(),
       role: "assistant",
+      route,
       text:
         reply.text ||
         (reply.stopped
@@ -547,7 +590,16 @@ export default function App() {
   async function send(e?: FormEvent) {
     e?.preventDefault();
     if (sending.current || (!draft.trim() && !file)) return;
-    const direct = state.preferences.chatMode === "cloud";
+    // One chat, two engines: this message picks its own route. Direct AI is
+    // the default; the PC takes over the moment the message is about the
+    // machine, is a command, or carries a file.
+    const route = pickRoute(draft.trim(), {
+      hasFile: !!file,
+      mode: state.preferences.chatMode,
+      cloudReady: cloud.configured,
+      paired: !!profile,
+    });
+    const direct = route === "cloud";
     if (direct && !cloud.configured) {
       setModeOpen(true);
       return;
@@ -558,14 +610,14 @@ export default function App() {
     }
     if (direct && draft.trim().startsWith("/")) {
       notify(
-        "Slash commands use PC agent mode, not Direct AI. Choose PC agent first.",
+        "Slash commands run on your PC. This chat is pinned to Direct AI — choose Automatic or PC agent to run it.",
       );
       setModeOpen(true);
       return;
     }
     if (direct && file) {
       notify(
-        "Files need PC agent mode in this version. Direct AI is text-only.",
+        "Files are read on your PC, and Direct AI is text-only. Choose Automatic or PC agent for attachments.",
       );
       return;
     }
@@ -586,6 +638,7 @@ export default function App() {
       {
         id,
         role: "user",
+        route,
         text: upload
           ? `${display.text || "Work through this file."}\n\n📎 ${upload.name}`
           : display.text,
@@ -609,7 +662,7 @@ export default function App() {
       let reply: Reply;
       if (direct)
         reply = await cloudChat([
-          ...(active?.messages || []),
+          ...cloudContext(active?.messages || []),
           { id, role: "user", text, ts: Date.now() },
         ]);
       else if (
@@ -654,6 +707,7 @@ export default function App() {
           jobId: direct ? undefined : id,
           id: crypto.randomUUID(),
           role: "assistant",
+          route,
           text:
             reply.text ||
             "No text returned. Check task state before repeating a PC action.",
@@ -699,6 +753,7 @@ export default function App() {
         {
           id: crypto.randomUUID(),
           role: "assistant",
+          route,
           text: direct
             ? `Direct AI could not return a response. ${e instanceof Error ? e.message : "Connection interrupted."} Your provider may already have processed it; no retry was made. No PC tools ran in Direct AI mode.`
             : e instanceof PendingJob
@@ -1258,6 +1313,13 @@ export default function App() {
                       <br className="desktop-break" /> Let’s work through it,
                       together.
                     </p>
+                    {state.preferences.chatMode === "auto" && (
+                      <p className="auto-note">
+                        Ordinary messages are answered by your own model key. The
+                        moment you mention your PC or give a command, the paired
+                        PC takes over — right here, same chat.
+                      </p>
+                    )}
                     <div className="suggestion-grid">
                       {suggestions.map((s) => (
                         <button
@@ -1307,6 +1369,11 @@ export default function App() {
                         <div className="message-content">
                           <div className="message-label">
                             {m.role === "assistant" ? "Observer" : "You"}
+                            {m.role === "assistant" && m.route && (
+                              <span className={`route-chip ${m.route}`}>
+                                {m.route === "cloud" ? "Direct AI" : "PC"}
+                              </span>
+                            )}
                             <time>
                               {new Date(m.ts).toLocaleTimeString("en-IN", {
                                 hour: "2-digit",
@@ -1450,9 +1517,11 @@ export default function App() {
                     <Sparkles size={14} />
                     {state.preferences.chatMode === "cloud"
                       ? `Direct AI${cloud.provider ? " · " + cloud.provider : ""}`
-                      : status?.model
-                        ? "Auto · PC agent"
-                        : "Your agent"}
+                      : state.preferences.chatMode === "auto"
+                        ? "Automatic"
+                        : status?.model
+                          ? "Auto · PC agent"
+                          : "Your agent"}
                     <ChevronDown size={13} />
                   </button>
                   <button

@@ -129,6 +129,29 @@ bash /tmp/observer.sh update --dir ~/observer-agent
 bash /tmp/observer.sh update --check          # sirf version compare
 ```
 
+**App + service, ek hi command** (agent code, service restart, aur phone app
+teeno — phone app ka signed OTA bundle ban ke paired phones ko chala jaata
+hai, APK install ki zaroorat nahi):
+
+```bash
+bash /tmp/observer.sh update --app --bump
+#   --app   : companion app rebuild + publish karo
+#   --bump  : patch version badhao (warna phones ko naya bundle offer nahi hoga)
+#   --app-dir /path/to/app/companion  → app source kahin aur ho to
+#   --notes "kya naya"                → release notes
+```
+
+**Phone pe apne aap:** bundle publish hote hi tumhe WhatsApp pe
+`📱 Phone app 1.5.1 bhi ready hai` message aa jaayega. Observer app kholo —
+3 second baad check hoke install + reload ho jaayega (ya 30 min mein khud
+check karega). Koi uninstall/download nahi. Naya version boot na ho paye to
+purana apne aap wapas aa jaata hai.
+
+> **Sirf pehli baar:** jo APK abhi phone pe hai usmein ye auto-update code
+> nahi hai. Ek baar Settings → *PC interface updates* → Check → Install
+> karna hoga (ya naya APK ek baar install karna hoga). Uske baad hamesha
+> automatic.
+
 (Path apna actual install path daalo — jahan `package.json` hai wahan.
 Default `~/observer-agent`. Pata nahi?
 `find ~ -name package.json -path "*observer-agent*" 2>/dev/null`)

@@ -3,6 +3,7 @@
 #
 #   bash observer.sh install     first-time install (curl-only, no git needed)
 #   bash observer.sh update      update the code, keep .env / WhatsApp login / data
+#   bash observer.sh update --app   update the agent AND the phone app in one go
 #   bash observer.sh models …    local Hugging Face models (llama.cpp) — 100% offline
 #   bash observer.sh keys …      add Groq / OpenRouter / Gemini free API keys
 #   bash observer.sh test        self-test: keys, brains, routing, unit tests
@@ -20,6 +21,7 @@
 #   bash observer.sh models recommend
 #   bash observer.sh models setup best --small tiny --vision balanced
 #   bash observer.sh update --dir ~/observer-agent
+#   bash observer.sh update --app --bump
 #   bash observer.sh doctor
 #
 # Nothing here needs git. The install/update path downloads a branch tarball
@@ -278,13 +280,20 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_update() {
-  local dir="" check=0
+  local dir="" check=0 with_app=0 bump=0 app_dir="" notes=""
+  # Written by update_companion_app(); read by this function for the receipt.
+  APP_RESULT_LINE=""
+  APP_UPDATE_VERSION=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir)       dir="${2:-}"; [ -n "$dir" ] || die "--dir needs a path"; shift 2 ;;
       --branch|-b) [ -n "${2:-}" ] || die "--branch needs a branch name"; set_branch "$2"; shift 2 ;;
       --branch=*)  set_branch "${1#--branch=}"; shift ;;
       --check)     check=1; shift ;;
+      --app)       with_app=1; shift ;;
+      --app-dir)   app_dir="${2:-}"; [ -n "$app_dir" ] || die "--app-dir needs a path"; shift 2 ;;
+      --bump)      bump=1; shift ;;
+      --notes)     notes="${2:-}"; shift 2 ;;
       -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
       *) die "update: unknown option $1 (try --help)" ;;
     esac
@@ -376,15 +385,31 @@ cmd_update() {
   printf '%s\n' "$BRANCH" > "$dest/.observer-branch" 2>/dev/null || true   # sticky: future updates track THIS branch
   info "update branch: ${BRANCH} (yaad rakh liya — .observer-branch)"
 
+  # The phone app rides the same update: build and publish it BEFORE the
+  # restart, so the receipt below can name the bundle the phones will be
+  # offered. A failed app build must not stop the service restart — the agent
+  # code is already on disk, so warn and carry on.
+  if [ "$with_app" -eq 1 ]; then
+    update_companion_app "$dest" "$app_dir" "$bump" "$notes" "$(dirname "$src")" \
+      || warn "phone app update failed — the agent update still completed (re-run: bash observer.sh update --app --bump)"
+  fi
+
   # Leave a receipt the new process can read at startup: data/ survives
-  # updates, so the "updated!" WhatsApp message knows the real duration.
+  # updates, so the "updated!" WhatsApp message knows the real duration and
+  # can tell the owner the phone bundle is waiting.
   local elapsed=$(( $(date +%s) - started_epoch ))
+  local app_json=""
+  if [ -n "${APP_UPDATE_VERSION:-}" ]; then
+    app_json=",\"app\":{\"version\":\"${APP_UPDATE_VERSION}\"}"
+  fi
   mkdir -p "$dest/data"
-  printf '{"from":"%s","to":"%s","at":"%s","seconds":%s,"via":"observer.sh"}\n' \
-    "${old:-}" "${new:-}" "$(date -Is)" "$elapsed" > "$dest/data/last-update.json" 2>/dev/null \
+  printf '{"from":"%s","to":"%s","at":"%s","seconds":%s,"via":"observer.sh"%s}\n' \
+    "${old:-}" "${new:-}" "$(date -Is)" "$elapsed" "$app_json" > "$dest/data/last-update.json" 2>/dev/null \
     || warn "could not write data/last-update.json (update still fine)"
 
   restart_agent "$dest"
+
+  local app_line="${APP_RESULT_LINE:-}"
 
   cat <<EOF
 
@@ -392,10 +417,91 @@ cmd_update() {
  Updated: ${old:-?} → ${new:-?}   (took $(( $(date +%s) - started_epoch ))s)
  Kept   : .env · auth_info/ (WhatsApp login, no new QR) · data/
  Backup : ${backup}
+${app_line:+ App    : ${app_line}}
 ────────────────────────────────────────────────────────────────────────
  WhatsApp pe ek "updated" message aayega (kya naya + kitna time laga).
  Phir /doctor bhejo — sab check ho jayega.
 EOF
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHONE APP — rebuild the companion and push it to paired phones (OTA)
+# ═══════════════════════════════════════════════════════════════════════════════
+# One command updates BOTH halves: the agent (above) and the phone UI (here).
+# The web bundle is signed on this PC and served to paired phones from
+# data/mobile/updates — phones pick it up on their next update check, no APK
+# reinstall. Native-shell changes still need a new APK (npm run android:debug).
+update_companion_app() {
+  local dest="$1" want_dir="$2" do_bump="$3" notes="$4" src_root="${5:-}"
+  APP_RESULT_LINE=""
+  APP_UPDATE_VERSION=""
+  have node || die "node is required to build the phone app: sudo dnf install nodejs"
+
+  # Find the companion source, freshest first: an explicit flag, the archive
+  # we just downloaded (so no local git checkout is needed), a repo checkout
+  # next to the install, the checkout this script lives in, usual spots.
+  local app="" cand
+  for cand in \
+    "$want_dir" \
+    "${APP_DIR:-}" \
+    "${src_root:+${src_root}/app/companion}" \
+    "$dest/../app/companion" \
+    "$dest/app/companion" \
+    "${SELF_DIR:+${SELF_DIR}/../../app/companion}" \
+    "$HOME/psd-observer/app/companion" \
+    "$(pwd)/app/companion"; do
+    [ -n "$cand" ] || continue
+    [ -f "$cand/package.json" ] && [ -d "$cand/src" ] && { app="$(cd "$cand" && pwd)"; break; }
+  done
+  # Last resort: no checkout anywhere — pull the branch archive and build the
+  # app from it, so this still works on a PC with no git clone at all.
+  if [ -z "$app" ]; then
+    say "No local app checkout found — downloading the branch archive"
+    local fet; fet=$(mktemp -d)
+    if curl -fL --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+         -o "$fet/src.tar.gz" "$ARCHIVE" && tar -xzf "$fet/src.tar.gz" -C "$fet" 2>/dev/null; then
+      local root; root=$(find "$fet" -maxdepth 4 -type d -name companion -path '*/app/*' 2>/dev/null | head -1)
+      [ -n "$root" ] && [ -f "$root/package.json" ] && app="$root"
+    fi
+    [ -n "$app" ] || { rm -rf "$fet"; die "could not fetch app/companion from branch ${BRANCH}. Pass it: bash observer.sh update --app --app-dir /path/to/app/companion"; }
+    ok "building from the downloaded archive"
+  fi
+  say "Building the phone app"
+  info "source : $app"
+  ( cd "$app" && npm ci --no-audit --no-fund ) || die "npm ci failed in $app"
+  ( cd "$app" && npm run build )          || die "app build failed in $app (typecheck/bundle contract)"
+  ( cd "$app" && npm run android:sync )   || warn "android asset sync failed — the next APK build will still refresh it"
+
+  # Optional patch bump: phones only get offered a bundle whose version is
+  # newer than what they run, so an unchanged version means "no update".
+  local version; version=$(node -p "require('$app/package.json').version" 2>/dev/null || echo "")
+  [ -n "$version" ] || die "could not read the app version from $app/package.json"
+  if [ "$do_bump" -eq 1 ]; then
+    version=$(node -e "
+      const fs=require('fs'), f='$app/package.json', p=JSON.parse(fs.readFileSync(f,'utf8'));
+      const v=p.version.split('.'); v[2]=String(Number(v[2]||0)+1); p.version=v.join('.');
+      fs.writeFileSync(f, JSON.stringify(p,null,2)+'\n'); process.stdout.write(p.version);")
+    info "version bumped → ${version}"
+    ( cd "$app" && npm run build ) || die "rebuild after version bump failed"
+    ( cd "$app" && npm run android:sync ) || true
+  fi
+
+  [ -n "$notes" ] || notes="Observer phone app ${version}"
+  if [ "$do_bump" -eq 0 ]; then
+    info "note: version ${version} unchanged — phones already on ${version} won't be offered this bundle"
+    info "      use --bump to increment the patch version automatically"
+  fi
+  say "Publishing app bundle ${version} for paired phones"
+  ( cd "$dest" && node scripts/app-update.mjs pack --version "$version" --dist "$app/dist" --notes "$notes" ) \
+    || die "packing the app bundle failed — the service keeps running the previous bundle"
+  ok "phones will be offered v${version} on their next update check"
+  info "APK chahiye to: cd \"$app\" && npm run android:debug"
+  APP_UPDATE_VERSION="$version"
+  APP_RESULT_LINE="v${version} — OTA bundle published (new APK: npm run android:debug)"
+  # The fetched archive (if any) is scratch; the packed bundle already lives
+  # in the agent's data/ directory.
+  if [ -n "${fet:-}" ]; then rm -rf "$fet"; fi
+  return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1480,8 +1586,9 @@ ${B}Setup${R}
                               first-time install (curl-only, no git)
   install --model best        install + set up a local Hugging Face model
   install --model auto        install + let it pick a model for this machine
-  update [--dir PATH] [--check]
+  update [--dir PATH] [--check] [--app] [--bump]
                               update the code (keeps .env, WhatsApp login, data)
+                              --app: also rebuild the phone app and push it to paired phones
   keys                        which API keys are set (masked) + where to get them
   keys groq <gsk_...>         add/replace a free Groq key (also: deepseek, openrouter, gemini)
   keys --test                 test every saved key

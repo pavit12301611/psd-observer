@@ -223,8 +223,10 @@ test("theme and every destination, including More, work and fit each orientation
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  // Dark is the default appearance now; the toggle still works both ways.
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Switch to light theme" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   for (const [target, heading] of [
     ["PC control", "PC control"],
     ["Tasks", "Room to focus."],
@@ -245,8 +247,8 @@ test("theme and every destination, including More, work and fit each orientation
   // The theme segmented control lives in Settings, so walk there explicitly:
   // More now holds every route, and the loop above ends on More.
   await go(page, "Settings");
-  await page.getByRole("button", { name: "Light theme", exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 test("searchable capabilities only draft; disconnected sends never run or silently queue PC actions", async ({
   page,
@@ -483,6 +485,165 @@ test("PC tool selection leaves Direct AI in a fresh thread and never forwards to
       ),
     ),
   ).toEqual([]);
+});
+
+test("automatic mode keeps one chat: PC talk runs on the PC, ordinary talk runs on your own model", async ({
+  page,
+}) => {
+  // A paired phone whose whole bridge is faked on the device: every request the
+  // app would make to the PC is answered here, so the test can see exactly
+  // which engine a message went to.
+  await page.addInitScript(() => {
+    const calls: { method: string; payload: Record<string, unknown> }[] = [];
+    (window as unknown as { fixtureCalls: typeof calls }).fixtureCalls = calls;
+    const jobs = new Map<string, Record<string, unknown>>();
+    const json = (status: number, body: unknown) => ({ status, json: body });
+    window.ObserverAndroid = {
+      postMessage: (raw) => {
+        const p = JSON.parse(raw);
+        calls.push(p);
+        let data: unknown = null;
+        switch (p.method) {
+          case "restore":
+            data = {
+              baseUrl: "https://fixture-pc.example",
+              serverId: "fixture-device",
+              native: true,
+            };
+            break;
+          case "readState":
+            data = null;
+            break;
+          case "readPendingJobs":
+            data = "[]";
+            break;
+          case "cloudStatus":
+            data = { configured: true, provider: "fixture", model: "fixture" };
+            break;
+          case "cloudChat":
+            data = { ok: true, text: "Direct AI fixture reply." };
+            break;
+          case "webUpdateCheck":
+            data = { available: false };
+            break;
+          case "request": {
+            const payload = p.payload as {
+              path: string;
+              method?: string;
+              body?: { id: string; text: string };
+            };
+            const path = payload.path;
+            if (path === "/api/status")
+              data = json(200, {
+                ok: true,
+                version: "3.13.0",
+                model: "fixture-model",
+              });
+            else if (path === "/api/app/state")
+              data = json(200, {
+                host: "Fixture PC",
+                pending: [],
+                active: [],
+                projects: [],
+              });
+            else if (path === "/api/app/jobs" && payload.method === "POST") {
+              const body = payload.body || { id: "", text: "" };
+              const job = {
+                id: body.id,
+                kind: "chat",
+                state: "replied",
+                createdAt: Date.now(),
+                result: {
+                  ok: true,
+                  text: `**A clear answer.**\n\nYou asked: ${body.text}`,
+                },
+              };
+              jobs.set(body.id, job);
+              data = json(202, job);
+            } else if (/^\/api\/app\/jobs\//.test(path))
+              data = json(200, jobs.get(path.split("/").pop() || "") || {});
+            else data = json(200, {});
+            break;
+          }
+        }
+        setTimeout(
+          () =>
+            window.dispatchEvent(
+              new CustomEvent("observer-native-result", {
+                detail: { id: p.id, ok: true, data },
+              }),
+            ),
+          0,
+        );
+      },
+    };
+  });
+  await page.goto("/");
+  await expect(page.locator(".model-chip")).toContainText("Automatic");
+  await expect(
+    page.getByRole("button", { name: "PC connected", exact: true }),
+  ).toBeVisible();
+
+  // PC talk switches to the paired PC inside the same chat.
+  await page.getByLabel("Message Observer").fill("mere laptop pe kaam kar");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.locator(".route-chip").last()).toHaveText("PC");
+  const pcJob = await page.evaluate(() =>
+    (
+      window as unknown as {
+        fixtureCalls: {
+          method: string;
+          payload: { path?: string; body?: { text?: string } };
+        }[];
+      }
+    ).fixtureCalls.filter(
+      (c) => c.method === "request" && c.payload.path === "/api/app/jobs",
+    ),
+  );
+  expect(pcJob).toHaveLength(1);
+  expect(pcJob[0].payload.body?.text).toBe("mere laptop pe kaam kar");
+
+  // Ordinary talk stays on Direct AI, and the PC's answer is masked on the way.
+  await page.getByLabel("Message Observer").fill("explain black holes simply");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.locator(".route-chip").last()).toHaveText("Direct AI");
+  const cloud = await page.evaluate(() =>
+    (
+      window as unknown as {
+        fixtureCalls: {
+          method: string;
+          payload: { messages: { role: string; content: string }[] };
+        }[];
+      }
+    ).fixtureCalls.filter((c) => c.method === "cloudChat"),
+  );
+  expect(cloud).toHaveLength(1);
+  const sent = cloud[0].payload.messages;
+  expect(sent[sent.length - 1]).toEqual({
+    role: "user",
+    content: "explain black holes simply",
+  });
+  expect(sent.some((m) => /Handled on your PC/i.test(m.content))).toBe(true);
+  expect(sent.some((m) => m.content.includes("A clear answer."))).toBe(false);
+  // The cloud turn never touched the machine.
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            fixtureCalls: {
+              method: string;
+              payload: { path?: string; body?: { text?: string } };
+            }[];
+          }
+        ).fixtureCalls.filter(
+          (c) =>
+            c.method === "request" &&
+            c.payload.path === "/api/app/jobs" &&
+            c.payload.body?.text === "explain black holes simply",
+        ).length,
+    ),
+  ).toBe(0);
 });
 
 test("normal text survives an aborted acceptance response and recovers without a second execution POST", async ({

@@ -8,9 +8,11 @@ import {
   LoaderCircle,
   Monitor,
   ShieldCheck,
+  Wand2,
 } from "lucide-react";
 import { configureCloud, clearCloud, type CloudStatus } from "../core/cloud";
 import { isNative } from "../core/native";
+import type { ChatMode } from "../types";
 import { Modal } from "./ui";
 export default function ModelMode({
   mode,
@@ -20,9 +22,9 @@ export default function ModelMode({
   onClose,
   inspect,
 }: {
-  mode: "agent" | "cloud";
+  mode: ChatMode;
   cloud: CloudStatus;
-  onMode: (mode: "agent" | "cloud") => void;
+  onMode: (mode: ChatMode) => void;
   onCloud: (c: CloudStatus) => void;
   onClose: () => void;
   inspect: () => void;
@@ -35,10 +37,28 @@ export default function ModelMode({
   return (
     <Modal
       title="The right kind of help."
-      subtitle="Switching mode starts a new conversation; PC chat history is never automatically sent to Direct AI. PC control needs your paired agent."
+      subtitle="Picking a mode by hand starts a new conversation; on Automatic every message chooses its own engine inside the same chat. PC chat history is never automatically sent to Direct AI. PC control needs your paired agent."
       onClose={onClose}
     >
       <div className="mode-choices">
+        <button
+          className={`mode-choice ${mode === "auto" ? "selected" : ""}`}
+          onClick={() => {
+            onMode("auto");
+            onClose();
+          }}
+        >
+          <Wand2 size={21} />
+          <span>
+            <strong>Automatic</strong>
+            <small>
+              Direct AI answers by default, so the phone works on its own. The
+              moment a message mentions your PC or is a command, the PC agent
+              takes over — same chat, nothing to switch.
+            </small>
+          </span>
+          {mode === "auto" && <Check size={17} />}
+        </button>
         <button
           className={`mode-choice ${mode === "agent" ? "selected" : ""}`}
           onClick={() => {
@@ -102,7 +122,9 @@ export default function ModelMode({
                 );
                 setKey("");
                 onCloud(c);
-                onMode("cloud");
+                // Automatic is the default: the key now answers ordinary
+                // messages, and PC talk still goes to the PC.
+                onMode("auto");
                 onClose();
               } catch (e) {
                 setError(

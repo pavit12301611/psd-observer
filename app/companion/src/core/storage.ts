@@ -1,18 +1,25 @@
-import type { Conversation, LocalState, Message, Preferences } from "../types";
+import type {
+  ChatMode,
+  Conversation,
+  LocalState,
+  Message,
+  Preferences,
+} from "../types";
 import { isNative, nativeCall } from "./native";
 export const defaultPreferences: Preferences = {
-  theme: "light",
+  theme: "dark",
   language: "en-IN",
   saveHistory: true,
   readAloud: false,
   lowData: true,
   screenPrivacy: false,
-  chatMode: "agent",
+  chatMode: "auto",
   appLock: false,
   betaUpdates: true,
+  autoAppUpdate: true,
 };
 export const newConversation = (
-  mode: "agent" | "cloud" = "agent",
+  mode: ChatMode = defaultPreferences.chatMode,
 ): Conversation => ({
   mode,
   id: crypto.randomUUID(),
@@ -34,7 +41,7 @@ export function normaliseState(input: unknown): LocalState {
   const p = input as Partial<LocalState>,
     prefs = p.preferences;
   if (prefs && typeof prefs === "object") {
-    if (["agent", "cloud"].includes(prefs.chatMode))
+    if (["agent", "cloud", "auto"].includes(prefs.chatMode))
       fresh.preferences.chatMode = prefs.chatMode;
     if (["light", "dark", "system"].includes(prefs.theme))
       fresh.preferences.theme = prefs.theme;
@@ -47,6 +54,7 @@ export function normaliseState(input: unknown): LocalState {
       "screenPrivacy",
       "appLock",
       "betaUpdates",
+      "autoAppUpdate",
     ] as const)
       if (typeof prefs[key] === "boolean") fresh.preferences[key] = prefs[key];
   }
