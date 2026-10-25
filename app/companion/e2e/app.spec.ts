@@ -242,6 +242,9 @@ test("theme and every destination, including More, work and fit each orientation
       ),
     ).toBe(true);
   }
+  // The theme segmented control lives in Settings, so walk there explicitly:
+  // More now holds every route, and the loop above ends on More.
+  await go(page, "Settings");
   await page.getByRole("button", { name: "Light theme", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
