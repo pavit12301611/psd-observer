@@ -47,7 +47,7 @@ android {
         }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
-    lint { abortOnError true; checkReleaseBuilds true }
+    lint { abortOnError true; checkReleaseBuilds true; textReport true }
 }
 dependencies {
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'

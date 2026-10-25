@@ -106,9 +106,10 @@ jobs:
       - name: Print lint errors when the build fails
         if: failure()
         run: |
-          for f in android/app/build/reports/lint-results-*.txt; do
-            [ -f "$f" ] && { echo "===== $f"; cat "$f"; }
-          done
+          cd android && ./gradlew --no-daemon lintLocal --continue > /dev/null 2>&1
+          echo "===== lint-results-local.txt"
+          grep -h -B1 -A3 "Error:" app/build/reports/lint-results-local.txt | head -80
+          exit 1
       - name: Collect installable APKs
         run: |
           VERSION=$(node -p "require('./package.json').version")
