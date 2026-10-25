@@ -490,18 +490,82 @@ test("PC tool selection leaves Direct AI in a fresh thread and never forwards to
 test("automatic mode keeps one chat: PC talk runs on the PC, ordinary talk runs on your own model", async ({
   page,
 }) => {
+  // A paired phone whose whole bridge is faked on the device: every request the
+  // app would make to the PC is answered here, so the test can see exactly
+  // which engine a message went to.
   await page.addInitScript(() => {
     const calls: { method: string; payload: Record<string, unknown> }[] = [];
     (window as unknown as { fixtureCalls: typeof calls }).fixtureCalls = calls;
+    const jobs = new Map<string, Record<string, unknown>>();
+    const json = (status: number, body: unknown) => ({ status, json: body });
     window.ObserverAndroid = {
       postMessage: (raw) => {
         const p = JSON.parse(raw);
         calls.push(p);
-        let data: unknown = true;
-        if (p.method === "cloudStatus")
-          data = { configured: true, provider: "fixture", model: "fixture" };
-        if (p.method === "cloudChat")
-          data = { ok: true, text: "Direct AI fixture reply." };
+        let data: unknown = null;
+        switch (p.method) {
+          case "restore":
+            data = {
+              baseUrl: "https://fixture-pc.example",
+              serverId: "fixture-device",
+              native: true,
+            };
+            break;
+          case "readState":
+            data = null;
+            break;
+          case "readPendingJobs":
+            data = "[]";
+            break;
+          case "cloudStatus":
+            data = { configured: true, provider: "fixture", model: "fixture" };
+            break;
+          case "cloudChat":
+            data = { ok: true, text: "Direct AI fixture reply." };
+            break;
+          case "webUpdateCheck":
+            data = { available: false };
+            break;
+          case "request": {
+            const payload = p.payload as {
+              path: string;
+              method?: string;
+              body?: { id: string; text: string };
+            };
+            const path = payload.path;
+            if (path === "/api/status")
+              data = json(200, {
+                ok: true,
+                version: "3.13.0",
+                model: "fixture-model",
+              });
+            else if (path === "/api/app/state")
+              data = json(200, {
+                host: "Fixture PC",
+                pending: [],
+                active: [],
+                projects: [],
+              });
+            else if (path === "/api/app/jobs" && payload.method === "POST") {
+              const body = payload.body || { id: "", text: "" };
+              const job = {
+                id: body.id,
+                kind: "chat",
+                state: "replied",
+                createdAt: Date.now(),
+                result: {
+                  ok: true,
+                  text: `**A clear answer.**\n\nYou asked: ${body.text}`,
+                },
+              };
+              jobs.set(body.id, job);
+              data = json(202, job);
+            } else if (/^\/api\/app\/jobs\//.test(path))
+              data = json(200, jobs.get(path.split("/").pop() || "") || {});
+            else data = json(200, {});
+            break;
+          }
+        }
         setTimeout(
           () =>
             window.dispatchEvent(
@@ -514,20 +578,30 @@ test("automatic mode keeps one chat: PC talk runs on the PC, ordinary talk runs 
       },
     };
   });
-  const f = await fixture(page);
   await page.goto("/");
-  await connect(page);
   await expect(page.locator(".model-chip")).toContainText("Automatic");
+  await expect(
+    page.getByRole("button", { name: "PC connected", exact: true }),
+  ).toBeVisible();
 
   // PC talk switches to the paired PC inside the same chat.
   await page.getByLabel("Message Observer").fill("mere laptop pe kaam kar");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page.locator(".route-chip").last()).toHaveText("PC");
-  expect(
-    f.requests.some(
-      (r) => r.path === "/api/app/jobs" && r.body.text === "mere laptop pe kaam kar",
+  const pcJob = await page.evaluate(() =>
+    (
+      window as unknown as {
+        fixtureCalls: {
+          method: string;
+          payload: { path?: string; body?: { text?: string } };
+        }[];
+      }
+    ).fixtureCalls.filter(
+      (c) => c.method === "request" && c.payload.path === "/api/app/jobs",
     ),
-  ).toBe(true);
+  );
+  expect(pcJob).toHaveLength(1);
+  expect(pcJob[0].payload.body?.text).toBe("mere laptop pe kaam kar");
 
   // Ordinary talk stays on Direct AI, and the PC's answer is masked on the way.
   await page.getByLabel("Message Observer").fill("explain black holes simply");
@@ -551,12 +625,25 @@ test("automatic mode keeps one chat: PC talk runs on the PC, ordinary talk runs 
   });
   expect(sent.some((m) => /Handled on your PC/i.test(m.content))).toBe(true);
   expect(sent.some((m) => m.content.includes("A clear answer."))).toBe(false);
-  // No second PC job: the cloud turn never touched the machine.
+  // The cloud turn never touched the machine.
   expect(
-    f.requests.filter(
-      (r) => r.path === "/api/app/jobs" && r.body.text === "explain black holes simply",
+    await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            fixtureCalls: {
+              method: string;
+              payload: { path?: string; body?: { text?: string } };
+            }[];
+          }
+        ).fixtureCalls.filter(
+          (c) =>
+            c.method === "request" &&
+            c.payload.path === "/api/app/jobs" &&
+            c.payload.body?.text === "explain black holes simply",
+        ).length,
     ),
-  ).toHaveLength(0);
+  ).toBe(0);
 });
 
 test("normal text survives an aborted acceptance response and recovers without a second execution POST", async ({
