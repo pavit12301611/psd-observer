@@ -287,9 +287,10 @@ export default function PCControl({
       // Nothing known yet: show a dashed ghost in the middle instead of nothing,
       // so the owner always has something to aim with.
       const position = cursor ?? { x: 500, y: 500 };
+      // Ring only in Auto: "Always" means the owner's own arrow, always.
       const kind: "arrow" | "ring" | "ghost" = !cursor
         ? "ghost"
-        : inFrame && pointerApiRef.current === "ok"
+        : markerMode === "auto" && inFrame && pointerApiRef.current === "ok"
           ? "ring"
           : "arrow";
       const rect = box.getBoundingClientRect();
