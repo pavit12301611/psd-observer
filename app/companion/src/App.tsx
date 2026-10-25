@@ -681,6 +681,31 @@ export default function App() {
     await deliver(userText, route, { retried: true });
   }
 
+  /**
+   * A catalog command, run from the palette with one tap and answered there.
+   * Read-only reports only: the same job path as chat, without the history a
+   * normal turn carries, so the answer is exactly what the PC said.
+   */
+  async function runCommandNow(text: string): Promise<string> {
+    if (!profile) throw new Error("Pair your PC first — commands run there.");
+    const job = await submitAndWatch({
+      id: crypto.randomUUID(),
+      kind: "chat",
+      text,
+      projectId: active?.projectId || "personal00",
+      history: [],
+    });
+    const answer = job.result?.text;
+    if (answer) return answer;
+    if (job.state === "unknown")
+      throw new Error(
+        "Your PC accepted it but kept no result. Check Tasks before running it again.",
+      );
+    throw new Error(
+      "No retained result. Inspect Tasks before a new request; nothing was replayed.",
+    );
+  }
+
   async function send(e?: FormEvent) {
     e?.preventDefault();
     if (sending.current || (!draft.trim() && !file)) return;
@@ -2022,6 +2047,8 @@ export default function App() {
           <CommandPalette
             onClose={() => setCommandsOpen(false)}
             onChoose={chooseDraft}
+            onRun={runCommandNow}
+            paired={!!profile}
           />
         )}
         {historyOpen && (

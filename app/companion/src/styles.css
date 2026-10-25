@@ -1380,6 +1380,88 @@ textarea {
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
+/* The row's draft half: full-width tap target, same as it always was. */
+.command-pick {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: var(--s3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+/* Read-only commands run here; anything else stays a draft. */
+.command-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.command-run:disabled {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.command-result {
+  margin-top: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.command-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--s4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-caption);
+  color: var(--muted);
+}
+.command-result-head strong {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--ink);
+}
+.command-result-head span {
+  margin-left: auto;
+}
+.command-result pre {
+  margin: 0;
+  padding: var(--s4);
+  max-height: 34vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.command-result .button-row {
+  padding: 0 var(--s4) var(--s3);
+}
+.command-failure {
+  margin: var(--s3) 0 0;
+  font-size: var(--t-caption);
+  line-height: 1.7;
+  color: var(--warn);
+}
 .command-item:hover {
   background: var(--surface);
 }
