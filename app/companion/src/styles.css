@@ -1216,6 +1216,54 @@ textarea {
   padding: 10px 12px;
   font-size: 12px;
 }
+/* Same shape as the select, so the row never jumps between inputs. */.setting-row .number-input {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  min-height: 44px;
+  width: 112px;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hint {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+/* Direct AI spend on the owner's own key: three numbers, one glance. */
+.usage-panel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s3);
+  margin: var(--s3) 0 var(--s4);
+}
+.usage-panel > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.usage-figure {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.usage-panel small {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .modal input:not([type="checkbox"]) {
   width: 100%;
 }
@@ -1861,6 +1909,26 @@ textarea {
 .toggle input:focus-visible + span {
   outline: 2px solid var(--ink);
   outline-offset: 3px;
+}
+/* Same on/off look as .toggle, for the one row the phone owns the truth for. */
+.setting-toggle {
+  min-width: 62px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.setting-toggle[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.setting-toggle:disabled {
+  opacity: 0.6;
 }
 .connection-card {
   display: flex;
