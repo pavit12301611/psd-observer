@@ -439,8 +439,19 @@ update_companion_app() {
     [ -n "$cand" ] || continue
     [ -f "$cand/package.json" ] && [ -d "$cand/src" ] && { app="$(cd "$cand" && pwd)"; break; }
   done
-  [ -n "$app" ] || die "phone app source not found. Pass it: bash observer.sh update --app --app-dir /path/to/app/companion"
-
+  # Last resort: no checkout anywhere — pull the branch archive and build the
+  # app from it, so this still works on a PC with no git clone at all.
+  if [ -z "$app" ]; then
+    say "No local app checkout found — downloading the branch archive"
+    local fet; fet=$(mktemp -d)
+    if curl -fL --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+         -o "$fet/src.tar.gz" "$ARCHIVE" && tar -xzf "$fet/src.tar.gz" -C "$fet" 2>/dev/null; then
+      local root; root=$(find "$fet" -maxdepth 4 -type d -name companion -path '*/app/*' 2>/dev/null | head -1)
+      [ -n "$root" ] && [ -f "$root/package.json" ] && app="$root"
+    fi
+    [ -n "$app" ] || { rm -rf "$fet"; die "could not fetch app/companion from branch ${BRANCH}. Pass it: bash observer.sh update --app --app-dir /path/to/app/companion"; }
+    ok "building from the downloaded archive"
+  fi
   say "Building the phone app"
   info "source : $app"
   ( cd "$app" && npm ci --no-audit --no-fund ) || die "npm ci failed in $app"
@@ -472,6 +483,10 @@ update_companion_app() {
   ok "phones will be offered v${version} on their next update check"
   info "APK chahiye to: cd \"$app\" && npm run android:debug"
   APP_RESULT_LINE="v${version} — OTA bundle published (new APK: npm run android:debug)"
+  # The fetched archive (if any) is scratch; the packed bundle already lives
+  # in the agent's data/ directory.
+  if [ -n "${fet:-}" ]; then rm -rf "$fet"; fi
+  return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
