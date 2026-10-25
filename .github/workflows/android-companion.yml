@@ -106,9 +106,11 @@ jobs:
       - name: Print lint errors when the build fails
         if: failure()
         run: |
-          cd android && ./gradlew --no-daemon lintLocal --continue > /dev/null 2>&1
+          set +e
+          (cd android && ./gradlew --no-daemon lintLocal --continue > /tmp/lint.log 2>&1)
           echo "===== lint-results-local.txt"
-          grep -h -B1 -A3 "Error:" app/build/reports/lint-results-local.txt | head -80
+          grep -n -A4 "Error:" app/build/reports/lint-results-local.txt 2>/dev/null | head -60
+          echo "===== end"
           exit 1
       - name: Collect installable APKs
         run: |
