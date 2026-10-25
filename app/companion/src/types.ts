@@ -297,6 +297,8 @@ export interface AgentEvent {
   text: string;
   ts: number;
   jobId?: string;
+  /** Approval events carry the exact request id, so the shade can act on it. */
+  approvalId?: string;
 }
 export interface PairedDevice {
   id: string;

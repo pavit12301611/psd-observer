@@ -184,6 +184,12 @@ export default function App() {
     [copied, setCopied] = useState("");
   const [atBottom, setAtBottom] = useState(true),
     [shown, setShown] = useState(30);
+  // Set when a notification shade action (Approve/Decline) is consumed.
+  const [approvalAction, setApprovalAction] = useState<{
+    id: string;
+    decision: boolean;
+    nonce: number;
+  } | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null),
     scroller = useRef<HTMLDivElement>(null),
     fileInput = useRef<HTMLInputElement>(null),
@@ -1119,6 +1125,9 @@ export default function App() {
           qr?: string;
           page?: string;
           file?: Attachment;
+          /** Where the draft came from, so the note says the right thing. */
+          source?: "notification" | "share";
+          approval?: { id: string; decision: boolean };
         }>("consumeShare");
         if (!alive || !r) return;
         if (r.qr) {
@@ -1133,6 +1142,10 @@ export default function App() {
         }
         if (r.page && ["chat", "pc", "tasks"].includes(r.page))
           setPage(r.page as Page);
+        // A decision tapped in the notification shade: the app opens on that
+        // exact request and applies it, and the PC refuses it if it went stale.
+        if (r.approval?.id)
+          setApprovalAction({ ...r.approval, nonce: Date.now() });
         if (r.text || r.file) {
           const c = newConversation("agent");
           setState((s) => ({
@@ -1155,7 +1168,9 @@ export default function App() {
           setSharedReference(Boolean(r.reference));
           setPage("chat");
           notify(
-            "Shared draft loaded. Review it; nothing was uploaded or executed.",
+            r.source === "notification"
+              ? "Reply drafted from the notification. Read it, then send."
+              : "Shared draft loaded. Review it; nothing was uploaded or executed.",
           );
         }
       } catch {
@@ -1870,6 +1885,7 @@ export default function App() {
               onConnect={() => setPairOpen(true)}
               notice={notify}
               addReply={addReply}
+              approvalAction={approvalAction}
             />
           ) : page === "more" ? (
             <More

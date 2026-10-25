@@ -30,7 +30,16 @@ final class PhoneFeatures {
     PhoneFeatures(Activity a,SecureVault vault,NativeResult result){this.a=a;this.vault=vault;this.result=result;accept(a.getIntent());}
     void accept(Intent intent){if(intent==null)return;try{
         if(Intent.ACTION_VIEW.equals(intent.getAction())&&intent.getData()!=null&&"observer-companion".equals(intent.getData().getScheme())){share=new JSONObject().put("qr",intent.getData().toString());return;}
-        String page=intent.getStringExtra("observerPage");if(page!=null&&java.util.Arrays.asList("chat","pc","tasks","voice").contains(page)){share=new JSONObject().put("page",page);String draft=intent.getStringExtra("observerDraft");if(draft!=null)share.put("text",draft.substring(0,Math.min(16000,draft.length()))).put("reference",false);return;}
+        String page=intent.getStringExtra("observerPage");if(page!=null&&java.util.Arrays.asList("chat","pc","tasks","voice").contains(page)){
+            String draft=intent.getStringExtra("observerDraft");
+            if(draft!=null)share=new JSONObject().put("page",page).put("text",draft.substring(0,Math.min(16000,draft.length()))).put("reference",false).put("source","notification");
+            else share=new JSONObject().put("page",page);
+            // An approval notification carries the exact id plus the decision the
+            // owner tapped. The PC still re-checks it, so a stale or changed
+            // request is refused there rather than executed here.
+            String approval=intent.getStringExtra("observerApproval");
+            if(approval!=null&&approval.matches("[a-f0-9]{64}")&&intent.hasExtra("observerDecision"))share.put("approval",new JSONObject().put("id",approval).put("decision",intent.getBooleanExtra("observerDecision",false)));
+            return;}
         if(!Intent.ACTION_SEND.equals(intent.getAction()))return;
         CharSequence text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT);if(text!=null){share=new JSONObject().put("text",text.toString().substring(0,Math.min(16000,text.length()))).put("reference",true);return;}
         Uri uri=intent.getParcelableExtra(Intent.EXTRA_STREAM);if(uri==null||!"content".equals(uri.getScheme()))return;

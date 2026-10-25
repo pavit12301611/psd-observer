@@ -38,7 +38,7 @@ public final class AlertService extends Service {
                     String next=data.optString("epoch");long latest=data.optLong("latest");if(epoch.isEmpty()||!epoch.equals(next)){epoch=next;cursor=latest;prefs.edit().putString(serverId+":epoch",epoch).putLong(serverId+":cursor",cursor).apply();}eventType="message";continue;
                 }
                 long id=data.optLong("id");if(id<=cursor)continue;cursor=id;prefs.edit().putLong(serverId+":cursor",cursor).apply();
-                NotificationHub.event(this,serverId,data.optString("epoch",epoch),id,data.optString("type"));
+                NotificationHub.event(this,serverId,data.optString("epoch",epoch),id,data.optString("type"),data.optString("approvalId",null));
             }}
         }catch(Exception ignored){/* Never log credentials/private event text. */}
         finally{if(c!=null)c.disconnect();connection=null;}

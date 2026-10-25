@@ -6,7 +6,7 @@ export function createEvents({ file, now = Date.now, push = null } = {}) {
   const listeners = new Set();
   return {
     publish(type, text, extra = {}) {
-      const event = { epoch: db.value.epoch, id: db.value.sequence + 1, uid: randomBytes(8).toString('hex'), type: short(type, 40), text: short(text, 1800), ts: now(), ...(extra.jobId ? { jobId: short(extra.jobId, 100) } : {}) };
+      const event = { epoch: db.value.epoch, id: db.value.sequence + 1, uid: randomBytes(8).toString('hex'), type: short(type, 40), text: short(text, 1800), ts: now(), ...(extra.jobId ? { jobId: short(extra.jobId, 100) } : {}), ...(extra.approvalId ? { approvalId: short(extra.approvalId, 100) } : {}) };
       db.update((state) => ({ ...state, sequence: event.id, events: [...state.events, event].slice(-120) }));
       for (const fn of listeners) { try { fn(event); } catch { /* closed client */ } }
       // Push carries only a generic type/id. No private text/screenshots/keys.

@@ -70,7 +70,9 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
       timer = setInterval(() => {
         try {
           const pending = app?.state?.().pending || [], key = pending.map((p) => p.id).join(',');
-          if (key && key !== lastApproval) events.publish('approval', 'Your PC has an exact action waiting for review.');
+          // The approval id travels with the event so the phone can act on that
+          // exact request from the notification; the PC still re-checks it.
+          if (key && key !== lastApproval) events.publish('approval', 'Your PC has an exact action waiting for review.', { approvalId: pending[pending.length - 1].id });
           lastApproval = key;
           for (const due of workflows.scheduled()) {
             workflows.markScheduled(due.id, due.day); // Commit the day BEFORE dispatch; no catch-up/replay after restart.

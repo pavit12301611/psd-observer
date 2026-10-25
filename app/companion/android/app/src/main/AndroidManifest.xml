@@ -23,6 +23,8 @@
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <receiver android:name=".ObserverWidget" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/observer_widget_info" /></receiver>
+        <!-- Notification "Reply" only; not exported, and it never talks to the PC itself. -->
+        <receiver android:name=".ReplyReceiver" android:exported="false" />
         <service android:name=".ObserverTile" android:label="Observer" android:icon="@drawable/observer_icon" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true"><intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter></service>
     </application>
 </manifest>
