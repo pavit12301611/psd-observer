@@ -2905,6 +2905,18 @@ textarea {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.pc-cursor.ring {
+  /* Not a second cursor: a halo around the PC's own pointer, which is drawn at
+     PC scale and becomes a few pixels once the screen is scaled to a phone. */
+  transform: translate(-50%, -50%);
+  border: 2px solid #000;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #fff;
+  background: transparent;
+}
+.pc-cursor.ring::after {
+  display: none;
+}
 .pc-cursor::after {
   content: "";
   position: absolute;

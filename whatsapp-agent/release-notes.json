@@ -314,7 +314,7 @@
       "🗓️🔄 CHANNELS: Google Calendar sync (`/cal sync <ics-url>` + `/cal export`), `/topic` channels with shared memory, aur speed: lookup cache 553µs→19µs. (Shades rule: auto-restore kabhi nahi — sirf /shades off se.)"
     ]
   },
-  "latest": "3.12.3",
+  "latest": "3.12.4",
   "3.8.0": "🆕 *PSD_Ai v3.8.0 — Complete Feature Suite (29 upgrades!)*\n\nHar suggestion complete: 11 shelf + 18 naye features.\n\n*Padhai & Voice*\n• /revise call — JARVIS khud call karta hai + revision (voice segments)\n• /today — aaj ka complete timeline\n• /exam add <sub> <date> — exam countdown + auto study schedule\n• /study scan — flashcards photo → OCR → pack\n• /accuracy report — bot ka report card\n\n*Proactive & Smart*\n• /nudges — proactive messages (padh lo, reminder miss, battery)\n• /recap — weekly recap + goal tracker\n• /routine at 7am — morning auto-routines\n• /leaveby — leave-by time calculator (traffic estimate)\n• HW reminders ab escalate hote hain (48h → 24h → 2h bursts)\n\n*PC & Home*\n• /block — study window me distracting sites auto-close\n• /organize — downloads auto-sort\n• /backup now|cloud — zip backup + GitHub upload\n• /timeline — screenshot timeline recall\n• /home — smart home webhooks (lights/AC/TV)\n• /wake — \"Hey JARVIS\" wake word + voice commands\n\n*Family & Safety*\n• /role kids|family + /rolelimit — per-role modes\n• /fun quiz|riddle — timepass\n• /audit — security audit log\n• /pcs ask|all|check — fleet remote commands (queue)\n• Notes meetings se action-items auto-extract\n• /photos ab actual images bhejta hai (top match)\n\nUpdate: BRANCH=main bash <(curl -fsSL https://raw.githubusercontent.com/pavit12301611/psd-observer/main/whatsapp-agent/scripts/observer.sh) update",
   "3.8.1": {
     "title": "Heavy tasks: reliable routing & safe failover",
@@ -371,6 +371,16 @@
       "Signed interface updates install in place with rollback, anti-downgrade, size/path limits and an unconfirmed-boot restore; no APK is deleted or reinstalled.",
       "New endpoints /api/app/update/manifest, /bundle and /key are authenticated per device; signing keys never leave the PC and never enter Git.",
       "Shades remains explicit-only: only /shades off restores the display; there is no auto-restore."
+    ]
+  },
+  "3.12.4": {
+    "title": "Cursor: halo, ek tap me apna arrow, aur poora diagnostic",
+    "bullets": [
+      "Jin PCs par screenshot me asli cursor aata hai, wo PC scale par hota hai — phone par poora screen chhota hone se cursor 3-4 pixel ka reh jata hai, isliye 'dikhta hi nahi'. Ab app us cursor ke aas-paas ek chhota halo (black+white ring) banati hai (X11 par position /api/pc/pointer se aati hai).",
+      "Agar halo na chahiye to PC control → More → Arrow → Always: apna arrow hamesha dikhega; Off se band. Choice phone par yaad rehti hai.",
+      "Arrow ab thoda bada floor (12px minimum) hai aur tap karte hi turant dikhta hai (PC ka jawab aane ka intezaar nahi) — isliye 'kuch hua hi nahi' jaisa nahi lagta; refuse hone par notice + More tab me 'refused' likha aata hai.",
+      "Naya diagnostic: More tab me Cursor in frame (yes/no), Capture tool, Screen (1920×1080), Pointer query (works / not available), My arrow (shown/hidden + jagah) aur Last input (accepted/refused). Isse turant pata chal jata hai ki cursor kahan gaya.",
+      "Shades unchanged: sirf owner ka /shades off display wapas laata hai."
     ]
   },
   "3.12.3": {

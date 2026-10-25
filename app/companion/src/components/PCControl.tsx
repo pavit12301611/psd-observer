@@ -116,6 +116,27 @@ export default function PCControl({
       x: number;
       y: number;
       size: number;
+      // "arrow" = our own pointer, "ring" = highlight around the PC's own
+      // (usually tiny) cursor drawn into the frame.
+      kind: "arrow" | "ring";
+    } | null>(null),
+    // "auto" hides the arrow only when the frame already has the PC's cursor.
+    // The owner can force it either way — a cursor you cannot see is worse than
+    // a duplicated one.
+    [markerMode, setMarkerMode] = useState<"auto" | "always" | "never">(() => {
+      try {
+        const saved = localStorage.getItem("observer-pointer-marker");
+        return saved === "always" || saved === "never" ? saved : "auto";
+      } catch {
+        return "auto";
+      }
+    }),
+    [pointerApi, setPointerApi] = useState<"unknown" | "ok" | "none">("unknown"),
+    [lastInput, setLastInput] = useState<{
+      what: string;
+      ok: boolean;
+      at: number;
+      detail?: string;
     } | null>(null),
     [imgSize, setImgSize] = useState<Size>({ width: 0, height: 0 }),
     [now, setNow] = useState(() => Date.now()),
@@ -161,10 +182,12 @@ export default function PCControl({
     padCarry = useRef({ x: 0, y: 0 }),
     captureMs = useRef(0),
     screenPxRef = useRef<Size | null>(null),
-    pointerPixels = useRef<{ x: number; y: number } | null>(null);
+    pointerPixels = useRef<{ x: number; y: number } | null>(null),
+    pointerApiRef = useRef<"unknown" | "ok" | "none">("unknown");
 
   active.current = connected;
   view.current = { zoom, center };
+  pointerApiRef.current = pointerApi;
   screenPxRef.current = screenPx;
   const busyAgent = Boolean(state?.active.length || pc?.busy);
 
@@ -256,20 +279,27 @@ export default function PCControl({
   useEffect(() => {
     const place = () => {
       const box = stage.current;
+      if (markerMode === "never" || !box || !cursor || !frame)
+        return setMarker(null);
       // A frame that already contains the real pointer needs no second arrow.
-      const known = pc?.pointerInFrame;
-      if (!box || !cursor || !frame || known === true) return setMarker(null);
+      // But the real cursor is drawn at PC scale, which is a few pixels once the
+      // screen is scaled down to a phone — so highlight where it is instead.
+      const inFrame = pc?.pointerInFrame === true && markerMode === "auto";
+      const kind: "arrow" | "ring" = inFrame ? "ring" : "arrow";
+      if (inFrame && pointerApiRef.current !== "ok") return setMarker(null);
       const rect = box.getBoundingClientRect();
       const point = cursorMarkerPosition(cursor, rect, imgSize, region);
       if (!point) return setMarker(null);
       // Size it like a real cursor: ~20 PC pixels tall, scaled to how big this
-      // image actually is on the phone. A fixed 23px arrow looked enormous.
+      // image actually is on the phone. A fixed 23px banner looked enormous.
       const scale = Math.min(rect.width / imgSize.width, rect.height / imgSize.height),
         perPcPixel = screenPx?.width
           ? (imgSize.width * scale) / screenPx.width
           : scale;
-      const size = Math.min(22, Math.max(9, 20 * perPcPixel));
-      setMarker({ ...point, size });
+      // Never smaller than a fingertip-sized arrow: 12px is the floor where it
+      // is still findable on a phone.
+      const size = Math.min(26, Math.max(12, 22 * perPcPixel));
+      setMarker({ ...point, size, kind });
     };
     place();
     if (typeof ResizeObserver === "undefined" || !stage.current) return;
@@ -286,6 +316,7 @@ export default function PCControl({
     fullscreen,
     screenPx,
     pc?.pointerInFrame,
+    markerMode,
   ]);
 
   useEffect(() => {
@@ -397,7 +428,12 @@ export default function PCControl({
           y?: number;
           screen?: Size | null;
         }>("/api/pc/pointer");
-        if (cancelled || !r.known || r.x == null || r.y == null) return;
+        if (cancelled) return;
+        if (!r.known || r.x == null || r.y == null) {
+          setPointerApi("none");
+          return;
+        }
+        setPointerApi("ok");
         if (r.screen && r.screen.width > 0 && r.screen.height > 0)
           setScreenPx(r.screen);
         const screen = r.screen && r.screen.width > 0 ? r.screen : screenPxRef.current;
@@ -406,6 +442,7 @@ export default function PCControl({
         else pointerPixels.current = { x: r.x, y: r.y }; // wait for a screen size
       } catch {
         /* No pointer query on this desktop — the tap seeds the marker. */
+        if (!cancelled) setPointerApi("none");
       }
     };
     void sync(true);
@@ -463,9 +500,17 @@ export default function PCControl({
 
   function tapped(point: { x: number; y: number }, at: { x: number; y: number }) {
     mark(at.x, at.y);
+    // Show the arrow at once: waiting for the round-trip made it look like
+    // nothing happened at all. A refusal is reported in words and in the More
+    // tab, and the arrow stays where the owner actually touched.
+    setCursor({ x: point.x, y: point.y });
     void send("/api/tap", { ...point, relative: true }).then((ok) => {
-      // The marker only moves for input the PC accepted.
-      if (ok) setCursor({ x: point.x, y: point.y });
+      setLastInput({
+        what: `tap ${point.x},${point.y}`,
+        ok,
+        at: Date.now(),
+        detail: ok ? undefined : "The PC refused the tap (see the notice).",
+      });
     });
   }
 
@@ -482,10 +527,15 @@ export default function PCControl({
     );
     if (!point) return;
     mark(at.x, at.y);
+    setCursor({ x: point.x, y: point.y });
     void send("/api/tap", { ...point, relative: true, button: "right" }).then(
-      (ok) => {
-        if (ok) setCursor({ x: point.x, y: point.y });
-      },
+      (ok) =>
+        setLastInput({
+          what: `right click ${point.x},${point.y}`,
+          ok,
+          at: Date.now(),
+          detail: ok ? undefined : "The PC refused the click (see the notice).",
+        }),
     );
   }
 
@@ -524,6 +574,15 @@ export default function PCControl({
         if (padCarry.current.x || padCarry.current.y) flushPointer();
       });
   }
+
+  const chooseMarkerMode = (mode: "auto" | "always" | "never") => {
+    setMarkerMode(mode);
+    try {
+      localStorage.setItem("observer-pointer-marker", mode);
+    } catch {
+      /* private mode: the choice just does not survive a reload */
+    }
+  };
 
   const setZoomKeepingCenter = (next: number) => {
     const result = zoomAround(zoom, center, next, { x: 0.5, y: 0.5 });
@@ -666,9 +725,15 @@ export default function PCControl({
       }, region);
       if (from && to) {
         mark(to.x, to.y);
-        void send("/api/drag", { from, to }).then((ok) => {
-          if (ok) setCursor({ x: to.x, y: to.y });
-        });
+        setCursor({ x: to.x, y: to.y });
+        void send("/api/drag", { from, to }).then((ok) =>
+          setLastInput({
+            what: "drag",
+            ok,
+            at: Date.now(),
+            detail: ok ? undefined : "The PC refused the drag (see the notice).",
+          }),
+        );
       }
       return;
     }
@@ -951,21 +1016,29 @@ export default function PCControl({
                     style={{ left: ripple.x, top: ripple.y }}
                   />
                 )}
-                {marker && (
+                {marker?.kind === "ring" ? (
                   <span
-                    className="pc-cursor"
-                    style={{
-                      left: marker.x,
-                      top: marker.y,
-                      width: marker.size * 0.74,
-                      height: marker.size,
-                    }}
+                    className="pc-cursor ring"
+                    style={{ left: marker.x, top: marker.y, width: marker.size, height: marker.size }}
                     aria-hidden
-                  >
-                    <svg viewBox="0 0 17 23" width="100%" height="100%">
-                      <path d="M1.9 1.6 L1.9 18.2 L6.2 14.1 L8.9 20.6 L12 19.2 L9.3 12.9 L14.9 12.9 Z" />
-                    </svg>
-                  </span>
+                  />
+                ) : (
+                  marker && (
+                    <span
+                      className="pc-cursor"
+                      style={{
+                        left: marker.x,
+                        top: marker.y,
+                        width: marker.size * 0.74,
+                        height: marker.size,
+                      }}
+                      aria-hidden
+                    >
+                      <svg viewBox="0 0 17 23" width="100%" height="100%">
+                        <path d="M1.9 1.6 L1.9 18.2 L6.2 14.1 L8.9 20.6 L12 19.2 L9.3 12.9 L14.9 12.9 Z" />
+                      </svg>
+                    </span>
+                  )
                 )}
                 {dragLine && (
                   <svg className="pc-drag-line" aria-hidden>
@@ -1154,12 +1227,24 @@ export default function PCControl({
                     </button>
                   </div>
                   <p className="pc-muted">
-                    {pc?.pointerInFrame
-                      ? "The PC draws its own cursor into this frame, so no extra arrow is needed."
-                      : inputEnabled && !cursor
-                        ? "Tap the screen once: this desktop cannot report where the pointer is, so the arrow appears after your first tap."
-                        : "The arrow marks where your input landed and follows every move."}
+                    {markerMode === "never"
+                      ? "Your arrow is turned off. More → Arrow → Auto or Always brings it back."
+                      : markerMode === "auto" && pc?.pointerInFrame
+                        ? "This frame already contains the PC's own cursor. Not seeing it?"
+                        : !inputEnabled
+                          ? "Turn on Input, then tap the screen to place the arrow."
+                          : !cursor
+                            ? "Tap the screen once: this desktop cannot report where the pointer is, so the arrow starts from your first tap."
+                            : "The arrow marks where your input landed and follows every move."}
                   </p>
+                  {markerMode === "auto" && pc?.pointerInFrame && (
+                    <button
+                      className="button compact"
+                      onClick={() => chooseMarkerMode("always")}
+                    >
+                      Show my arrow anyway
+                    </button>
+                  )}
                   <div className="pc-row">
                     <span className="pc-muted">Nudge</span>
                     {[
@@ -1374,7 +1459,75 @@ export default function PCControl({
                       <span>Agent</span>
                       <strong>{busyAgent ? "busy" : "idle"}</strong>
                     </div>
+                    <div>
+                      <span>Cursor in frame</span>
+                      <strong>
+                        {pc?.pointerInFrame === true
+                          ? "yes"
+                          : pc?.pointerInFrame === false
+                            ? "no"
+                            : "unknown"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Capture tool</span>
+                      <strong>{pc?.captureTool || "unknown"}</strong>
+                    </div>
+                    <div>
+                      <span>Screen</span>
+                      <strong>
+                        {screenPx ? `${screenPx.width}×${screenPx.height}` : "unknown"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Pointer query</span>
+                      <strong>
+                        {pointerApi === "ok"
+                          ? "works"
+                          : pointerApi === "none"
+                            ? "not available"
+                            : "…"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>My arrow</span>
+                      <strong>
+                        {marker
+                          ? `${marker.kind === "ring" ? "highlighting the PC cursor" : "shown"} at ${Math.round(marker.x)},${Math.round(marker.y)}`
+                          : markerMode === "never"
+                            ? "off by choice"
+                            : cursor
+                              ? "hidden (outside the visible crop)"
+                              : "waiting for a tap"}
+                      </strong>
+                    </div>
                   </div>
+                  <div className="pc-row" role="group" aria-label="Pointer arrow">
+                    <span className="pc-muted">Arrow</span>
+                    {(
+                      [
+                        ["auto", "Auto"],
+                        ["always", "Always"],
+                        ["never", "Off"],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        className="button compact"
+                        aria-pressed={markerMode === mode}
+                        onClick={() => chooseMarkerMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {lastInput && (
+                    <p className="pc-muted">
+                      Last input: {lastInput.what} —{" "}
+                      {lastInput.ok ? "accepted by the PC" : "refused"}
+                      {lastInput.detail ? ` (${lastInput.detail})` : ""}
+                    </p>
+                  )}
                   <div className="pc-row">
                     <button className="button compact" onClick={() => void loadPcState()}>
                       <RefreshCw size={14} />

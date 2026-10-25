@@ -1,5 +1,15 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.12.4 — "cursor dikh hi nahi raha": make it visible, and make the reason visible (2026-10-25)
+
+- The trap we walked into ourselves: once the capture tools started drawing the real pointer, the *real* cursor is in the frame at **PC scale**. A 1920-px screen shown on a phone is a few hundred pixels wide, so a 20 px cursor becomes 3-4 px — invisible. Hiding our own arrow in that case (3.12.3) made it worse.
+- Fix: when the frame already has the PC's cursor, the app now draws a small black-and-white **halo** around it (position from `/api/pc/pointer` on X11) instead of nothing. It is not a second cursor: it marks the real one. Where even that position is unknowable, nothing is drawn and the pad tab offers "Show my arrow anyway".
+- The arrow is now a real choice, not a guess: More → **Arrow → Auto / Always / Off**, persisted in `localStorage`. `Always` guarantees a visible pointer on any desktop.
+- The arrow appears **immediately** on tap/drag (it used to wait for the PC's confirmation, so a slow or refused request looked like "nothing happened"); the confirmation still updates the More tab as accepted/refused.
+- New diagnostics in More: Cursor in frame (yes/no/unknown), Capture tool, Screen size, Pointer query (works / not available), My arrow (shown at x,y / hidden and why), Last input (accepted/refused). This is the panel that ends "cursor kahan gaya" guessing games.
+- Marker floor is 12 px (was 9) and the ceiling 26 px, so it reads as a cursor without becoming the banner of 3.12.2.
+- Tests: companion 55/55, agent 611/611, and a new Playwright test: a frame with `pointerInFrame` draws the halo (never a second arrow), the More tab reports the tool and the frame state, and "Always" switches to our own arrow.
+
 ## 3.12.3 — the marker now matches the real cursor (2026-10-25)
 
 - Report: "jo cursor hai woh screen ke cursor se bahut bada hai aur na sync mein — bilkul hi door". Three separate causes, all fixed:

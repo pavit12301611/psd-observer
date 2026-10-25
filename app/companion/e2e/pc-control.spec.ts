@@ -235,6 +235,33 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   expect(await page.evaluate(() => window.scrollY)).toBe(before);
 });
 
+test("a frame with the PC's own cursor gets a halo, and Always forces my arrow", async ({
+  page,
+}) => {
+  const f = fixture(page);
+  // On X11 the capture tools draw the real pointer — at PC scale, so it is a few
+  // pixels on a phone. The app must highlight it instead of hiding everything.
+  f.pcState.pointerInFrame = true;
+  f.pcState.captureTool = "scrot";
+  await f.install();
+  await page.goto("/");
+  await connect(page);
+  await go(page, "PC control");
+  await page.getByLabel("Enable manual PC input").check();
+  const halo = page.locator(".pc-cursor.ring");
+  await expect(halo).toBeVisible();
+  // A halo, not a second arrow.
+  await expect(page.locator(".pc-cursor:not(.ring)")).toHaveCount(0);
+  // Diagnostics say exactly what is going on.
+  await page.getByRole("tab", { name: "More" }).click();
+  await expect(page.getByText("Cursor in frame")).toBeVisible();
+  await expect(page.getByText("scrot", { exact: true })).toBeVisible();
+  // One tap and the owner gets their own arrow regardless.
+  await page.getByRole("button", { name: "Always", exact: true }).click();
+  await page.getByRole("tab", { name: "Pad" }).click();
+  await expect(page.locator(".pc-cursor:not(.ring)")).toBeVisible();
+});
+
 test("zoom asks for a real crop and taps still land on the right pixel", async ({ page }) => {
   const f = fixture(page);
   await f.install();

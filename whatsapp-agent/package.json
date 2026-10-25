@@ -1,6 +1,6 @@
 {
   "name": "observer-whatsapp-agent",
-  "version": "3.12.3",
+  "version": "3.12.4",
   "private": true,
   "description": "Owner-controlled WhatsApp agent with trained local routing, safe bounded multitasking, free/local AI and guarded Linux PC tools.",
   "type": "module",

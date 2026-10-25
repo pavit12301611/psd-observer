@@ -90,7 +90,18 @@ delivers it. No APK reinstall is needed — see [PC-UPDATES.md](PC-UPDATES.md).
 
 ## Where is the pointer?
 
-Two rules, in this order:
+**Something is always findable.** A real cursor drawn at PC scale is 3-4 px on a
+phone, so "the frame already has it" is not the same as "the owner can see it".
+
+- **Arrow → Auto** (default): a halo around the PC's own cursor when the frame
+  contains it and its position is known (`/api/pc/pointer`, X11); our own arrow
+  when it does not; nothing at all when even the position is unknowable — then
+  the pad tab offers *Show my arrow anyway*.
+- **Arrow → Always**: always our own arrow. **Arrow → Off**: never. The choice is
+  kept on the phone, so a desktop this app cannot read still gets a usable
+  pointer.
+
+Two rules behind that:
 
 1. **If the frame already has the real cursor, no marker is drawn.** The PC
    reports `pointerInFrame` (and `captureTool`) in `GET /api/pc/state`, derived
@@ -144,3 +155,17 @@ Two failure modes used to look identical — "the page is dead":
 On the PC side, `GET /api/pc/state` also reports `screen: {width, height}` of the
 last frame, so the pointer marker keeps working where the native bridge forwards
 only the ETag header.
+
+### Reading the symptoms
+
+`More` (the last dock tab) is the status panel, and it answers
+"my cursor went where?" without guessing:
+
+| Row | Meaning |
+|---|---|
+| Cursor in frame | `yes` — the capture tool drew the PC's real pointer |
+| Capture tool | which tool produced the frame (`xdg-desktop-portal`, `scrot`, `grim`, …) |
+| Screen | real PC pixels of the frame (used for the marker's size and position) |
+| Pointer query | `works` — the PC can report the cursor position (X11) |
+| My arrow | `shown at x,y`, or where it is hidden and why |
+| Last input | the last tap/drag and whether the PC accepted it |
