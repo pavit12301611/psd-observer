@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.12.3 — the marker now matches the real cursor (2026-10-25)
+
+- Report: "jo cursor hai woh screen ke cursor se bahut bada hai aur na sync mein — bilkul hi door". Three separate causes, all fixed:
+  1. **Two cursors.** On X11 (and grim/wlroots) the capture tools now *do* draw the real pointer, so the phone's arrow was a second, unrelated one. `captureScreenshot` reports `{tool, pointer}` through `onCapture`, `/api/pc/state` exposes `pointerInFrame`/`captureTool`, and the app draws nothing when the frame already has the cursor.
+  2. **Too big.** The arrow was a fixed 23 px CSS shape regardless of how big the screen was on the phone. It is now `clamp(20 × drawnWidth ÷ screenWidth, 9, 22)` px — the scale a ~20 PC-pixel cursor would have — so it reads like a cursor, not a banner.
+  3. **Out of sync.** The seed came from `xdotool` even on Wayland, where it talks to **XWayland** and reports a pointer that has nothing to do with the compositor's — hence "bilkul door". `pointerPosition` now refuses on Wayland, the marker only moves for input the PC accepted (a refused move no longer drags the arrow away), and on X11 it re-syncs from the real position every 5 s while the phone is idle (skipped for 3 s after any move, so it never fights the owner's own motion).
+- Long-press and two-finger tap now send `POST /api/tap` with `button: "right"`, so the right click lands on the touched pixel instead of wherever the PC cursor happened to be; the dock's "Right click" button keeps its old "click at the cursor" meaning.
+- Tests: agent 611/611 (pointer-tool table, `pointerInFrame` state, right-click-at-pixel), companion 55/55, and the Playwright spec asserts the marker is small (8–26 px) and follows a pad drag.
+
 ## 3.12.2 — input that survives a busy phone bridge (2026-10-25)
 
 - Owner report: "input nahi chal raha … yeh error aa raha hai `Task …AndroidBridge$$ExternalSyntheticLambda12@4eb295f rejected from java.util.concurrent.ThreadPoolExecutor[… pool size = 4, active threads = 4, queued tasks = 12 …]`". That message is the Android bridge's own pool refusing work: every `api.wire` in the app is one task on a 4-thread/12-slot pool, and the touchpad was firing a move every 24 ms — far faster than a phone round-trip. The queue filled, taps were rejected too, and each rejection hit `.catch(() => setInputEnabled(false))`, which switched manual input off and made the whole page look dead.

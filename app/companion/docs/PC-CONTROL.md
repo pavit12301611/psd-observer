@@ -90,6 +90,21 @@ delivers it. No APK reinstall is needed — see [PC-UPDATES.md](PC-UPDATES.md).
 
 ## Where is the pointer?
 
+Two rules, in this order:
+
+1. **If the frame already has the real cursor, no marker is drawn.** The PC
+   reports `pointerInFrame` (and `captureTool`) in `GET /api/pc/state`, derived
+   from whichever tool produced the frame. Two arrows in different places is
+   worse than none, so on X11 (gnome-shell, gnome-screenshot, scrot, maim) or
+   wlroots (grim) the app stays out of the way.
+2. **Otherwise the marker is scaled and honest.** Its height follows the image:
+   a real cursor is about 20 PC pixels, so the marker is
+   `clamp(20 × drawnWidth ÷ screenWidth, 9, 22)` px, not a fixed banner. It only
+   moves for input the PC accepted, and on desktops that can report the cursor
+   (`/api/pc/pointer`, X11 only) it re-syncs whenever the phone has been idle for
+   three seconds — so a dropped move or the PC's own acceleration cannot leave it
+   drifting away from the real pointer.
+
 On GNOME Wayland the only screenshot path that works is
 `xdg-desktop-portal`, and the portal **never draws the mouse pointer**. That is
 the desktop being honest, not a bug in this app, and no flag changes it.

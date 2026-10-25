@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createBridgeServer, readCrop } from '../src/server.js';
-import { captureArgs, gnomeShellCaptureArgs, parseLockedHint, parsePointerLocation, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
+import { captureArgs, capturesPointer, gnomeShellCaptureArgs, parseLockedHint, parsePointerLocation, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
 import { Store } from '../src/store.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -68,6 +68,45 @@ test('pc/state: carries the screen size a pointer marker needs, and never invent
   assert.equal((await f.get('/api/screen?w=960')).status, 200);
   const body = await (await f.get('/api/pc/state')).json();
   assert.deepEqual(body.screen, { width: 1920, height: 1080 });
+});
+
+test('only the tools that draw the pointer are allowed to hide the phone marker', () => {
+  // Two arrows in different places is worse than one, so this table decides
+  // whether the app draws its own.
+  for (const tool of ['grim', 'scrot', 'gnome-screenshot', 'maim', 'gnome-shell'])
+    assert.equal(capturesPointer(tool), true, `${tool} draws the pointer`);
+  for (const tool of ['xdg-desktop-portal', 'spectacle', 'import', '', null, undefined])
+    assert.equal(capturesPointer(tool), false, `${String(tool)} cannot`);
+});
+
+test('pc/state: says whether the frame already contains the real cursor', async (t) => {
+  const f = await bridgeFor(t, {
+    system: { state: async () => ({ session: 'x11', graphical: true, locked: false }) },
+    screen: {
+      capture: async (opts) => {
+        opts?.onCapture?.({ tool: 'scrot', pointer: true });
+        return fakePng(1280, 800);
+      },
+    },
+  });
+  assert.equal((await (await f.get('/api/pc/state')).json()).pointerInFrame, null);
+  await f.get('/api/screen?w=960');
+  const body = await (await f.get('/api/pc/state')).json();
+  assert.equal(body.pointerInFrame, true);
+  assert.equal(body.captureTool, 'scrot');
+});
+
+test('pc/tap: a right click lands on the touched pixel, not on the old cursor', async (t) => {
+  const clicks = [];
+  const f = await bridgeFor(t, {
+    screen: { capture: async () => fakePng(1000, 500), click: async (...args) => clicks.push(args) },
+  });
+  await f.get('/api/screen?w=800');
+  assert.equal((await f.post('/api/tap', { x: 250, y: 250, relative: true, button: 'right' })).status, 200);
+  assert.deepEqual(clicks.at(-1), [250, 125, 'right']);
+  await f.post('/api/tap', { x: 500, y: 500, relative: true });
+  assert.deepEqual(clicks.at(-1), [500, 250, 'left']);
+  assert.equal((await f.post('/api/tap', { x: 1, y: 1, button: 'middle' })).status, 400);
 });
 
 test('pc/pointer: reports the real cursor where the desktop can, never a guess', async (t) => {

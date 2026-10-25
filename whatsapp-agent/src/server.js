@@ -185,6 +185,9 @@ export function createBridgeServer({
   // screenshots — important on Wayland, where every capture can pop the
   // portal's "share your screen" prompt.
   let lastFrameSize = null;
+  // Which tool produced the last frame, and whether it drew the pointer. The
+  // phone needs this to decide whether its own marker would be a second arrow.
+  let lastCapture = null;
   function activeJobCount() {
     try { return (mobile?.jobs?.list?.() || []).filter((job) => job.state === 'running').length; } catch { return 0; }
   }
@@ -589,7 +592,12 @@ export function createBridgeServer({
         // the phone is just another client of the same agent.
         case 'GET /api/screen': {
           if (!config.allowPcControl) return json(res, 403, { detail: 'PC control is off (ALLOW_PC_CONTROL=false).' });
-          const shot = await scr.capture({ portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000) });
+          const shot = await scr.capture({
+            portalTimeoutMs: Math.min(Number(config.portalTimeoutMs) || 30_000, 20_000),
+            // Remember which tool produced this frame and whether it drew the
+            // pointer: the phone must not add a second arrow on top.
+            onCapture: (info) => { lastCapture = info; },
+          });
           const size = pngSize(shot) ?? { width: 0, height: 0 };
           if (size.width && size.height) lastFrameSize = size;
           const tag = screenTag(shot);
@@ -627,6 +635,10 @@ export function createBridgeServer({
           if (config.controlPin && !safeEqual(String(body.pin ?? ''), config.controlPin)) return json(res, 403, { detail: 'PC control PIN required.' });
           if (config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input requires standard/full access.' });
           if (app?.busy?.() || mobile?.jobs.active) return json(res, 423, { detail: 'Stop or wait for the active agent task before using manual input.' });
+          // A long-press/two-finger tap means "right click HERE", so the click
+          // lands on the touched pixel instead of wherever the PC cursor was.
+          const button = body.button === 'right' ? 'right' : 'left';
+          if (body.button !== undefined && !['left', 'right'].includes(body.button)) return json(res, 400, { detail: 'Invalid button' });
           const rx = Number(body.x);
           const ry = Number(body.y);
           if (!Number.isFinite(rx) || !Number.isFinite(ry)) return json(res, 400, { detail: 'x and y are required (0-1000 relative, or pixels with relative:false)' });
@@ -650,9 +662,9 @@ export function createBridgeServer({
           if (!size.width || x < 0 || y < 0 || x >= size.width || y >= size.height) {
             return json(res, 400, { detail: `Tap outside the screen (${size.width}×${size.height})` });
           }
-          await scr.click(x, y);
-          log.info?.(`[bridge] tap ${x},${y} from the phone app`);
-          return json(res, 200, { ok: true, x, y, width: size.width, height: size.height });
+          await scr.click(x, y, button);
+          log.info?.(`[bridge] ${button} click ${x},${y} from the phone app`);
+          return json(res, 200, { ok: true, x, y, button, width: size.width, height: size.height });
         }
 
         case 'POST /api/drag': {
@@ -720,6 +732,8 @@ export function createBridgeServer({
             // its pointer marker, and the native bridge only forwards the ETag
             // header, so it travels in JSON rather than in x-screen-* headers.
             screen: lastFrameSize && lastFrameSize.width && lastFrameSize.height ? { ...lastFrameSize } : null,
+            pointerInFrame: lastCapture ? Boolean(lastCapture.pointer) : null,
+            captureTool: lastCapture?.tool || null,
             ...(error ? { detail: error } : {}),
           });
         }

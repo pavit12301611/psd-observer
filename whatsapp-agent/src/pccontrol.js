@@ -464,6 +464,15 @@ export function captureArgs(tool, file) {
 }
 
 /**
+ * Which capture tools actually draw the mouse pointer into the image?
+ *
+ * If the frame already contains the real cursor, the phone must not draw a
+ * second one on top: two arrows in different places is worse than none.
+ */
+const POINTER_TOOLS = new Set(['grim', 'scrot', 'gnome-screenshot', 'maim', 'gnome-shell']);
+export const capturesPointer = (tool) => POINTER_TOOLS.has(String(tool ?? ''));
+
+/**
  * GNOME Shell D-Bus screenshot: Screenshot(include_frame, include_cursor, file).
  * The second boolean used to be false, which is exactly why the captured frame
  * on GNOME had no pointer in it.
@@ -529,7 +538,7 @@ async function waylandHint(env, tried) {
   return lines.join('\n');
 }
 
-export async function captureScreenshot({ portalTimeoutMs } = {}) {
+export async function captureScreenshot({ portalTimeoutMs, onCapture } = {}) {
   const env = displayEnv();
   const session = sessionInfo(env);
   if (!session.graphical) throw new Error(NO_SESSION);
@@ -555,6 +564,9 @@ export async function captureScreenshot({ portalTimeoutMs } = {}) {
         try { fs.unlinkSync(produced); } catch { /* noop */ }
         continue;
       }
+      // Tell the caller what produced this frame: the portal never draws the
+      // pointer, and whoever draws it next needs to know whether to.
+      try { onCapture?.({ tool: attempt.label, pointer: capturesPointer(attempt.label) }); } catch { /* a stale callback must not break capture */ }
       if (produced === file) {
         // Our own temp copy: the caller only needs the Buffer, so the file is
         // dead the moment it is read. No reason to wait for the janitor.
@@ -1273,6 +1285,10 @@ export function parsePointerLocation(output) {
 export async function pointerPosition(env = displayEnv()) {
   const session = sessionInfo(env);
   if (!session.graphical) return { known: false, reason: 'no graphical session' };
+  // On Wayland xdotool talks to XWayland, whose pointer is NOT the compositor's
+  // pointer: answering from it put the phone's marker far from the real cursor.
+  if (session.type === 'wayland')
+    return { known: false, reason: 'Wayland does not let an app read the pointer position' };
   try {
     const out = await run('xdotool', ['getmouselocation', '--shell'], { timeout: 4_000 });
     const point = parsePointerLocation(out);

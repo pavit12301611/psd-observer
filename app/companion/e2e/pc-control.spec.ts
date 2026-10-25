@@ -36,6 +36,9 @@ function fixture(page: Page) {
     busy: false,
     activeJobs: 0,
     screen: { width: 1920, height: 1080 },
+    // Wayland portal frames contain no cursor, so the app draws its own.
+    pointerInFrame: false,
+    captureTool: "xdg-desktop-portal",
   };
   const install = () =>
     page.route("**/bridge/**", async (route) => {
@@ -210,6 +213,9 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
   const ghost = page.locator(".pc-cursor");
   await expect(ghost).toBeVisible();
   const beforeDrag = (await ghost.boundingBox())!;
+  // A real cursor is small: the marker is scaled to the image, never a banner.
+  expect(beforeDrag.height).toBeLessThan(26);
+  expect(beforeDrag.height).toBeGreaterThanOrEqual(8);
   const before = await page.evaluate(() => window.scrollY);
   await page.mouse.move(point[0], point[1]);
   await page.mouse.down();
