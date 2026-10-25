@@ -253,6 +253,15 @@ export interface Job {
   stopRequested?: boolean;
   result?: Reply;
 }
+/** One line of the PC's append-only audit trail (data/audit.jsonl). */
+export interface AuditEntry {
+  at: number;
+  who?: string;
+  cmd?: string;
+  args?: string;
+  event?: string;
+  ok?: boolean;
+}
 export interface JobRef {
   id: string;
   conversationId: string;
@@ -277,6 +286,9 @@ export interface Workflow {
   name: string;
   steps: WorkflowStep[];
   trigger: { type: "manual" | "daily"; time?: string };
+  /** The PC's calendar day this routine last fired on (YYYY-MM-DD), if ever. */
+  lastDay?: string | null;
+  createdAt?: number;
 }
 export interface AgentEvent {
   epoch: string;

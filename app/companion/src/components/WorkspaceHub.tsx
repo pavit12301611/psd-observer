@@ -14,6 +14,7 @@ import {
   Trash2,
   Play,
   QrCode,
+  ScrollText,
   LoaderCircle,
 } from "lucide-react";
 import type {
@@ -22,6 +23,7 @@ import type {
   WorkflowStep,
   PairedDevice,
   AgentEvent,
+  AuditEntry,
   AppState,
 } from "../types";
 import { api } from "../core/api";
@@ -60,6 +62,7 @@ export default function WorkspaceHub({
     [workflows, setWorkflows] = useState<Workflow[]>([]),
     [devices, setDevices] = useState<PairedDevice[]>([]),
     [events, setEvents] = useState<AgentEvent[]>([]),
+    [audit, setAudit] = useState<AuditEntry[]>([]),
     [busy, setBusy] = useState(false),
     [info, setInfo] = useState("");
   const [project, setProject] = useState<Partial<Project>>({
@@ -89,16 +92,22 @@ export default function WorkspaceHub({
   async function refresh() {
     if (!connected) return;
     try {
-      const [p, w, d, e] = await Promise.all([
+      const [p, w, d, e, a] = await Promise.all([
         api.projects(),
         api.workflows(),
         api.get<{ devices: PairedDevice[] }>("/api/app/devices"),
         api.events(),
+        // An older PC agent has no audit route; that is not an error worth
+        // interrupting the rest of the hub for.
+        api
+          .audit(40)
+          .catch(() => ({ entries: [] as AuditEntry[] })),
       ]);
       setProjects(p.projects);
       setWorkflows(w.workflows);
       setDevices(d.devices);
       setEvents(e.events.reverse());
+      setAudit(a.entries);
     } catch (e) {
       notice(e instanceof Error ? e.message : "Workspace data unavailable");
     }
@@ -138,10 +147,24 @@ export default function WorkspaceHub({
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
   }
+  // The PC commits its own calendar day before a scheduled routine runs, so
+  // "last run" is a fact about the PC, not a guess from the phone's clock.
+  const lastRun = (day?: string | null) => {
+    if (!day) return "never run on schedule";
+    const [y, m, d] = day.split("-").map(Number);
+    if (!y || !m || !d) return "never run on schedule";
+    const stamp = new Date(y, m - 1, d).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+    });
+    const today = new Date();
+    return `${stamp}${y === today.getFullYear() && m === today.getMonth() + 1 && d === today.getDate() ? " (today)" : ""}`;
+  };
   const tabs = [
     ["projects", "Projects", FolderOpen],
     ["automations", "Routines", ListChecks],
     ["devices", "Devices", Laptop],
+    ["activity", "Activity", ScrollText],
     ["alerts", "Alerts", Bell],
     ["privacy", "Privacy", Fingerprint],
     ["connect", "Connection", Wifi],
@@ -324,7 +347,7 @@ export default function WorkspaceHub({
                     <small>
                       {w.steps.length} steps ·{" "}
                       {w.trigger.type === "daily"
-                        ? `Daily ${w.trigger.time} (PC timezone)`
+                        ? `Daily ${w.trigger.time} (PC timezone) · ${lastRun(w.lastDay)}`
                         : "Manual"}
                     </small>
                   </button>
@@ -526,6 +549,47 @@ export default function WorkspaceHub({
                   </button>
                 </div>
               ))}
+            </>
+          )}
+          {tab === "activity" && (
+            <>
+              <p className="info-note">
+                <ShieldCheck size={16} />
+                The PC’s own audit trail, read-only: every owner command and
+                every rejected guest attempt, newest first. The phone shows it
+                and keeps nothing — the log lives on your PC.
+              </p>
+              <div className="section-label">LAST {audit.length} ENTRIES</div>
+              {audit.map((entry, i) => (
+                <div className="hub-row" key={`${entry.at}-${i}`}>
+                  <div>
+                    <strong>
+                      {entry.cmd
+                        ? `/${entry.cmd}`
+                        : (entry.event || "event").replaceAll("_", " ")}
+                    </strong>
+                    <small>
+                      {new Date(entry.at).toLocaleString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                      {" · "}
+                      {entry.who || "owner"}
+                      {entry.args ? ` · ${entry.args.slice(0, 60)}` : ""}
+                    </small>
+                  </div>
+                  {entry.ok === false && (
+                    <span className="small-pill warn">failed</span>
+                  )}
+                </div>
+              ))}
+              {!audit.length && (
+                <p className="quiet-empty">
+                  Nothing logged yet. Commands you run appear here.
+                </p>
+              )}
             </>
           )}
           {tab === "alerts" && (

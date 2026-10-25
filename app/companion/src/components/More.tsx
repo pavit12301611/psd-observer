@@ -13,6 +13,7 @@ import {
   Sun,
   Download,
   ShieldCheck,
+  ScrollText,
   ChevronRight,
 } from "lucide-react";
 import type { AppState } from "../types";
@@ -32,6 +33,7 @@ export type MoreTarget =
   | "projects"
   | "automations"
   | "devices"
+  | "activity"
   | "alerts"
   | "privacy"
   | "connect"
@@ -146,6 +148,14 @@ export default function More({
           connected ? host || "Connected" : "Not connected",
           () => onOpenHub("connect"),
           "Pairing QR, LAN discovery, diagnostics.",
+        )}
+        {row(
+          "activity",
+          <ScrollText size={19} />,
+          "Activity",
+          "Read-only",
+          () => onOpenHub("activity"),
+          "What your PC ran, and what it refused. The log stays on the PC.",
         )}
         {row(
           "devices",

@@ -1,5 +1,6 @@
 import { version as appVersion } from "../../package.json";
 import type {
+  AuditEntry,
   Profile,
   Release,
   WireResponse,
@@ -281,6 +282,12 @@ export class BridgeClient {
   }
   jobs() {
     return this.get<{ jobs: Job[] }>("/api/app/jobs");
+  }
+  /** The PC's append-only audit trail, newest first. Read-only. */
+  audit(limit = 40) {
+    return this.get<{ entries: AuditEntry[] }>(
+      `/api/app/audit?limit=${Math.min(200, Math.max(1, limit))}`,
+    );
   }
   job(id: string) {
     return this.get<Job>("/api/app/jobs/" + encodeURIComponent(id));

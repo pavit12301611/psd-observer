@@ -44,6 +44,12 @@ export async function mobileRoute({ req, res, url, principal, platform: p, json,
     return true;
   }
   if (route === 'GET /api/app/events') { json(res, 200, { ...p.events.status(), events: p.events.list(url.searchParams.get('after')) }); return true; }
+  // Read-only audit trail, newest first: the same log `/audit` prints in
+  // WhatsApp, so the phone can show it without owning a second copy.
+  if (route === 'GET /api/app/audit') {
+    json(res, 200, { entries: p.auditEntries(url.searchParams.get('limit')) });
+    return true;
+  }
   if (route === 'GET /api/app/events/stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.write(`event: ready\ndata: ${JSON.stringify(p.events.status())}\n\n`);

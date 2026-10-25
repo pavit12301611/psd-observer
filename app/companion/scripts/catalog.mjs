@@ -23,5 +23,24 @@ for (const raw of text.split('\n')) {
   }
 }
 commands.sort((a, b) => a.name.localeCompare(b.name));
+// The catalog is generated from the agent's public HELP, so anything the phone
+// needs beyond that lives in runnable.json and is merged back in here. A
+// regeneration therefore cannot silently drop the Run buttons.
+let runnable = {};
+try {
+  runnable = JSON.parse(fs.readFileSync(path.join(root, 'src/data/runnable.json'), 'utf8')).commands || {};
+} catch {
+  throw new Error('src/data/runnable.json is missing or invalid; the Run buttons need it');
+}
+let runCount = 0;
+for (const command of commands) {
+  const run = runnable[command.name];
+  if (typeof run !== 'string' || !run.startsWith(command.name)) continue;
+  command.runnable = true;
+  command.run = run;
+  runCount++;
+}
+const stale = Object.keys(runnable).filter((name) => !commands.some((c) => c.name === name));
+if (stale.length) throw new Error(`runnable.json lists commands the agent no longer publishes: ${stale.join(', ')}`);
 fs.writeFileSync(path.join(root, 'src/data/commands.json'), JSON.stringify({ schemaVersion: 1, source: 'whatsapp-agent/src/commands.js public HELP', commands }, null, 2) + '\n');
-console.log(`Catalog: ${commands.length} unique public commands. Selecting a command only drafts it; never executes it.`);
+console.log(`Catalog: ${commands.length} unique public commands, ${runCount} runnable read-only reports. Selecting a command only drafts it; never executes it.`);
