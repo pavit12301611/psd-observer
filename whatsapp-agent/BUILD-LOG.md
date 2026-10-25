@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.13.0 — paint the pointer into the frame (2026-10-25)
+
+- Three versions of app-side markers still left the owner without a cursor, so this stops depending on the app at all: when the capture tool cannot draw the pointer (GNOME's portal, ImageMagick, Spectacle), the PC now **paints the arrow into the PNG itself** with `sharp` (already a dependency) before cropping and shrinking. Whatever displays the frame — the phone, a zoomed crop, a screenshot sent to WhatsApp — has the cursor in its pixels.
+- `burnPointer` composites a white arrow with a black outline plus a contrast ring at the real position; the mark is `clamp(imageWidth / 26, 28, 96)` px, i.e. ~1/26 of the frame, so it stays readable after the image is scaled to a phone (a raw 20px cursor became 3-4px, which is what "cursor dikh hi nahi raha" actually was).
+- Position: `xdotool` where the desktop can report it (X11), otherwise an estimate the bridge maintains from its own input — `moveTrackedPointer` for every accepted `/api/pointer` move, exact for `/api/tap` and the end of `/api/drag`, clamped to the screen. Unknown is still unknown: nothing is painted rather than a guess.
+- No double cursor: burning only happens when the capture tool reports `pointer: false`. `GET /api/pc/state` exposes `pointerBurned`, the app hides its marker in Auto when it is true, and More shows "Cursor painted: yes (in the pixels)". `POINTER_IN_FRAME=false` disables it.
+- App: the dead-end that made everything invisible (frame has the pointer, but its position is unknown, so the marker was suppressed) is gone — Auto now draws a halo around a known real cursor, our arrow otherwise, and a dashed "tap to place" ghost when nothing is known yet. `Always` still forces the arrow.
+- Tests: agent 614/614 (burned pixels are really dark, clamped positions, no burn when the tool already draws the cursor, state flag), companion 55/55, Playwright: a painted frame draws no marker, More says so, `Always` overrides.
+
 ## 3.12.4 — "cursor dikh hi nahi raha": make it visible, and make the reason visible (2026-10-25)
 
 - The trap we walked into ourselves: once the capture tools started drawing the real pointer, the *real* cursor is in the frame at **PC scale**. A 1920-px screen shown on a phone is a few hundred pixels wide, so a 20 px cursor becomes 3-4 px — invisible. Hiding our own arrow in that case (3.12.3) made it worse.

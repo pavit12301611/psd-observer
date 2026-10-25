@@ -156,6 +156,18 @@ export function createBridgeServer({
   let mobile = null;
   try { mobile = createMobilePlatform({ config, app, runOwner, voice, normalise: replyForApp, solve: solveJob }); }
   catch { log.error?.('[mobile] Private mobile state could not be loaded; new mobile APIs fail closed. Existing owner commands are still available.'); }
+  /** Where to paint the pointer: the real position if the desktop can say it. */
+  async function pointerForFrame() {
+    try {
+      const real = await sys.pointer?.();
+      if (real?.known && Number.isFinite(real.x) && Number.isFinite(real.y)) {
+        pointerTrack = { x: real.x, y: real.y };
+        return pointerTrack;
+      }
+    } catch { /* no query API on this desktop */ }
+    return pointerTrack;
+  }
+
   async function solveJob(input) {
     const upload = input.upload, buffer = Buffer.from(upload.base64, 'base64');
     const mime = upload.mime, document = mime === 'application/pdf' || /\.(pdf|docx|txt)$/i.test(upload.name);
@@ -180,6 +192,7 @@ export function createBridgeServer({
     key: (combo) => pc.keyCombo(combo),
     type: (text) => pc.typeText(text),
     crop: (buffer, box, opts) => pc.cropFrame(buffer, box, opts),
+    burnPointer: (buffer, at) => pc.burnPointer(buffer, at),
   };
   // Size of the last frame the phone asked for. A tap then needs ZERO extra
   // screenshots — important on Wayland, where every capture can pop the
@@ -188,6 +201,12 @@ export function createBridgeServer({
   // Which tool produced the last frame, and whether it drew the pointer. The
   // phone needs this to decide whether its own marker would be a second arrow.
   let lastCapture = null;
+  // Pointer position in screen pixels: from xdotool where the desktop can tell
+  // us, otherwise maintained from the moves and taps this bridge performs. This
+  // is what gets painted into frames whose tool cannot draw a cursor.
+  let pointerTrack = null;
+  let pointerBurnedLast = false;
+  const pointerOn = () => process.env.POINTER_IN_FRAME !== 'false';
   function activeJobCount() {
     try { return (mobile?.jobs?.list?.() || []).filter((job) => job.state === 'running').length; } catch { return 0; }
   }
@@ -607,16 +626,28 @@ export function createBridgeServer({
             res.writeHead(304, { etag: tag, 'cache-control': 'no-store', 'x-screen-width': size.width, 'x-screen-height': size.height });
             return res.end();
           }
+          // Paint the pointer into the frame when the capture tool could not.
+          // This is the dependable path: it survives zoom, the native bridge and
+          // saving the screenshot, because the cursor is in the pixels.
+          let frameShot = shot;
+          pointerBurnedLast = false;
+          if (pointerOn() && lastCapture && lastCapture.pointer === false && scr.burnPointer) {
+            const at = await pointerForFrame();
+            if (at) {
+              const painted = await scr.burnPointer(shot, { x: at.x, y: at.y });
+              if (painted) { frameShot = painted; pointerBurnedLast = true; }
+            }
+          }
           const wanted = Math.max(480, Math.min(1920, Number(url.searchParams.get('w')) || 1280));
           // Zoomed view: the phone asks for a normalised region (0-1000) and
           // gets real pixels of that region instead of an upscaled thumbnail.
           const crop = readCrop(url.searchParams);
           let image = null, mime = 'image/png', cropped = false;
           if (crop && scr.crop) {
-            const region = await scr.crop(shot, crop, { maxWidth: wanted });
+            const region = await scr.crop(frameShot, crop, { maxWidth: wanted });
             if (region) { image = region.image; mime = region.mime; cropped = true; }
           }
-          if (!image) ({ image, mime } = await hands.shrinkForModel(shot, wanted, 70));
+          if (!image) ({ image, mime } = await hands.shrinkForModel(frameShot, wanted, 70));
           res.writeHead(200, {
             'content-type': mime,
             'content-length': image.length,
@@ -663,6 +694,7 @@ export function createBridgeServer({
             return json(res, 400, { detail: `Tap outside the screen (${size.width}×${size.height})` });
           }
           await scr.click(x, y, button);
+          pointerTrack = { x, y };
           log.info?.(`[bridge] ${button} click ${x},${y} from the phone app`);
           return json(res, 200, { ok: true, x, y, button, width: size.width, height: size.height });
         }
@@ -675,7 +707,9 @@ export function createBridgeServer({
           if(!lastFrameSize||!scr.drag)return json(res,409,{detail:'Capture a current screenshot first; this input backend must support drag.'});
           const points=[b.from,b.to];if(points.some(p=>!p||![p.x,p.y].every(Number.isFinite)||p.x<0||p.y<0||p.x>=1000||p.y>=1000))return json(res,400,{detail:'Bounded normalized screenshot coordinates required'});
           const [a,z]=points.map(p=>({x:Math.min(lastFrameSize.width-1,Math.round(p.x/1000*lastFrameSize.width)),y:Math.min(lastFrameSize.height-1,Math.round(p.y/1000*lastFrameSize.height))}));
-          await scr.drag(a.x,a.y,z.x,z.y);return json(res,200,{ok:true});
+          await scr.drag(a.x,a.y,z.x,z.y);
+          pointerTrack = { x: z.x, y: z.y };
+          return json(res,200,{ok:true});
         }
         case 'POST /api/pointer': {
           if (!config.allowPcControl || config.accessLevel === 'safe') return json(res, 403, { detail: 'Manual input is not permitted by PC policy.' });
@@ -685,6 +719,7 @@ export function createBridgeServer({
           if (body.op === 'move') {
             if (![body.dx,body.dy].every(Number.isFinite) || Math.abs(body.dx)>200 || Math.abs(body.dy)>200) return json(res,400,{detail:'Bounded deltas required'});
             if (!scr.relative) return json(res,503,{detail:'Relative input unavailable'}); await scr.relative(body.dx,body.dy);
+            pointerTrack = pc.moveTrackedPointer(pointerTrack, body.dx, body.dy, lastFrameSize);
           } else if (body.op === 'click') {
             if (!['left','right'].includes(body.button)) return json(res,400,{detail:'Invalid button'}); await scr.click(undefined,undefined,body.button,1);
           } else if (body.op === 'scroll') {
@@ -733,6 +768,7 @@ export function createBridgeServer({
             // header, so it travels in JSON rather than in x-screen-* headers.
             screen: lastFrameSize && lastFrameSize.width && lastFrameSize.height ? { ...lastFrameSize } : null,
             pointerInFrame: lastCapture ? Boolean(lastCapture.pointer) : null,
+            pointerBurned: pointerBurnedLast,
             captureTool: lastCapture?.tool || null,
             ...(error ? { detail: error } : {}),
           });

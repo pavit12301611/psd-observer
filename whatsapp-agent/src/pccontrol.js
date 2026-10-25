@@ -1302,3 +1302,70 @@ export async function pointerPosition(env = displayEnv()) {
     };
   }
 }
+
+/**
+ * Draw the pointer into the frame ourselves.
+ *
+ * The GNOME portal never includes the cursor, and an app-side marker has proven
+ * fragile (it depends on a screen-size round trip, a zoom crop and a live
+ * position). Painting the arrow into the pixels is a guarantee: whatever shows
+ * the frame — the phone, a saved screenshot, WhatsApp — the pointer is there.
+ */
+export function cursorArrowSvg({ size = 40, fill = '#ffffff', stroke = '#000000' } = {}) {
+  const width = Math.max(6, Math.round((size * 17) / 23));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${size}" viewBox="0 0 17 23">`
+    + `<path d="M1.9 1.6 L1.9 18.2 L6.2 14.1 L8.9 20.6 L12 19.2 L9.3 12.9 L14.9 12.9 Z" fill="${fill}" stroke="${stroke}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+/** A ring around the arrow so it is findable on white documents and dark terminals. */
+export function cursorHaloSvg({ size = 76 } = {}) {
+  const r = Math.max(4, Math.round(size / 2) - 3);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`
+    + `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#000000" stroke-opacity="0.55" stroke-width="4"/>`
+    + `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#ffffff" stroke-opacity="0.95" stroke-width="2"/></svg>`;
+}
+
+/** How big the painted arrow is, in image pixels: it must survive a phone preview. */
+export function pointerMarkSize(imageWidth) {
+  const width = Number(imageWidth || 0);
+  if (!Number.isFinite(width) || width <= 0) return 32;
+  return Math.max(28, Math.min(96, Math.round(width / 26)));
+}
+
+/**
+ * Composite the arrow (+ halo) at image pixel `x,y`. Returns a PNG buffer, or
+ * null when sharp is unavailable — the caller then keeps the plain frame.
+ */
+export async function burnPointer(buffer, { x, y, size } = {}) {
+  let sharp;
+  try { sharp = (await import('sharp')).default; } catch { return null; }
+  try {
+    const meta = await sharp(buffer).metadata();
+    if (!meta.width || !meta.height) return null;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const mark = pointerMarkSize(size ?? meta.width);
+    const arrowWidth = Math.round((mark * 17) / 23);
+    const halo = Math.round(mark * 1.9);
+    const left = Math.max(0, Math.min(meta.width - 1, Math.round(x)));
+    const top = Math.max(0, Math.min(meta.height - 1, Math.round(y)));
+    const clampLeft = (value, width) => Math.max(0, Math.min(meta.width - width, Math.round(value)));
+    const clampTop = (value, height) => Math.max(0, Math.min(meta.height - height, Math.round(value)));
+    return await sharp(buffer)
+      .composite([
+        { input: Buffer.from(cursorHaloSvg({ size: halo })), left: clampLeft(left - halo / 2, halo), top: clampTop(top - halo / 2, halo) },
+        { input: Buffer.from(cursorArrowSvg({ size: mark })), left: clampLeft(left, arrowWidth), top: clampTop(top, mark) },
+      ])
+      .png()
+      .toBuffer();
+  } catch { return null; }
+}
+
+/** Keep a pointer estimate inside the screen while moves arrive. */
+export function moveTrackedPointer(pointer, dx, dy, screen) {
+  if (!pointer || !screen || !screen.width || !screen.height) return pointer;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return pointer;
+  return {
+    x: Math.max(0, Math.min(screen.width - 1, pointer.x + dx)),
+    y: Math.max(0, Math.min(screen.height - 1, pointer.y + dy)),
+  };
+}

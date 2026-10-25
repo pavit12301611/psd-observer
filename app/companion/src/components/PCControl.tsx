@@ -116,9 +116,9 @@ export default function PCControl({
       x: number;
       y: number;
       size: number;
-      // "arrow" = our own pointer, "ring" = highlight around the PC's own
-      // (usually tiny) cursor drawn into the frame.
-      kind: "arrow" | "ring";
+      // "arrow" = our own pointer, "ring" = halo around the PC's own (usually
+      // tiny) cursor, "ghost" = nothing is known yet, tap to place it.
+      kind: "arrow" | "ring" | "ghost";
     } | null>(null),
     // "auto" hides the arrow only when the frame already has the PC's cursor.
     // The owner can force it either way — a cursor you cannot see is worse than
@@ -279,16 +279,21 @@ export default function PCControl({
   useEffect(() => {
     const place = () => {
       const box = stage.current;
-      if (markerMode === "never" || !box || !cursor || !frame)
-        return setMarker(null);
-      // A frame that already contains the real pointer needs no second arrow.
-      // But the real cursor is drawn at PC scale, which is a few pixels once the
-      // screen is scaled down to a phone — so highlight where it is instead.
-      const inFrame = pc?.pointerInFrame === true && markerMode === "auto";
-      const kind: "arrow" | "ring" = inFrame ? "ring" : "arrow";
-      if (inFrame && pointerApiRef.current !== "ok") return setMarker(null);
+      if (markerMode === "never" || !box || !frame) return setMarker(null);
+      // The PC can paint the pointer into the frame itself; then the pixels are
+      // the truth and a second arrow would be a lie.
+      if (markerMode === "auto" && pc?.pointerBurned === true) return setMarker(null);
+      const inFrame = pc?.pointerInFrame === true;
+      // Nothing known yet: show a dashed ghost in the middle instead of nothing,
+      // so the owner always has something to aim with.
+      const position = cursor ?? { x: 500, y: 500 };
+      const kind: "arrow" | "ring" | "ghost" = !cursor
+        ? "ghost"
+        : inFrame && pointerApiRef.current === "ok"
+          ? "ring"
+          : "arrow";
       const rect = box.getBoundingClientRect();
-      const point = cursorMarkerPosition(cursor, rect, imgSize, region);
+      const point = cursorMarkerPosition(position, rect, imgSize, region);
       if (!point) return setMarker(null);
       // Size it like a real cursor: ~20 PC pixels tall, scaled to how big this
       // image actually is on the phone. A fixed 23px banner looked enormous.
@@ -1022,6 +1027,14 @@ export default function PCControl({
                     style={{ left: marker.x, top: marker.y, width: marker.size, height: marker.size }}
                     aria-hidden
                   />
+                ) : marker?.kind === "ghost" ? (
+                  <span
+                    className="pc-cursor ghost"
+                    style={{ left: marker.x, top: marker.y, width: 26, height: 26 }}
+                    aria-hidden
+                  >
+                    <span>tap to place</span>
+                  </span>
                 ) : (
                   marker && (
                     <span
@@ -1229,15 +1242,13 @@ export default function PCControl({
                   <p className="pc-muted">
                     {markerMode === "never"
                       ? "Your arrow is turned off. More → Arrow → Auto or Always brings it back."
-                      : markerMode === "auto" && pc?.pointerInFrame
-                        ? "This frame already contains the PC's own cursor. Not seeing it?"
-                        : !inputEnabled
-                          ? "Turn on Input, then tap the screen to place the arrow."
-                          : !cursor
-                            ? "Tap the screen once: this desktop cannot report where the pointer is, so the arrow starts from your first tap."
-                            : "The arrow marks where your input landed and follows every move."}
+                      : pc?.pointerBurned
+                        ? "The PC paints the pointer into the image itself — it is part of the picture, at the real position."
+                        : !cursor
+                          ? "Tap the screen once to place the arrow; after that it follows every move."
+                          : "The arrow marks where your input landed and follows every move."}
                   </p>
-                  {markerMode === "auto" && pc?.pointerInFrame && (
+                  {markerMode === "auto" && pc?.pointerInFrame && !pc?.pointerBurned && (
                     <button
                       className="button compact"
                       onClick={() => chooseMarkerMode("always")}
@@ -1477,6 +1488,16 @@ export default function PCControl({
                       <span>Screen</span>
                       <strong>
                         {screenPx ? `${screenPx.width}×${screenPx.height}` : "unknown"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Cursor painted</span>
+                      <strong>
+                        {pc?.pointerBurned === true
+                          ? "yes (in the pixels)"
+                          : pc?.pointerBurned === false
+                            ? "no"
+                            : "unknown"}
                       </strong>
                     </div>
                     <div>

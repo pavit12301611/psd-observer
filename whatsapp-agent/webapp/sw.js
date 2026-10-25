@@ -1,5 +1,5 @@
 // Only public shell assets, never API data or credential-bearing URLs.
-const CACHE = 'observer-agent-v3.12.4';
+const CACHE = 'observer-agent-v3.13.0';
 const ASSETS = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {

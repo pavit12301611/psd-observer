@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createBridgeServer, readCrop } from '../src/server.js';
-import { captureArgs, capturesPointer, gnomeShellCaptureArgs, parseLockedHint, parsePointerLocation, parseScreensaverActive, parseUpowerBattery } from '../src/pccontrol.js';
+import { burnPointer, captureArgs, capturesPointer, gnomeShellCaptureArgs, moveTrackedPointer, parseLockedHint, parsePointerLocation, parseScreensaverActive, parseUpowerBattery, pointerMarkSize } from '../src/pccontrol.js';
 import { Store } from '../src/store.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -241,4 +241,63 @@ test('capture argv always asks for the mouse pointer', () => {
   for (const tool of ['grim', 'scrot', 'gnome-screenshot', 'maim']) {
     assert.ok(captureArgs(tool, 'x.png').includes('x.png'), `${tool} keeps the output path`);
   }
+});
+
+test('burnPointer paints a findable arrow at the real position', async () => {
+  const sharp = (await import('sharp')).default;
+  const base = await sharp({ create: { width: 400, height: 240, channels: 3, background: '#ffffff' } }).png().toBuffer();
+  const out = await burnPointer(base, { x: 200, y: 120 });
+  assert.ok(out && out.length > 0, 'a painted frame comes back');
+  const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+  assert.equal(info.width, 400);
+  let dark = 0;
+  for (let i = 0; i < data.length; i += info.channels) if (data[i] < 60) dark += 1;
+  // The arrow and its halo are actually in the pixels now.
+  assert.ok(dark > 100, `expected a visible mark, saw ${dark} dark pixels`);
+  // Out-of-range positions are clamped, never throw.
+  assert.ok(await burnPointer(base, { x: -50, y: 9999 }));
+  assert.equal(await burnPointer(base, { x: Number.NaN, y: 10 }), null);
+  // The mark must stay readable once the frame is scaled to a phone.
+  assert.ok(pointerMarkSize(1440) >= 28);
+  assert.ok(pointerMarkSize(1440) / 1440 > 1 / 40);
+});
+
+test("the pointer estimate follows the bridge's own moves and stays on screen", () => {
+  const screen = { width: 1920, height: 1080 };
+  assert.deepEqual(moveTrackedPointer({ x: 100, y: 100 }, 40, -20, screen), { x: 140, y: 80 });
+  assert.deepEqual(moveTrackedPointer({ x: 1900, y: 10 }, 400, -400, screen), { x: 1919, y: 0 });
+  assert.equal(moveTrackedPointer(null, 10, 10, screen), null);
+  assert.deepEqual(moveTrackedPointer({ x: 5, y: 5 }, Number.NaN, 1, screen), { x: 5, y: 5 });
+});
+
+test('screen: the PC paints the pointer when its capture tool cannot', async (t) => {
+  const painted = [];
+  const f = await bridgeFor(t, {
+    screen: {
+      capture: async (opts) => {
+        opts?.onCapture?.({ tool: 'xdg-desktop-portal', pointer: false });
+        return fakePng(800, 600);
+      },
+      burnPointer: async (buffer, at) => { painted.push(at); return buffer; },
+    },
+    system: { state: async () => ({ session: 'wayland', graphical: true }), pointer: async () => ({ known: true, x: 400, y: 300 }) },
+  });
+  assert.equal((await f.get('/api/screen?w=400')).status, 200);
+  assert.deepEqual(painted, [{ x: 400, y: 300 }], 'painted at the real pointer position');
+  assert.equal((await (await f.get('/api/pc/state')).json()).pointerBurned, true);
+
+  // A tool that already draws the cursor must not get a second one.
+  const clean = [];
+  const g = await bridgeFor(t, {
+    screen: {
+      capture: async (opts) => { opts?.onCapture?.({ tool: 'scrot', pointer: true }); return fakePng(800, 600); },
+      burnPointer: async (buffer) => { clean.push(1); return buffer; },
+    },
+    system: { state: async () => ({ session: 'x11', graphical: true }) },
+  });
+  await g.get('/api/screen?w=400');
+  assert.equal(clean.length, 0);
+  const state = await (await g.get('/api/pc/state')).json();
+  assert.equal(state.pointerBurned, false);
+  assert.equal(state.pointerInFrame, true);
 });

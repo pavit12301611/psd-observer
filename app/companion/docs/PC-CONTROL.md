@@ -90,6 +90,14 @@ delivers it. No APK reinstall is needed — see [PC-UPDATES.md](PC-UPDATES.md).
 
 ## Where is the pointer?
 
+**The dependable path: the PC paints the pointer into the frame.** When the
+capture tool cannot draw a cursor (GNOME's portal), the server composites a white
+arrow with a black outline and a contrast ring into the PNG — before cropping, so
+zoomed frames keep it too — at the real position, sized `clamp(imageWidth/26,
+28, 96)` px. It is part of the picture, so nothing downstream can lose it:
+not the zoom crop, not the native bridge, not a screenshot saved to disk. Turn it
+off with `POINTER_IN_FRAME=false`.
+
 **Something is always findable.** A real cursor drawn at PC scale is 3-4 px on a
 phone, so "the frame already has it" is not the same as "the owner can see it".
 
@@ -168,4 +176,17 @@ only the ETag header.
 | Screen | real PC pixels of the frame (used for the marker's size and position) |
 | Pointer query | `works` — the PC can report the cursor position (X11) |
 | My arrow | `shown at x,y`, or where it is hidden and why |
+| Cursor painted | `yes (in the pixels)` — the arrow is part of the image |
 | Last input | the last tap/drag and whether the PC accepted it |
+
+### If you still cannot see a cursor
+
+1. **More → Cursor painted** should say `yes (in the pixels)`. If it says `no`,
+   the frame comes from a tool that draws its own cursor (fine) or `sharp` is
+   missing on the PC — `npm install sharp` in the agent folder fixes that.
+2. **More → Arrow → Always** draws the app's own arrow on top of whatever the
+   frame contains. On `Auto` the app stays out of the way when the PC already
+   drew one.
+3. **More → Pointer query** tells you whether the PC can report the real cursor
+   position. Wayland cannot; the position is then estimated from your own moves
+   and taps, which is correct for everything you do on the phone.

@@ -36,8 +36,10 @@ function fixture(page: Page) {
     busy: false,
     activeJobs: 0,
     screen: { width: 1920, height: 1080 },
-    // Wayland portal frames contain no cursor, so the app draws its own.
+    // The PC paints the pointer into the frame when its tool cannot, but the
+    // default fixture keeps that off so marker behaviour can be asserted.
     pointerInFrame: false,
+    pointerBurned: false,
     captureTool: "xdg-desktop-portal",
   };
   const install = () =>
@@ -233,6 +235,25 @@ test("touchpad drags move the PC cursor without scrolling the page", async ({ pa
     .poll(async () => (await ghost.boundingBox())?.x ?? 0)
     .toBeGreaterThan(beforeDrag.x + 1);
   expect(await page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+test("a painted cursor needs no marker, and Always still forces one", async ({ page }) => {
+  const f = fixture(page);
+  // Wayland portal + the PC paints the arrow into the pixels: that is the
+  // dependable workaround, so the app stays out of the way by default.
+  f.pcState.pointerBurned = true;
+  await f.install();
+  await page.goto("/");
+  await connect(page);
+  await go(page, "PC control");
+  await page.getByLabel("Enable manual PC input").check();
+  await expect(page.locator(".pc-stage img")).toBeVisible();
+  await expect(page.locator(".pc-cursor")).toHaveCount(0);
+  await page.getByRole("tab", { name: "More" }).click();
+  await expect(page.getByText("yes (in the pixels)")).toBeVisible();
+  await page.getByRole("button", { name: "Always", exact: true }).click();
+  await page.getByRole("tab", { name: "Pad" }).click();
+  await expect(page.locator(".pc-cursor")).toHaveCount(1);
 });
 
 test("a frame with the PC's own cursor gets a halo, and Always forces my arrow", async ({

@@ -2905,6 +2905,26 @@ textarea {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.pc-cursor.ghost {
+  /* Nothing is known yet: a dashed placeholder that says so. */
+  transform: translate(-50%, -50%);
+  border: 1px dashed var(--muted);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+.pc-cursor.ghost::after {
+  display: none;
+}
+.pc-cursor.ghost span {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 9px;
+  color: var(--muted);
+}
 .pc-cursor.ring {
   /* Not a second cursor: a halo around the PC's own pointer, which is drawn at
      PC scale and becomes a few pixels once the screen is scaled to a phone. */

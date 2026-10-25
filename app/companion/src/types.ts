@@ -171,6 +171,8 @@ export interface PcState {
   screen?: { width: number; height: number } | null;
   /** Does the last frame already contain the PC's own mouse pointer? */
   pointerInFrame?: boolean | null;
+  /** Was the pointer painted into the frame by the PC (guaranteed visible)? */
+  pointerBurned?: boolean | null;
   captureTool?: string | null;
   detail?: string;
 }
