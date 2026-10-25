@@ -103,6 +103,12 @@ jobs:
           node scripts/ci-run.mjs "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
       - run: npm ci --no-audit --no-fund && npm run build && npm run android:sync
       - run: chmod +x android/gradlew && cd android && node ../scripts/ci-run.mjs ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug assembleLocal
+      - name: Print lint errors when the build fails
+        if: failure()
+        run: |
+          for f in android/app/build/reports/lint-results-*.txt; do
+            [ -f "$f" ] && { echo "===== $f"; cat "$f"; }
+          done
       - name: Collect installable APKs
         run: |
           VERSION=$(node -p "require('./package.json').version")
