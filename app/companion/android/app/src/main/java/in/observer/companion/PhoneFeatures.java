@@ -90,7 +90,7 @@ final class PhoneFeatures {
             byte[] data;
             try{int code=c.getResponseCode();if(code!=200)throw new Exception("File unavailable or expired (HTTP "+code+").");data=NativeHttp.read(c.getInputStream(),64*1024*1024);}
             finally{c.disconnect();}
-            if(!data.length)throw new Exception("That file is empty.");
+            if(data.length==0)throw new Exception("That file is empty.");
             java.io.File out=new java.io.File(new java.io.File(a.getCacheDir(),"shared"),name);
             out.getParentFile().mkdirs();
             try(java.io.OutputStream write=new java.io.FileOutputStream(out)){write.write(data);}

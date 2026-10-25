@@ -8,7 +8,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
-import androidx.core.app.NotificationManagerCompat;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.UUID;
@@ -127,7 +126,7 @@ public final class QuickActionService extends android.app.Service {
             .setContentIntent(tap).setAutoCancel(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE).build();
         try {
-            NotificationManagerCompat.from(this).notify(4101, n);
+            getSystemService(NotificationManager.class).notify(4101, n);
         } catch (SecurityException ignored) { /* Permission revoked between start and answer. */ }
     }
 
