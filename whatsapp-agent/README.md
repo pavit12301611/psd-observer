@@ -48,6 +48,7 @@ model that fits the machine — all from that one file.
 |---|---|
 | `observer.sh install` | first-time install (curl tarball, no git) |
 | `observer.sh update` | update code, keeps `.env` / login / `data/` |
+| `observer.sh update --app --bump` | agent **and** phone app in one go: rebuilds the companion, publishes a signed OTA bundle paired phones fetch on their next check (new APK still needs `npm run android:debug`) |
 | `observer.sh models …` | Hugging Face GGUF: list, recommend, download, serve, wire |
 | `observer.sh voice …` | JARVIS voice: `setup` (Piper en_GB), `whisper`, `call-engine` + `link-voip` (asli WhatsApp call), `status` / `test` |
 | `observer.sh doctor` | what is broken + the exact fix |

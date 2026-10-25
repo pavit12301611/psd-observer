@@ -129,6 +129,18 @@ bash /tmp/observer.sh update --dir ~/observer-agent
 bash /tmp/observer.sh update --check          # sirf version compare
 ```
 
+**App + service, ek hi command** (agent code, service restart, aur phone app
+teeno — phone app ka signed OTA bundle ban ke paired phones ko chala jaata
+hai, APK install ki zaroorat nahi):
+
+```bash
+bash /tmp/observer.sh update --app --bump
+#   --app   : companion app rebuild + publish karo
+#   --bump  : patch version badhao (warna phones ko naya bundle offer nahi hoga)
+#   --app-dir /path/to/app/companion  → app source kahin aur ho to
+#   --notes "kya naya"                → release notes
+```
+
 (Path apna actual install path daalo — jahan `package.json` hai wahan.
 Default `~/observer-agent`. Pata nahi?
 `find ~ -name package.json -path "*observer-agent*" 2>/dev/null`)
