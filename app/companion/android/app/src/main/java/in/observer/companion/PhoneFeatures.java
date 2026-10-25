@@ -52,7 +52,13 @@ final class PhoneFeatures {
     boolean ui(String id,String method,JSONObject p){
         if(method.equals("consumeShare")){JSONObject data=share;share=null;result.send(id,data,null);return true;}
         // The tile and widget run one read-only command; the phone owns that choice.
-        if(method.equals("getQuickAction")||method.equals("setQuickAction")){quickAction(id,method,p);return true;}
+        if(method.equals("getQuickAction")||method.equals("setQuickAction")){
+            if(method.equals("setQuickAction")){
+                String command=p.optString("command");boolean known=false;
+                for(String allowed:QuickActionService.ALLOWED)known|=allowed.equals(command);
+                if(!known){result.send(id,null,"That command is not in the quick-action list.");return true;}
+            }
+            quickAction(id,method,p);return true;}
         if(method.equals("scanQr")){if(scanId!=null){result.send(id,null,"A QR scan is already open.");return true;}scanId=id;a.startActivityForResult(new Intent(a,QrActivity.class),SCAN);return true;}
         if(method.equals("saveText")){if(saving!=null){result.send(id,null,"Finish the current save first.");return true;}String text=p.optString("text");if(text.length()>2*1024*1024){result.send(id,null,"Export is too large.");return true;}saving=p;saveId=id;Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,p.optString("name","observer-export.json").replaceAll("[\\\\/\\r\\n]","_"));a.startActivityForResult(intent,SAVE_TEXT);return true;}
         if(method.equals("startAlerts")){
@@ -79,9 +85,9 @@ final class PhoneFeatures {
     }catch(Exception e){result.send(id,null,e.getMessage());}}
     private void quickAction(String id,String method,JSONObject p){try{
         if(method.equals("getQuickAction")){result.send(id,new JSONObject().put("command",QuickActionService.command(a)),null);return;}
-        String command=p.optString("command");boolean known=false;for(String allowed:QuickActionService.ALLOWED)known|=allowed.equals(command);
-        if(!known){result.send(id,null,"That command is not in the quick-action list.");return;}
-        QuickActionService.save(a,command);result.send(id,new JSONObject().put("command",command),null);
+        String command=p.optString("command");
+        QuickActionService.save(a,command);
+        result.send(id,new JSONObject().put("command",command),null);
     }catch(Exception e){result.send(id,null,e.getMessage());}}
     /** Send a PC file out through the phone's own share sheet. */
     private void shareFile(String id,JSONObject p){

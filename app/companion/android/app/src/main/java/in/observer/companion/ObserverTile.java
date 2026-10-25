@@ -13,8 +13,9 @@ import android.widget.Toast;
 public final class ObserverTile extends TileService {
  @Override public void onClick(){
   super.onClick();
-  if(!paired(this)){Toast.makeText(this,"Pair your PC first.",Toast.LENGTH_LONG).show();openChat(this);return;}
-  try{startForegroundService(new Intent(this,QuickActionService.class));openChat(this);}
+  Context c=this;
+  if(!paired(c)){Toast.makeText(c,"Pair your PC first.",Toast.LENGTH_LONG).show();openChat(c);return;}
+  try{c.startForegroundService(new Intent(c,QuickActionService.class));openChat(c);}
   catch(Exception e){Toast.makeText(this,"Could not start that quick action.",Toast.LENGTH_LONG).show();}
  }
  /** Collapse the shade and land the owner on the chat page, whatever the API level. */
