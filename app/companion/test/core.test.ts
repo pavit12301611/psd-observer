@@ -108,6 +108,21 @@ describe("mobile correctness and privacy", () => {
     }
     expect(displayRequest("/time")).toEqual({ text: "/time", private: false });
   });
+  it("keeps the PC-delivered update preference across boots and defaults it on", () => {
+    expect(emptyState().preferences.autoAppUpdate).toBe(true);
+    expect(
+      normaliseState({ preferences: { autoAppUpdate: false } }).preferences
+        .autoAppUpdate,
+    ).toBe(false);
+    expect(
+      normaliseState({ preferences: { autoAppUpdate: "yes" } }).preferences
+        .autoAppUpdate,
+    ).toBe(true);
+    // An absent key means "on", so existing installs get automatic updates.
+    expect(normaliseState({ preferences: {} }).preferences.autoAppUpdate).toBe(
+      true,
+    );
+  });
   it.each([
     null,
     [],

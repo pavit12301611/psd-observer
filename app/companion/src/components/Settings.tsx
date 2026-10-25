@@ -450,6 +450,21 @@ export default function Settings({
         Include official beta releases in update checks. Installation still
         needs your approval.
       </label>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={Boolean(p.autoAppUpdate ?? true)}
+          onChange={(e) => update({ autoAppUpdate: e.target.checked })}
+        />
+        Install interface updates from my PC automatically. Your PC signs a web
+        bundle, this phone verifies it, installs it and reloads — no APK, no
+        uninstall. A version that fails to start is rolled back on its own.
+        <small>
+          Runs on app start and every 30 minutes, never while a request,
+          dictation or voice turn is in flight. Turn off to install by hand
+          above.
+        </small>
+      </label>
       <footer className="settings-footer">
         <span>observer</span>
         <p>

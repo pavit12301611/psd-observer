@@ -118,7 +118,7 @@ export function clearUpdateMarker(dataDir) {
 }
 
 /** The WhatsApp message itself. Pure on purpose (easy to test). */
-export function buildUpdateMessage({ from, to, seconds, changes = [], brains }) {
+export function buildUpdateMessage({ from, to, seconds, changes = [], brains, app = null }) {
   const head = from && from !== to
     ? `🔄 *Observer updated* · ${from} → ${to}${Number.isFinite(seconds) ? ` · ${humanSeconds(seconds)}` : ''}`
     : `🔄 *Observer updated* · ${to || '?'}${Number.isFinite(seconds) ? ` · ${humanSeconds(seconds)}` : ''}`;
@@ -131,6 +131,11 @@ export function buildUpdateMessage({ from, to, seconds, changes = [], brains }) 
     lines.push('_Release notes nahi mile — /help se naye commands dekho._');
   }
   if (brains?.text) lines.push('', brains.text);
+  // The phone app rides the same update: a signed web bundle is already
+  // waiting on this PC, so paired phones install it themselves.
+  if (app?.version) {
+    lines.push('', `📱 *Phone app ${app.version}* bhi ready hai — Observer app kholo, update apne aap install ho jayega (APK install ki zaroorat nahi).`);
+  }
   lines.push('', '_Purani settings, WhatsApp login aur data sab waise hi hain._');
   return lines.join('\n');
 }
@@ -188,6 +193,7 @@ export async function announceUpdate({
     to: version,
     seconds,
     changes,
+    app: markerForThis?.app && markerForThis.app.version ? markerForThis.app : null,
     brains: brainText ? { text: brainText } : null,
   });
 

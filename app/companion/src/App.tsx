@@ -63,6 +63,8 @@ import {
   ApiError,
   SessionChanged,
   markUpdateHealthy,
+  applyPcUpdate,
+  checkPcUpdate,
 } from "./core/api";
 import { cancelSpeech, dictate, speak } from "./core/speech";
 import { attachment, displayRequest } from "./core/validation";
@@ -356,6 +358,44 @@ export default function App() {
     if (atBottom) end.current?.scrollIntoView({ block: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, busy, page]);
+  // ── PC-delivered interface updates (no APK, no uninstall) ────────────────
+  // `observer.sh update --app` on the PC packs a signed web bundle; paired
+  // phones are offered it here and install it themselves. Applied only while
+  // nothing is in flight, and the app reloads once the new bundle is active —
+  // a bundle that fails to boot is swapped back natively (WebUpdate).
+  useEffect(() => {
+    if (!profile || !isNative() || state.preferences.autoAppUpdate === false)
+      return;
+    let alive = true;
+    const autoUpdate = async () => {
+      // Never interrupt a request, a dictation or a voice turn.
+      if (document.hidden || sending.current || busy || voiceOpen) return;
+      try {
+        const check = await checkPcUpdate();
+        if (!alive || !check?.available) return;
+        const applied = await applyPcUpdate();
+        if (!alive) return;
+        notify(
+          `Interface ${applied?.installed || check.version} installed — reloading.`,
+        );
+        window.setTimeout(() => window.location.reload(), 1500);
+      } catch {
+        /* Silent on purpose: Settings keeps the manual path and the reason. */
+      }
+    };
+    const boot = window.setTimeout(() => void autoUpdate(), 3000);
+    const timer = window.setInterval(() => void autoUpdate(), 30 * 60 * 1000);
+    const visible = () => {
+      if (!document.hidden) void autoUpdate();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      alive = false;
+      window.clearTimeout(boot);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [profile, busy, voiceOpen, state.preferences.autoAppUpdate, notify]);
   const toBottom = () => {
     setAtBottom(true);
     end.current?.scrollIntoView({ block: "end", behavior: "smooth" });

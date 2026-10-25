@@ -136,6 +136,19 @@ test('updates: the message keeps a title plus six bullets, not five', () => {
   assert.match(text, /2\.7\.0 → 2\.8\.0 · 1m 2s/);
 });
 
+test('updates: a phone bundle published with the same update is announced, and its absence is silent', () => {
+  const withApp = buildUpdateMessage({
+    from: '2.7.0', to: '2.8.0', seconds: 5, changes: ['one'],
+    app: { version: '1.5.1' },
+  });
+  assert.match(withApp, /📱 \*Phone app 1\.5\.1\* bhi ready hai/);
+  assert.match(withApp, /APK install ki zaroorat nahi/);
+  const withoutApp = buildUpdateMessage({
+    from: '2.7.0', to: '2.8.0', seconds: 5, changes: ['one'],
+  });
+  assert.ok(!withoutApp.includes('Phone app'), 'no bundle, no phone line');
+});
+
 // ── /usage ──────────────────────────────────────────────────────────────────
 
 test('usage: counts per model and per provider for the day', () => {

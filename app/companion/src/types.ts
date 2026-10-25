@@ -58,6 +58,8 @@ export interface Conversation {
 export interface Preferences {
   appLock?: boolean;
   betaUpdates?: boolean;
+  /** Install PC-delivered signed interface bundles automatically (no APK). */
+  autoAppUpdate?: boolean;
   theme: Theme;
   language: "en-IN" | "hi-IN";
   saveHistory: boolean;

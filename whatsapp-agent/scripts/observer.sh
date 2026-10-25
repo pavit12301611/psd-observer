@@ -281,6 +281,9 @@ EOF
 
 cmd_update() {
   local dir="" check=0 with_app=0 bump=0 app_dir="" notes=""
+  # Written by update_companion_app(); read by this function for the receipt.
+  APP_RESULT_LINE=""
+  APP_UPDATE_VERSION=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dir)       dir="${2:-}"; [ -n "$dir" ] || die "--dir needs a path"; shift 2 ;;
@@ -382,21 +385,31 @@ cmd_update() {
   printf '%s\n' "$BRANCH" > "$dest/.observer-branch" 2>/dev/null || true   # sticky: future updates track THIS branch
   info "update branch: ${BRANCH} (yaad rakh liya — .observer-branch)"
 
+  # The phone app rides the same update: build and publish it BEFORE the
+  # restart, so the receipt below can name the bundle the phones will be
+  # offered. A failed app build must not stop the service restart — the agent
+  # code is already on disk, so warn and carry on.
+  if [ "$with_app" -eq 1 ]; then
+    update_companion_app "$dest" "$app_dir" "$bump" "$notes" "$(dirname "$src")" \
+      || warn "phone app update failed — the agent update still completed (re-run: bash observer.sh update --app --bump)"
+  fi
+
   # Leave a receipt the new process can read at startup: data/ survives
-  # updates, so the "updated!" WhatsApp message knows the real duration.
+  # updates, so the "updated!" WhatsApp message knows the real duration and
+  # can tell the owner the phone bundle is waiting.
   local elapsed=$(( $(date +%s) - started_epoch ))
+  local app_json=""
+  if [ -n "${APP_UPDATE_VERSION:-}" ]; then
+    app_json=",\"app\":{\"version\":\"${APP_UPDATE_VERSION}\"}"
+  fi
   mkdir -p "$dest/data"
-  printf '{"from":"%s","to":"%s","at":"%s","seconds":%s,"via":"observer.sh"}\n' \
-    "${old:-}" "${new:-}" "$(date -Is)" "$elapsed" > "$dest/data/last-update.json" 2>/dev/null \
+  printf '{"from":"%s","to":"%s","at":"%s","seconds":%s,"via":"observer.sh"%s}\n' \
+    "${old:-}" "${new:-}" "$(date -Is)" "$elapsed" "$app_json" > "$dest/data/last-update.json" 2>/dev/null \
     || warn "could not write data/last-update.json (update still fine)"
 
   restart_agent "$dest"
 
-  local app_line=""
-  if [ "$with_app" -eq 1 ]; then
-    update_companion_app "$dest" "$app_dir" "$bump" "$notes" "$(dirname "$src")" || exit 1
-    app_line="$APP_RESULT_LINE"
-  fi
+  local app_line="${APP_RESULT_LINE:-}"
 
   cat <<EOF
 
@@ -421,6 +434,7 @@ EOF
 update_companion_app() {
   local dest="$1" want_dir="$2" do_bump="$3" notes="$4" src_root="${5:-}"
   APP_RESULT_LINE=""
+  APP_UPDATE_VERSION=""
   have node || die "node is required to build the phone app: sudo dnf install nodejs"
 
   # Find the companion source, freshest first: an explicit flag, the archive
@@ -482,6 +496,7 @@ update_companion_app() {
     || die "packing the app bundle failed — the service keeps running the previous bundle"
   ok "phones will be offered v${version} on their next update check"
   info "APK chahiye to: cd \"$app\" && npm run android:debug"
+  APP_UPDATE_VERSION="$version"
   APP_RESULT_LINE="v${version} — OTA bundle published (new APK: npm run android:debug)"
   # The fetched archive (if any) is scratch; the packed bundle already lives
   # in the agent's data/ directory.

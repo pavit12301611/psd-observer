@@ -10,6 +10,7 @@ export const defaultPreferences: Preferences = {
   chatMode: "agent",
   appLock: false,
   betaUpdates: true,
+  autoAppUpdate: true,
 };
 export const newConversation = (
   mode: "agent" | "cloud" = "agent",
@@ -47,6 +48,7 @@ export function normaliseState(input: unknown): LocalState {
       "screenPrivacy",
       "appLock",
       "betaUpdates",
+      "autoAppUpdate",
     ] as const)
       if (typeof prefs[key] === "boolean") fresh.preferences[key] = prefs[key];
   }

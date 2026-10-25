@@ -141,6 +141,17 @@ bash /tmp/observer.sh update --app --bump
 #   --notes "kya naya"                → release notes
 ```
 
+**Phone pe apne aap:** bundle publish hote hi tumhe WhatsApp pe
+`📱 Phone app 1.5.1 bhi ready hai` message aa jaayega. Observer app kholo —
+3 second baad check hoke install + reload ho jaayega (ya 30 min mein khud
+check karega). Koi uninstall/download nahi. Naya version boot na ho paye to
+purana apne aap wapas aa jaata hai.
+
+> **Sirf pehli baar:** jo APK abhi phone pe hai usmein ye auto-update code
+> nahi hai. Ek baar Settings → *PC interface updates* → Check → Install
+> karna hoga (ya naya APK ek baar install karna hoga). Uske baad hamesha
+> automatic.
+
 (Path apna actual install path daalo — jahan `package.json` hai wahan.
 Default `~/observer-agent`. Pata nahi?
 `find ~ -name package.json -path "*observer-agent*" 2>/dev/null`)
