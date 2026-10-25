@@ -1,7 +1,7 @@
 import type { Conversation, LocalState, Message, Preferences } from "../types";
 import { isNative, nativeCall } from "./native";
 export const defaultPreferences: Preferences = {
-  theme: "light",
+  theme: "dark",
   language: "en-IN",
   saveHistory: true,
   readAloud: false,

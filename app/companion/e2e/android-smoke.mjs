@@ -76,7 +76,7 @@ try {
   assert.ok(!encrypted.includes('emulator fixture hello'), 'history must not be plaintext');
   assert.equal(await page.evaluate(() => Object.values(localStorage).some((s) => /emulator-fixture-token|123456/.test(s))), false);
   await page.reload(); await expect(page.getByRole('button', { name: 'PC connected', exact: true })).toBeVisible(); await expect(page.getByText('Native bridge round-trip succeeded. No real PC action was executed.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Switch to dark theme' }).click(); await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark'); await page.screenshot({ path: 'android-smoke-results/02-native-dark-chat.png' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark'); await page.screenshot({ path: 'android-smoke-results/02-native-dark-chat.png' });
   stage='native-share';
   // Android-native share intent must remain a reviewed, read-only draft.
   adb('shell','am','start','-n',packageName+'/in.observer.companion.MainActivity','-a','android.intent.action.SEND','-t','text/plain','--es','android.intent.extra.TEXT','/yes');

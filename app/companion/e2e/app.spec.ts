@@ -223,8 +223,10 @@ test("theme and every destination, including More, work and fit each orientation
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  // Dark is the default appearance now; the toggle still works both ways.
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Switch to light theme" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   for (const [target, heading] of [
     ["PC control", "PC control"],
     ["Tasks", "Room to focus."],
@@ -245,8 +247,8 @@ test("theme and every destination, including More, work and fit each orientation
   // The theme segmented control lives in Settings, so walk there explicitly:
   // More now holds every route, and the loop above ends on More.
   await go(page, "Settings");
-  await page.getByRole("button", { name: "Light theme", exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 test("searchable capabilities only draft; disconnected sends never run or silently queue PC actions", async ({
   page,
