@@ -165,12 +165,24 @@ async function connect(page: Page) {
     page.getByRole("button", { name: "PC connected", exact: true }),
   ).toBeVisible();
 }
-const go = (page: Page, name: string) =>
-  page
-    .getByRole("navigation", { name: /Workspace|Mobile navigation/ })
+const nav = (page: Page) =>
+  page.getByRole("navigation", { name: /Workspace|Mobile navigation/ });
+// Phones show four destinations; Files and Settings are rows inside More.
+// One helper keeps every test working on both layouts.
+const go = async (page: Page, name: string) => {
+  const direct = nav(page)
     .getByRole("button", { name, exact: true })
-    .filter({ visible: true })
+    .filter({ visible: true });
+  if (await direct.count()) return direct.first().click();
+  const more = nav(page)
+    .getByRole("button", { name: "More", exact: true })
+    .filter({ visible: true });
+  if (await more.count()) await more.first().click();
+  await page
+    .getByRole("button", { name: new RegExp(`^${name}\\b`) })
+    .first()
     .click();
+};
 
 test("clean offline shell has no gradients, horizontal overflow, fake status or external font/model requests", async ({
   page,
@@ -207,19 +219,20 @@ test("clean offline shell has no gradients, horizontal overflow, fake status or 
     page.getByRole("button", { name: "Connect PC", exact: true }),
   ).toBeVisible();
 });
-test("theme and all five functional pages work and fit each phone orientation", async ({
+test("theme and every destination, including More, work and fit each orientation", async ({
   page,
 }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  for (const [nav, heading] of [
+  for (const [target, heading] of [
     ["PC control", "PC control"],
     ["Tasks", "Room to focus."],
     ["Files", "Bring it together."],
     ["Settings", "On your terms."],
+    ["More", "More"],
   ]) {
-    await go(page, nav);
+    await go(page, target);
     await expect(
       page.getByRole("heading", { name: heading, exact: true }),
     ).toBeVisible();
@@ -229,6 +242,9 @@ test("theme and all five functional pages work and fit each phone orientation", 
       ),
     ).toBe(true);
   }
+  // The theme segmented control lives in Settings, so walk there explicitly:
+  // More now holds every route, and the loop above ends on More.
+  await go(page, "Settings");
   await page.getByRole("button", { name: "Light theme", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });

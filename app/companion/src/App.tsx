@@ -9,6 +9,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  ArrowDown,
   ArrowDownToLine,
   ArrowRight,
   ArrowUp,
@@ -16,6 +17,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleHelp,
   Command,
   Copy,
@@ -33,7 +35,7 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  Settings as SettingsIcon,
+  Menu as MoreIcon,
   ShieldCheck,
   Sparkles,
   Square,
@@ -72,6 +74,7 @@ import {
 } from "./core/storage";
 import { isNative, nativeCall } from "./core/native";
 import type {
+  Delivery,
   Project,
   AppState,
   Attachment,
@@ -96,17 +99,26 @@ const History = lazy(() => import("./components/History"));
 const PCControl = lazy(() => import("./components/PCControl"));
 const Tasks = lazy(() => import("./components/Tasks"));
 const Files = lazy(() => import("./components/Files"));
+const More = lazy(() => import("./components/More"));
 const AttachmentEditor = lazy(() => import("./components/AttachmentEditor"));
 const WorkspaceHub = lazy(() => import("./components/WorkspaceHub"));
 const Settings = lazy(() => import("./components/Settings"));
 const Voice = lazy(() => import("./components/Voice"));
 const ModelMode = lazy(() => import("./components/ModelMode"));
-const pages = [
+// Phones get four big destinations; everything else lives behind More, which
+// lists each destination with its current state instead of a seven-tab modal.
+const mobilePages = [
+  { id: "chat", label: "Chat", icon: MessageCircle },
+  { id: "tasks", label: "Tasks", icon: ListChecks },
+  { id: "pc", label: "PC control", icon: Monitor },
+  { id: "more", label: "More", icon: MoreIcon },
+] as const;
+const deskPages = [
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "pc", label: "PC control", icon: Monitor },
   { id: "tasks", label: "Tasks", icon: ListChecks },
   { id: "files", label: "Files", icon: FolderOpen },
-  { id: "settings", label: "Settings", icon: SettingsIcon },
+  { id: "more", label: "More", icon: MoreIcon },
 ] as const;
 const suggestions = [
   {
@@ -152,17 +164,22 @@ export default function App() {
     [drawer, setDrawer] = useState(false),
     [voiceOpen, setVoiceOpen] = useState(false),
     [menuOpen, setMenuOpen] = useState(false),
+    [attachOpen, setAttachOpen] = useState(false),
     [connectionError, setConnectionError] = useState("");
   const [cloud, setCloud] = useState<CloudStatus>({ configured: false }),
     [modeOpen, setModeOpen] = useState(false);
   const [editImage, setEditImage] = useState(false);
   const [hubOpen, setHubOpen] = useState(false),
+    [hubTab, setHubTab] = useState<string>("projects"),
     [pairSeed, setPairSeed] = useState<string>(),
     [sharedReference, setSharedReference] = useState(false);
   const [effectiveDark, setEffectiveDark] = useState(false);
   const [toast, setToast] = useState(""),
     [copied, setCopied] = useState("");
+  const [atBottom, setAtBottom] = useState(true),
+    [shown, setShown] = useState(30);
   const textarea = useRef<HTMLTextAreaElement>(null),
+    scroller = useRef<HTMLDivElement>(null),
     fileInput = useRef<HTMLInputElement>(null),
     end = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state),
@@ -333,9 +350,41 @@ export default function App() {
       document.removeEventListener("visibilitychange", visible);
     };
   }, [profile, page, busy, refresh]);
+  // Follow the conversation only while the owner is at the bottom; scrolling up
+  // to read must not be yanked back by an incoming reply.
   useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" });
+    if (atBottom) end.current?.scrollIntoView({ block: "end" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, busy, page]);
+  const toBottom = () => {
+    setAtBottom(true);
+    end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  };
+  // A half-written message is the most expensive thing on this screen, so a
+  // draft survives reloads, crashes and losing the network. Stored per thread,
+  // on the device only — never sent until you press send.
+  useEffect(() => {
+    try {
+      const key = `observer-draft:${state.activeId}`;
+      const text = draft.trim() ? draft : "";
+      if (text) localStorage.setItem(key, text);
+      else localStorage.removeItem(key);
+    } catch {
+      /* storage full or blocked: the draft simply stays in memory */
+    }
+  }, [draft, state.activeId]);
+  useEffect(() => {
+    setShown(30);
+  }, [state.activeId]);
+  useEffect(() => {
+    try {
+      setDraft(localStorage.getItem(`observer-draft:${state.activeId}`) || "");
+    } catch {
+      setDraft("");
+    }
+    // Thread switch only; typing must not re-read storage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeId]);
   useEffect(() => {
     const el = textarea.current;
     if (el) {
@@ -398,6 +447,21 @@ export default function App() {
     setCommandsOpen(false);
     setDrawer(false);
     setTimeout(() => textarea.current?.focus(), 50);
+  }
+  function markDelivery(conversationId: string, id: string, delivery: Delivery) {
+    setState((s) => ({
+      ...s,
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === id ? { ...m, delivery } : m,
+              ),
+            }
+          : c,
+      ),
+    }));
   }
   function append(
     message: Message,
@@ -527,6 +591,7 @@ export default function App() {
           : display.text,
         ts: Date.now(),
         private: display.private,
+        delivery: "sending",
         images: upload?.preview ? [upload.preview] : undefined,
       },
       cId,
@@ -582,6 +647,7 @@ export default function App() {
         };
       }
       if (generation !== session.current) return;
+      markDelivery(cId, id, "sent");
       append(
         {
           ...reply,
@@ -623,6 +689,7 @@ export default function App() {
         [400, 403, 409, 413, 423].includes(e.status)
       )
         await forgetJob(id);
+      markDelivery(cId, id, "failed");
       setTasks((items) =>
         items.map((t) =>
           t.id === id ? { ...t, state: "unknown", ended: Date.now() } : t,
@@ -915,13 +982,17 @@ export default function App() {
       window.removeEventListener("observer-unlocked", unlocked);
     };
   }, [loaded, notify, refresh]);
-  const selectedLabel = pages.find((p) => p.id === page)?.label || "Chat";
+  // Long threads render a window, not every message: 4 GB phone, no jank.
+  const visibleMessages = messages.slice(Math.max(0, messages.length - shown));
+  const selectedLabel = [...deskPages, ...mobilePages].find(
+    (p) => p.id === page,
+  )?.label || "Chat";
   const nav = (mobile = false) => (
     <nav
       aria-label={mobile ? "Mobile navigation" : "Workspace"}
       className={mobile ? "bottom-nav" : "side-nav"}
     >
-      {pages.map(({ id, label, icon: Icon }) => (
+      {(mobile ? mobilePages : deskPages).map(({ id, label, icon: Icon }) => (
         <button
           key={id}
           aria-label={label}
@@ -1085,6 +1156,13 @@ export default function App() {
               </span>
             </button>
             <IconButton
+              label="Search or run a command"
+              className="palette-button"
+              onClick={() => setCommandsOpen(true)}
+            >
+              <Command size={18} />
+            </IconButton>
+            <IconButton
               label={
                 effectiveDark ? "Switch to light theme" : "Switch to dark theme"
               }
@@ -1152,7 +1230,16 @@ export default function App() {
         >
           {page === "chat" ? (
             <section className="chat-page" aria-label="Conversation">
-              <div className="chat-scroll">
+              <div
+                className="chat-scroll"
+                ref={scroller}
+                onScroll={() => {
+                  const el = scroller.current;
+                  if (!el) return;
+                  const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+                  setAtBottom(gap < 90);
+                }}
+              >
                 {!messages.length ? (
                   <div className="welcome">
                     <div className="welcome-mark">
@@ -1202,7 +1289,17 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="messages">
-                    {messages.map((m) => (
+                    {messages.length > shown && (
+                      <button
+                        className="earlier-messages"
+                        onClick={() => setShown((n) => n + 40)}
+                      >
+                        <ChevronUp size={14} />
+                        Show {messages.length - shown} earlier{" "}
+                        {messages.length - shown === 1 ? "message" : "messages"}
+                      </button>
+                    )}
+                    {visibleMessages.map((m) => (
                       <article className={`message ${m.role}`} key={m.id}>
                         <div className="message-avatar">
                           {m.role === "assistant" ? <Mark size={19} /> : "You"}
@@ -1268,6 +1365,22 @@ export default function App() {
                               <ArrowDownToLine size={17} />
                             </button>
                           )}
+                          {m.role === "user" && m.delivery && (
+                            <p
+                              className={`delivery ${m.delivery}`}
+                              title={
+                                m.delivery === "failed"
+                                  ? "The PC never confirmed this. Check Tasks before sending it again."
+                                  : undefined
+                              }
+                            >
+                              {m.delivery === "sending"
+                                ? "Sending…"
+                                : m.delivery === "sent"
+                                  ? "Delivered to your PC"
+                                  : "Not delivered — check Tasks"}
+                            </p>
+                          )}
                           {m.role === "assistant" && (
                             <div className="message-tools">
                               <IconButton
@@ -1321,6 +1434,12 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {!atBottom && messages.length > 0 && (
+                <button className="jump-latest" onClick={toBottom}>
+                  <ArrowDown size={15} />
+                  Latest
+                </button>
+              )}
               <div className="composer-area">
                 <div className="composer-context">
                   <button
@@ -1409,8 +1528,8 @@ export default function App() {
                   <div className="composer-controls">
                     <div>
                       <IconButton
-                        label="Attach a photo or document"
-                        onClick={() => fileInput.current?.click()}
+                        label="Add something to this message"
+                        onClick={() => setAttachOpen(true)}
                       >
                         <Plus size={21} />
                       </IconButton>
@@ -1491,6 +1610,25 @@ export default function App() {
               notice={notify}
               addReply={addReply}
             />
+          ) : page === "more" ? (
+            <More
+              connected={!!profile}
+              state={agentState}
+              host={profile?.baseUrl?.replace(/^https?:\/\//, "") || ""}
+              version={status?.version || ""}
+              deviceCount={null}
+              alertCount={0}
+              dark={effectiveDark}
+              onConnect={() => setPairOpen(true)}
+              onToggleTheme={() =>
+                updatePreferences({ theme: effectiveDark ? "light" : "dark" })
+              }
+              onOpenPage={(next) => setPage(next)}
+              onOpenHub={(target) => {
+                setHubTab(target);
+                setHubOpen(true);
+              }}
+            />
           ) : page === "files" ? (
             <Files
               connected={!!profile}
@@ -1549,8 +1687,47 @@ export default function App() {
             }}
           />
         )}
+        {attachOpen && (
+          <Modal
+            title="Add to this message"
+            subtitle="Files stay on your PC until you pick one."
+            onClose={() => setAttachOpen(false)}
+          >
+            <button
+              className="more-row"
+              onClick={() => {
+                setAttachOpen(false);
+                fileInput.current?.click();
+              }}
+            >
+              <span className="setting-icon">
+                <FileText size={19} />
+              </span>
+              <span className="more-copy">
+                <strong>Photo or document</strong>
+                <small>Picked from this phone, then sent with the message.</small>
+              </span>
+            </button>
+            <button
+              className="more-row"
+              onClick={() => {
+                setAttachOpen(false);
+                setPage("files");
+              }}
+            >
+              <span className="setting-icon">
+                <FolderOpen size={19} />
+              </span>
+              <span className="more-copy">
+                <strong>Files from your PC</strong>
+                <small>Browse what the PC saved for you, then attach one.</small>
+              </span>
+            </button>
+          </Modal>
+        )}
         {hubOpen && (
           <WorkspaceHub
+            initialTab={hubTab}
             connected={!!profile}
             state={agentState}
             onClose={() => setHubOpen(false)}

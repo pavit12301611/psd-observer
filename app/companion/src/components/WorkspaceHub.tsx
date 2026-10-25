@@ -37,6 +37,7 @@ const tools = [
   "remind",
 ] as const;
 export default function WorkspaceHub({
+  initialTab,
   connected,
   state,
   onClose,
@@ -45,6 +46,7 @@ export default function WorkspaceHub({
   recover,
   notice,
 }: {
+  initialTab?: string;
   connected: boolean;
   state: AppState | null;
   onClose: () => void;
@@ -53,7 +55,7 @@ export default function WorkspaceHub({
   recover: (id: string) => void;
   notice: (s: string) => void;
 }) {
-  const [tab, setTab] = useState("projects"),
+  const [tab, setTab] = useState(initialTab || "projects"),
     [projects, setProjects] = useState<Project[]>([]),
     [workflows, setWorkflows] = useState<Workflow[]>([]),
     [devices, setDevices] = useState<PairedDevice[]>([]),

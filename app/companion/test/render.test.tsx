@@ -71,3 +71,59 @@ it("PC control is a fixed stage with a dock, not a scrolling stack of cards", as
   expect(screen.getByLabelText("Enable manual PC input")).toBeTruthy();
   expect(screen.getByLabelText("PC control PIN")).toBeTruthy();
 });
+
+it("More lists every destination with its own state, so no tab hunt is needed", async () => {
+  const { default: More } = await import("../src/components/More");
+  const open = vi.fn(),
+    page = vi.fn(),
+    hub = vi.fn();
+  render(
+    <More
+      connected
+      state={
+        {
+          apiVersion: 1,
+          version: "3.13.0",
+          host: "Fixture PC",
+          platform: "linux",
+          pcControl: true,
+          controlPinRequired: true,
+          active: [],
+          pending: [],
+        } as never
+      }
+      host="192.168.1.12:8787"
+      version="1.5.0"
+      deviceCount={2}
+      alertCount={0}
+      dark={false}
+      onOpenPage={page}
+      onOpenHub={(t) => {
+        hub(t);
+        open();
+      }}
+      onToggleTheme={() => {}}
+      onConnect={() => {}}
+    />,
+  );
+  // One heading, one list: the seven old hub tabs are plain rows now.
+  expect(screen.getByRole("heading", { name: "More" })).toBeTruthy();
+  expect(screen.queryByRole("tab")).toBeNull();
+  // Rows state their value instead of hiding it behind a tap.
+  expect(screen.getAllByText("192.168.1.12:8787").length).toBeGreaterThan(0);
+  expect(screen.getByText("2")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
+  expect(page).toHaveBeenCalledWith("files");
+  fireEvent.click(screen.getByRole("button", { name: /^Alerts/ }));
+  expect(hub).toHaveBeenCalledWith("alerts");
+});
+
+it("every code block carries its own copy button", () => {
+  const write = vi.fn().mockResolvedValue(undefined);
+  Object.assign(navigator, { clipboard: { writeText: write } });
+  const { container } = render(<Markdown text={"```js\nconst a = 1;\n```"} />);
+  const button = screen.getByRole("button", { name: "Copy this code" });
+  fireEvent.click(button);
+  expect(write).toHaveBeenCalledWith("const a = 1;");
+  expect(container.querySelectorAll(".code-block").length).toBe(1);
+});
