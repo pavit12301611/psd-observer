@@ -487,6 +487,78 @@ test("PC tool selection leaves Direct AI in a fresh thread and never forwards to
   ).toEqual([]);
 });
 
+test("automatic mode keeps one chat: PC talk runs on the PC, ordinary talk runs on your own model", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const calls: { method: string; payload: Record<string, unknown> }[] = [];
+    (window as unknown as { fixtureCalls: typeof calls }).fixtureCalls = calls;
+    window.ObserverAndroid = {
+      postMessage: (raw) => {
+        const p = JSON.parse(raw);
+        calls.push(p);
+        let data: unknown = true;
+        if (p.method === "cloudStatus")
+          data = { configured: true, provider: "fixture", model: "fixture" };
+        if (p.method === "cloudChat")
+          data = { ok: true, text: "Direct AI fixture reply." };
+        setTimeout(
+          () =>
+            window.dispatchEvent(
+              new CustomEvent("observer-native-result", {
+                detail: { id: p.id, ok: true, data },
+              }),
+            ),
+          0,
+        );
+      },
+    };
+  });
+  const f = await fixture(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator(".model-chip")).toContainText("Automatic");
+
+  // PC talk switches to the paired PC inside the same chat.
+  await page.getByLabel("Message Observer").fill("mere laptop pe kaam kar");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.locator(".route-chip").last()).toHaveText("PC");
+  expect(
+    f.requests.some(
+      (r) => r.path === "/api/app/jobs" && r.body.text === "mere laptop pe kaam kar",
+    ),
+  ).toBe(true);
+
+  // Ordinary talk stays on Direct AI, and the PC's answer is masked on the way.
+  await page.getByLabel("Message Observer").fill("explain black holes simply");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.locator(".route-chip").last()).toHaveText("Direct AI");
+  const cloud = await page.evaluate(() =>
+    (
+      window as unknown as {
+        fixtureCalls: {
+          method: string;
+          payload: { messages: { role: string; content: string }[] };
+        }[];
+      }
+    ).fixtureCalls.filter((c) => c.method === "cloudChat"),
+  );
+  expect(cloud).toHaveLength(1);
+  const sent = cloud[0].payload.messages;
+  expect(sent[sent.length - 1]).toEqual({
+    role: "user",
+    content: "explain black holes simply",
+  });
+  expect(sent.some((m) => /Handled on your PC/i.test(m.content))).toBe(true);
+  expect(sent.some((m) => m.content.includes("A clear answer."))).toBe(false);
+  // No second PC job: the cloud turn never touched the machine.
+  expect(
+    f.requests.filter(
+      (r) => r.path === "/api/app/jobs" && r.body.text === "explain black holes simply",
+    ),
+  ).toHaveLength(0);
+});
+
 test("normal text survives an aborted acceptance response and recovers without a second execution POST", async ({
   page,
 }) => {

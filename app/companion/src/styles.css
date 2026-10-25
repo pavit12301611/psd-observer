@@ -490,6 +490,14 @@ time,
   font-size: 13px;
   line-height: 1.9;
 }
+.welcome > .auto-note {
+  margin: 14px 0 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.75;
+}
 .suggestion-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -730,6 +738,25 @@ time,
   color: var(--muted);
   font-weight: 400;
   letter-spacing: 0;
+}
+/* Which engine answered this turn: engine name, not a state colour. */
+.route-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.route-chip.cloud {
+  color: var(--ink);
+  border-color: var(--muted);
 }
 .markdown,
 .plain-message {
