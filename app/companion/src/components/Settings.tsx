@@ -20,6 +20,7 @@ import {
   Fingerprint,
   Gauge,
   LoaderCircle,
+  Zap,
   Check,
   ExternalLink,
 } from "lucide-react";
@@ -41,6 +42,16 @@ import {
 } from "../core/api";
 import { isNative, nativeCall, openExternal } from "../core/native";
 import { Modal, SectionHeading, SettingRow } from "./ui";
+/** The only commands the tile and widget can run. Read-only reports. */
+const QUICK_ACTIONS = [
+  "/status",
+  "/usage",
+  "/todo",
+  "/apps",
+  "/pending",
+  "/audit",
+  "/routine",
+];
 export default function Settings({
   onTools,
   preferences: p,
@@ -125,6 +136,21 @@ export default function Settings({
       setLockBusy(false);
     }
   }
+  // The tile/widget quick action: one read-only command, chosen here.
+  const [quickAction, setQuickAction] = useState("/status"),
+    [quickNote, setQuickNote] = useState("");
+  useEffect(() => {
+    if (!isNative()) return;
+    let alive = true;
+    void nativeCall<{ command: string }>("getQuickAction")
+      .then((r) => {
+        if (alive && r?.command) setQuickAction(r.command);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [confirm, setConfirm] = useState<"disconnect" | "history" | null>(null),
     [checking, setChecking] = useState(false),
     [release, setRelease] = useState<Release | null>(null),
@@ -434,6 +460,44 @@ export default function Settings({
         {budgetWarning && (
           <div className="update-note" role="status">
             <p>{budgetWarning}</p>
+          </div>
+        )}
+      </div>
+      <div className="settings-group">
+        <div className="section-label">QUICK ACTION</div>
+        <SettingRow
+          icon={<Zap size={20} />}
+          title="Tile and widget button"
+          description="One read-only command, run without opening the app. The answer arrives as a notification."
+        >
+          <select
+            aria-label="Quick action command"
+            value={quickAction}
+            onChange={(e) => {
+              const command = e.target.value;
+              setQuickAction(command);
+              if (!isNative()) return;
+              void nativeCall<{ command: string }>("setQuickAction", { command })
+                .then((r) => r && setQuickNote(`Quick action set to ${r.command}.`))
+                .catch((e) =>
+                  setQuickNote(
+                    e instanceof Error
+                      ? e.message
+                      : "Could not save the quick action.",
+                  ),
+                );
+            }}
+          >
+            {QUICK_ACTIONS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+        {quickNote && (
+          <div className="update-note" role="status">
+            <p>{quickNote}</p>
           </div>
         )}
       </div>

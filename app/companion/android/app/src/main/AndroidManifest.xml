@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <queries><intent><action android:name="android.speech.RecognitionService" /></intent><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>
     <application android:label="${appLabel}" android:theme="@style/AppTheme" android:icon="@drawable/observer_icon" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true">
@@ -18,6 +19,7 @@
         </activity>
         <activity android:name=".QrActivity" android:exported="false" />
         <service android:name=".AlertService" android:exported="false" android:foregroundServiceType="remoteMessaging" />
+        <service android:name=".QuickActionService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name=".ObserverMessagingService" android:exported="false"><intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter></service>
         <provider android:name=".ObserverInitProvider" android:authorities="${applicationId}.observer-init" android:exported="false" android:initOrder="101" />
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />

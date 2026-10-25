@@ -148,7 +148,7 @@ jobs:
         with:
           name: observer-android-apks
           path: app/companion/artifacts/
-      - run: node --test scripts/android-startup.test.mjs scripts/android-credential.test.mjs
+      - run: node --test scripts/android-startup.test.mjs scripts/android-credential.test.mjs scripts/android-quick-action.test.mjs
         working-directory: app/companion
       - name: Resolve preview APK path
         run: echo "OBSERVER_PREVIEW_APK=$PWD/app/companion/artifacts/observer-$(node -p "require('./app/companion/package.json').version")-preview.apk" >> "$GITHUB_ENV"
