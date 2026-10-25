@@ -108,9 +108,14 @@ jobs:
         run: |
           set +e
           (cd android && ./gradlew --no-daemon lintLocal --continue > /tmp/lint.log 2>&1)
-          echo "===== lint-results-local.txt"
-          grep -n -A4 "Error:" android/app/build/reports/lint-results-local.txt 2>/dev/null | head -60
-          echo "===== end"
+          F=android/app/build/reports/lint-results-local.txt
+          if [ ! -f "$F" ]; then
+            echo "::error::no lint report at $F"
+          else
+            grep -h "Error:" "$F" | head -30 | while IFS= read -r l; do
+              echo "::error::${l:0:400}"
+            done
+          fi
           exit 1
       - name: Collect installable APKs
         run: |
