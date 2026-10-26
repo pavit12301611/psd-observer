@@ -19,6 +19,7 @@
 // Pure + injectable: nothing here touches the network, so it is fully testable.
 
 import { brainFailure } from './brainrequest.js';
+import { nullNeedle, confident as needleConfident, NEEDLE_TIERS } from './needle.js';
 
 export const TIERS = ['tiny', 'light', 'standard', 'heavy'];
 export const TIER_RANK = { tiny: 1, light: 2, standard: 3, heavy: 4 };
@@ -379,7 +380,7 @@ export function budgetFor(rank, config = {}) {
 
 // ── the router ───────────────────────────────────────────────────────────────
 
-export function createModelRouter({ config = {}, log = console } = {}) {
+export function createModelRouter({ config = {}, log = console, needle = nullNeedle() } = {}) {
   const catalog = buildCatalog(config);
   const prefer = String(config.routerPrefer || 'local').toLowerCase(); // local | cloud | balanced
   const cooldownBaseMs = Math.max(1, Number(config.modelCooldownMs ?? 120_000) || 120_000);
@@ -423,6 +424,9 @@ export function createModelRouter({ config = {}, log = console } = {}) {
   /**
    * Decide the model order for one request.
    * Returns { tier, rank, complexity, candidates, notes, maxSteps, toolLimit, budgetHit }
+   *
+   * `needleIntent` is an already-resolved intent from needle.js. Pass it through
+   * `planAsync` to have the router resolve it for you.
    */
   function plan(input = {}) {
     const text = String(input.text ?? '');
@@ -443,8 +447,30 @@ export function createModelRouter({ config = {}, log = console } = {}) {
     }
     rank = clampRank(rank);
 
-    const needsTools = input.needsTools === false ? false : Boolean(complexity.needsTools || askedForTools);
+    // ── Needle's second opinion, folded in before anything is selected ──────
+    // The keyword classifier stays the floor: Needle can only *add* a
+    // capability requirement and *lower* the tier by one step, never the
+    // reverse. That asymmetry is deliberate — a capability we forget to ask
+    // for is what breaks (a command sent to a chat-only model is simply
+    // refused), while a tier one notch too high only costs latency, which is
+    // the thing we are trying to save. When Needle is absent or unsure this
+    // block is a no-op and the keyword plan survives untouched.
+    if (input.needleIntent && needleConfident(input.needleIntent)) {
+      const intent = input.needleIntent;
+      const pct = typeof intent.confidence === 'number' ? intent.confidence.toFixed(2) : '?';
+      if (intent.tools && !askedForTools) {
+        notes.push(`needle: needs tools (${pct})`);
+      }
+      const wanted = NEEDLE_TIERS.indexOf(intent.tier) + 1;
+      if (wanted > 0 && wanted < rank) {
+        notes.push(`needle: ${RANK_TIER[rank]} → ${RANK_TIER[wanted]} (${pct})`);
+        rank = wanted;
+      }
+    }
+
+    const needsTools = input.needsTools === false ? false : Boolean(complexity.needsTools || askedForTools || (input.needleIntent?.tools && needleConfident(input.needleIntent)));
     const needsVision = Boolean(complexity.needsVision || input.needsVision || input.image);
+    const web = Boolean(looksLikeWebTask(text) || (input.needleIntent?.web && needleConfident(input.needleIntent)));
 
     const eligible = catalog.filter((m) => {
       if (!m.tools && needsTools) return false;
@@ -560,9 +586,31 @@ export function createModelRouter({ config = {}, log = console } = {}) {
       budgetHit,
       needsTools,
       needsVision,
+      web,
       maxSteps: Number(input.maxSteps ?? budget.maxSteps),
       toolLimit: Number(input.toolLimit ?? budget.toolLimit),
     };
+  }
+
+  /**
+   * plan(), with Needle resolved first.
+   *
+   * Needle is a separate process, so this is the only async entry point. It is
+   * used on the two hot paths (the chat turn and the agent loop) where the
+   * wake-up it saves is worth the few milliseconds it costs. Everywhere else
+   * keeps calling the synchronous plan() and simply never gets a second
+   * opinion, which is the same as today.
+   */
+  async function planAsync(input = {}) {
+    const text = String(input.text ?? '');
+    if (!text.trim() || !config.needleEnabled) return plan(input);
+    let intent = null;
+    try {
+      intent = await needle.intent(text, { timeoutMs: config.needleTimeoutMs });
+    } catch (error) {
+      log?.warn?.(`[needle] ${error?.message ?? error}`);
+    }
+    return plan({ ...input, needleIntent: intent });
   }
 
   // Optional observer (usage.js): told about every call so /usage can show the
@@ -729,6 +777,7 @@ export function createModelRouter({ config = {}, log = console } = {}) {
   return {
     catalog,
     plan,
+    planAsync,
     record,
     isCooling,
     noteDecision,
@@ -746,11 +795,14 @@ export function createModelRouter({ config = {}, log = console } = {}) {
 // messages (a brain that just timed out is not retried on the next one).
 const ROUTERS = new WeakMap();
 
-export function routerFor(config = {}, log = console) {
-  if (!config || typeof config !== 'object') return createModelRouter({ config: {}, log });
+export function routerFor(config = {}, log = console, needle = null) {
+  if (!config || typeof config !== 'object') return createModelRouter({ config: {}, log, needle: needle ?? nullNeedle() });
+  // An injected Needle is per-caller state (it holds a "not installed" latch and
+  // its own config), so it must not be shared through the config-keyed cache.
+  if (needle) return createModelRouter({ config, log, needle });
   let router = ROUTERS.get(config);
   if (!router) {
-    router = createModelRouter({ config, log });
+    router = createModelRouter({ config, log, needle: nullNeedle() });
     ROUTERS.set(config, router);
   }
   return router;

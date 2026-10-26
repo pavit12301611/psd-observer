@@ -34,7 +34,8 @@ import { resolveRefs, absorb, contextStatus, clearContext } from './context.js';
 import { parseCorrection, saveCorrection, applyCorrection, listCorrections } from './corrections.js';
 import { scoreAnswer, bestAnswer } from './answerquality.js';
 import { withSource, extractSources } from './sourcelinks.js';
-import { completeWithFallback, fallbackReply } from './brainfallback.js';
+import { completeWithFallback, fallbackReply, askLaya } from './brainfallback.js';
+import { layaFor } from './laya.js';
 import { makePlan, planStatus, approvePlan, cancelPlan, buildSteps, planReply } from './planpreview.js';
 import { diffBuffers, setBaseline, compareWithBaseline, diffReply, pushBuffer, resetDiff } from './screendiff.js';
 import { extractHighlights, highlightReply } from './highlights.js';
@@ -283,6 +284,29 @@ async function buildStudyPack(topic, ctx) {
     'Revise: `/revise` · Quiz: `/quiz ' + topic + '`',
   ].join('\n');
 }
+/**
+ * The commands a decision model is allowed to pick when every brain is down.
+ *
+ * Read-only and safe-by-construction only. This list is the answer space for
+ * Laya's "which command" question, so it is deliberately narrow: a model
+ * decision must never be able to reach something destructive, and every entry
+ * here only reads state. Anything outside it falls through to the normal
+ * "no brain" hint. All of them still traverse handleCommand, so owner/PIN and
+ * confirmation policy apply exactly as they do for a typed command.
+ */
+const DECISION_COMMANDS = [
+  'status', 'sysinfo', 'ping', 'help',
+  'screenshot', 'shots', 'snapshots', 'screen', 'lookscreen', 'top',
+  'disk', 'battery', 'ip', 'ports', 'wifi', 'bluetooth',
+  'volume', 'vol', 'brightness', 'bright',
+  'todo', 'todos', 'reminders', 'notes', 'memory', 'context',
+  'weather', 'wiki', 'calc', 'time', 'date', 'timer', 'pomo',
+  'brief', 'today', 'recap', 'audit', 'accuracy', 'usage', 'quota',
+  'brains', 'doctor', 'diag', 'jobs', 'clipboard', 'clip',
+  'find', 'fsearch', 'recall', 'ls', 'dir', 'files', 'downloads',
+  'translate', 'define', 'news', 'stats', 'timeline', 'tldr',
+];
+
 const HELP = `🤖 *PSD_Ai (Observer WhatsApp Agent)* — free, owner-only, full PC control
 _No Observer app needed. No paid API. Everything runs on your own PC._
 
@@ -4148,7 +4172,44 @@ ${recapGoal()}`;
       if (fb) return fastReply(fb);
     } catch { /* fall through to hint */ }
     throwIfStopped(activeSignal, 'AI answer');
+    // Every brain failed and wiki had nothing. Ask the decision model what this
+    // message is: a command needs no LLM to run, so "screenshot lo" still works
+    // with every brain offline. A question gets the honest hint, unchanged.
+    if (config.layaEnabled) {
+      try {
+        const acted = await actOnDecision(text, { config, ctx, signal: activeSignal });
+        if (acted) return fastReply(acted);
+      } catch { /* a broken decision must never block the hint */ }
+    }
     return ai.NO_BRAIN_HINT;
+  }
+
+  /**
+   * Turn a confident Laya decision into an actual command run.
+   *
+   * Laya writes no text, so it can only tell us *what kind* of message this is.
+   * When it is sure the message is a command and sure which one, we run it
+   * through the normal handler — which still applies owner/PIN/confirmation
+   * policy, exactly as a typed command would. Anything less than confident
+   * returns null and the caller keeps its existing reply.
+   */
+  async function actOnDecision(text, opts = {}) {
+    const decision = await askLaya(text, {
+      laya: layaFor(opts.config),
+      commandOptions: DECISION_COMMANDS,
+      minProbability: opts.config?.layaMinProbability,
+    });
+    if (!decision?.kind || decision.kind.answer !== 'command') return null;
+    // Acting without asking is a separate, stricter question. If Laya is not
+    // sure, we say so rather than running something the owner did not ask for.
+    if (decision.act && decision.act.answer !== true) return null;
+    const name = decision.command?.answer;
+    if (!name || !DECISION_COMMANDS.includes(name)) return null;
+    throwIfStopped(opts.signal, 'Decision act');
+    const reply = await handleCommand(name, String(text), { ...opts.ctx, confirmed: false, signal: opts.signal });
+    const body = typeof reply === 'string' ? reply.trim() : '';
+    if (!body) return null;
+    return `${body}\n\n_🤖 Saare brains offline the — Laya ne command pehchaana aur chalaya._`;
   }
 
   /** Execute a user-defined trigger→action rule from `store.data.rules`. */

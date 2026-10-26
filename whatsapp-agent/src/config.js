@@ -119,6 +119,21 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     packageVersion: JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
 
     aiProvider: (e.AI_PROVIDER || 'auto').toLowerCase(),
+    // ── Optional local decision models (off by default) ────────────────────
+    // Needle 3 (Cactus, Apache-2.0) is an 8-29 MB tool-calling model used as a
+    // second opinion on the router's tier, so a multi-billion-parameter local
+    // brain does not have to wake just to classify "screenshot lo". It never
+    // writes a reply.
+    needleEnabled: bool(e.NEEDLE_ENABLED, false),
+    needleTimeoutMs: Math.max(200, Number(e.NEEDLE_TIMEOUT_MS) || 4000),
+    needleCmd: e.NEEDLE_CMD || '',
+    needleArgs: e.NEEDLE_ARGS || '',
+    // Laya (ConvAI, Apache-2.0) is a typed-decision model: no text output, only
+    // calibrated probabilities. Used as the last rung before the "all brains
+    // offline" template, so a command can still run when no model can talk.
+    layaEnabled: bool(e.LAYA_ENABLED, false),
+    layaUrl: (e.LAYA_URL || 'http://127.0.0.1:8765').replace(/\/$/, ''),
+    layaMinProbability: Math.min(1, Math.max(0, Number(e.LAYA_MIN_PROBABILITY) || 0.7)),
     ollamaUrl: (e.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
     ollamaModel: e.OLLAMA_MODEL || 'llama3.2',
     ollamaVisionModel: e.OLLAMA_VISION_MODEL || '',
@@ -417,6 +432,14 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
   }
   if (!['local', 'cloud', 'balanced'].includes(config.routerPrefer)) {
     problems.push(`ROUTER_PREFER must be local, cloud or balanced (got "${config.routerPrefer}").`);
+  }
+  // The optional decision models are off by default, so the only thing worth
+  // catching is a probability gate that cannot ever fire.
+  if (config.layaEnabled && !(config.layaMinProbability > 0 && config.layaMinProbability <= 1)) {
+    problems.push(`LAYA_MIN_PROBABILITY must be between 0 and 1 (got "${config.layaMinProbability}").`);
+  }
+  if (config.needleEnabled && config.needleTimeoutMs < 200) {
+    problems.push(`NEEDLE_TIMEOUT_MS must be at least 200 (got "${config.needleTimeoutMs}").`);
   }
   if (problems.length) {
     throw new Error(`Configuration problem(s):\n  - ${problems.join('\n  - ')}`);
