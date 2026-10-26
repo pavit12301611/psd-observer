@@ -287,3 +287,102 @@ rm -rf ~/models/best
 # wapas cloud/auto pe:
 # .env me AI_PROVIDER=auto kar do
 ```
+
+---
+
+## 9. Optional: on-device decision models (Needle 3 + Laya)
+
+Ye section un do models ke liye hai jo **chat nahi karte**. Ye sirf ye decide
+karte hain ki message *kis tarah ka* hai, taaki agent tab bhi kaam kar sake jab
+bade models so rahe hon ya poora offline hon. Dono default se **OFF** hain.
+
+Dono Apache-2.0 hain, dono PC pe chalte hain, aur dono ko fine-tuning chahiye —
+neeche accuracy ka sach hai.
+
+### Needle 3 — router ka second opinion
+
+[Cactus Compute](https://cactuscompute.com/needle) ka 8–29 MB tool-calling
+model. Agent ka router (`src/router.js`) har message ka tier keyword lists se
+decide karta hai — `ACTION_VERBS`, `HARD_WORDS`, regexes. Needle us decision ka
+**doosra opinion** deta hai.
+
+Kyun useful hai: Ollama model ko `keep_alive` (default 30 min) tak RAM mein
+rakhta hai. "screenshot lo" classify karne ke liye 7B model jagana faltu hai —
+Needle 29 MB mein wahi kaam karta hai, Pi 5 pe bhi 400–4000 tok/s.
+
+```bash
+pip install cactus-needle
+# .env me:
+NEEDLE_ENABLED=true
+```
+
+Router kabhi Needle ko decider nahi banata. Wo sirf:
+
+- **tier ek step neeche** laa sakta hai (jahan se speed aur RAM bachta hai),
+- **tool requirement jod** sakta hai (Hinglish/slang jaisa jo keyword list miss
+  karti hai), aur
+- kabhi tier **upar** nahi laa sakta, aur kabhi capability requirement hata
+  nahi sakta.
+
+Needle install na ho, ya confidence 0.6 se kam ho, ya time out ho — kuch nahi
+badlega. Keyword router jaisa tha waisa chalega.
+
+**Accuracy ka sach:** base Needle 3 Cactus ke apne held-out eval pe ~27%
+(13/49) deta hai. LoRA fine-tune karne pe 20L 84%, 4L 61%. Matlab bina tuning
+ke ye keyword heuristic se bhi kharab ho sakta hai. Isliye ye second opinion
+hai, decider nahi. Tuning ke liye tumhara `commands.json` (157 commands, 22
+runnable) exactly wahi dataset hai jo Needle chahta hai.
+
+### Laya — jab saare brains down hon
+
+[ConvAI Innovations](https://github.com/NandhaKishorM/laya) ka 421M typed-decision
+model. Ye **text generate hi nahi karta** — sirf calibrated probability deta
+hai: choice / score / yes-no. Ek forward pass, ~33ms.
+
+Agent ka chat path (`askAI` in `src/commands.js`) aisa tha: brain fail →
+wiki fallback → `NO_BRAIN_HINT` ("koi brain reachable nahi"). Laya us dead end
+se pehle ek rung hai: agar wo confidently kehta hai "ye command hai, aur ye
+command", to command chala deta hai — **command ko LLM ki zaroorat hi nahi**.
+
+```bash
+pip install laya
+laya-serve --port 8765 &
+# .env me:
+LAYA_ENABLED=true
+LAYA_URL=http://127.0.0.1:8765
+```
+
+Safety: Laya sirf ek **fixed read-only allowlist** (`DECISION_COMMANDS` in
+`src/commands.js`) mein se command chun sakta hai — `status`, `screenshot`,
+`todo`, `weather`, `calc` jaise. Kuch destructive kabhi nahi. Aur har command
+normal `handleCommand` se jaata hai, to owner/PIN/confirmation policy bilkul
+waise hi lagta hai jaise typed command pe lagta hai.
+
+**Accuracy ka sach:** base Laya typed-decisions benchmark pe ~0.36 deta hai,
+jabki random baseline ~0.32 hai — literally chance. Published 0.766 usi
+benchmark ke training split pe fine-tune karne se aaya. Isliye default gate
+0.7 hai, aur jab tak tumne apne traffic pe measure nahi kiya, usse band rakho.
+
+### Dono ko test karo (model download ke bina)
+
+Integration poora injectable hai, to weights ke bina bhi contract test ho sakta
+hai:
+
+```bash
+node --test test/needle.test.js test/laya.test.js
+```
+
+39 tests. Fake spawn aur fake HTTP client use hote hain — na Python, na model,
+na network. Ye exactly ye prove karte hain ki missing/slow/unsure model se
+kuch nahi badalta.
+
+### Band karna
+
+```bash
+# .env me:
+NEEDLE_ENABLED=false
+LAYA_ENABLED=false
+```
+
+Ya bas `NEEDLE_CMD`/`LAYA_URL` hata do — dono module "not installed" ko normal
+state maante hain, error nahi.

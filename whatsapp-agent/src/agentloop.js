@@ -1,6 +1,7 @@
 // Real tool-calling agent with bounded requests, workload routing and safe
 // failover. A new brain CONTINUES verified work; it must never restart it.
 import { routerFor } from './router.js';
+import { needleFor } from './needle.js';
 import { throwIfStopped, isStoppedError } from './cancel.js';
 import { personaLines } from './jarvis.js';
 import { getAgentName, formatMemoryForPrompt } from './memory.js';
@@ -53,7 +54,7 @@ function progressReply(state, reason) {
 }
 
 export function createAgentLoop({ config = {}, store, actions, log = console }) {
-  const router = routerFor(config, log);
+  const router = routerFor(config, log, needleFor(config));
   const allTools = actions.toolSchemas();
   const enabled = config.agentTools !== false && config.aiProvider !== 'none' && allTools.length > 0;
   const timeoutMs = bounded(config.aiTimeoutMs, DEFAULT_TIMEOUT_MS, 1, 600_000);
@@ -326,7 +327,7 @@ export function createAgentLoop({ config = {}, store, actions, log = console }) 
       lastRun = { ok: false, reason: !enabled ? 'agent tools disabled' : 'guest tool access blocked', model: null, tier: null };
       return null;
     }
-    const plan = router.plan({ text, needsTools: opts.needsTools ?? true, minTier: opts.minTier, forceTier: opts.forceTier, maxSteps: opts.maxSteps, toolLimit: opts.toolLimit });
+    const plan = await router.planAsync({ text, needsTools: opts.needsTools ?? true, minTier: opts.minTier, forceTier: opts.forceTier, maxSteps: opts.maxSteps, toolLimit: opts.toolLimit });
     const effectivePlan = opts.nudge !== false ? { ...plan, maxSteps: Math.max(plan.maxSteps, 3) } : plan;
     const maxTries = bounded(opts.maxTries ?? config.agentMaxTries, 6, 1, 12);
     const started = Date.now();

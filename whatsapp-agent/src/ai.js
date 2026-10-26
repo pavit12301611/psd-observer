@@ -16,6 +16,7 @@
 import { createHash } from 'node:crypto';
 import { throwIfStopped } from './cancel.js';
 import { routerFor } from './router.js';
+import { needleFor } from './needle.js';
 import { postBrainJson as postJson, safeBrainText } from './brainrequest.js';
 import { getOwnerAddress, getAgentName, formatMemoryForPrompt } from './memory.js';
 import { formatPersonaForPrompt, observeOwnerTurn, reflectWithAI } from './persona.js';
@@ -325,8 +326,8 @@ async function callModel(model, config, messages, timeoutMs = TIMEOUT_MS, opts =
 export async function chat(config, store, userText, log = console, opts = {}) {
   const started = Date.now();
   throwIfStopped(opts.signal, 'AI chat');
-  const router = routerFor(config, log);
-  const plan = router.plan({ text: userText, needsTools: false });
+  const router = routerFor(config, log, needleFor(config));
+  const plan = await router.planAsync({ text: userText, needsTools: false });
   if (!plan.candidates.length) return null;
   let intent = opts.intent;
   try { if (!intent) intent = classifyIntent(userText, { dataDir: config?.dataDir }).label; } catch { /* optional */ }
