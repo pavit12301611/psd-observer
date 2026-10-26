@@ -10,7 +10,7 @@
     "dev": "vite --host 0.0.0.0",
     "catalog": "node scripts/catalog.mjs",
     "typecheck": "tsc --noEmit",
-    "build": "npm run catalog && npm run typecheck && vite build && node scripts/check-bundle.mjs",
+    "build": "npm run catalog && npm run typecheck && vite build && node scripts/check-bundle.mjs && node scripts/check-layout.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "preview": "vite preview --host 0.0.0.0",
