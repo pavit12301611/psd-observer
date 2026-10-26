@@ -289,8 +289,18 @@ export default function App() {
         `${window.visualViewport?.height || window.innerHeight}px`,
       );
     resize();
+    // visualViewport is the only API that tracks the collapsing URL bar, but it
+    // is missing on some WebViews and inside some in-app browsers. Without the
+    // window listeners the shell would keep a stale height after a rotation and
+    // push the composer off-screen, so both are wired up.
     window.visualViewport?.addEventListener("resize", resize);
-    return () => window.visualViewport?.removeEventListener("resize", resize);
+    window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
+    };
   }, []);
   const clearLocal = useCallback(() => {
     const fresh = emptyState();
@@ -468,13 +478,30 @@ export default function App() {
     // Thread switch only; typing must not re-read storage.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.activeId]);
-  useEffect(() => {
+  const growComposer = useCallback(() => {
     const el = textarea.current;
-    if (el) {
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 160) + "px";
-    }
-  }, [draft, page]);
+    if (!el) return;
+    // Reset to auto before reading scrollHeight, otherwise the box can only ever
+    // grow and never shrink back when the draft is deleted or the screen widens.
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 160) + "px";
+  }, []);
+  useEffect(() => {
+    growComposer();
+  }, [draft, page, growComposer]);
+  useEffect(() => {
+    // The wrapped line count depends on the box width, so a rotation, a split
+    // screen resize or the on-screen keyboard all invalidate the stored height.
+    // Without this the textarea keeps a stale height and clips its own text.
+    window.addEventListener("resize", growComposer);
+    window.addEventListener("orientationchange", growComposer);
+    window.visualViewport?.addEventListener("resize", growComposer);
+    return () => {
+      window.removeEventListener("resize", growComposer);
+      window.removeEventListener("orientationchange", growComposer);
+      window.visualViewport?.removeEventListener("resize", growComposer);
+    };
+  }, [growComposer]);
   useEffect(() => {
     const shortcut = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
