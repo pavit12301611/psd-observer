@@ -51,6 +51,7 @@ model that fits the machine — all from that one file.
 | `observer.sh update` | agent code only, keeps `.env` / login / `data/` |
 | `observer.sh models …` | Hugging Face GGUF: list, recommend, download, serve, wire |
 | `observer.sh voice …` | JARVIS voice: `setup` (Piper en_GB), `whisper`, `call-engine` + `link-voip` (asli WhatsApp call), `status` / `test` |
+| `node scripts/app-update.mjs doctor` | why the phone is not being offered an interface update: the signing key, the published bundle, and whether its signature verifies |
 | `observer.sh doctor` | what is broken + the exact fix |
 | `observer.sh service …` | systemd unit install/restart/logs |
 | `observer.sh start` / `relink` / `remote` / `fix` | run, new QR, Tailscale, desktop fixes |

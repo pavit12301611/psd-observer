@@ -140,6 +140,15 @@ cd ~/observer-agent && BRANCH=arena/9851a33a-psd-observer bash scripts/observer.
 Merge hone ke baad `BRANCH=` hata do — script yaad rakh leta hai kaunsa branch
 track karna hai (`.observer-branch`).
 
+**Phone pe update nahi dikh raha?** Pehle ye chalao — ye batata hai PC pe kya
+published hai, signing key kya hai, aur signature verify hoti hai ya nahi:
+
+```bash
+cd ~/observer-agent && node scripts/app-update.mjs doctor
+```
+
+Output ke aakhir mein phone pe app kya dikhayega aur uska fix likha hoga.
+
 **Aur kuch chahiye to (optional):**
 
 ```bash
