@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # observer.sh — ONE script for the whole Observer WhatsApp agent.
 #
+#   THE ONE COMMAND — agent + service + phone app, sab ek saath:
+#   bash observer.sh update --app --bump
+#
 #   bash observer.sh install     first-time install (curl-only, no git needed)
 #   bash observer.sh update      update the code, keep .env / WhatsApp login / data
-#   bash observer.sh update --app   update the agent AND the phone app in one go
 #   bash observer.sh models …    local Hugging Face models (llama.cpp) — 100% offline
 #   bash observer.sh keys …      add Groq / OpenRouter / Gemini free API keys
 #   bash observer.sh test        self-test: keys, brains, routing, unit tests
@@ -20,8 +22,8 @@
 #   bash observer.sh install --fedora all --model best
 #   bash observer.sh models recommend
 #   bash observer.sh models setup best --small tiny --vision balanced
-#   bash observer.sh update --dir ~/observer-agent
-#   bash observer.sh update --app --bump
+#   bash observer.sh update --app --bump --notes "kya naya"
+#   BRANCH=<branch> bash observer.sh update --app --bump   # PR branch se lena ho to
 #   bash observer.sh doctor
 #
 # Nothing here needs git. The install/update path downloads a branch tarball
@@ -210,7 +212,7 @@ cmd_install() {
       --fedora)    fedora=1; shift ;;
       --model)     model="${2:-}"; shift 2 ;;
       --service|--ollama|--power|--phone|--remote|--pc-control) passthru+=("$1"); fedora=1; shift ;;
-      -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+      -h|--help)   sed -n '2,/^set -euo pipefail/p' "$0"; exit 0 ;;
       *) die "install: unknown option $1 (try --help)" ;;
     esac
   done
@@ -294,7 +296,7 @@ cmd_update() {
       --app-dir)   app_dir="${2:-}"; [ -n "$app_dir" ] || die "--app-dir needs a path"; shift 2 ;;
       --bump)      bump=1; shift ;;
       --notes)     notes="${2:-}"; shift 2 ;;
-      -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+      -h|--help)   sed -n '2,/^set -euo pipefail/p' "$0"; exit 0 ;;
       *) die "update: unknown option $1 (try --help)" ;;
     esac
   done
