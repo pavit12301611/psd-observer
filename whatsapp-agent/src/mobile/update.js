@@ -12,6 +12,31 @@ const VERSION = /^\d{1,4}\.\d{1,3}\.\d{1,3}$/;
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 const keyId = (spkiBase64) => sha256(Buffer.from(spkiBase64, 'base64')).slice(0, 32);
 export const safeEntry = (name) => typeof name === 'string' && name.length > 0 && name.length <= 180 && !name.startsWith('/') && !name.includes('\\') && !name.includes('\0') && !/[\u0000-\u001f]/.test(name) && !name.split('/').some((part) => part === '' || part === '.' || part === '..');
+const VERSION_TUPLE = /^\d{1,4}\.\d{1,3}\.\d{1,3}$/;
+/** Strict X.Y.Z as numbers, or null. Same rule the phone applies. */
+export function versionTuple(value) {
+  if (typeof value !== 'string' || !VERSION_TUPLE.test(value)) return null;
+  return value.split('.').map(Number);
+}
+const beats = (a, b) => a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
+/**
+ * The next version to publish so a phone is actually offered it.
+ *
+ * A phone only installs a bundle newer than the one it already runs. Bumping
+ * the app source's own version is not enough: that version is the one committed
+ * on the branch, and a PC with no app checkout rebuilds from that tarball every
+ * time — so it republished the same version forever, the phone was told the
+ * bundle was "not newer", and no update ever appeared.
+ *
+ * So this counts up from the highest of the source version and the highest
+ * version already published on this PC. Monotonic with or without a checkout,
+ * and it never goes backwards.
+ */
+export function nextBundleVersion(sourceVersion, published = []) {
+  let base = versionTuple(sourceVersion) || [0, 0, 0];
+  for (const version of published) { const tuple = versionTuple(version); if (tuple && beats(tuple, base)) base = tuple; }
+  return `${base[0]}.${base[1]}.${base[2] + 1}`;
+}
 export function canonicalManifest(manifest) {
   return JSON.stringify({ schema: 1, version: manifest.version, createdAt: manifest.createdAt, sha256: manifest.sha256, size: manifest.size, fileCount: manifest.fileCount, minNative: manifest.minNative, notes: manifest.notes || '' });
 }

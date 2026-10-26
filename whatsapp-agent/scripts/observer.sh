@@ -474,15 +474,18 @@ update_companion_app() {
   ( cd "$app" && npm run build )          || die "app build failed in $app (typecheck/bundle contract)"
   ( cd "$app" && npm run android:sync )   || warn "android asset sync failed — the next APK build will still refresh it"
 
-  # Optional patch bump: phones only get offered a bundle whose version is
-  # newer than what they run, so an unchanged version means "no update".
+  # The version a phone will actually be offered. Phones only install a bundle
+  # newer than the one they already run, so an unchanged version means "no
+  # update" — and a PC with no app checkout rebuilds from the branch tarball
+  # every time, whose version is the committed one. Bumping that alone
+  # republished the same version forever and the phone never saw a new update.
+  # next-version therefore counts up from the highest version already published
+  # on THIS PC, which is monotonic with or without a checkout.
   local version; version=$(node -p "require('$app/package.json').version" 2>/dev/null || echo "")
   [ -n "$version" ] || die "could not read the app version from $app/package.json"
   if [ "$do_bump" -eq 1 ]; then
-    version=$(node -e "
-      const fs=require('fs'), f='$app/package.json', p=JSON.parse(fs.readFileSync(f,'utf8'));
-      const v=p.version.split('.'); v[2]=String(Number(v[2]||0)+1); p.version=v.join('.');
-      fs.writeFileSync(f, JSON.stringify(p,null,2)+'\n'); process.stdout.write(p.version);")
+    version=$( cd "$dest" && node scripts/app-update.mjs next-version --source "$app/package.json" 2>/dev/null )
+    [ -n "$version" ] || die "could not work out the next app version"
     info "version bumped → ${version}"
     ( cd "$app" && npm run build ) || die "rebuild after version bump failed"
     ( cd "$app" && npm run android:sync ) || true

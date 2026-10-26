@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createUpdateChannel, canonicalManifest } from '../src/mobile/update.js';
+import { createUpdateChannel, canonicalManifest, nextBundleVersion } from '../src/mobile/update.js';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const args = process.argv.slice(2), command = args[0] || 'status';
 const flag = (name, fallback = '') => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] ?? '' : fallback; };
@@ -39,6 +39,25 @@ if (command === 'status') {
   const result = channel.pack({ dist, version, notes, minNative });
   console.log(JSON.stringify({ packed: result.manifest, keyId: result.keyId, directory: path.join(updates, version) }, null, 2));
   console.log('Phones fetch this from their paired PC. Native-shell changes are NOT included in a web bundle.');
+} else if (command === 'next-version') {
+  // The version a phone will actually be offered, and nothing else.
+  //
+  // Phones only install a bundle newer than the one they already run. The old
+  // bump added one patch to the app source's own version — which is the version
+  // committed on the branch. A PC with no app checkout rebuilds from that
+  // tarball every single time, so it republished the same version forever, the
+  // phone was told "not newer than the installed interface", and no update ever
+  // appeared no matter how often the owner ran the command.
+  //
+  // So the next version is the highest of the source version and the highest
+  // version already published on this PC, plus one patch. That is monotonic
+  // whether or not the PC has a checkout, and it never goes backwards.
+  const source = flag('--source', path.join(root, '..', 'app', 'companion', 'package.json'));
+  const sourceVersion = () => { try { return JSON.parse(fs.readFileSync(source, 'utf8')).version; } catch { return ''; } };
+  const next = nextBundleVersion(sourceVersion(), channel.status().versions || []);
+  // Keep the source honest so the bundle it builds cannot claim another version.
+  try { const p = JSON.parse(fs.readFileSync(source, 'utf8')); p.version = next; fs.writeFileSync(source, JSON.stringify(p, null, 2) + '\n'); } catch { /* a read-only source still gets the version reported */ }
+  console.log(next);
 } else if (command === 'doctor') {
   // The phone's own check, done here, in the order the phone does it. Every
   // refusal the phone can give has a different fix, and the app only shows the
