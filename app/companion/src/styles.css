@@ -2061,6 +2061,34 @@ textarea {
 .device-note > svg {
   margin-top: 2px;
 }
+/* The PC-delivered interface update, in front of the owner instead of buried in
+   Settings: a ready bundle is an offer (Install), anything else is the exact
+   reason the app has nothing to show. Hairline card, no gradient, colour only
+   when there is something to act on. */
+.update-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 0 var(--s3);
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--t-label);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.update-strip.ready {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: var(--ink);
+}
+.update-strip-text {
+  flex: 1;
+  min-width: 0;
+}
+.update-strip .button.compact {
+  flex: none;
+}
 .update-note {
   padding: 14px;
   border-radius: var(--r-sm);

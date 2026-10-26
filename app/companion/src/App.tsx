@@ -77,6 +77,7 @@ import {
   saveState,
 } from "./core/storage";
 import { pickRoute, cloudContext, compactContext, learnFix } from "./core/route";
+import { updateStrip } from "./core/updateStrip";
 import { isNative, nativeCall } from "./core/native";
 import type {
   Delivery,
@@ -87,6 +88,7 @@ import type {
   LocalTask,
   Message,
   Page,
+  PcUpdateCheck,
   Preferences,
   Profile,
   Reply,
@@ -368,6 +370,8 @@ export default function App() {
     if (atBottom) end.current?.scrollIntoView({ block: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, busy, page]);
+  const [appUpdate, setAppUpdate] = useState<PcUpdateCheck | null>(null);
+  const [appUpdateBusy, setAppUpdateBusy] = useState(false);
   // ── PC-delivered interface updates (no APK, no uninstall) ────────────────
   // `observer.sh update --app` on the PC packs a signed web bundle; paired
   // phones are offered it here and install it themselves. Applied only while
@@ -382,15 +386,28 @@ export default function App() {
       if (document.hidden || sending.current || busy || voiceOpen) return;
       try {
         const check = await checkPcUpdate();
-        if (!alive || !check?.available) return;
+        if (!alive) return;
+        setAppUpdate(check);
+        // A refusal is not a failure to hide: the PC has no bundle yet, the
+        // bundle is not newer, or the key does not match — each one has a
+        // different fix, and "nothing shows up" told the owner none of them.
+        if (!check?.available) return;
         const applied = await applyPcUpdate();
         if (!alive) return;
         notify(
           `Interface ${applied?.installed || check.version} installed — reloading.`,
         );
         window.setTimeout(() => window.location.reload(), 1500);
-      } catch {
-        /* Silent on purpose: Settings keeps the manual path and the reason. */
+      } catch (e) {
+        if (!alive) return;
+        setAppUpdate({
+          installed: "",
+          available: false,
+          reason:
+            e instanceof Error
+              ? e.message
+              : "Could not reach your PC for an interface update.",
+        });
       }
     };
     const boot = window.setTimeout(() => void autoUpdate(), 3000);
@@ -406,6 +423,22 @@ export default function App() {
       document.removeEventListener("visibilitychange", visible);
     };
   }, [profile, busy, voiceOpen, state.preferences.autoAppUpdate, notify]);
+  const strip = updateStrip(appUpdate);
+  /** Install the offered bundle now, from the strip, without opening Settings. */
+  const installAppUpdate = useCallback(async () => {
+    setAppUpdateBusy(true);
+    try {
+      const applied = await applyPcUpdate();
+      notify(
+        `Interface ${applied?.installed || appUpdate?.version || "update"} installed — reloading.`,
+      );
+      window.setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Install failed.");
+    } finally {
+      setAppUpdateBusy(false);
+    }
+  }, [applyPcUpdate, appUpdate?.version, notify]);
   const toBottom = () => {
     setAtBottom(true);
     end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -1455,6 +1488,27 @@ export default function App() {
         >
           {page === "chat" ? (
             <section className="chat-page" aria-label="Conversation">
+              {strip && (
+                <div
+                  className={"update-strip" + (strip.ready ? " ready" : "")}
+                  role="status"
+                >
+                  <span className="update-strip-text">{strip.text}</span>
+                  {strip.ready ? (
+                    <button
+                      className="button compact"
+                      disabled={appUpdateBusy}
+                      onClick={() => void installAppUpdate()}
+                    >
+                      {appUpdateBusy ? "Installing\u2026" : "Install"}
+                    </button>
+                  ) : (
+                    <button className="text-button" onClick={() => setAppUpdate(null)}>
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              )}
               <div
                 className="chat-scroll"
                 ref={scroller}
