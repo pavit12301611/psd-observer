@@ -14,6 +14,19 @@ for item in src webapp test scripts systemd benchmarks audits; do
 done
 rm -f "$STAGE/whatsapp-agent/release-bundle.tar.gz"
 
+# Default the stamp to the branch being built, so it can never be forgotten:
+# a bundle whose stamp does not name the branch it was built from is refused by
+# the download path and the full archive is used instead.
+if [ -z "${BUNDLE_REF:-}" ]; then
+  BUNDLE_REF=$(git -C "$AGENT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+fi
+# Stamp the ref this bundle was built from. The download path verifies a bundle
+# by version alone, and every branch shares one version number, so a fallback
+# to main's bundle used to pass as "verified" and quietly ship old code to a PC
+# that asked for a branch. The stamp makes that impossible to miss.
+printf 'ref=%s\nbuilt=%s\n' "${BUNDLE_REF:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  > "$STAGE/whatsapp-agent/.bundle-ref"
+
 for file in package.json package-lock.json release-notes.json .env.example start.sh \
             README.md QUICKSTART.md LOCAL-MODELS.md AI-KEYS.md BUILD-LOG.md NEURAL.md DEEP-TESTING.md \
             VOICE.md WHATSAPP-CALL.md \

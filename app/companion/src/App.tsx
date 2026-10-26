@@ -11,6 +11,7 @@ import {
 import {
   ArrowDown,
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowRight,
   ArrowUp,
   BookOpen,
@@ -23,6 +24,7 @@ import {
   Copy,
   FileText,
   FolderOpen,
+  Gauge,
   History as HistoryIcon,
   Lightbulb,
   ListChecks,
@@ -74,7 +76,8 @@ import {
   newConversation,
   saveState,
 } from "./core/storage";
-import { pickRoute, cloudContext } from "./core/route";
+import { pickRoute, cloudContext, compactContext, learnFix } from "./core/route";
+import { updateStrip } from "./core/updateStrip";
 import { isNative, nativeCall } from "./core/native";
 import type {
   Delivery,
@@ -85,6 +88,7 @@ import type {
   LocalTask,
   Message,
   Page,
+  PcUpdateCheck,
   Preferences,
   Profile,
   Reply,
@@ -182,6 +186,12 @@ export default function App() {
     [copied, setCopied] = useState("");
   const [atBottom, setAtBottom] = useState(true),
     [shown, setShown] = useState(30);
+  // Set when a notification shade action (Approve/Decline) is consumed.
+  const [approvalAction, setApprovalAction] = useState<{
+    id: string;
+    decision: boolean;
+    nonce: number;
+  } | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null),
     scroller = useRef<HTMLDivElement>(null),
     fileInput = useRef<HTMLInputElement>(null),
@@ -360,6 +370,8 @@ export default function App() {
     if (atBottom) end.current?.scrollIntoView({ block: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, busy, page]);
+  const [appUpdate, setAppUpdate] = useState<PcUpdateCheck | null>(null);
+  const [appUpdateBusy, setAppUpdateBusy] = useState(false);
   // ── PC-delivered interface updates (no APK, no uninstall) ────────────────
   // `observer.sh update --app` on the PC packs a signed web bundle; paired
   // phones are offered it here and install it themselves. Applied only while
@@ -374,15 +386,28 @@ export default function App() {
       if (document.hidden || sending.current || busy || voiceOpen) return;
       try {
         const check = await checkPcUpdate();
-        if (!alive || !check?.available) return;
+        if (!alive) return;
+        setAppUpdate(check);
+        // A refusal is not a failure to hide: the PC has no bundle yet, the
+        // bundle is not newer, or the key does not match — each one has a
+        // different fix, and "nothing shows up" told the owner none of them.
+        if (!check?.available) return;
         const applied = await applyPcUpdate();
         if (!alive) return;
         notify(
           `Interface ${applied?.installed || check.version} installed — reloading.`,
         );
         window.setTimeout(() => window.location.reload(), 1500);
-      } catch {
-        /* Silent on purpose: Settings keeps the manual path and the reason. */
+      } catch (e) {
+        if (!alive) return;
+        setAppUpdate({
+          installed: "",
+          available: false,
+          reason:
+            e instanceof Error
+              ? e.message
+              : "Could not reach your PC for an interface update.",
+        });
       }
     };
     const boot = window.setTimeout(() => void autoUpdate(), 3000);
@@ -398,6 +423,22 @@ export default function App() {
       document.removeEventListener("visibilitychange", visible);
     };
   }, [profile, busy, voiceOpen, state.preferences.autoAppUpdate, notify]);
+  const strip = updateStrip(appUpdate);
+  /** Install the offered bundle now, from the strip, without opening Settings. */
+  const installAppUpdate = useCallback(async () => {
+    setAppUpdateBusy(true);
+    try {
+      const applied = await applyPcUpdate();
+      notify(
+        `Interface ${applied?.installed || appUpdate?.version || "update"} installed — reloading.`,
+      );
+      window.setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Install failed.");
+    } finally {
+      setAppUpdateBusy(false);
+    }
+  }, [applyPcUpdate, appUpdate?.version, notify]);
   const toBottom = () => {
     setAtBottom(true);
     end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -587,6 +628,123 @@ export default function App() {
       notify(e instanceof Error ? e.message : "Stop request not delivered.");
     }
   }
+  // Local calendar day, so "today" means the owner's today, not UTC's.
+  const dayKey = () =>
+    new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  const monthKey = () => dayKey().slice(0, 7);
+
+  /** Tokens spent on the owner's own Direct AI key today. */
+  const todayTokens = () =>
+    stateRef.current.preferences.usage?.[dayKey()] || 0;
+  const monthTokens = () => {
+    const usage = stateRef.current.preferences.usage || {},
+      month = monthKey();
+    return Object.entries(usage)
+      .filter(([day]) => day.startsWith(month))
+      .reduce((sum, [, n]) => sum + n, 0);
+  };
+  const usageWarning = () => {
+    const cap = stateRef.current.preferences.usageCap || 0;
+    if (!cap) return "";
+    const used = monthTokens();
+    if (used >= cap)
+      return `Direct AI budget for this month is used up (${used.toLocaleString("en-IN")} / ${cap.toLocaleString("en-IN")} tokens). PC answers still work.`;
+    if (used >= cap * 0.8)
+      return `Direct AI is at ${Math.round((used / cap) * 100)}% of this month's budget (${used.toLocaleString("en-IN")} / ${cap.toLocaleString("en-IN")} tokens).`;
+    return "";
+  };
+  function chargeUsage(tokens: number) {
+    if (!(tokens > 0)) return;
+    const key = dayKey(),
+      usage = { ...(stateRef.current.preferences.usage || {}) };
+    usage[key] = (usage[key] || 0) + tokens;
+    // Keep a year of days at most; the phone is not a billing archive.
+    const trimmed = Object.fromEntries(
+      Object.entries(usage)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(-366),
+    );
+    updatePreferences({ usage: trimmed });
+  }
+
+  /**
+   * A Direct AI call that retries only for transport failures — a refused
+   * question or a bad key is an answer, not a reason to spend twice. Backoff
+   * is short because the owner is waiting, and the provider may already have
+   * processed the earlier attempt.
+   */
+  async function cloudWithRetry(messages: Message[], attempts = 3) {
+    let last: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await cloudChat(messages);
+      } catch (e) {
+        last = e;
+        const text = e instanceof Error ? e.message : String(e);
+        const transport =
+          /network|timeout|timed out|interrupt|unavailable|socket|fetch|connection|refused|502|503|504/i.test(
+            text,
+          );
+        if (!transport || attempt === attempts - 1) throw e;
+        await new Promise((r) => setTimeout(r, 700 * 2 ** attempt));
+      }
+    }
+    throw last;
+  }
+
+  /**
+   * "Ask the other engine": the same sentence, the other engine, this chat.
+   * The correction is remembered so the classifier routes it right next time.
+   */
+  async function resendOn(userText: string, route: Route) {
+    if (sending.current || !userText.trim()) return;
+    if (route === "cloud" && !cloud.configured) {
+      setModeOpen(true);
+      return;
+    }
+    if (route === "agent" && !profile) {
+      setPairOpen(true);
+      return;
+    }
+    updatePreferences({
+      routeFixes: learnFix(
+        stateRef.current.preferences.routeFixes || [],
+        userText,
+        route,
+      ),
+    });
+    await deliver(userText, route, { retried: true });
+  }
+
+  /**
+   * A catalog command, run from the palette with one tap and answered there.
+   * Read-only reports only: the same job path as chat, without the history a
+   * normal turn carries, so the answer is exactly what the PC said.
+   */
+  async function runCommandNow(text: string): Promise<string> {
+    if (!profile) throw new Error("Pair your PC first — commands run there.");
+    const job = await submitAndWatch({
+      id: crypto.randomUUID(),
+      kind: "chat",
+      text,
+      projectId: active?.projectId || "personal00",
+      history: [],
+    });
+    const answer = job.result?.text;
+    if (answer) return answer;
+    if (job.state === "unknown")
+      throw new Error(
+        "Your PC accepted it but kept no result. Check Tasks before running it again.",
+      );
+    throw new Error(
+      "No retained result. Inspect Tasks before a new request; nothing was replayed.",
+    );
+  }
+
   async function send(e?: FormEvent) {
     e?.preventDefault();
     if (sending.current || (!draft.trim() && !file)) return;
@@ -598,6 +756,7 @@ export default function App() {
       mode: state.preferences.chatMode,
       cloudReady: cloud.configured,
       paired: !!profile,
+      fixes: stateRef.current.preferences.routeFixes || [],
     });
     const direct = route === "cloud";
     if (direct && !cloud.configured) {
@@ -623,7 +782,28 @@ export default function App() {
     }
     const text = draft.trim(),
       upload = file,
-      reference = sharedReference,
+      reference = sharedReference;
+    setDraft("");
+    setFile(null);
+    setSharedReference(false);
+    await deliver(text, route, { file: upload, reference });
+  }
+
+  /**
+   * The one path every message takes, however it was started: typed, retried
+   * on the other engine, or re-run from a notification. Keeping it in one
+   * place is what makes "ask the other engine" behave exactly like a send.
+   */
+  async function deliver(
+    text: string,
+    route: Route,
+    {
+      file: upload = null,
+      reference = false,
+      retried = false,
+    }: { file?: Attachment | null; reference?: boolean; retried?: boolean } = {},
+  ) {
+    const direct = route === "cloud",
       cId = stateRef.current.activeId,
       generation = session.current,
       id = crypto.randomUUID();
@@ -631,9 +811,6 @@ export default function App() {
     const display = displayRequest(text);
     sending.current = true;
     setBusy(true);
-    setDraft("");
-    setFile(null);
-    setSharedReference(false);
     append(
       {
         id,
@@ -653,18 +830,25 @@ export default function App() {
       ...items.slice(-29),
       {
         id,
-        text: display.text || upload?.name || "Attachment",
+        text: `${retried ? "Re-asked · " : ""}${display.text || upload?.name || "Attachment"}`,
         started: Date.now(),
         state: "running",
       },
     ]);
     try {
       let reply: Reply;
-      if (direct)
-        reply = await cloudChat([
-          ...cloudContext(active?.messages || []),
+      if (direct) {
+        // Long chats keep the recent turns and a topic line built from the
+        // owner's own words; PC answers stay behind the placeholder either way.
+        const history = compactContext(
+          cloudContext(active?.messages || []),
+        );
+        reply = await cloudWithRetry([
+          ...history,
           { id, role: "user", text, ts: Date.now() },
         ]);
+        chargeUsage(reply.usage?.totalTokens || 0);
+      }
       else if (
         !reference &&
         /^(?:\/(?:stop|cancel|abort|ruko)\b|\/taskstatus\s*$|\/batch\s+(?:status|results)\s*$)/i.test(
@@ -974,6 +1158,9 @@ export default function App() {
           qr?: string;
           page?: string;
           file?: Attachment;
+          /** Where the draft came from, so the note says the right thing. */
+          source?: "notification" | "share";
+          approval?: { id: string; decision: boolean };
         }>("consumeShare");
         if (!alive || !r) return;
         if (r.qr) {
@@ -988,6 +1175,10 @@ export default function App() {
         }
         if (r.page && ["chat", "pc", "tasks"].includes(r.page))
           setPage(r.page as Page);
+        // A decision tapped in the notification shade: the app opens on that
+        // exact request and applies it, and the PC refuses it if it went stale.
+        if (r.approval?.id)
+          setApprovalAction({ ...r.approval, nonce: Date.now() });
         if (r.text || r.file) {
           const c = newConversation("agent");
           setState((s) => ({
@@ -1010,7 +1201,9 @@ export default function App() {
           setSharedReference(Boolean(r.reference));
           setPage("chat");
           notify(
-            "Shared draft loaded. Review it; nothing was uploaded or executed.",
+            r.source === "notification"
+              ? "Reply drafted from the notification. Read it, then send."
+              : "Shared draft loaded. Review it; nothing was uploaded or executed.",
           );
         }
       } catch {
@@ -1039,6 +1232,16 @@ export default function App() {
   }, [loaded, notify, refresh]);
   // Long threads render a window, not every message: 4 GB phone, no jank.
   const visibleMessages = messages.slice(Math.max(0, messages.length - shown));
+  // The classifier is pure and instant, so the destination is known before
+  // anything is sent — no network call, no model call.
+  const hintRoute = draft.trim()
+    ? pickRoute(draft.trim(), {
+        mode: "auto",
+        cloudReady: cloud.configured,
+        paired: !!profile,
+        fixes: state.preferences.routeFixes || [],
+      })
+    : null;
   const selectedLabel = [...deskPages, ...mobilePages].find(
     (p) => p.id === page,
   )?.label || "Chat";
@@ -1285,6 +1488,27 @@ export default function App() {
         >
           {page === "chat" ? (
             <section className="chat-page" aria-label="Conversation">
+              {strip && (
+                <div
+                  className={"update-strip" + (strip.ready ? " ready" : "")}
+                  role="status"
+                >
+                  <span className="update-strip-text">{strip.text}</span>
+                  {strip.ready ? (
+                    <button
+                      className="button compact"
+                      disabled={appUpdateBusy}
+                      onClick={() => void installAppUpdate()}
+                    >
+                      {appUpdateBusy ? "Installing\u2026" : "Install"}
+                    </button>
+                  ) : (
+                    <button className="text-button" onClick={() => setAppUpdate(null)}>
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              )}
               <div
                 className="chat-scroll"
                 ref={scroller}
@@ -1361,7 +1585,7 @@ export default function App() {
                         {messages.length - shown === 1 ? "message" : "messages"}
                       </button>
                     )}
-                    {visibleMessages.map((m) => (
+                    {visibleMessages.map((m, i) => (
                       <article className={`message ${m.role}`} key={m.id}>
                         <div className="message-avatar">
                           {m.role === "assistant" ? <Mark size={19} /> : "You"}
@@ -1450,6 +1674,25 @@ export default function App() {
                           )}
                           {m.role === "assistant" && (
                             <div className="message-tools">
+                              {/* Wrong engine? Ask the other one, in this chat. */}
+                              {m.route && !busy && (
+                                <button
+                                  className="text-button small-text"
+                                  onClick={() =>
+                                    void resendOn(
+                                      visibleMessages[i - 1]?.role === "user"
+                                        ? visibleMessages[i - 1].text
+                                        : "",
+                                      m.route === "cloud" ? "agent" : "cloud",
+                                    )
+                                  }
+                                >
+                                  <ArrowLeftRight size={15} />
+                                  {m.route === "cloud"
+                                    ? "PC se poocho"
+                                    : "Direct AI se poocho"}
+                                </button>
+                              )}
                               <IconButton
                                 label="Copy reply"
                                 onClick={() =>
@@ -1524,6 +1767,11 @@ export default function App() {
                           : "Your agent"}
                     <ChevronDown size={13} />
                   </button>
+                  {hintRoute && (
+                    <span className={`route-hint ${hintRoute}`}>
+                      {hintRoute === "cloud" ? "→ Direct AI" : "→ your PC"}
+                    </span>
+                  )}
                   <button
                     className="text-button small-text"
                     onClick={() => {
@@ -1655,6 +1903,19 @@ export default function App() {
                     You’re in control. Review important answers and actions.
                   </span>
                 </div>
+                {/* Direct AI spends the owner's own key, so the phone says so. */}
+                {(todayTokens() > 0 || usageWarning()) && (
+                  <p
+                    className={`usage-note${usageWarning() ? " warn" : ""}`}
+                    role="status"
+                  >
+                    <Gauge size={12} />
+                    <span>
+                      {usageWarning() ||
+                        `Direct AI today: ${todayTokens().toLocaleString("en-IN")} tokens on your key.`}
+                    </span>
+                  </p>
+                )}
               </div>
             </section>
           ) : page === "pc" ? (
@@ -1678,6 +1939,7 @@ export default function App() {
               onConnect={() => setPairOpen(true)}
               notice={notify}
               addReply={addReply}
+              approvalAction={approvalAction}
             />
           ) : page === "more" ? (
             <More
@@ -1855,6 +2117,8 @@ export default function App() {
           <CommandPalette
             onClose={() => setCommandsOpen(false)}
             onChoose={chooseDraft}
+            onRun={runCommandNow}
+            paired={!!profile}
           />
         )}
         {historyOpen && (

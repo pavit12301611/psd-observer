@@ -17,7 +17,9 @@ it("model HTML and javascript links cannot become executable markup", () => {
 });
 it("command selection drafts only and filters safely", async () => {
   const choose = vi.fn();
-  render(<CommandPalette onClose={() => {}} onChoose={choose} />);
+  render(
+    <CommandPalette onClose={() => {}} onChoose={choose} paired onRun={vi.fn()} />,
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Search commands" }), {
     target: { value: "/shades" },
   });
@@ -126,4 +128,53 @@ it("every code block carries its own copy button", () => {
   fireEvent.click(button);
   expect(write).toHaveBeenCalledWith("const a = 1;");
   expect(container.querySelectorAll(".code-block").length).toBe(1);
+});
+
+it("a read-only command runs on the PC and answers in the palette", async () => {
+  const onRun = vi.fn().mockResolvedValue("Agent status\nUptime: 3h");
+  render(
+    <CommandPalette
+      onClose={() => {}}
+      onChoose={vi.fn()}
+      onRun={onRun}
+      paired
+    />,
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Search commands" }), {
+    target: { value: "/todo" },
+  });
+  await waitFor(() => expect(screen.getByText("/todo")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Run /todo on your PC now" }));
+  await waitFor(() => expect(onRun).toHaveBeenCalledWith("/todo"));
+  expect(screen.getByText(/Uptime: 3h/)).toBeTruthy();
+  expect(screen.getByText("ran on your PC")).toBeTruthy();
+});
+
+it("commands that change something stay drafts, with no Run button", async () => {
+  const onRun = vi.fn();
+  render(
+    <CommandPalette
+      onClose={() => {}}
+      onChoose={vi.fn()}
+      onRun={onRun}
+      paired
+    />,
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Search commands" }), {
+    target: { value: "/rm" },
+  });
+  await waitFor(() => expect(screen.getByText("/rm")).toBeTruthy());
+  expect(
+    screen.queryByRole("button", { name: /^Run \/rm on your PC now$/ }),
+  ).toBeNull();
+});
+
+it("every catalog entry marked runnable carries the exact text it sends", async () => {
+  const catalog = (await import("../src/data/commands.json")).default;
+  const runnable = catalog.commands.filter((c) => c.runnable);
+  expect(runnable.length).toBeGreaterThan(10);
+  for (const c of runnable) {
+    expect(c.run, `${c.name} needs the text it runs`).toMatch(/^\/[a-z]/);
+    expect(c.run.startsWith(c.name)).toBe(true);
+  }
 });

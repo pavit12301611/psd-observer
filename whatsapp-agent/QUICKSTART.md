@@ -107,54 +107,63 @@ Limits, models aur kaunsa lena chahiye: [`AI-KEYS.md`](AI-KEYS.md)
 
 ---
 
-## 1c. Update karna (git ke bina) — baad me, jab code purana ho jaye
+## 1c. Update karna (git ke bina) — ek hi command
 
-> 2.1 me `/agent` fix hua hai (ab actually kaam karta hai, jhooth nahi bolta) aur
-> AI ab workload ke hisaab se model chunta hai. Update ke baad WhatsApp pe
-> `/brains` bhejo — live routing dikh jayega.
-
-Git ki zaroorat nahi. Ye script GitHub se seedha **tarball** download karta hai
-(plain `curl`), purana code backup karke naya copy karta hai, `npm install`
-chalata hai aur service restart karta hai.
-
-**Jab tumhare paas pehle se install hai** (code update karna hai):
+Git ki zaroorat nahi, koi step nahi. **Ek command, bas:**
 
 ```bash
-curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/592311b3-psd-observer/whatsapp-agent/scripts/observer.sh" \
-  || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/592311b3-psd-observer"
-
-bash /tmp/observer.sh update --dir ~/observer-agent
-bash /tmp/observer.sh update --check          # sirf version compare
+cd ~/observer-agent && bash scripts/observer.sh update --app --bump
 ```
 
-**App + service, ek hi command** (agent code, service restart, aur phone app
-teeno — phone app ka signed OTA bundle ban ke paired phones ko chala jaata
-hai, APK install ki zaroorat nahi):
+Ye ek line ye sab karti hai: naya code GitHub se tarball download → `.env`,
+WhatsApp login aur `data/` jaise-taisse → service restart → phone app rebuild →
+version bump → signed OTA bundle publish. Kuch aur likhne ki zaroorat nahi.
+
+**Phone pe khud:** publish hote hi WhatsApp pe
+`📱 Phone app <version> bhi ready hai` aa jaayega. Observer app kholo — 3 second
+mein check hoke install + reload ho jaayega (ya 30 min mein khud check karega).
+Koi tap nahi, koi download nahi, koi uninstall nahi. Naya version boot na ho
+paye to purana apne aap wapas aa jaata hai.
+
+> **Sirf pehli baar, sirf native code ke liye:** jo APK abhi phone pe hai usmein
+> auto-update ka code nahi hai. Ek baar naya APK install karo — uske baad
+> hamesha automatic. Web-bundle wale update (nayi screens, naye commands) ke liye
+> APK kabhi nahi chahiye.
+
+**Branch badalna ho to** (naye features kisi PR branch pe hon): command ke aage
+`BRANCH=` laga do, baaki wahi:
 
 ```bash
-bash /tmp/observer.sh update --app --bump
-#   --app   : companion app rebuild + publish karo
-#   --bump  : patch version badhao (warna phones ko naya bundle offer nahi hoga)
-#   --app-dir /path/to/app/companion  → app source kahin aur ho to
-#   --notes "kya naya"                → release notes
+cd ~/observer-agent && BRANCH=arena/9851a33a-psd-observer bash scripts/observer.sh update --app --bump
 ```
 
-**Phone pe apne aap:** bundle publish hote hi tumhe WhatsApp pe
-`📱 Phone app 1.5.1 bhi ready hai` message aa jaayega. Observer app kholo —
-3 second baad check hoke install + reload ho jaayega (ya 30 min mein khud
-check karega). Koi uninstall/download nahi. Naya version boot na ho paye to
-purana apne aap wapas aa jaata hai.
+Merge hone ke baad `BRANCH=` hata do — script yaad rakh leta hai kaunsa branch
+track karna hai (`.observer-branch`).
 
-> **Sirf pehli baar:** jo APK abhi phone pe hai usmein ye auto-update code
-> nahi hai. Ek baar Settings → *PC interface updates* → Check → Install
-> karna hoga (ya naya APK ek baar install karna hoga). Uske baad hamesha
-> automatic.
+**Phone pe update nahi dikh raha?** Pehle ye chalao — ye batata hai PC pe kya
+published hai, signing key kya hai, aur signature verify hoti hai ya nahi:
 
-(Path apna actual install path daalo — jahan `package.json` hai wahan.
-Default `~/observer-agent`. Pata nahi?
-`find ~ -name package.json -path "*observer-agent*" 2>/dev/null`)
+```bash
+cd ~/observer-agent && node scripts/app-update.mjs doctor
+```
+
+Output ke aakhir mein phone pe app kya dikhayega aur uska fix likha hoga.
+
+**Aur kuch chahiye to (optional):**
+
+```bash
+bash scripts/observer.sh update --check     # sirf version compare, kuch install nahi
+bash scripts/observer.sh update --app --bump --notes "kya naya"   # release notes
+bash scripts/observer.sh doctor             # kya toota hua hai + exact fix
+```
+
+> `--app` = companion app rebuild + publish · `--bump` = patch version badhao
+> (warna phones ko naya bundle offer nahi hoga) · `--app-dir /path` = app source
+> kahin aur ho to · `--notes "..."` = release notes.
+>
+> Path apna actual install path daalo — jahan `package.json` hai wahan. Default
+> `~/observer-agent`. Pata nahi?
+> `find ~ -name package.json -path "*observer-agent*" 2>/dev/null`
 
 **Pehli baar install kar rahe ho (koi code pehle se nahi hai):**
 

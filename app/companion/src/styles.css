@@ -758,6 +758,36 @@ time,
   color: var(--ink);
   border-color: var(--muted);
 }
+/* Where this message is going, before it is sent. */
+.route-hint {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.route-hint.agent {
+  color: var(--ink);
+  border-style: solid;
+  border-color: var(--muted);
+}
+.usage-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.usage-note.warn {
+  color: var(--warn);
+}
 .markdown,
 .plain-message {
   font-size: var(--t-body);
@@ -1186,6 +1216,54 @@ textarea {
   padding: 10px 12px;
   font-size: 12px;
 }
+/* Same shape as the select, so the row never jumps between inputs. */.setting-row .number-input {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  min-height: 44px;
+  width: 112px;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hint {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+/* Direct AI spend on the owner's own key: three numbers, one glance. */
+.usage-panel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s3);
+  margin: var(--s3) 0 var(--s4);
+}
+.usage-panel > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.usage-figure {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.usage-panel small {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .modal input:not([type="checkbox"]) {
   width: 100%;
 }
@@ -1301,6 +1379,88 @@ textarea {
   padding: var(--s3) var(--s2);
   border-bottom: 1px solid var(--line);
   text-align: left;
+}
+/* The row's draft half: full-width tap target, same as it always was. */
+.command-pick {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: var(--s3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+/* Read-only commands run here; anything else stays a draft. */
+.command-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.command-run:disabled {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.command-result {
+  margin-top: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.command-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--s4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-caption);
+  color: var(--muted);
+}
+.command-result-head strong {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--ink);
+}
+.command-result-head span {
+  margin-left: auto;
+}
+.command-result pre {
+  margin: 0;
+  padding: var(--s4);
+  max-height: 34vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.command-result .button-row {
+  padding: 0 var(--s4) var(--s3);
+}
+.command-failure {
+  margin: var(--s3) 0 0;
+  font-size: var(--t-caption);
+  line-height: 1.7;
+  color: var(--warn);
 }
 .command-item:hover {
   background: var(--surface);
@@ -1832,6 +1992,26 @@ textarea {
   outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
+/* Same on/off look as .toggle, for the one row the phone owns the truth for. */
+.setting-toggle {
+  min-width: 62px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.setting-toggle[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.setting-toggle:disabled {
+  opacity: 0.6;
+}
 .connection-card {
   display: flex;
   align-items: center;
@@ -1880,6 +2060,34 @@ textarea {
 }
 .device-note > svg {
   margin-top: 2px;
+}
+/* The PC-delivered interface update, in front of the owner instead of buried in
+   Settings: a ready bundle is an offer (Install), anything else is the exact
+   reason the app has nothing to show. Hairline card, no gradient, colour only
+   when there is something to act on. */
+.update-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 0 var(--s3);
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--t-label);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.update-strip.ready {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: var(--ink);
+}
+.update-strip-text {
+  flex: 1;
+  min-width: 0;
+}
+.update-strip .button.compact {
+  flex: none;
 }
 .update-note {
   padding: 14px;

@@ -143,3 +143,27 @@ test('mobile/discovery: user opt-in controls only metadata advertisement; loopba
  const d=createDiscovery({host:'0.0.0.0',port:8787,serverId:'fixture',factory:fake});assert.equal(d.status().enabled,false);await d.start();assert.equal(starts,0);await d.set(true);assert.equal(d.status().advertising,true);await d.set(false);assert.equal(stops,1);
  const loop=createDiscovery({host:'127.0.0.1',factory:fake});await assert.rejects(loop.set(true),/loopback/);
 });
+
+test('mobile/HTTP: the audit trail is readable from the phone, newest first, and never writable through the app',async t=>{
+ const dir=folder(t);
+ fs.writeFileSync(path.join(dir,'audit.jsonl'),[
+   JSON.stringify({at:Date.parse('2026-10-24T10:00:00Z'),who:'owner',cmd:'status'}),
+   JSON.stringify({at:Date.parse('2026-10-24T10:05:00Z'),who:'919999999999',cmd:'memory',ok:false}),
+   JSON.stringify({at:Date.parse('2026-10-24T10:09:00Z'),who:'owner',cmd:'audit'}),
+ ].join('\n')+'\n');
+ const f=await bridgeFixture(t,{dataDir:dir});
+ const read=await f.api('/api/app/audit?limit=2');
+ assert.equal(read.status,200);
+ const body=await read.json();
+ assert.equal(body.entries.length,2);
+ assert.equal(body.entries[0].cmd,'audit');
+ assert.equal(body.entries[1].ok,false);
+ // A default limit still answers, and a nonsense limit cannot empty the log.
+ assert.equal((await(await f.api('/api/app/audit')).json()).entries.length,3);
+ assert.equal((await(await f.api('/api/app/audit?limit=0')).json()).entries.length,3);
+ assert.equal((await(await f.api('/api/app/audit?limit=9999')).json()).entries.length,3);
+ // The app can read the log; there is no route that writes it.
+ const forged=await f.api('/api/app/audit',{cmd:'forged'});
+ assert.equal(forged.status,404);
+ assert.equal(fs.readFileSync(path.join(dir,'audit.jsonl'),'utf8').trim().split('\n').length,3);
+});

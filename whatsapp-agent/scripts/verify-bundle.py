@@ -9,12 +9,17 @@ import tarfile
 ROOT = Path(__file__).resolve().parent.parent
 DIRECTORIES = ("src", "webapp", "test", "scripts", "systemd", "benchmarks", "audits")
 FILES = ("package.json", "package-lock.json", "release-notes.json", ".env.example", "start.sh", "README.md", "QUICKSTART.md", "LOCAL-MODELS.md", "AI-KEYS.md", "BUILD-LOG.md", "NEURAL.md", "DEEP-TESTING.md", "VOICE.md", "WHATSAPP-CALL.md", "docker-compose.yml", "Containerfile")
+# Written by build-bundle.sh at pack time, not kept in the tree: it names the ref
+# the bundle came from, so a download can refuse another branch's bundle that
+# happens to carry the same version number.
+STAMPED = ".bundle-ref"
 FORBIDDEN = {".git", "node_modules", "data", "auth_info", "auth_info_baileys", ".cache", "coverage", "__pycache__"}
 
 
 def verify(archive, root=ROOT):
     expected = {p.relative_to(root).as_posix() for name in DIRECTORIES if (root / name).is_dir() for p in (root / name).rglob("*") if p.is_file() and not FORBIDDEN.intersection(p.relative_to(root).parts)}
     expected.update(name for name in FILES if (root / name).is_file())
+    expected.add(STAMPED)
     found = set()
     with tarfile.open(archive, "r:gz") as tf:
         for member in tf:
@@ -30,6 +35,12 @@ def verify(archive, root=ROOT):
             relative = PurePosixPath(*path.parts[1:]).as_posix()
             if relative in found or relative not in expected:
                 raise ValueError(f"Duplicate/unexpected archive member: {member.name}")
+            if relative == STAMPED:
+                stamp = tf.extractfile(member).read().decode("utf-8", "replace")
+                if not any(line.startswith("ref=") and len(line) > 4 for line in stamp.splitlines()):
+                    raise ValueError("Bundle ref stamp is missing its ref")
+                found.add(relative)
+                continue
             if (root / relative).is_symlink():
                 raise ValueError(f"Source symlink not allowed: {relative}")
             if tf.extractfile(member).read() != (root / relative).read_bytes():

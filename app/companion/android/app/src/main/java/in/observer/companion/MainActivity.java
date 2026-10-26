@@ -248,7 +248,7 @@ public final class MainActivity extends Activity {
                     String base=OriginPolicy.base(p.getString("baseUrl"),p.optBoolean("allowLan"));JSONObject r=NativeHttp.request(base+"/health","GET",null,null,false,null,12000);JSONObject h=r.optJSONObject("json");
                     respond(id,new JSONObject().put("reachable",r.optInt("status")==200).put("version",h==null?"unknown":h.optString("version")).put("service",h==null?"unknown":h.optString("service")),null);return;
                 }
-                case "wake": case "wakeProfile": case "pushStatus": phone.io(id,method,p);return;
+                case "wake": case "wakeProfile": case "pushStatus": case "shareFile": phone.io(id,method,p);return;
                 case "restore": respond(id, profile(), null); return;
                 case "readState": respond(id, vault.get("state"), null); return;
                 case "writeState": {
@@ -338,7 +338,11 @@ public final class MainActivity extends Activity {
                         if (code >= 400) throw new Exception("Provider returned HTTP " + code + ". Check the configured model, API key, quota and account. Provider error text is not echoed to protect key fragments.");
                         JSONObject response = new JSONObject(new String(NativeHttp.read(c.getInputStream(), 2 * 1024 * 1024), StandardCharsets.UTF_8));
                         if (requestCloudEpoch != cloudEpoch.get()) throw new Exception("Cloud request cancelled; late response discarded.");
-                        JSONObject message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message"); Object content = message.opt("content"), refusal = message.opt("refusal"); String text = content instanceof String ? ((String) content).trim() : refusal instanceof String ? ((String) refusal).trim() : ""; if (text.isEmpty()) throw new Exception("Provider returned no text. Check model and usage before retrying; nothing was retried automatically."); respond(id, new JSONObject().put("ok", true).put("text", text.substring(0, Math.min(48000, text.length()))), null);
+                        JSONObject message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message"); Object content = message.opt("content"), refusal = message.opt("refusal"); String text = content instanceof String ? ((String) content).trim() : refusal instanceof String ? ((String) refusal).trim() : ""; if (text.isEmpty()) throw new Exception("Provider returned no text. Check model and usage before retrying; nothing was retried automatically.");
+                        JSONObject answer = new JSONObject().put("ok", true).put("text", text.substring(0, Math.min(48000, text.length())));
+                        // The key is the owner's, so the phone keeps the count.
+                        JSONObject usage = response.optJSONObject("usage"); if (usage != null) answer.put("usage", new JSONObject().put("promptTokens", usage.optInt("prompt_tokens")).put("completionTokens", usage.optInt("completion_tokens")).put("totalTokens", usage.optInt("total_tokens")));
+                        respond(id, answer, null);
                     } finally { if (cloudConnection == c) cloudConnection = null; c.disconnect(); }
                     return;
                 }

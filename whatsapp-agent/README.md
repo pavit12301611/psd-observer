@@ -46,14 +46,24 @@ model that fits the machine — all from that one file.
 
 | Command | What it does |
 |---|---|
+| `observer.sh update --app --bump` | **the one command**: agent code + service restart + phone app rebuild + signed OTA publish, all in one go. Paired phones install it themselves on their next check — no APK, no tap |
 | `observer.sh install` | first-time install (curl tarball, no git) |
-| `observer.sh update` | update code, keeps `.env` / login / `data/` |
-| `observer.sh update --app --bump` | agent **and** phone app in one go: rebuilds the companion, publishes a signed OTA bundle paired phones fetch on their next check (new APK still needs `npm run android:debug`) |
+| `observer.sh update` | agent code only, keeps `.env` / login / `data/` |
 | `observer.sh models …` | Hugging Face GGUF: list, recommend, download, serve, wire |
 | `observer.sh voice …` | JARVIS voice: `setup` (Piper en_GB), `whisper`, `call-engine` + `link-voip` (asli WhatsApp call), `status` / `test` |
+| `node scripts/app-update.mjs doctor` | why the phone is not being offered an interface update: the signing key, the published bundle, and whether its signature verifies |
 | `observer.sh doctor` | what is broken + the exact fix |
 | `observer.sh service …` | systemd unit install/restart/logs |
 | `observer.sh start` / `relink` / `remote` / `fix` | run, new QR, Tailscale, desktop fixes |
+
+Run it from the install directory — one line, nothing else:
+
+```bash
+cd ~/observer-agent && bash scripts/observer.sh update --app --bump
+```
+
+A newer branch (a PR) needs `BRANCH=<name>` in front; after a merge the script
+remembers the branch it should track.
 
 The old names (`install-fresh.sh`, `update-from-github.sh`, `local-models.sh`)
 still work — they are now thin wrappers that forward to `observer.sh`.
@@ -642,8 +652,21 @@ Everything the Observer app does in the cloud also works locally:
 | `POST /api/chat` | phone app chat |
 | `POST /api/action` | run one action by name |
 | `GET /api/files` · `GET /api/apps` | files / installed apps |
+| `GET /api/app/audit` | read-only audit trail, newest first (same log as `/audit`) |
 | `POST /api/send` | send a message to the owner |
 | `GET /health` | public liveness (masked numbers only) |
+
+A signed web bundle is verified before it is installed:
+
+```bash
+cd ~/observer-agent
+node scripts/app-update.mjs pack --version 1.5.1 --notes "what changed"
+node scripts/verify-ota-pack.mjs pack.json 1.5.1
+```
+
+The pack step defaults to the companion app's own version, so packing straight
+after a build cannot ship a bundle that claims to be something else. `--version`
+still overrides it. CI runs the same pack-and-verify on every push.
 
 All except `/health`, the app shell and icons need `x-bridge-token`,
 `Authorization: Bearer`, or `?t=` (the private dashboard URL). The bridge

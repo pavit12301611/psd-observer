@@ -35,6 +35,8 @@ export interface Reply {
   media?: Media[];
   stopped?: boolean;
   awaitingConfirm?: boolean;
+  /** Direct AI only: what the provider says this turn cost. */
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
 }
 export type Delivery = "sending" | "sent" | "failed";
 export interface Message extends Reply {
@@ -77,6 +79,22 @@ export interface Preferences {
    * machine or is a command. "agent"/"cloud" pin the whole app.
    */
   chatMode: ChatMode;
+  /**
+   * The owner's own engine corrections, newest last. In "auto" mode one of
+   * these beats the classifier, so a sentence is never mis-routed twice.
+   * Device-local only: never sent to the PC or to a provider.
+   */
+  routeFixes?: RouteFix[];
+  /** Tokens spent on the owner's own Direct AI key, per day (YYYY-MM-DD). */
+  usage?: Record<string, number>;
+  /** Monthly Direct AI token budget; 0 disables the warning. */
+  usageCap?: number;
+}
+/** One owner correction: "this sentence belongs on that engine". */
+export interface RouteFix {
+  text: string;
+  route: Route;
+  at: number;
 }
 export interface LocalState {
   conversations: Conversation[];
@@ -235,6 +253,15 @@ export interface Job {
   stopRequested?: boolean;
   result?: Reply;
 }
+/** One line of the PC's append-only audit trail (data/audit.jsonl). */
+export interface AuditEntry {
+  at: number;
+  who?: string;
+  cmd?: string;
+  args?: string;
+  event?: string;
+  ok?: boolean;
+}
 export interface JobRef {
   id: string;
   conversationId: string;
@@ -259,6 +286,9 @@ export interface Workflow {
   name: string;
   steps: WorkflowStep[];
   trigger: { type: "manual" | "daily"; time?: string };
+  /** The PC's calendar day this routine last fired on (YYYY-MM-DD), if ever. */
+  lastDay?: string | null;
+  createdAt?: number;
 }
 export interface AgentEvent {
   epoch: string;
@@ -267,6 +297,8 @@ export interface AgentEvent {
   text: string;
   ts: number;
   jobId?: string;
+  /** Approval events carry the exact request id, so the shade can act on it. */
+  approvalId?: string;
 }
 export interface PairedDevice {
   id: string;

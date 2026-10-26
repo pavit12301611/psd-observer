@@ -10,6 +10,7 @@ import { createAssets } from './assets.js';
 import { createDiscovery } from './discovery.js';
 import { createPush } from './push.js';
 import { createUpdateChannel } from './update.js';
+import { readAudit } from '../audit.js';
 import { error } from './records.js';
 export function privateIPv4(ip) {
   const a = ip.split('.').map(Number); return a.length === 4 && a.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && (a[0] === 10 || a[0] === 192 && a[1] === 168 || a[0] === 172 && a[1] >= 16 && a[1] <= 31 || a[0] === 100 && a[1] >= 64 && a[1] <= 127);
@@ -22,6 +23,9 @@ export function pairingOrigin(raw) {
 export function createMobilePlatform({ config, app, runOwner, voice, normalise, solve, now = Date.now, pushFetch } = {}) {
   const root = config.dataDir ? path.join(config.dataDir, 'mobile') : null;
   const file = (name) => root ? path.join(root, name) : null;
+  // The audit trail follows DATA_DIR like every other store, so a relocated
+  // agent keeps one log instead of silently starting a second one.
+  const auditFile = () => path.join(config.dataDir, 'audit.jsonl');
   const devices = createDevices({ file: file('devices.json'), now });
   let push;
   try { push = createPush({ credentialsFile: config.appFcmCredentials || null, targets: () => devices.pushTargets(), fetchImpl: pushFetch, now }); }
@@ -54,6 +58,11 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
   return {
     devices, events, jobs, projects, workflows, rtc, assets, discovery, updates, capabilities,
     controlsAllowed: () => Boolean(config.allowPcControl),
+    /** Read-only audit entries, newest first. Never writes, never truncates. */
+    auditEntries(limit = 40) {
+      const wanted = Math.min(200, Math.max(1, Number(limit) || 40));
+      return readAudit({ file: auditFile(), limit: wanted }).reverse();
+    },
     diagnostics() { return { serverId: devices.serverId, capabilities: capabilities(), port: config.port, host: config.host, addresses: Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === 'IPv4' && !n.internal && privateIPv4(n.address)).map((n) => n.address), loopbackOnly: config.host === '127.0.0.1', pcControl: Boolean(config.allowPcControl), note: 'Reachability cannot be proven from the PC alone. No firewall, permission or router settings were changed.' }; },
     start() {
       if (timer) return;
@@ -61,7 +70,9 @@ export function createMobilePlatform({ config, app, runOwner, voice, normalise, 
       timer = setInterval(() => {
         try {
           const pending = app?.state?.().pending || [], key = pending.map((p) => p.id).join(',');
-          if (key && key !== lastApproval) events.publish('approval', 'Your PC has an exact action waiting for review.');
+          // The approval id travels with the event so the phone can act on that
+          // exact request from the notification; the PC still re-checks it.
+          if (key && key !== lastApproval) events.publish('approval', 'Your PC has an exact action waiting for review.', { approvalId: pending[pending.length - 1].id });
           lastApproval = key;
           for (const due of workflows.scheduled()) {
             workflows.markScheduled(due.id, due.day); // Commit the day BEFORE dispatch; no catch-up/replay after restart.

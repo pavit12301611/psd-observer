@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # observer.sh — ONE script for the whole Observer WhatsApp agent.
 #
+#   THE ONE COMMAND — agent + service + phone app, sab ek saath:
+#   bash observer.sh update --app --bump
+#
 #   bash observer.sh install     first-time install (curl-only, no git needed)
 #   bash observer.sh update      update the code, keep .env / WhatsApp login / data
-#   bash observer.sh update --app   update the agent AND the phone app in one go
 #   bash observer.sh models …    local Hugging Face models (llama.cpp) — 100% offline
 #   bash observer.sh keys …      add Groq / OpenRouter / Gemini free API keys
 #   bash observer.sh test        self-test: keys, brains, routing, unit tests
@@ -20,8 +22,8 @@
 #   bash observer.sh install --fedora all --model best
 #   bash observer.sh models recommend
 #   bash observer.sh models setup best --small tiny --vision balanced
-#   bash observer.sh update --dir ~/observer-agent
-#   bash observer.sh update --app --bump
+#   bash observer.sh update --app --bump --notes "kya naya"
+#   BRANCH=<branch> bash observer.sh update --app --bump   # PR branch se lena ho to
 #   bash observer.sh doctor
 #
 # Nothing here needs git. The install/update path downloads a branch tarball
@@ -111,13 +113,19 @@ download_tarball() {
 
   if fetch_repo_file "whatsapp-agent/release-bundle.tar.gz" "$tmp/bundle.tar.gz" \
      && tar -xzf "$tmp/bundle.tar.gz" -C "$tmp" 2>/dev/null; then
-    local bundled_src bundled_ver
+    local bundled_src bundled_ver bundled_ref
     bundled_src=$(find_extracted_agent "$tmp")
     bundled_ver=$(local_version "$bundled_src" 2>/dev/null || echo "")
-    if [ -n "$bundled_src" ] && { [ -z "$expected_ver" ] || [ "$bundled_ver" = "$expected_ver" ]; }; then
-      ok "fast bundle verified (v${bundled_ver})"
+    bundled_ref=$(sed -n 's/^ref=//p' "$tmp/whatsapp-agent/.bundle-ref" 2>/dev/null || echo "")
+    # A version match alone is not enough: every branch carries the same version
+    # number, so a bundle from another ref used to pass as "verified" and ship
+    # code the owner never asked for. The ref stamp is what actually proves it.
+    if [ -n "$bundled_src" ] && [ "$bundled_ref" = "$BRANCH" ] \
+       && { [ -z "$expected_ver" ] || [ "$bundled_ver" = "$expected_ver" ]; }; then
+      ok "fast bundle verified (v${bundled_ver}, ref ${bundled_ref})"
       return 0
     fi
+    [ -n "$bundled_ref" ] && warn "fast bundle is from '${bundled_ref}', not '${BRANCH}' — using the full branch archive instead"
     rm -rf "$tmp/whatsapp-agent" "$tmp/bundle.tar.gz"
   fi
 
@@ -210,7 +218,7 @@ cmd_install() {
       --fedora)    fedora=1; shift ;;
       --model)     model="${2:-}"; shift 2 ;;
       --service|--ollama|--power|--phone|--remote|--pc-control) passthru+=("$1"); fedora=1; shift ;;
-      -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+      -h|--help)   sed -n '2,/^set -euo pipefail/p' "$0"; exit 0 ;;
       *) die "install: unknown option $1 (try --help)" ;;
     esac
   done
@@ -294,7 +302,7 @@ cmd_update() {
       --app-dir)   app_dir="${2:-}"; [ -n "$app_dir" ] || die "--app-dir needs a path"; shift 2 ;;
       --bump)      bump=1; shift ;;
       --notes)     notes="${2:-}"; shift 2 ;;
-      -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+      -h|--help)   sed -n '2,/^set -euo pipefail/p' "$0"; exit 0 ;;
       *) die "update: unknown option $1 (try --help)" ;;
     esac
   done
@@ -472,15 +480,26 @@ update_companion_app() {
   ( cd "$app" && npm run build )          || die "app build failed in $app (typecheck/bundle contract)"
   ( cd "$app" && npm run android:sync )   || warn "android asset sync failed — the next APK build will still refresh it"
 
-  # Optional patch bump: phones only get offered a bundle whose version is
-  # newer than what they run, so an unchanged version means "no update".
+  # The version a phone will actually be offered. Phones only install a bundle
+  # newer than the one they already run, so an unchanged version means "no
+  # update" — and a PC with no app checkout rebuilds from the branch tarball
+  # every time, whose version is the committed one. Bumping that alone
+  # republished the same version forever and the phone never saw a new update.
+  # next-version therefore counts up from the highest version already published
+  # on THIS PC, which is monotonic with or without a checkout.
   local version; version=$(node -p "require('$app/package.json').version" 2>/dev/null || echo "")
   [ -n "$version" ] || die "could not read the app version from $app/package.json"
   if [ "$do_bump" -eq 1 ]; then
-    version=$(node -e "
-      const fs=require('fs'), f='$app/package.json', p=JSON.parse(fs.readFileSync(f,'utf8'));
-      const v=p.version.split('.'); v[2]=String(Number(v[2]||0)+1); p.version=v.join('.');
-      fs.writeFileSync(f, JSON.stringify(p,null,2)+'\n'); process.stdout.write(p.version);")
+    # stderr carries the decision (source version, what is already published,
+    # what was chosen) so a wrong bump is visible instead of guessed at.
+    version=$( cd "$dest" && node scripts/app-update.mjs next-version --source "$app/package.json" 2>&1 >/dev/null | tail -1 | sed 's/.*-> //' )
+    [ -n "$version" ] || die "could not work out the next app version — run: cd $dest && node scripts/app-update.mjs doctor"
+    # Never republish a version a phone has already been offered: the phone
+    # refuses it as "not newer", the app used to swallow that reason, and the
+    # owner saw no update no matter how often the command was run.
+    if [ -d "$dest/data/mobile/updates/$version" ]; then
+      die "version $version is already published — the phone would refuse it as not newer. Run: cd $dest && node scripts/app-update.mjs doctor"
+    fi
     info "version bumped → ${version}"
     ( cd "$app" && npm run build ) || die "rebuild after version bump failed"
     ( cd "$app" && npm run android:sync ) || true

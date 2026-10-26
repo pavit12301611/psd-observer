@@ -17,7 +17,10 @@ import {
   Cpu,
   CircleHelp,
   EyeOff,
+  Fingerprint,
+  Gauge,
   LoaderCircle,
+  Zap,
   Check,
   ExternalLink,
 } from "lucide-react";
@@ -39,6 +42,16 @@ import {
 } from "../core/api";
 import { isNative, nativeCall, openExternal } from "../core/native";
 import { Modal, SectionHeading, SettingRow } from "./ui";
+/** The only commands the tile and widget can run. Read-only reports. */
+const QUICK_ACTIONS = [
+  "/status",
+  "/usage",
+  "/todo",
+  "/apps",
+  "/pending",
+  "/audit",
+  "/routine",
+];
 export default function Settings({
   onTools,
   preferences: p,
@@ -64,6 +77,80 @@ export default function Settings({
   draft: (s: string) => void;
   commands: () => void;
 }) {
+  // Direct AI spends the owner's own key, so the count is theirs to see.
+  const usage = p.usage || {},
+    dayKey = () =>
+      new Intl.DateTimeFormat("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date()),
+    todayTokens = usage[dayKey()] || 0,
+    thisMonth = dayKey().slice(0, 7),
+    monthTokens = Object.entries(usage)
+      .filter(([day]) => day.startsWith(thisMonth))
+      .reduce((sum, [, n]) => sum + n, 0),
+    answerDays = Object.keys(usage).length,
+    cap = p.usageCap || 0,
+    budgetWarning =
+      cap && monthTokens >= cap
+        ? `This month’s Direct AI budget is used up (${monthTokens.toLocaleString("en-IN")} / ${cap.toLocaleString("en-IN")} tokens). PC answers still work.`
+        : cap && monthTokens >= cap * 0.8
+          ? `Direct AI is at ${Math.round((monthTokens / cap) * 100)}% of this month’s budget (${monthTokens.toLocaleString("en-IN")} / ${cap.toLocaleString("en-IN")} tokens).`
+          : "";
+  // The lock is a device credential gate, not a preference: the phone owns the
+  // truth, so the row reads it from Android instead of a saved boolean.
+  const [lockOn, setLockOn] = useState(false),
+    [lockBusy, setLockBusy] = useState(false),
+    [lockNote, setLockNote] = useState("");
+  useEffect(() => {
+    if (!isNative()) return;
+    let alive = true;
+    void nativeCall<{ enabled: boolean }>("getLockState")
+      .then((r) => {
+        if (alive) setLockOn(Boolean(r?.enabled));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  async function setLock(next: boolean) {
+    setLockBusy(true);
+    setLockNote("");
+    try {
+      await nativeCall("setAppLock", { enabled: next });
+      setLockOn(next);
+      setLockNote(
+        next
+          ? "App lock is on. Observer will ask for your fingerprint or PIN each time it opens."
+          : "App lock is off.",
+      );
+    } catch (e) {
+      setLockNote(
+        e instanceof Error
+          ? e.message
+          : "Could not change the app lock. Android asks for confirmation when you turn it on.",
+      );
+    } finally {
+      setLockBusy(false);
+    }
+  }
+  // The tile/widget quick action: one read-only command, chosen here.
+  const [quickAction, setQuickAction] = useState("/status"),
+    [quickNote, setQuickNote] = useState("");
+  useEffect(() => {
+    if (!isNative()) return;
+    let alive = true;
+    void nativeCall<{ command: string }>("getQuickAction")
+      .then((r) => {
+        if (alive && r?.command) setQuickAction(r.command);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [confirm, setConfirm] = useState<"disconnect" | "history" | null>(null),
     [checking, setChecking] = useState(false),
     [release, setRelease] = useState<Release | null>(null),
@@ -285,6 +372,31 @@ export default function Settings({
             {toggle("screenPrivacy", "Screen privacy")}
           </SettingRow>
         )}
+        {/* The lock itself is native (Keystore + device credential); this only
+            asks for the change, and Android asks the owner to confirm. */}
+        {isNative() && (
+          <>
+            <SettingRow
+              icon={<Fingerprint size={20} />}
+              title="Fingerprint / device lock"
+              description="Ask for your fingerprint or PIN before Observer opens."
+            >
+              <button
+                className="setting-toggle"
+                disabled={lockBusy}
+                aria-pressed={lockOn}
+                onClick={() => void setLock(!lockOn)}
+              >
+                {lockBusy ? "Confirm on your phone…" : lockOn ? "On" : "Off"}
+              </button>
+            </SettingRow>
+            {lockNote && (
+              <div className="update-note" role="status">
+                <p>{lockNote}</p>
+              </div>
+            )}
+          </>
+        )}
         <button
           className="setting-button"
           onClick={() => setConfirm("history")}
@@ -302,6 +414,92 @@ export default function Settings({
             description="Review the PC agent’s memory in chat."
           />
         </button>
+      </div>
+      <div className="settings-group">
+        <div className="section-label">DIRECT AI</div>
+        {/* The key is the owner's, so the count is shown, not hidden. */}
+        <div className="usage-panel">
+          <div>
+            <span className="usage-figure">
+              {todayTokens.toLocaleString("en-IN")}
+            </span>
+            <small>tokens today</small>
+          </div>
+          <div>
+            <span className="usage-figure">
+              {monthTokens.toLocaleString("en-IN")}
+            </span>
+            <small>tokens this month</small>
+          </div>
+          <div>
+            <span className="usage-figure">{answerDays}</span>
+            <small>days used</small>
+          </div>
+        </div>
+        <SettingRow
+          icon={<Gauge size={20} />}
+          title="Monthly budget"
+          description="Warn at 80%. PC answers are unaffected either way."
+        >
+          <input
+            type="number"
+            min={0}
+            step={50000}
+            aria-label="Monthly Direct AI budget in tokens"
+            className="number-input"
+            value={p.usageCap ?? 0}
+            onChange={(e) =>
+              update({ usageCap: Math.max(0, Number(e.target.value) || 0) })
+            }
+          />
+        </SettingRow>
+        <small className="hint">
+          Counted on this device only — your provider’s own bill is the real
+          one. Set 0 to switch the warning off.
+        </small>
+        {budgetWarning && (
+          <div className="update-note" role="status">
+            <p>{budgetWarning}</p>
+          </div>
+        )}
+      </div>
+      <div className="settings-group">
+        <div className="section-label">QUICK ACTION</div>
+        <SettingRow
+          icon={<Zap size={20} />}
+          title="Tile and widget button"
+          description="One read-only command, run without opening the app. The answer arrives as a notification."
+        >
+          <select
+            aria-label="Quick action command"
+            value={quickAction}
+            onChange={(e) => {
+              const command = e.target.value;
+              setQuickAction(command);
+              if (!isNative()) return;
+              void nativeCall<{ command: string }>("setQuickAction", { command })
+                .then((r) => r && setQuickNote(`Quick action set to ${r.command}.`))
+                .catch((e) =>
+                  setQuickNote(
+                    e instanceof Error
+                      ? e.message
+                      : "Could not save the quick action.",
+                  ),
+                );
+            }}
+          >
+            {QUICK_ACTIONS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+        {quickNote && (
+          <div className="update-note" role="status">
+            <p>{quickNote}</p>
+          </div>
+        )}
       </div>
       <div className="settings-group">
         <div className="section-label">WORKSPACE & DEVICE TOOLS</div>

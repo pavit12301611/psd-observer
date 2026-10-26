@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -25,6 +25,7 @@ export default function Tasks({
   notice,
   addReply,
   recover,
+  approvalAction,
 }: {
   connected: boolean;
   state: AppState | null;
@@ -36,6 +37,8 @@ export default function Tasks({
   notice: (s: string) => void;
   addReply: (r: Reply) => void;
   recover: (id: string) => void;
+  /** A decision tapped in the notification shade, applied once on arrival. */
+  approvalAction?: { id: string; decision: boolean; nonce: number } | null;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   useEffect(() => {
@@ -58,6 +61,15 @@ export default function Tasks({
     };
   }, [connected]);
   const [approving, setApproving] = useState("");
+  // The shade hands over one decision; applying it is the same code path as
+  // tapping Approve here, so the PC's stale/changed check still applies.
+  const applied = useRef(0);
+  useEffect(() => {
+    if (!approvalAction || approvalAction.nonce === applied.current) return;
+    if (!state?.pending.some((p) => p.id === approvalAction.id)) return;
+    applied.current = approvalAction.nonce;
+    void decide(approvalAction.id, approvalAction.decision);
+  }, [approvalAction, state]);
   async function decide(id: string, approve: boolean) {
     if (approving) return;
     setApproving(id);

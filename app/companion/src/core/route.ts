@@ -135,6 +135,10 @@ export function looksLikeCommand(text: string): boolean {
  *
  * With no key and no PC paired there is no engine at all; the app then opens
  * the key sheet, because Direct AI is the default and needs no PC.
+ *
+ * `fixes` are the owner's own corrections from earlier turns: in "auto" mode a
+ * correction beats the classifier, so the same sentence is never sent to the
+ * wrong engine twice. A manual pin still beats everything.
  */
 export function pickRoute(
   text: string,
@@ -143,6 +147,7 @@ export function pickRoute(
     mode?: ChatMode;
     cloudReady?: boolean;
     paired?: boolean;
+    fixes?: RouteFix[];
   } = {},
 ): Route {
   const {
@@ -150,6 +155,7 @@ export function pickRoute(
     mode = "auto",
     cloudReady = true,
     paired = true,
+    fixes = [],
   } = options;
   // An explicit choice always wins — auto only applies in "auto".
   if (mode === "agent") return "agent";
@@ -158,10 +164,48 @@ export function pickRoute(
   // Auto: the PC takes anything about the machine or any command.
   if (hasFile) return "agent";
   if (text.trim().startsWith("/")) return "agent";
+  const fix = fixFor(fixes, text);
+  if (fix) return fix;
   if (mentionsPc(text) || looksLikeCommand(text)) return "agent";
   // Nothing machine-ish: Direct AI when it can actually answer.
   if (cloudReady) return "cloud";
   return paired ? "agent" : "cloud";
+}
+
+/** One owner correction: "this sentence belongs on that engine". */
+export interface RouteFix {
+  text: string;
+  route: Route;
+  at: number;
+}
+
+/** How many corrections are kept on the device. Oldest falls off the end. */
+export const MAX_ROUTE_FIXES = 60;
+
+/** Same sentence, same key: case and spacing are not a different message. */
+export const fixKey = (text: string) =>
+  ` ${text.toLowerCase().trim().replace(/\s+/g, " ")} `;
+
+/** The engine the owner last chose for this exact sentence, if any. */
+export function fixFor(fixes: RouteFix[], text: string): Route | null {
+  const key = fixKey(text);
+  if (key.trim().length < 4) return null;
+  for (let i = fixes.length - 1; i >= 0; i--)
+    if (fixKey(fixes[i].text) === key) return fixes[i].route;
+  return null;
+}
+
+/** Remember a correction, newest last, bounded, without mutating the input. */
+export function learnFix(
+  fixes: RouteFix[],
+  text: string,
+  route: Route,
+  at = Date.now(),
+): RouteFix[] {
+  const clean = text.trim().slice(0, 500);
+  if (clean.length < 4) return fixes; // "hi" is not a correction worth keeping
+  const kept = fixes.filter((f) => fixKey(f.text) !== fixKey(clean));
+  return [...kept, { text: clean, route, at }].slice(-MAX_ROUTE_FIXES);
 }
 
 /**
@@ -179,4 +223,40 @@ export function cloudContext(messages: Message[]): Message[] {
     );
   }
   return out;
+}
+
+/**
+ * Long chats used to lose everything outside the last twelve turns. This keeps
+ * the recent turns verbatim and folds the older ones into a single line built
+ * from the owner's own words only — a PC answer is never quoted, only counted,
+ * so the privacy boundary in cloudContext still holds.
+ */
+export function compactContext(
+  messages: Message[],
+  { keep = 6, perTopic = 60 }: { keep?: number; perTopic?: number } = {},
+): Message[] {
+  if (messages.length <= keep) return messages;
+  const older = messages.slice(0, -keep),
+    recent = messages.slice(-keep);
+  const topics = older
+    .filter((m) => m.role === "user" && !m.private)
+    .map((m) => m.text.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(-8)
+    .map((t) => `· ${t.length > perTopic ? `${t.slice(0, perTopic)}…` : t}`);
+  const pcAnswers = older.filter(
+    (m) => m.role === "assistant" && m.route === "agent",
+  ).length;
+  const summary: Message = {
+    id: "context-summary",
+    role: "assistant",
+    route: "cloud",
+    ts: older[older.length - 1].ts,
+    text:
+      `Earlier in this chat: ${older.length} messages` +
+      (pcAnswers ? `, ${pcAnswers} of them handled on the PC` : "") +
+      ". Topics so far:\n" +
+      (topics.length ? topics.join("\n") : "· (nothing worth carrying over)"),
+  };
+  return [summary, ...recent];
 }

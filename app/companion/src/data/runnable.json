@@ -1,0 +1,27 @@
+{
+  "schema": "Catalog commands that are read-only reports and need no argument, so they are safe to run with one tap. The value is the exact text sent to the PC. Anything that changes state, needs an argument, or touches a credential deliberately stays out of this file and remains a draft.",
+  "commands": {
+    "/access": "/access",
+    "/apps": "/apps",
+    "/audit": "/audit",
+    "/backup": "/backup",
+    "/brains": "/brains",
+    "/context": "/context",
+    "/corrections": "/corrections",
+    "/digest": "/digest",
+    "/doctor": "/doctor",
+    "/model": "/model",
+    "/notes": "/notes",
+    "/pc": "/pc status",
+    "/pending": "/pending",
+    "/recap": "/recap",
+    "/routine": "/routine",
+    "/shots": "/shots",
+    "/stats": "/stats",
+    "/taskstatus": "/taskstatus",
+    "/today": "/today",
+    "/todo": "/todo",
+    "/usage": "/usage",
+    "/windows": "/windows"
+  }
+}

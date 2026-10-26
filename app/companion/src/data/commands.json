@@ -6,7 +6,9 @@
       "name": "/access",
       "section": "Safety",
       "description": "/access — what is allowed · /yes · /no (destructive actions ask first)",
-      "usage": "/access"
+      "usage": "/access",
+      "runnable": true,
+      "run": "/access"
     },
     {
       "name": "/accuracy",
@@ -36,7 +38,9 @@
       "name": "/apps",
       "section": "Apps & windows",
       "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
-      "usage": "/apps"
+      "usage": "/apps",
+      "runnable": true,
+      "run": "/apps"
     },
     {
       "name": "/arena",
@@ -48,7 +52,9 @@
       "name": "/audit",
       "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
       "description": "/audit — 📋 security audit log (guest attempts, naye contacts)",
-      "usage": "/audit"
+      "usage": "/audit",
+      "runnable": true,
+      "run": "/audit"
     },
     {
       "name": "/auto",
@@ -60,7 +66,9 @@
       "name": "/backup",
       "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
       "description": "/backup now|list|cloud — 💾 zip backup + GitHub cloud copy",
-      "usage": "/backup now|list|cloud"
+      "usage": "/backup now|list|cloud",
+      "runnable": true,
+      "run": "/backup"
     },
     {
       "name": "/batch",
@@ -78,7 +86,9 @@
       "name": "/brains",
       "section": "Just talk (English / Hindi / Hinglish)",
       "description": "/brains — kaun sa model kab use hota hai (live health + power budget)",
-      "usage": "/brains"
+      "usage": "/brains",
+      "runnable": true,
+      "run": "/brains"
     },
     {
       "name": "/brief",
@@ -162,7 +172,9 @@
       "name": "/context",
       "section": "3.6.0 — Smart Upgrades",
       "description": "🧠 Multi-turn yaad (\"wo file bhejo\") · /context · galat, asli jawab X hai se seekhta hai (/corrections) · /retrain",
-      "usage": "/context"
+      "usage": "/context",
+      "runnable": true,
+      "run": "/context"
     },
     {
       "name": "/copy",
@@ -174,7 +186,9 @@
       "name": "/corrections",
       "section": "3.6.0 — Smart Upgrades",
       "description": "🧠 Multi-turn yaad (\"wo file bhejo\") · /context · galat, asli jawab X hai se seekhta hai (/corrections) · /retrain",
-      "usage": "/corrections)"
+      "usage": "/corrections)",
+      "runnable": true,
+      "run": "/corrections"
     },
     {
       "name": "/cp",
@@ -198,7 +212,9 @@
       "name": "/digest",
       "section": "3.6.0 — Smart Upgrades",
       "description": "📞 /callscript save <name> <text> · 🌙 /quiet 22:00-07:00 + /digest · 🎤 voice→voice reply",
-      "usage": "/digest"
+      "usage": "/digest",
+      "runnable": true,
+      "run": "/digest"
     },
     {
       "name": "/doc",
@@ -210,7 +226,9 @@
       "name": "/doctor",
       "section": "Safety",
       "description": "/doctor — kya kaam nahi kar raha, aur exact fix (screenshot/input/AI)",
-      "usage": "/doctor"
+      "usage": "/doctor",
+      "runnable": true,
+      "run": "/doctor"
     },
     {
       "name": "/download",
@@ -378,7 +396,9 @@
       "name": "/model",
       "section": "Just talk (English / Hindi / Hinglish)",
       "description": "/model — brains ka setup/status (local + cloud)",
-      "usage": "/model"
+      "usage": "/model",
+      "runnable": true,
+      "run": "/model"
     },
     {
       "name": "/msg",
@@ -438,7 +458,9 @@
       "name": "/notes",
       "section": "3.5.0 — 15 Smart Features",
       "description": "/notes now|stop — 🎙️ meeting record → AI notes + transcript",
-      "usage": "/notes now|stop"
+      "usage": "/notes now|stop",
+      "runnable": true,
+      "run": "/notes"
     },
     {
       "name": "/notify",
@@ -486,7 +508,9 @@
       "name": "/pc",
       "section": "PC control",
       "description": "/screenshot · /look [question] · /ocr · /pc status|disk|ip|battery|top",
-      "usage": "/pc status|disk|ip|battery|top"
+      "usage": "/pc status|disk|ip|battery|top",
+      "runnable": true,
+      "run": "/pc status"
     },
     {
       "name": "/pcs",
@@ -498,7 +522,9 @@
       "name": "/pending",
       "section": "no send this instead: <text> (ya nahi yeh bhejo: <text>) → AI ke reply ki jagah aapka message bhejeg",
       "description": "/pending · /approve [id] [custom text] · /reject [id] — pending guest messages dekho/control karo",
-      "usage": "/pending"
+      "usage": "/pending",
+      "runnable": true,
+      "run": "/pending"
     },
     {
       "name": "/persona",
@@ -576,7 +602,9 @@
       "name": "/recap",
       "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
       "description": "/recap — 🗞️ weekly recap (padhai/work/balance)",
-      "usage": "/recap"
+      "usage": "/recap",
+      "runnable": true,
+      "run": "/recap"
     },
     {
       "name": "/record",
@@ -666,7 +694,9 @@
       "name": "/routine",
       "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
       "description": "/routine at 7am <macro> — ⏰ morning auto-routines (IST)",
-      "usage": "/routine at 7am <macro>"
+      "usage": "/routine at 7am <macro>",
+      "runnable": true,
+      "run": "/routine"
     },
     {
       "name": "/run",
@@ -714,7 +744,9 @@
       "name": "/shots",
       "section": "Naye (2.8.0)",
       "description": "/shots — screenshot auto-delete (default 4 min) · /shots clean — abhi saaf",
-      "usage": "/shots"
+      "usage": "/shots",
+      "runnable": true,
+      "run": "/shots"
     },
     {
       "name": "/sleepnotify",
@@ -738,7 +770,9 @@
       "name": "/stats",
       "section": "3.5.0 — 15 Smart Features",
       "description": "/stats [today|week|on|off] — 📊 screen time report",
-      "usage": "/stats [today|week|on|off]"
+      "usage": "/stats [today|week|on|off]",
+      "runnable": true,
+      "run": "/stats"
     },
     {
       "name": "/stop",
@@ -768,7 +802,9 @@
       "name": "/taskstatus",
       "section": "Safety",
       "description": "/taskstatus · /batch status — live progress · /batch results — completed/partial outputs · /stop — cancel",
-      "usage": "/taskstatus"
+      "usage": "/taskstatus",
+      "runnable": true,
+      "run": "/taskstatus"
     },
     {
       "name": "/teach",
@@ -786,13 +822,17 @@
       "name": "/today",
       "section": "3.8.0 — Complete Feature Suite (29 upgrades)",
       "description": "/today — 📅 aaj ka full timeline (calendar + reminders + pending + HW)",
-      "usage": "/today"
+      "usage": "/today",
+      "runnable": true,
+      "run": "/today"
     },
     {
       "name": "/todo",
       "section": "Do things",
       "description": "/remind in 10m <text> · /todo add <text> · /note <text> · /remember <fact>",
-      "usage": "/todo add <text>"
+      "usage": "/todo add <text>",
+      "runnable": true,
+      "run": "/todo"
     },
     {
       "name": "/topic",
@@ -852,7 +892,9 @@
       "name": "/usage",
       "section": "Naye (2.8.0)",
       "description": "/usage — aaj ka AI quota: kaun sa brain kitna kharch, 80% pe warning",
-      "usage": "/usage"
+      "usage": "/usage",
+      "runnable": true,
+      "run": "/usage"
     },
     {
       "name": "/use",
@@ -912,7 +954,9 @@
       "name": "/windows",
       "section": "Apps & windows",
       "description": "/apps · /open <app> · /close <app> · /windows · /focus <title>",
-      "usage": "/windows"
+      "usage": "/windows",
+      "runnable": true,
+      "run": "/windows"
     },
     {
       "name": "/work",
