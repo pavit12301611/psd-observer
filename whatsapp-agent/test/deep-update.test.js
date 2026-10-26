@@ -7,7 +7,7 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { createUpdateChannel, canonicalManifest, safeEntry, nextBundleVersion } from '../src/mobile/update.js';
+import { createUpdateChannel, canonicalManifest, safeEntry, nextBundleVersion, publishedVersions } from '../src/mobile/update.js';
 import { createBridgeServer } from '../src/server.js';
 
 const folder = (t) => { const p = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-update-')); t.after(() => fs.rmSync(p, { recursive: true, force: true })); return p; };
@@ -138,6 +138,18 @@ test('update: the next published version is always newer than what a phone alrea
   assert.equal(nextBundleVersion('1.5.1'), '1.5.2');
   // The phone's own parser rejects anything outside X.Y.Z, so this must too.
   for (const bad of ['1.5', '1.5.2.3', 'v1.5.2', '1.5.2 ', '']) assert.equal(nextBundleVersion(bad, []), '0.0.1', `${bad} must fall back`);
+});
+
+test('update: every version directory counts as used, even a half-written one', (t) => {
+  const dir = folder(t);
+  assert.deepEqual(publishedVersions(dir), []);
+  // A directory whose bundle was never finished still blocks that version: the
+  // phone has already been offered it once and will refuse it as not newer.
+  for (const version of ['1.5.0', '1.5.2', '2.0.0', '1.10.0']) fs.mkdirSync(path.join(dir, version));
+  fs.writeFileSync(path.join(dir, 'not-a-version'), 'x');
+  fs.mkdirSync(path.join(dir, 'signing'));
+  assert.deepEqual(publishedVersions(dir), ['2.0.0', '1.10.0', '1.5.2', '1.5.0']);
+  assert.equal(nextBundleVersion('1.5.1', publishedVersions(dir)), '2.0.1');
 });
 
 test('update/HTTP: only an authenticated caller receives the bundle, and pairing pins the same key id', async (t) => {

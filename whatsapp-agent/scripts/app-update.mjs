@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createUpdateChannel, canonicalManifest, nextBundleVersion } from '../src/mobile/update.js';
+import { createUpdateChannel, canonicalManifest, nextBundleVersion, publishedVersions } from '../src/mobile/update.js';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const args = process.argv.slice(2), command = args[0] || 'status';
 const flag = (name, fallback = '') => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] ?? '' : fallback; };
@@ -54,7 +54,14 @@ if (command === 'status') {
   // whether or not the PC has a checkout, and it never goes backwards.
   const source = flag('--source', path.join(root, '..', 'app', 'companion', 'package.json'));
   const sourceVersion = () => { try { return JSON.parse(fs.readFileSync(source, 'utf8')).version; } catch { return ''; } };
-  const next = nextBundleVersion(sourceVersion(), channel.status().versions || []);
+  // Scan the directory rather than the validated release list: a half-written
+  // version must still count as used, or the next publish hands a phone a
+  // version it has already refused and the update silently never appears.
+  const published = publishedVersions(updates);
+  const next = nextBundleVersion(sourceVersion(), published);
+  // The decision goes to stderr so stdout stays a single clean version for the
+  // caller, and so a wrong bump is visible instead of guessed at.
+  console.error(`next-version: source=${sourceVersion() || 'unreadable'} published=[${published.join(', ')}] -> ${next}`);
   // Keep the source honest so the bundle it builds cannot claim another version.
   try { const p = JSON.parse(fs.readFileSync(source, 'utf8')); p.version = next; fs.writeFileSync(source, JSON.stringify(p, null, 2) + '\n'); } catch { /* a read-only source still gets the version reported */ }
   console.log(next);

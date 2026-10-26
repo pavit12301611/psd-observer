@@ -21,7 +21,7 @@ class BundleVerifierTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         model = b'{"public":true}'
-        self.files = {"package.json": b'{"version":"3.9.1"}', "package-lock.json": b'{"version":"3.9.1","packages":{"":{"version":"3.9.1"}}}', "release-notes.json": b'{"latest":"3.9.1"}', "src/neural/weights.json": model, "benchmarks/neural-v2.json": json.dumps({"checkpoint": {"sha256": hashlib.sha256(model).hexdigest()}}).encode()}
+        self.files = {"package.json": b'{"version":"3.9.1"}', "package-lock.json": b'{"version":"3.9.1","packages":{"":{"version":"3.9.1"}}}', "release-notes.json": b'{"latest":"3.9.1"}', "src/neural/weights.json": model, "benchmarks/neural-v2.json": json.dumps({"checkpoint": {"sha256": hashlib.sha256(model).hexdigest()}}).encode(), verifier.STAMPED: b"ref=arena/test\nbuilt=2026-01-01T00:00:00Z\n"}
         for name, data in self.files.items():
             file = self.root / name
             file.parent.mkdir(parents=True, exist_ok=True)
@@ -43,6 +43,15 @@ class BundleVerifierTest(unittest.TestCase):
 
     def test_valid(self):
         self.assertEqual(verifier.verify(self.archive(), self.root)["version"], "3.9.1")
+
+    def test_ref_stamp_without_a_ref_is_refused(self):
+        # The stamp is the only thing that proves a bundle came from the branch
+        # that was asked for; every branch shares one version number, so without
+        # it another branch's bundle verifies as "the same version".
+        for blank in (b"", b"built=2026-01-01T00:00:00Z\n", b"ref=\n"):
+            self.files[verifier.STAMPED] = blank
+            with self.assertRaises(ValueError):
+                verifier.verify(self.archive(), self.root)
 
     def test_traversal(self):
         with self.assertRaises(ValueError):

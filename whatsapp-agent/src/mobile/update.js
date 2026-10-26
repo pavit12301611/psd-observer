@@ -20,6 +20,18 @@ export function versionTuple(value) {
 }
 const beats = (a, b) => a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
 /**
+ * Every version directory ever published here, highest first.
+ *
+ * Deliberately a directory scan rather than the validated release list: a
+ * version whose bundle was half-written must still count as "already used", or
+ * the next publish can hand a phone a version it has already refused.
+ */
+export function publishedVersions(dir) {
+  let names = []; try { names = fs.readdirSync(dir); } catch { return []; }
+  return names.filter((n) => VERSION_TUPLE.test(n))
+    .sort((a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); return y[0] - x[0] || y[1] - x[1] || y[2] - x[2]; });
+}
+/**
  * The next version to publish so a phone is actually offered it.
  *
  * A phone only installs a bundle newer than the one it already runs. Bumping

@@ -113,13 +113,19 @@ download_tarball() {
 
   if fetch_repo_file "whatsapp-agent/release-bundle.tar.gz" "$tmp/bundle.tar.gz" \
      && tar -xzf "$tmp/bundle.tar.gz" -C "$tmp" 2>/dev/null; then
-    local bundled_src bundled_ver
+    local bundled_src bundled_ver bundled_ref
     bundled_src=$(find_extracted_agent "$tmp")
     bundled_ver=$(local_version "$bundled_src" 2>/dev/null || echo "")
-    if [ -n "$bundled_src" ] && { [ -z "$expected_ver" ] || [ "$bundled_ver" = "$expected_ver" ]; }; then
-      ok "fast bundle verified (v${bundled_ver})"
+    bundled_ref=$(sed -n 's/^ref=//p' "$tmp/whatsapp-agent/.bundle-ref" 2>/dev/null || echo "")
+    # A version match alone is not enough: every branch carries the same version
+    # number, so a bundle from another ref used to pass as "verified" and ship
+    # code the owner never asked for. The ref stamp is what actually proves it.
+    if [ -n "$bundled_src" ] && [ "$bundled_ref" = "$BRANCH" ] \
+       && { [ -z "$expected_ver" ] || [ "$bundled_ver" = "$expected_ver" ]; }; then
+      ok "fast bundle verified (v${bundled_ver}, ref ${bundled_ref})"
       return 0
     fi
+    [ -n "$bundled_ref" ] && warn "fast bundle is from '${bundled_ref}', not '${BRANCH}' — using the full branch archive instead"
     rm -rf "$tmp/whatsapp-agent" "$tmp/bundle.tar.gz"
   fi
 
@@ -484,8 +490,16 @@ update_companion_app() {
   local version; version=$(node -p "require('$app/package.json').version" 2>/dev/null || echo "")
   [ -n "$version" ] || die "could not read the app version from $app/package.json"
   if [ "$do_bump" -eq 1 ]; then
-    version=$( cd "$dest" && node scripts/app-update.mjs next-version --source "$app/package.json" 2>/dev/null )
-    [ -n "$version" ] || die "could not work out the next app version"
+    # stderr carries the decision (source version, what is already published,
+    # what was chosen) so a wrong bump is visible instead of guessed at.
+    version=$( cd "$dest" && node scripts/app-update.mjs next-version --source "$app/package.json" 2>&1 >/dev/null | tail -1 | sed 's/.*-> //' )
+    [ -n "$version" ] || die "could not work out the next app version — run: cd $dest && node scripts/app-update.mjs doctor"
+    # Never republish a version a phone has already been offered: the phone
+    # refuses it as "not newer", the app used to swallow that reason, and the
+    # owner saw no update no matter how often the command was run.
+    if [ -d "$dest/data/mobile/updates/$version" ]; then
+      die "version $version is already published — the phone would refuse it as not newer. Run: cd $dest && node scripts/app-update.mjs doctor"
+    fi
     info "version bumped → ${version}"
     ( cd "$app" && npm run build ) || die "rebuild after version bump failed"
     ( cd "$app" && npm run android:sync ) || true
