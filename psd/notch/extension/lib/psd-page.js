@@ -28,7 +28,7 @@ const CHIPS = [
 
 class Bubble extends St.BoxLayout {
     constructor(role, text = '') {
-        super({vertical: true, x_expand: true});
+        super({orientation: Clutter.Orientation.VERTICAL, x_expand: true});
         this.add_style_class_name(`psd-bubble psd-bubble-${role}`);
         this.role = role;
 

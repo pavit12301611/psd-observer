@@ -61,12 +61,19 @@ class Label extends Actor {
     }
 }
 class Button extends Actor {}
+// StBoxLayout installs exactly one property, `orientation`, default HORIZONTAL.
+// There is no `vertical` property, and the real Shell does not complain about
+// one — g_object_new drops the unknown key and the box lays out horizontally.
+// That silence is why this fake mirrors the drop instead of inventing a
+// `vertical` field for the tests to assert against.
 class BoxLayout extends Actor {
     constructor(properties = {}) {
         if (Object.hasOwn(properties, 'spacing'))
             throw new Error('No property spacing on StBoxLayout');
         super(properties);
+        this.orientation = properties.orientation ?? Clutter.Orientation.HORIZONTAL;
     }
+    get vertical() { return this.orientation === Clutter.Orientation.VERTICAL; }
 }
 class Slider {
     constructor(value) { this.value = value; }
@@ -78,15 +85,34 @@ class FileIcon {
     constructor(properties = {}) { Object.assign(this, properties); }
 }
 const Gio = {FileIcon, ThemedIcon: {new: name => ({themed: name})}};
+
+// GObject.Object.find_property is how widgets.js decides which orientation
+// property this Shell has. Point it at whatever the current generation installs.
+let shellGeneration = 'modern';   // 'legacy' = GNOME 45–47, 'modern' = GNOME 49–50
+const GObject = {
+    Object: {
+        find_property(klass, name) {
+            const has = shellGeneration === 'legacy'
+                ? ['vertical', 'pack_start']
+                : ['orientation'];
+            return has.includes(name) ? {name} : null;
+        },
+    },
+};
 const GLib = {get_monotonic_time: () => 1_000_000};
 const St = {Icon, Label, Button, BoxLayout};
-const Clutter = {ActorAlign: {START: 0, CENTER: 1, FILL: 2, END: 3}};
+const Clutter = {
+    ActorAlign: {START: 0, CENTER: 1, FILL: 2, END: 3},
+    // clutter-enums.h: HORIZONTAL = 0, VERTICAL = 1.
+    Orientation: {HORIZONTAL: 0, VERTICAL: 1},
+};
 const Pango = {EllipsizeMode: {NONE: 0, END: 3}, WrapMode: {WORD_CHAR: 2}, Alignment: {CENTER: 1}};
 const stubs = new Map([
     ['gi://St', {default: St}],
     ['gi://Gio', {default: Gio}],
     ['gi://GLib', {default: GLib}],
     ['gi://Clutter', {default: Clutter}],
+    ['gi://GObject', {default: GObject}],
     ['gi://Pango', {default: Pango}],
     ['resource:///org/gnome/shell/ui/slider.js', {Slider}],
 ]);
@@ -168,4 +194,31 @@ test('disabled controls lose focus and look disabled', () => {
     widgets.setSensitive(widget, true);
     assert.equal(widget.reactive, true);
     assert.equal(widget.opacity, 255);
+});
+
+test('a box is a column on every Shell generation, 45 through 50', () => {
+    // The property that makes an StBoxLayout vertical changed under us:
+    //   GNOME 45–47  "vertical" (boolean)
+    //   GNOME 48     both
+    //   GNOME 49–50  "orientation" only
+    // widgets.js resolves this at import from GObject.Object.find_property.
+    // Assert the *outcome* — a vertical box — not the property name, so the
+    // test keeps meaning something whichever Shell is being targeted.
+    const vertical = widgets.box(true, 'notch-page', 6);
+    const horizontal = widgets.box(false, 'notch-row', 6);
+
+    if (shellGeneration === 'legacy') {
+        assert.equal(vertical.vertical, true, 'legacy Shell: box must ask for vertical');
+        assert.equal(horizontal.vertical, false);
+        assert.equal(vertical.orientation, undefined, 'legacy Shell has no orientation property');
+    } else {
+        assert.equal(vertical.orientation, Clutter.Orientation.VERTICAL);
+        assert.equal(horizontal.orientation, Clutter.Orientation.HORIZONTAL);
+    }
+    assert.equal(vertical.vertical, true, 'outcome: it lays out as a column');
+
+    // And the same for the two boxes built outside box(): a button's content
+    // row and the centred empty state.
+    const empty = widgets.emptyState('Nothing playing', 'Start a song to see controls.');
+    assert.equal(empty.vertical, true, 'empty states are columns');
 });

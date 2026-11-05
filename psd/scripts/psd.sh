@@ -162,14 +162,25 @@ install_notch() {
       return 1
     fi
   fi
-  # And run it: enable() must survive a fake Shell. The type errors GNOME
-  # reports ("Expected type string for argument 'path'") only appear at runtime.
+  # And run it: enable() must survive a fake Shell, and every call into the
+  # Shell must use an argument shape the Shell actually accepts. The errors
+  # GNOME reports here only appear at runtime:
+  #   Expected type string for argument 'path' but got type GObject.Object
+  #   Unrecognized parameter "affectsInputRegion"
+  # Both shipped past a passing build once. The suite is the gate now.
   if command -v node >/dev/null 2>&1 && [ -f "$source/../tests/enable.test.js" ]; then
-    if ( cd "$source/.." && node --test tests/enable.test.js >/dev/null 2>&1 ); then
+    local gate=(
+      tests/enable.test.js
+      tests/gi-contract.test.js
+      tests/shell-api.test.js
+    )
+    if ( cd "$source/.." && node --test "${gate[@]}" >/dev/null 2>&1 ); then
       ok "enable() and disable() run cleanly"
+      ok "every Shell API the extension calls has the shape the Shell expects"
     else
       bad "the extension fails when enabled:"
-      ( cd "$source/.." && node --test tests/enable.test.js 2>&1 ) | grep -E "error:|AssertionError" | head -4 | sed 's/^/   /'
+      ( cd "$source/.." && node --test "${gate[@]}" 2>&1 ) |
+        grep -E "^not ok|error:|AssertionError|Actual message" | head -8 | sed 's/^/   /'
       say "   Your current extension has NOT been touched."
       return 1
     fi

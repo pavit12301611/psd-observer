@@ -49,3 +49,21 @@ export function interfaceXml(dir, file) {
     if (!text.includes('<node')) throw new Error(`Not a D-Bus interface file: ${path}`);
     return {xml: text};
 }
+
+/**
+ * The interface name inside an interface XML file.
+ *
+ * `export()` does not take an interface name — the skeleton reads it from the
+ * XML — so the XML is the only place the name exists. If it drifts from the
+ * constant PSD calls, the method call just fails with UnknownInterface at
+ * runtime, which is a miserable thing to debug from the client side. Read it
+ * back and compare instead.
+ *
+ * @param {{xml: string}} parsed result of interfaceXml()
+ * @returns {string}
+ */
+export function interfaceNameOf(parsed) {
+    const match = /<interface\s+name="([^"]+)"/.exec(parsed?.xml ?? '');
+    if (!match) throw new Error('D-Bus interface XML has no <interface name="...">');
+    return match[1];
+}
