@@ -958,25 +958,116 @@ export function createTools({ config, memory, notch, whatsapp, bus = () => {} })
   };
 }
 
-/** "25m", "2h", "18:30", "tomorrow 9am", ISO. Returns ms epoch or null. */
+/**
+ * Turn what a person types into an epoch timestamp.
+ *
+ * Accepts, case- and space-insensitively:
+ *   "25m" "2h" "3 days"          relative, abbreviated or spelled out
+ *   "in 10 minutes" "after 2 hrs"
+ *   "18:30" "6:30pm" "at 6:30"   clock time (rolls to tomorrow if already past)
+ *   "tomorrow 9am" "today 6pm"   day word + time
+ *   "noon" "midnight"            named times
+ *   ISO timestamps and anything Date.parse understands
+ *
+ * Why this is explicit rather than delegated to Date.parse: Date.parse handles
+ * `25m` and `18:30` (via the two branches above) but quietly returns NaN for
+ * "10 minutes", "2 hours" and "tomorrow 9am" — the exact phrasings people use
+ * when setting a reminder from the notch. It also parses a bare "6:30" as a time
+ * *today*, silently in the past, so clock times are handled here instead.
+ *
+ * @returns {number|null} ms since epoch, or null when it cannot be read
+ */
 export function parseWhen(input) {
   const raw = String(input ?? '').trim().toLowerCase();
   if (!raw) return null;
-  const rel = raw.match(/^(\d+(?:\.\d+)?)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days)$/);
+
+  // Strip the filler words people add without thinking.
+  const text = raw
+    .replace(/^(?:in|after|at|by|on)\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return null;
+
+  const UNIT_MS = {
+    s: 1000, sec: 1000, secs: 1000, second: 1000, seconds: 1000,
+    m: 60_000, min: 60_000, mins: 60_000, minute: 60_000, minutes: 60_000,
+    h: 3_600_000, hr: 3_600_000, hrs: 3_600_000, hour: 3_600_000, hours: 3_600_000,
+    d: 86_400_000, day: 86_400_000, days: 86_400_000,
+  };
+  const AMOUNT = '\\d+(?:\\.\\d+)?';
+  const UNIT = '(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)';
+
+  // ── relative: "25m", "10 minutes", "1.5 hours" ───────────────────────────
+  const rel = text.match(new RegExp(`^${AMOUNT}\\s*${UNIT}$`));
   if (rel) {
-    const n = Number(rel[1]);
-    const unit = rel[2][0];
-    const ms = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[unit];
+    const n = Number(text.match(new RegExp(`^(${AMOUNT})`))[1]);
+    const ms = UNIT_MS[rel[1]];
+    if (!ms) return null;
     return Date.now() + n * ms;
   }
-  const clock = raw.match(/^(\d{1,2}):(\d{2})$/);
-  if (clock) {
+
+  // ── a day word, optionally followed by a time: "tomorrow 9am", "today 18:00" ──
+  const dayWord = text.match(/^(today|tonight|tomorrow|tmrw|tmw)\b\s*(.*)$/);
+  if (dayWord) {
+    const rest = dayWord[2].trim();
+    const base = new Date();
+    if (dayWord[1] === 'tomorrow' || dayWord[1] === 'tmrw' || dayWord[1] === 'tmw')
+      base.setDate(base.getDate() + 1);
+    const time = rest ? clockParts(rest) : null;
+    if (rest && !time) return null;
+    if (time) {
+      base.setHours(time.hours, time.minutes, 0, 0);
+      if (dayWord[1] === 'tonight' && time.hours < 12) base.setHours(time.hours + 12);
+      return base.getTime();
+    }
+    // No time given: "tomorrow" means 9am, "tonight" means 8pm, "today" means now.
+    if (dayWord[1] === 'tonight') base.setHours(20, 0, 0, 0);
+    else if (dayWord[1] !== 'today') base.setHours(9, 0, 0, 0);
+    return base.getTime();
+  }
+
+  // ── named times ──────────────────────────────────────────────────────────
+  if (text === 'noon' || text === 'midday') return nextClock(12, 0);
+  if (text === 'midnight') return nextClock(0, 0);
+  if (text === 'morning') return nextClock(9, 0);
+  if (text === 'evening') return nextClock(20, 0);
+
+  // ── clock time: "18:30", "6:30pm", "6pm", "6:30 pm" ──────────────────────
+  const time = clockParts(text);
+  if (time) return nextClock(time.hours, time.minutes);
+
+  // ── anything else: let the platform try (ISO dates, "2026-11-06 09:00") ──
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+
+  /** "6:30pm" / "18:30" / "6 pm" → {hours, minutes} in 24h, or null. */
+  function clockParts(value) {
+    const match = String(value).trim()
+      .match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (!match) return null;
+    let hours = Number(match[1]);
+    const minutes = Number(match[2] ?? 0);
+    const meridiem = match[3]?.toLowerCase();
+    if (minutes > 59) return null;
+    if (meridiem) {
+      if (hours < 1 || hours > 12) return null;
+      if (meridiem === 'pm' && hours !== 12) hours += 12;
+      if (meridiem === 'am' && hours === 12) hours = 0;
+    } else if (hours > 23) {
+      return null;
+    }
+    return {hours, minutes};
+  }
+
+  /**
+   * A bare clock time means "the next time it is that o'clock" — setting a
+   * reminder for 6:30 at 7pm should ring tomorrow morning, not an hour ago.
+   */
+  function nextClock(hours, minutes) {
     const now = new Date();
     const at = new Date(now);
-    at.setHours(Number(clock[1]), Number(clock[2]), 0, 0);
+    at.setHours(hours, minutes, 0, 0);
     if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
     return at.getTime();
   }
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : null;
 }

@@ -115,12 +115,56 @@ export function parseIntent(input) {
   }
   if (/^(?:lock)\b/.test(text) && !question) return { tool: 'lock_screen', args: {}, label: 'Locking the screen' };
 
-  // ── reminders / memory ───────────────────────────────────────────────────
-  const remind = text.match(/^(?:remind me|reminder|yaad dila(?:o|na))\s*(?:in\s+)?(\d+\s*(?:s|sec|m|min|h|hr|d|day)s?|at\s+\d{1,2}:\d{2}|\d{1,2}:\d{2}|tomorrow\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|that|ke liye|ki)?\s*(.+)$/i);
-  if (remind) {
-    const when = clean(remind[1]).replace(/^at\s+/, '');
-    return { tool: 'remind', args: { text: clean(remind[2]), when }, label: `Reminder for ${when}` };
+  // ── reminders / memory ────────────────────────────────────────────────────
+  //
+  // People say this both ways round, and the second way is the natural one:
+  //
+  //   remind me in 10 minutes to stretch     (time first)
+  //   remind me to stretch in 10 minutes     (task first)
+  //   remind me to call mum at 6:30          (task first, clock time)
+  //
+  // The original pattern only matched the first, so "remind me to stretch in 10
+  // minutes" fell through to a keyword match and ran list_reminders — answering
+  // "No reminders pending" to somebody who had just asked to set one. Accept
+  // both orders; the when/task split is the same either way.
+  const stripWhen = (value) => clean(value)
+    .replace(/^(?:in|at|by|after)\s+/i, '')
+    .replace(/\s+(?:in|at|by|after)$/i, '')
+    .trim();
+
+  // "remind me to stretch in 10m" and "remind me in 10m to stretch" both leave
+  // the infinitive attached to the task; it belongs to neither.
+  const taskOf = (value) => clean(value).replace(/^(?:to|that|for)\s+/i, '').trim();
+
+  const remindPrefix = text.match(/^(?:remind me|reminder|yaad dila(?:o|na))\b\s*(.*)$/i);
+  if (remindPrefix) {
+    let rest = clean(remindPrefix[1]).replace(/^(?:in|after|at|by)\s+/i, '');
+
+    // ── time first: "in 10 minutes to stretch" / "25m to stretch" ──────────
+    // The duration must be a bare number+unit (or a clock time); "at 6:30 to X"
+    // and "tomorrow 9am X" land here too.
+    const leading = rest.match(/^(\d+\s*(?:seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b|\d{1,2}:\d{2}(?:\s*(?:am|pm))?|tomorrow\b[^,]*|tonight|noon|midnight)\s*(?:to|that|for|ke liye|ki)?\s*(.*)$/i);
+    if (leading && clean(leading[2])) {
+      const when = stripWhen(leading[1]);
+      return { tool: 'remind', args: { text: taskOf(leading[2]), when }, label: `Reminder for ${when}` };
+    }
+
+    // ── task first: "to stretch in 10 minutes" / "call mum at 6:30" ────────
+    const trailing = rest.match(/^(.+?)\s+(?:in|after|at|by)\s+(\d+\s*(?:seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b|\d{1,2}:\d{2}(?:\s*(?:am|pm))?|tomorrow\b[^,]*|tonight|noon|midnight)\s*$/i);
+    if (trailing) {
+      const when = stripWhen(trailing[2]);
+      return { tool: 'remind', args: { text: taskOf(trailing[1]), when }, label: `Reminder for ${when}` };
+    }
+
+    // A bare time with no task is still a reminder — "remind me in 20 minutes".
+    const bare = rest.match(/^(\d+\s*(?:seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b|\d{1,2}:\d{2}(?:\s*(?:am|pm))?)$/i);
+    if (bare) {
+      const when = stripWhen(bare[1]);
+      return { tool: 'remind', args: { text: 'Reminder', when }, label: `Reminder for ${when}` };
+    }
+    rest = null;
   }
+
   const remember = text.match(/^(?:remember|note that|yaad rakho)\b[:\s]+(.+)$/i);
   if (remember) {
     const fact = clean(remember[1]);
