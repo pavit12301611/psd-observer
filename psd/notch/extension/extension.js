@@ -4,7 +4,7 @@ import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {NotchView} from './lib/view.js';
-import {APP_ID, EXTENSION_ID, EXTENSION_PATH, PSD_INTERFACE, interfaceXml} from './lib/dbus.js';
+import {APP_ID, EXTENSION_ID, EXTENSION_PATH, PSD_INTERFACE, interfaceXml, interfaceNameOf} from './lib/dbus.js';
 
 export default class NotchExtension extends Extension {
     enable() {
@@ -59,12 +59,22 @@ export default class NotchExtension extends Extension {
         // PSD → notch: one JSON method, so the agent can push a card, a live
         // status, a streamed token or a system snapshot with a single D-Bus call.
         const psdXml = interfaceXml(this.dir, `${APP_ID}.Psd.xml`);
+        // export() takes no interface name (the skeleton reads it from the XML),
+        // so make sure the XML still describes the name PSD calls. A silent
+        // mismatch here is an UnknownInterface error on the client side.
+        const exportedName = interfaceNameOf(psdXml);
+        if (exportedName !== PSD_INTERFACE)
+            throw new Error(`PSD interface XML says "${exportedName}", but clients call "${PSD_INTERFACE}"`);
         this.psdDbus = Gio.DBusExportedObject.wrapJSObject(psdXml, {
             PsdMessage: (payload) => this.view?.receivePsd(payload),
             PsdOpen: (tab) => this.view?.openPsd(tab || 'chat'),
             PsdState: () => this.view?.psdState() ?? '{}',
         });
-        this.psdDbus.export(Gio.DBus.session, EXTENSION_PATH, PSD_INTERFACE);
+        // GjsDBusImplementation extends GDBusInterfaceSkeleton, and
+        // skeleton.export() takes exactly (connection, object_path) — the
+        // interface name is inside the XML, not a third argument. Passing one
+        // only earns a "Too many arguments" warning, so keep it to two.
+        this.psdDbus.export(Gio.DBus.session, EXTENSION_PATH);
         this.busOwnerId = Gio.bus_own_name(Gio.BusType.SESSION, EXTENSION_ID,
             Gio.BusNameOwnerFlags.NONE, null, null, null);
     }

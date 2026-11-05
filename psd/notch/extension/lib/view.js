@@ -15,7 +15,6 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -48,6 +47,40 @@ const TABS = [
     {id: 'notifications', title: 'Alerts', icon: 'preferences-system-notifications-symbolic'},
     {id: 'system', title: 'System', icon: 'utilities-system-monitor-symbolic'},
 ];
+
+/**
+ * Whether this Shell's LayoutManager still accepts the affectsInputRegion
+ * parameter on addChrome()/trackChrome().
+ *
+ * `defaultParams` lives in js/ui/layout.js and is not exported, so there is no
+ * clean way to ask. Instead, use the documented failure: Params.parse throws
+ * `Unrecognized parameter` — so try a throwaway call and see. Doing it against
+ * a throwaway actor would register chrome we then have to untrack, so instead
+ * we lean on the one observable difference: the property is gone from the
+ * Shell's tracked-actor defaults from 49 onwards. Probe with a detached actor
+ * and undo immediately; the cost is one function call at enable().
+ */
+function acceptsInputRegion() {
+    const manager = Main.layoutManager;
+    if (!manager || typeof manager.addChrome !== 'function') return false;
+    if (typeof manager.untrackChrome !== 'function') return false;
+    const probe = new St.Widget({visible: false});
+    let accepted = false;
+    try {
+        manager.trackChrome(probe, {affectsInputRegion: true});
+        accepted = true;
+    } catch {
+        accepted = false;
+    } finally {
+        try {
+            manager.untrackChrome(probe);
+            probe.destroy();
+        } catch {
+            /* nothing to clean up */
+        }
+    }
+    return accepted;
+}
 
 export class NotchView {
     constructor(extension) {
@@ -160,7 +193,18 @@ export class NotchView {
         this.surface.add_child(this.peek);
 
         this.actor.add_child(this.surface);
-        Main.layoutManager.addChrome(this.actor, {affectsInputRegion: true, trackFullscreen: true});
+        // LayoutManager._trackActor() runs Params.parse(params, defaultParams),
+        // which throws `Unrecognized parameter "<name>"` for anything outside
+        // that set. The set moved:
+        //
+        //   GNOME 46–48   {trackFullscreen, affectsStruts, affectsInputRegion}
+        //   GNOME 49–50   {trackFullscreen, affectsStruts}
+        //
+        // Passing affectsInputRegion unconditionally is what the owner's Shell
+        // rejected on GNOME 50. Pass only what is accepted, and keep the two
+        // we genuinely want: hide under fullscreen, never reserve desktop space
+        // (a notch with struts would push every window down).
+        Main.layoutManager.addChrome(this.actor, this._chromeParams());
         this.actor.visible = true;
 
         this.actor.connectObject('enter-event', () => {
@@ -193,6 +237,23 @@ export class NotchView {
             this.actor.visible = true;
             this._evaluateVisibility();
         }, this.actor);
+    }
+
+    /**
+     * The addChrome() params this Shell actually accepts.
+     *
+     * Params.parse() rejects anything outside its defaults, and the defaults
+     * differ by release: affectsInputRegion existed in 46–48 and was removed in
+     * 49. Probe once — LayoutManager does not expose the set, so ask the manager
+     * what it tracks rather than guessing from a version string.
+     */
+    _chromeParams() {
+        const wanted = {trackFullscreen: true, affectsStruts: false};
+        // GNOME 46–48 also accepted affectsInputRegion; the notch is reactive
+        // and hover-driven, so on those releases we want it in the input region.
+        if (acceptsInputRegion())
+            wanted.affectsInputRegion = true;
+        return wanted;
     }
 
     _buildClosed() {
@@ -618,7 +679,8 @@ export class NotchView {
             widget.accessible_name = TABS[this.tabButtons.indexOf(widget)]?.title ?? '';
         });
         const columns = statColumns(this._contentWidth());
-        this.statsGrid.vertical = columns === 1;
+        this.statsGrid.orientation = columns === 1
+            ? Clutter.Orientation.VERTICAL : Clutter.Orientation.HORIZONTAL;
     }
 
     _animate({immediate = false} = {}) {

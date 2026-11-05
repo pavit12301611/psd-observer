@@ -10,10 +10,45 @@
 // Everything returns a real St actor, ready to add_child().
 
 import Clutter from 'gi://Clutter';
+import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import {giconFor} from './icons.js';
+
+/**
+ * St.BoxLayout's orientation property is not the same across the Shell versions
+ * this extension declares support for. Measured from the sources:
+ *
+ *   GNOME 45–47   StBoxLayout: "vertical"     (boolean, default FALSE)
+ *   GNOME 48      StBoxLayout: "orientation" AND "vertical"
+ *   GNOME 49–50   StBoxLayout: "orientation" only
+ *
+ * So `{vertical: true}` is a silent no-op on 49+, and
+ * `{orientation: Clutter.Orientation.VERTICAL}` is a silent no-op on 45–47.
+ * Either way the box keeps its horizontal default and a column renders as a
+ * row — no error, just a broken layout. Ask the object which property it has.
+ */
+const ORIENTATION_PROPERTY = (() => {
+    try {
+        if (GObject.Object.find_property.call(St.BoxLayout, 'orientation'))
+            return 'orientation';
+        if (GObject.Object.find_property.call(St.BoxLayout, 'vertical'))
+            return 'vertical';
+    } catch {
+        /* fall through */
+    }
+    return 'orientation';
+})();
+
+/** The constructor properties that make a St.BoxLayout a column (or a row). */
+export function boxOrientation(vertical) {
+    if (ORIENTATION_PROPERTY === 'vertical')
+        return {vertical: Boolean(vertical)};
+    return {
+        orientation: vertical ? Clutter.Orientation.VERTICAL : Clutter.Orientation.HORIZONTAL,
+    };
+}
 
 /** An icon that is safe to construct on GNOME 46–50. */
 export function icon(iconName, size = 16, styleClass = null) {
@@ -74,7 +109,7 @@ export function wrapLabel(text = '', styleClass = null) {
  */
 export function button({text, iconName, accessibleName, style, onClick, styleClass} = {}) {
     const content = new St.BoxLayout({
-        vertical: false,
+        ...boxOrientation(false),
         x_align: Clutter.ActorAlign.CENTER,
         y_align: Clutter.ActorAlign.CENTER,
     });
@@ -108,7 +143,7 @@ export function button({text, iconName, accessibleName, style, onClick, styleCla
 
 /** A box: vertical by default; spacing goes through CSS. */
 export function box(vertical = true, styleClass = null, spacing = 0) {
-    const widget = new St.BoxLayout({vertical});
+    const widget = new St.BoxLayout(boxOrientation(vertical));
     if (styleClass) widget.add_style_class_name(styleClass);
     if (spacing) widget.style = `spacing: ${spacing}px;`;
     return widget;
@@ -117,7 +152,7 @@ export function box(vertical = true, styleClass = null, spacing = 0) {
 /** A centered empty state: a title and one line of guidance. */
 export function emptyState(title, body, iconName = null) {
     const container = new St.BoxLayout({
-        vertical: true,
+        ...boxOrientation(true),
         x_align: Clutter.ActorAlign.CENTER,
         y_align: Clutter.ActorAlign.CENTER,
         x_expand: true,

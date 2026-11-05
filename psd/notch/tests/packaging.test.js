@@ -79,6 +79,6 @@ test('the D-Bus interfaces PSD calls are exactly the ones the extension exports'
     // extension.js must import the constants it uses from lib/dbus.js.
     const code = fs.readFileSync(path.join(extensionDir, 'extension.js'), 'utf8');
     const imported = /import \{([^}]+)\} from '\.\/lib\/dbus\.js'/.exec(code)?.[1] ?? '';
-    for (const name of ['APP_ID', 'EXTENSION_ID', 'EXTENSION_PATH', 'PSD_INTERFACE', 'interfaceXml'])
+    for (const name of ['APP_ID', 'EXTENSION_ID', 'EXTENSION_PATH', 'PSD_INTERFACE', 'interfaceXml', 'interfaceNameOf'])
         assert.ok(imported.includes(name), `lib/dbus.js must export ${name}`);
 });

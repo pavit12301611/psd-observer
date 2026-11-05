@@ -90,12 +90,19 @@ class ScrollView extends Actor {
     get child() { return this._child; }
 }
 
+// StBoxLayout installs exactly one property, `orientation`, default HORIZONTAL.
+// Unknown keys are silently dropped by g_object_new in the real Shell, which is
+// precisely why "vertical: true" looked fine for so long: no error, and every
+// column quietly laid out as a row. Model the silent drop faithfully.
 class BoxLayout extends Actor {
     constructor(properties = {}) {
         if (Object.hasOwn(properties, 'spacing'))
             throw new Error('No property spacing on StBoxLayout');
         super(properties);
-        this.vertical = properties.vertical ?? false;
+        this.orientation = properties.orientation ?? Clutter.Orientation.HORIZONTAL;
+    }
+    get vertical() {
+        return this.orientation === Clutter.Orientation.VERTICAL;
     }
 }
 
@@ -107,6 +114,8 @@ const St = {
 
 const Clutter = {
     ActorAlign: {START: 0, CENTER: 1, FILL: 2, END: 3},
+    // clutter-enums.h: HORIZONTAL = 0, VERTICAL = 1.
+    Orientation: {HORIZONTAL: 0, VERTICAL: 1},
     BinLayout: class {},
     KEY_Escape: 65307,
     EVENT_STOP: true,
@@ -185,12 +194,59 @@ const makePanel = () => {
     return {height: 32, statusArea: {dateMenu}};
 };
 
-const makeShell = () => {
-    const layoutManager = {
-        addChrome() { layoutManager.added = true; },
-        removeChrome() { layoutManager.removed = true; },
-        connectObject() {}, disconnectObject() {},
-    };
+/**
+ * The addChrome() params each Shell generation accepts, read from the sources:
+ *   GNOME 46–48  {trackFullscreen, affectsStruts, affectsInputRegion}
+ *   GNOME 49–50  {trackFullscreen, affectsStruts}
+ * js/ui/layout.js `_trackActor` runs Params.parse(params, defaultParams) and
+ * throws `Unrecognized parameter "<name>"` for anything else. Modelling the
+ * throw is what turns "the extension died at login" into a red test.
+ */
+const accept = (defaults, params) => {
+    for (const prop in params ?? {}) {
+        if (!(prop in defaults))
+            throw new Error(`Unrecognized parameter "${prop}"`);
+    }
+    return {...defaults, ...params};
+};
+
+// One layoutManager for the whole run: the gi:// stubs are ES modules whose
+// exports are snapshots taken at import time, so replacing Main.layoutManager
+// later would not be seen by the code under test. Switch the accepted-parameter
+// set in place instead — same object, different Shell generation.
+const layoutManager = {
+    generation: 'modern',
+    registry: new Map(),
+    get defaults() {
+        return {
+            trackFullscreen: false,
+            affectsStruts: false,
+            ...(layoutManager.generation === 'legacy' ? {affectsInputRegion: true} : {}),
+        };
+    },
+    addChrome(actor, params) {
+        layoutManager.chrome = {...accept(layoutManager.defaults, params), actor};
+        layoutManager.added = true;
+        assert.ok(actor && typeof actor.connectObject === 'function',
+            'addChrome must be handed a real actor');
+        layoutManager.registry.set(actor, layoutManager.chrome);
+    },
+    // trackChrome fills from defaultParams, then goes through the same
+    // Params.parse — that is the path view.js probes at enable().
+    trackChrome(actor, params = {}) {
+        const merged = {...params};
+        for (const prop in layoutManager.defaults) {
+            if (!(prop in merged)) merged[prop] = layoutManager.defaults[prop];
+        }
+        layoutManager.registry.set(actor, accept(layoutManager.defaults, merged));
+    },
+    untrackChrome(actor) { layoutManager.registry.delete(actor); },
+    removeChrome() { layoutManager.removed = true; },
+    connectObject() {}, disconnectObject() {},
+};
+
+const makeShell = ({inputRegion = false} = {}) => {
+    layoutManager.generation = inputRegion ? 'legacy' : 'modern';
     const tray = new Actor();
     tray._notificationQueue = [];
     tray.getSources = () => [];
@@ -281,6 +337,13 @@ test('NotchView constructs, lays out and tears down without throwing', () => {
     const notch = new view.NotchView(extension);
     assert.ok(notch.actor, 'the chrome actor was created');
     assert.ok(shell.Main.layoutManager.added, 'the notch was added as Chrome');
+    // The notch must never reserve desktop space (affectsStruts: false is the
+    // Shell default and we do not override it), and it must hide itself under
+    // fullscreen windows. Both are asserted so a future edit that adds a legacy
+    // param or drops tracking gets caught here, not in a screenshot.
+    const chrome = shell.Main.layoutManager.chrome;
+    assert.equal(chrome.trackFullscreen, true, 'the notch hides under fullscreen windows');
+    assert.equal(chrome.affectsStruts, false, 'the notch must not reserve desktop space');
     assert.ok(notch.pages.chat, 'the agent page exists');
     assert.equal(Object.keys(notch.pages).length, 5, 'five tabs');
     notch.destroy();
@@ -348,4 +411,44 @@ test('Extension.enable() and disable() run against the real code path', () => {
     assert.doesNotThrow(() => instance.disable(), 'disable() must not throw');
     assert.equal(instance.view, null);
     assert.equal(instance.dbus, null);
+});
+
+// ── the same code on both Shell generations ────────────────────────────────
+//
+// GNOME 46–48 accept addChrome({affectsInputRegion}) and orient a box with
+// `vertical`; 49–50 accept neither. The extension declares support for 46–50,
+// so it has to build on both. These two tests swap the fake Shell's parameter
+// set and assert the resulting chrome params, which is exactly the difference
+// that took the owner's extension down.
+
+test('the notch asks for input-region tracking on Shell 46–48, where it exists', () => {
+    layoutManager.generation = 'legacy';
+    try {
+        const extension = makeExtension();
+        extension.settings = extension.getSettings();
+        const notch = new view.NotchView(extension);
+        assert.equal(layoutManager.chrome.affectsInputRegion, true,
+            'GNOME 46–48 should still get the input region');
+        assert.equal(layoutManager.chrome.trackFullscreen, true);
+        assert.equal(layoutManager.chrome.affectsStruts, false);
+        notch.destroy();
+    } finally {
+        layoutManager.generation = 'modern';
+    }
+});
+
+test('the notch never sends affectsInputRegion to Shell 49–50, which rejects it', () => {
+    layoutManager.generation = 'modern';
+    const extension = makeExtension();
+    extension.settings = extension.getSettings();
+    assert.throws(
+        () => layoutManager.addChrome(new Actor(), {affectsInputRegion: true}),
+        /Unrecognized parameter "affectsInputRegion"/,
+        'the fake must reject it, or this whole test proves nothing');
+    const notch = new view.NotchView(extension);
+    const chrome = layoutManager.chrome;
+    assert.equal('affectsInputRegion' in chrome, false, 'nothing extra may be sent');
+    assert.equal(chrome.trackFullscreen, true);
+    assert.equal(chrome.affectsStruts, false);
+    notch.destroy();
 });
