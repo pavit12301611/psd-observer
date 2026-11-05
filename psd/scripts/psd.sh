@@ -9,6 +9,7 @@
 #   bash scripts/psd.sh url              the app link, for this PC and your phone
 #   bash scripts/psd.sh doctor           what works, and the fix
 #   bash scripts/psd.sh fix              install the missing desktop tools
+#   bash scripts/psd.sh uninstall        undo all of the above (see --purge)
 #
 # No git needed at runtime; the script only touches $HOME.
 
@@ -17,7 +18,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 BINDIR="$PREFIX/bin"
-SHAREDIR="$PREFIX/share/psd"
+# The runtime lives in lib/, NOT in share/psd: that path is the owner's data
+# directory (token.txt, memory.json, runs.jsonl). For a long time both were
+# "$PREFIX/share/psd", so every reinstall — and every uninstall without
+# --purge — deleted the token and the memory along with the program.
+SHAREDIR="$PREFIX/lib/psd"
+DATADIR="${XDG_DATA_HOME:-$HOME/.local/share}/psd"
 EXT_UUID="notch@pavit12301611.github.io"
 EXTDIR="$PREFIX/share/gnome-shell/extensions/$EXT_UUID"
 SCHEMADIR="$PREFIX/share/glib-2.0/schemas"
@@ -139,6 +145,20 @@ link_bin() {
   mkdir -p "$BINDIR"
   rm -rf "$SHAREDIR"
   mkdir -p "$SHAREDIR"
+  # The runtime used to live in $DATADIR. If it is still there, the owner's data
+  # is mixed in with program files — move the data aside first, then take over.
+  if [ "$SHAREDIR" != "$DATADIR" ] && [ -d "$DATADIR" ]; then
+    local legacy_kept=()
+    for item in src web agents skills scripts package.json README.md; do
+      if [ -e "$DATADIR/$item" ]; then
+        rm -rf "${DATADIR:?}/$item"
+        legacy_kept+=("$item")
+      fi
+    done
+    if [ "${#legacy_kept[@]}" -gt 0 ]; then
+      ok "moved the runtime out of $DATADIR — your token and memory stayed put"
+    fi
+  fi
   # Copy the runtime, not the docs/tests: the install stays small and obvious.
   for item in src web agents skills package.json README.md; do
     [ -e "$ROOT/$item" ] && cp -r "$ROOT/$item" "$SHAREDIR/"
@@ -469,7 +489,140 @@ doctor_cmd() {
 }
 
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# ── uninstall ───────────────────────────────────────────────────────────────
+#
+# Puts the machine back the way it was before PSD was installed.
+#
+# The order matters:
+#   1. stop running things first (daemon, then the Shell extension), so nothing
+#      is holding files open or writing settings while we clean up
+#   2. restore the extension from the backup the installer took of whatever was
+#      there before, rather than simply deleting it
+#   3. rebuild the schema database after removing our .gschema.xml, or every
+#      later `gsettings` call in that directory keeps a stale key list around
+#   4. reset our dconf keys last, once nothing is reading them
+#
+# Everything here is best-effort and reversible by reinstalling, except deleting
+# data — which only happens with --purge.
+uninstall_cmd() {
+  local purge=0
+  for arg in "$@"; do
+    case "$arg" in
+      --purge) purge=1 ;;
+      --keep-data) purge=0 ;;
+      *) ;;
+    esac
+  done
+
+  head_ "Uninstall PSD"
+
+  # ── 1. stop the agent ────────────────────────────────────────────────────
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user disable --now psd-agent.service >/dev/null 2>&1 || true
+    rm -f "$SERVICE_DIR/psd-agent.service"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    ok "psd-agent.service stopped and removed"
+  else
+    rm -f "$SERVICE_DIR/psd-agent.service" 2>/dev/null || true
+  fi
+  # A daemon started by hand (psd serve) is not a unit; stop ours if it is ours.
+  pkill -u "$(id -u)" -f "$SHAREDIR/src/index.js" 2>/dev/null || true
+
+  # ── 2. put the extension back ────────────────────────────────────────────
+  if command -v gnome-extensions >/dev/null 2>&1; then
+    gnome-extensions disable "$EXT_UUID" >/dev/null 2>&1 || true
+  fi
+
+  # The installer copied whatever extension was already there before replacing
+  # it. That copy IS the original notch — restore the newest one and drop the
+  # rest, instead of leaving the owner with nothing.
+  local backups=() newest=""
+  for candidate in "$EXTDIR".backup-*; do
+    [ -d "$candidate" ] && backups+=("$candidate")
+  done
+  if [ "${#backups[@]}" -gt 0 ]; then
+    newest="$(printf '%s\n' "${backups[@]}" | sort -t- -k2 -n | tail -1)"
+  fi
+
+  if [ -n "$newest" ] && [ -d "$newest" ]; then
+    rm -rf "$EXTDIR"
+    mv "$newest" "$EXTDIR"
+    ok "restored the extension that was installed before PSD from $(basename "$newest")"
+    # Any other backups are ours and now redundant.
+    for candidate in "${backups[@]}"; do
+      [ "$candidate" = "$newest" ] && continue
+      [ -d "$candidate" ] && rm -rf "$candidate"
+    done
+    if [ -f "$EXTDIR/schemas/gschemas.compiled" ] || ls "$EXTDIR/schemas/"*.gschema.xml >/dev/null 2>&1; then
+      install_schema_db "$EXTDIR/schemas" >/dev/null 2>&1 || true
+    fi
+    if command -v gnome-extensions >/dev/null 2>&1; then
+      gnome-extensions enable "$EXT_UUID" >/dev/null 2>&1 || true
+      ok "re-enabled $EXT_UUID — log out and back in for the Shell to pick it up"
+    fi
+  else
+    # No backup: PSD's build is what is there, so remove it outright.
+    if [ -d "$EXTDIR" ]; then
+      rm -rf "$EXTDIR"
+      ok "removed the PSD build of the notch extension"
+      say "   There was no earlier copy to restore, so the extension is now gone."
+    else
+      ok "no notch extension installed"
+    fi
+  fi
+
+  # ── 3. the settings schema ───────────────────────────────────────────────
+  rm -f "$SCHEMADIR/io.github.pavit12301611.Notch.gschema.xml"
+  if ls "$SCHEMADIR/"*.gschema.xml >/dev/null 2>&1; then
+    install_schema_db "$SCHEMADIR" >/dev/null 2>&1 || true
+    ok "rebuilt the shared schema database without the notch schema"
+  else
+    rm -f "$SCHEMADIR/gschemas.compiled"
+  fi
+
+  # ── 4. the command line and the runtime ──────────────────────────────────
+  rm -f "$BINDIR/psd" "$BINDIR/psd-proxy"
+  rm -rf "$SHAREDIR"
+  # Older installs put the runtime in $DATADIR. Remove only the program files
+  # there, never the owner's token, memory or reminders.
+  if [ "$SHAREDIR" != "$DATADIR" ]; then
+    for f in src web agents skills scripts package.json README.md; do
+      rm -rf "${DATADIR:?}/$f"
+    done
+  fi
+  ok "removed $BINDIR/psd, psd-proxy and $SHAREDIR"
+
+  # ── 5. leftover settings ─────────────────────────────────────────────────
+  # dconf keeps our keys in one directory. Reset it so a later reinstall starts
+  # from defaults instead of half-remembering this one.
+  if command -v dconf >/dev/null 2>&1; then
+    dconf reset -f /io/github/pavit12301611/Notch/ >/dev/null 2>&1 || true
+    ok "cleared the extension's saved settings"
+  fi
+
+  # ── 6. the owner's data ──────────────────────────────────────────────────
+  local datadir="$DATADIR"
+  if [ "$purge" = "1" ]; then
+    rm -rf "$datadir"
+    ok "deleted $datadir (memory, token, reminders)"
+  elif [ -d "$datadir" ] && [ -n "$(ls -A "$datadir" 2>/dev/null)" ]; then
+    warn "kept $datadir — your token, memory and reminders are still there"
+    say "   Remove it too with:  bash scripts/psd.sh uninstall --purge"
+  fi
+
+  # ── what was never ours ──────────────────────────────────────────────────
+  if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/psd/env" ]; then
+    warn "left ${XDG_CONFIG_HOME:-$HOME/.config}/psd/env alone (it is yours, not ours)"
+  fi
+
+  head_ "Done"
+  say "Logged-in sessions keep the old extension until you log out."
+  say "  Log out and back in, or:  ${c_b}gnome-extensions enable $EXT_UUID${c_reset}"
+  say "Nothing else on your system was touched: no dnf packages were removed,"
+  say "and your original extension directory was restored where one existed."
 }
 
 main() {
@@ -506,16 +659,7 @@ main() {
     doctor) doctor_cmd ;;
     fix) fix_cmd ;;
     deps) install_deps ;;
-    uninstall)
-      head_ "Uninstall"
-      systemctl --user disable --now psd-agent.service 2>/dev/null || true
-      rm -f "$SERVICE_DIR/psd-agent.service"
-      rm -rf "$SHAREDIR"
-      rm -f "$BINDIR/psd"
-      warn "kept: $EXTDIR (use 'gnome-extensions disable $EXT_UUID' or remove the folder)"
-      warn "kept: ${XDG_DATA_HOME:-$HOME/.local/share}/psd (memory, token)"
-      ok "removed"
-      ;;
+    uninstall|remove) uninstall_cmd "${@}" ;;
     url)
       node -e "import('$ROOT/src/config.js').then(m=>{const c=m.loadConfig();const t=c.token;const net=require('node:os').networkInterfaces();const ips=Object.values(net).flat().filter(a=>a&&a.family==='IPv4'&&!a.internal).map(a=>a.address);console.log('app      http://127.0.0.1:'+c.port+'/?token='+t);for(const ip of ips)console.log('phone    http://'+ip+':'+c.port+'/?token='+t);console.log('proxy    psd-proxy   (then http://<this-pc>:'+(c.port+1)+' — no token in the URL)');})"
       ;;

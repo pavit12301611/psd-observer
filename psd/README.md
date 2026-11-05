@@ -24,11 +24,25 @@ curl -fsSL https://raw.githubusercontent.com/pavit12301611/psd-observer/main/psd
   | bash -s -- --with-deps
 ```
 
-The installer checks Node 20.19+, downloads the tree, installs to
-`~/.local/share/psd`, puts `psd` and `psd-proxy` in `~/.local/bin`, installs the
+The installer checks Node 20.19+, downloads the tree, installs the runtime to
+`~/.local/lib/psd`, puts `psd` and `psd-proxy` in `~/.local/bin`, installs the
 notch extension **over** the one you have (backing it up first), enables
 `psd-agent.service`, and then proves it works: an intent answer, the SSE stream
 the notch consumes, and the OpenAI-compatible surface.
+
+Your data lives separately, in `~/.local/share/psd` (`token.txt`, `memory.json`,
+`runs.jsonl`). Reinstalling or uninstalling never touches it — only
+`uninstall --purge` deletes it.
+
+To go back to how the machine was before PSD:
+
+```bash
+bash ~/.local/lib/psd/scripts/psd.sh uninstall   # add --purge to also delete your data
+```
+
+That stops and removes the service, re-enables the notch that was there before
+PSD (from the installer's own backup), rebuilds the schema database, and removes
+the commands and runtime. Log out and back in afterwards.
 
 ## Use
 
