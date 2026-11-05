@@ -7,7 +7,12 @@
   font-size: 10.5pt;
   -st-icon-style: symbolic;
 }
-.notch-surface { background-color: transparent; }
+/* The notch itself. This is the one element that must NOT be transparent:
+   .notch-shell and .notch-surface wrap it, and with no background anywhere the
+   black pill came out as glass — widgets floating on the desktop with no body.
+   The colour lives here so the corner radius St sets at runtime clips a real
+   painted surface; a transparent background cannot be clipped into a shape. */
+.notch-surface { background-color: #000000; }
 .notch-body { background-color: #000000; }
 .notch-flare { background-color: transparent; }
 .notch-closed { background-color: transparent; }
