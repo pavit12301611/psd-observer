@@ -376,3 +376,64 @@ test('a cross-origin page cannot drive the agent, with or without a token in the
     await web.close();
   }
 });
+
+// ── reminders: both word orders, and the phrasings people actually use ──────
+//
+// Reported from the notch: "remind me to stretch in 10 minutes" answered
+// "No reminders pending" instead of setting one. Two separate faults —
+// the intent parser only accepted time-first, and once it accepted task-first
+// parseWhen() returned null for "10 minutes" (it only knew "10m"), so the
+// reminder would have failed anyway. Pin both.
+
+test('a reminder is understood whichever way round the time is said', () => {
+    const timeFirst = parseIntent('remind me in 10 minutes to stretch');
+    assert.equal(timeFirst?.tool, 'remind');
+    assert.equal(timeFirst.args.text, 'stretch');
+    assert.equal(timeFirst.args.when, '10 minutes');
+
+    const taskFirst = parseIntent('remind me to stretch in 10 minutes');
+    assert.equal(taskFirst?.tool, 'remind');
+    assert.equal(taskFirst.args.text, 'stretch');
+    assert.equal(taskFirst.args.when, '10 minutes');
+
+    // The infinitive belongs to neither the task nor the time.
+    const clock = parseIntent('remind me to call mum at 6:30');
+    assert.equal(clock?.tool, 'remind');
+    assert.equal(clock.args.text, 'call mum');
+    assert.equal(clock.args.when, '6:30');
+
+    const short = parseIntent('remind me 25m to stretch');
+    assert.equal(short?.tool, 'remind');
+    assert.equal(short.args.when, '25m');
+
+    // Listing reminders must stay listing reminders.
+    assert.equal(parseIntent('reminders')?.tool, 'list_reminders');
+    assert.equal(parseIntent('show reminders')?.tool, 'list_reminders');
+    // And a bare "remind me" with no time is not a reminder.
+    assert.equal(parseIntent('remind me'), null);
+});
+
+test('parseWhen reads spelled-out durations, not just abbreviations', () => {
+    const now = Date.now();
+    const near = (actual, minutes) =>
+        assert.ok(Math.abs(actual - (now + minutes * 60_000)) < 5_000, `expected ~${minutes}m, got ${actual}`);
+
+    near(parseWhen('10 minutes'), 10);
+    near(parseWhen('1.5 hours'), 90);
+    near(parseWhen('3 days'), 3 * 24 * 60);
+    near(parseWhen('25m'), 25);
+    near(parseWhen('in 10 minutes'), 10);
+    near(parseWhen('after 2 hrs'), 120);
+
+    // Clock times resolve to the future, never to a time that has already gone.
+    for (const input of ['18:30', '6:30pm', '6pm', 'noon', 'midnight']) {
+        const at = parseWhen(input);
+        assert.ok(at > now, `${input} must be in the future`);
+    }
+    // 6pm and 18:00 are the same moment.
+    assert.equal(new Date(parseWhen('6pm')).getHours(), 18);
+
+    // Unreadable input stays null rather than becoming "now".
+    assert.equal(parseWhen('nonsense'), null);
+    assert.equal(parseWhen(''), null);
+});
