@@ -99,7 +99,8 @@ const SHELL_API = {
         'get_home_dir', 'get_monotonic_time', 'getenv', 'idle_add', 'source_remove', 'timeout_add'],
     Gio: ['BusNameOwnerFlags', 'BusType', 'Cancellable', 'DBus', 'DBusCallFlags',
         'DBusExportedObject', 'DBusProxy', 'DBusProxyFlags', 'File', 'FileIcon', 'Settings',
-        'SettingsBindFlags', 'ThemedIcon', 'bus_own_name', 'bus_unown_name'],
+        'SettingsBindFlags', 'SettingsSchemaSource', 'ThemedIcon', 'bus_own_name',
+        'bus_unown_name'],
     // NOTE: GObject is deliberately absent. lib/view.js imported it for a long
     // time without ever using it; if a future edit needs GObject.Object or a
     // GObject.registerClass, add it here on purpose.
@@ -220,11 +221,37 @@ test('addChrome() is only ever given params some supported Shell accepts', () =>
     assert.match(view, /function acceptsInputRegion\(\)/, 'the probe must exist');
 });
 
-test('addChrome() never asks for a strut — the notch must not reserve screen space', () => {
+test('struts are opt-in, and never applied to the notch actor itself', () => {
+    // Two separate rules, because they protect different things.
+    //
+    // 1. The notch actor must never reserve space. It is positioned and sized
+    //    every animation frame; a strut on it would resize the work area
+    //    continuously and maximised windows would crawl.
+    // 2. Reserving space IS a real feature — `reserve-space` in Preferences —
+    //    but it goes through StrutReservation, which owns a separate, static
+    //    actor and tracks/untracks it on demand. Only that file may pass
+    //    affectsStruts: true, and only through a value the setting controls.
+
     for (const {name, code} of sources()) {
-        for (const match of code.matchAll(/add(?:Top)?Chrome\s*\([^)]*\)/g))
-            assert.doesNotMatch(match[0], /affectsStruts\s*:\s*true/, `${name}: a notch with struts would push every window down`);
+        const struts = [...code.matchAll(/affectsStruts\s*:\s*true/g)];
+        if (struts.length === 0) continue;
+        assert.equal(name, 'lib/session.js',
+            `${name}: only StrutReservation may reserve space — the notch actor is ` +
+            'repositioned every frame and a strut on it would make windows crawl');
+        assert.match(code, /reserve-space/,
+            'lib/session.js must derive struts from the reserve-space setting');
     }
+
+    // The notch actor's own addChrome() call must not ask for a strut.
+    const view = sources().find(file => file.name.endsWith('view.js')).code;
+    for (const match of view.matchAll(/add(?:Top)?Chrome\s*\([^;]*?\)/g))
+        assert.doesNotMatch(match[0], /affectsStruts\s*:\s*true/,
+            'addChrome() on the notch actor must never set affectsStruts');
+
+    // And the reservation has to be switchable off again.
+    const session = sources().find(file => file.name.endsWith('session.js')).code;
+    assert.match(session, /removeChrome\(/, 'the strut actor must be removable');
+    assert.match(session, /release\(\)/, 'reservation needs a release path');
 });
 
 test('DBusExportedObject.export() is called with exactly (connection, objectPath)', () => {
@@ -333,4 +360,42 @@ test('St.BoxLayout is only ever oriented with the property it actually has', () 
     // pass on code that never builds a column at all.
     const code = sources().map(file => file.code).join('\n');
     assert.match(code, /orientation:\s*Clutter\.Orientation\.VERTICAL/, 'something must build a column');
+});
+
+test('interface XML reaches wrapJSObject() as a string, never as an object', () => {
+    // Gio.DBusExportedObject.wrapJSObject(interfaceInfo, jsObj) passes its first
+    // argument to Gio.DBusInterfaceInfo.new_for_xml(). GJS's override takes a
+    // string only:
+    //
+    //   function _newNodeInfo(constructor, value) {
+    //       if (typeof value === 'string') return constructor(value);
+    //       throw TypeError(`Invalid type ${Object.prototype.toString.call(value)}`);
+    //   }
+    //
+    // Handing it {xml: "..."} produced `TypeError: Invalid type [object Object]`
+    // and the extension would not enable at all. interfaceXml() returns the
+    // string; these assertions keep it that way without needing a fake Shell.
+    const dbus = sources().find(file => file.name.endsWith('dbus.js')).code;
+    assert.match(dbus, /return text;/,
+        'interfaceXml() must return the XML string itself');
+    assert.doesNotMatch(dbus, /return \{\s*xml\s*:/,
+        'interfaceXml() must not wrap the XML in an object — wrapJSObject rejects it');
+
+    // And no call site may unwrap it as if it were one.
+    for (const {name, code} of sources()) {
+        assert.doesNotMatch(code, /\{\s*xml\s*\}\s*=\s*interfaceXml/,
+            `${name}: interfaceXml() returns a string now, not {xml}`);
+        assert.doesNotMatch(code, /interfaceXml\([^)]*\)\s*\.xml\b/,
+            `${name}: interfaceXml() returns a string, so there is no .xml on it`);
+    }
+
+    // The same rule for anything else handed to wrapJSObject().
+    const extension = sources().find(file => file.name.endsWith('extension.js')).code;
+    const wrappers = [...extension.matchAll(/wrapJSObject\s*\(\s*([A-Za-z_][\w.]*)/g)];
+    assert.equal(wrappers.length, 2, 'both interfaces are exported');
+    for (const match of wrappers) {
+        assert.match(match[1], /^[a-z]*[Xx]ml$|^xml$/,
+            `extension.js passes ${match[1]} to wrapJSObject() — it must be the XML string ` +
+            'that interfaceXml() returned, not anything derived from it');
+    }
 });

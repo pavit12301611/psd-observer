@@ -82,3 +82,111 @@ test('the D-Bus interfaces PSD calls are exactly the ones the extension exports'
     for (const name of ['APP_ID', 'EXTENSION_ID', 'EXTENSION_PATH', 'PSD_INTERFACE', 'interfaceXml', 'interfaceNameOf'])
         assert.ok(imported.includes(name), `lib/dbus.js must export ${name}`);
 });
+
+// ── the schema must actually contain every key the code uses ────────────────
+//
+// Reported from the Extensions app:
+//
+//   Error: GSettings key psd-url not found in schema io.github.pavit12301611.Notch
+//
+// GJS resolves the schema *id* and then rejects any key the compiled schema does
+// not list, so a missing key is not "a setting with its default" — it is a hard
+// failure that stops the Preferences window from opening at all. The XML is the
+// contract between three files that never get compiled together: prefs.js,
+// lib/*.js, and the .gschema.xml. Check them against each other.
+
+const extensionSettingsKeys = () => {
+    const files = [path.join(extensionDir, 'prefs.js'), path.join(extensionDir, 'extension.js')];
+    for (const file of fs.readdirSync(path.join(extensionDir, 'lib')))
+        if (file.endsWith('.js')) files.push(path.join(extensionDir, 'lib', file));
+
+    const used = new Map();
+    for (const file of files) {
+        if (!fs.existsSync(file)) continue;
+        const code = fs.readFileSync(file, 'utf8')
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/\/\/[^\n]*/g, '');
+        // Any get_*/set_* on a Gio.Settings-ish receiver, plus the add* helpers
+        // prefs.js uses to build rows from a key name.
+        const patterns = [
+            /\.(?:get|set)_(?:boolean|int|double|string|strv|value|enum|flags)\s*\(\s*'([^']+)'/g,
+            /\.(?:bind|bind_writable|create_action|get_default_value|is_writable)\s*\(\s*'([^']+)'/g,
+        ];
+        for (const pattern of patterns) {
+            for (const match of code.matchAll(pattern)) {
+                const key = match[1];
+                if (!used.has(key)) used.set(key, new Set());
+                used.get(key).add(path.basename(file));
+            }
+        }
+    }
+    return used;
+};
+
+const schemaKeys = () => {
+    const file = path.join(extensionDir, 'schemas/io.github.pavit12301611.Notch.gschema.xml');
+    const xml = fs.readFileSync(file, 'utf8');
+    return new Set([...xml.matchAll(/<key\s+name="([^"]+)"/g)].map(match => match[1]));
+};
+
+test('every settings key the extension reads exists in its own schema', () => {
+    // Keys that belong to *other* schemas, not ours. Listing them explicitly
+    // means a new cross-schema key has to be considered rather than guessed at.
+    const OTHER_SCHEMAS = new Set([
+        'show-banners',        // org.gnome.desktop.notifications (Do Not Disturb)
+        'color-scheme',        // org.gnome.desktop.interface
+        'night-light-enabled', // org.gnome.settings-daemon.plugins.color
+    ]);
+
+    const declared = schemaKeys();
+    const missing = [];
+    for (const [key, where] of extensionSettingsKeys()) {
+        if (OTHER_SCHEMAS.has(key)) continue;
+        if (!declared.has(key)) missing.push(`${key} (used in ${[...where].join(', ')})`);
+    }
+    assert.deepEqual(missing, [],
+        'these keys are read from io.github.pavit12301611.Notch but the schema does not ' +
+        'declare them — GJS throws "GSettings key ... not found in schema ..." and ' +
+        'Preferences will not open');
+});
+
+test('the keys Preferences binds are a subset of the schema', () => {
+    // prefs.js is the file that failed in the report, and it fails at
+    // fillPreferencesWindow() — the whole window dies on the first bad key.
+    const prefs = fs.readFileSync(path.join(extensionDir, 'prefs.js'), 'utf8');
+    const declared = schemaKeys();
+    const used = new Set();
+    // prefs.js builds rows through helpers that take a key as their second arg.
+    for (const match of prefs.matchAll(/add(?:Switch|Spin|Entry|Row|Combo|Scale|Color|Font)\s*\(\s*\w+\s*,\s*'([^']+)'/g))
+        used.add(match[1]);
+    // …and sometimes reads settings directly.
+    for (const match of prefs.matchAll(/settings\.(?:get|set)_\w+\s*\(\s*'([^']+)'/g))
+        used.add(match[1]);
+    // …and the PSD entries, which are plain addEntry() calls.
+    for (const match of prefs.matchAll(/addEntry\s*\(\s*'([^']+)'/g))
+        used.add(match[1]);
+
+    const missing = [...used].filter(key => !declared.has(key));
+    assert.deepEqual(missing, [],
+        'prefs.js binds keys the schema does not declare — the Preferences window throws ' +
+        'before it renders anything');
+    assert.ok(used.size > 20, `expected prefs.js to bind many keys, found ${used.size}`);
+});
+
+test('the schema parses as XML and declares the id and path the code expects', () => {
+    const file = path.join(extensionDir, 'schemas/io.github.pavit12301611.Notch.gschema.xml');
+    const xml = fs.readFileSync(file, 'utf8');
+    // A malformed schema is never compiled, which on an existing install leaves
+    // the previous gschemas.compiled in place — the exact reported failure.
+    assert.match(xml, /<schema\s+id="io\.github\.pavit12301611\.Notch"/);
+    assert.match(xml, /<schema[^>]*path="\/io\/github\/pavit12301611\/Notch\/"/);
+    // Every key needs a type — either type="…" or enum="…" for an enumerated
+    // one — or glib-compile-schemas refuses the whole file.
+    for (const match of xml.matchAll(/<key\s+name="([^"]+)"([^>]*)>/g)) {
+        assert.match(match[2], /\b(?:type|enum)="/, `key ${match[1]} declares no type`);
+    }
+    // Tags must balance, which is all a regex-level check can honestly promise.
+    const opens = [...xml.matchAll(/<(schema|key)\b/g)].length;
+    const closes = [...xml.matchAll(/<\/(schema|key)>/g)].length;
+    assert.equal(opens, closes, 'unbalanced <schema>/<key> tags');
+});

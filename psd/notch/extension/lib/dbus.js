@@ -36,9 +36,23 @@ function toPath(dir) {
  * Accepts either the Extension object's `dir` (a Gio.File) or a plain path, so
  * the call site does not have to care which the Shell hands us.
  *
+ * Returns the XML *string*, not a wrapper object. That matters:
+ * Gio.DBusExportedObject.wrapJSObject(xml, obj) hands its first argument
+ * straight to Gio.DBusInterfaceInfo.new_for_xml(), and GJS's override for that
+ * accepts a string only —
+ *
+ *   function _newNodeInfo(constructor, value) {
+ *       if (typeof value === 'string') return constructor(value);
+ *       throw TypeError(`Invalid type ${Object.prototype.toString.call(value)}`);
+ *   }
+ *
+ * — so anything object-shaped surfaces on the desktop as the wonderfully
+ * unhelpful `TypeError: Invalid type [object Object]` and the extension refuses
+ * to enable. Return the string and there is nothing to unwrap.
+ *
  * @param {string|Gio.File} dir extension directory
  * @param {string} file file name inside dbus/, e.g. 'io.github.pavit12301611.Notch.Psd.xml'
- * @returns {{xml: string}}
+ * @returns {string} the interface XML
  */
 export function interfaceXml(dir, file) {
     const base = toPath(dir).replace(/\/+$/, '');
@@ -47,11 +61,11 @@ export function interfaceXml(dir, file) {
     const [, bytes] = source.load_contents(null);
     const text = new TextDecoder().decode(bytes);
     if (!text.includes('<node')) throw new Error(`Not a D-Bus interface file: ${path}`);
-    return {xml: text};
+    return text;
 }
 
 /**
- * The interface name inside an interface XML file.
+ * The interface name inside an interface XML document.
  *
  * `export()` does not take an interface name — the skeleton reads it from the
  * XML — so the XML is the only place the name exists. If it drifts from the
@@ -59,11 +73,11 @@ export function interfaceXml(dir, file) {
  * runtime, which is a miserable thing to debug from the client side. Read it
  * back and compare instead.
  *
- * @param {{xml: string}} parsed result of interfaceXml()
+ * @param {string} xml interface XML, as returned by interfaceXml()
  * @returns {string}
  */
-export function interfaceNameOf(parsed) {
-    const match = /<interface\s+name="([^"]+)"/.exec(parsed?.xml ?? '');
+export function interfaceNameOf(xml) {
+    const match = /<interface\s+name="([^"]+)"/.exec(typeof xml === 'string' ? xml : '');
     if (!match) throw new Error('D-Bus interface XML has no <interface name="...">');
     return match[1];
 }

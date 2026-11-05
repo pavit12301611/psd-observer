@@ -104,20 +104,62 @@ delete globalThis[key];
 test('interfaceXml accepts the Gio.File that Extension.dir actually is', () => {
     // This is what extension.js does: this.dir is a Gio.File.
     const dir = new File(extensionDir);
-    const {xml} = dbus.interfaceXml(dir, 'io.github.pavit12301611.Notch.xml');
+    const xml = dbus.interfaceXml(dir, 'io.github.pavit12301611.Notch.xml');
     assert.match(xml, /<node>/);
     assert.match(xml, /method name="Toggle"/);
 });
 
 test('interfaceXml also accepts a plain path', () => {
-    const {xml} = dbus.interfaceXml(extensionDir, 'io.github.pavit12301611.Notch.Psd.xml');
+    const xml = dbus.interfaceXml(extensionDir, 'io.github.pavit12301611.Notch.Psd.xml');
     assert.match(xml, /PsdMessage/);
 });
 
 test('the PSD interface the agent calls is loadable from disk', () => {
-    const {xml} = dbus.interfaceXml(new File(extensionDir), 'io.github.pavit12301611.Notch.Psd.xml');
+    const xml = dbus.interfaceXml(new File(extensionDir), 'io.github.pavit12301611.Notch.Psd.xml');
     for (const method of ['PsdMessage', 'PsdOpen', 'PsdState'])
         assert.match(xml, new RegExp(`method name="${method}"`));
+});
+
+// ── the return type is part of the contract ────────────────────────────────
+//
+// Gio.DBusExportedObject.wrapJSObject(xml, obj) passes `xml` straight to
+// Gio.DBusInterfaceInfo.new_for_xml(). GJS's override for that accepts a string
+// and nothing else:
+//
+//   function _newNodeInfo(constructor, value) {
+//       if (typeof value === 'string') return constructor(value);
+//       throw TypeError(`Invalid type ${Object.prototype.toString.call(value)}`);
+//   }
+//
+// Returning {xml: text} from here therefore surfaced on the desktop as
+// `TypeError: Invalid type [object Object]`, with the extension refusing to
+// enable. Assert the type, not just the contents.
+
+test('interfaceXml returns the XML string itself, not a wrapper object', () => {
+    const result = dbus.interfaceXml(new File(extensionDir), 'io.github.pavit12301611.Notch.Psd.xml');
+    assert.equal(typeof result, 'string',
+        'wrapJSObject() needs a string; an object becomes "Invalid type [object Object]"');
+    assert.match(result, /^\s*<node>/);
+});
+
+test('the XML it returns is exactly what new_for_xml() would be given', () => {
+    // Model GJS's own check, so a regression fails with the desktop's wording.
+    const gjsNewForXml = (value) => {
+        if (typeof value !== 'string')
+            throw new TypeError(`Invalid type ${Object.prototype.toString.call(value)}`);
+        return value;
+    };
+    for (const file of ['io.github.pavit12301611.Notch.xml', 'io.github.pavit12301611.Notch.Psd.xml']) {
+        const xml = dbus.interfaceXml(new File(extensionDir), file);
+        assert.doesNotThrow(() => gjsNewForXml(xml),
+            `${file}: wrapJSObject() would throw before exporting anything`);
+    }
+});
+
+test('interfaceNameOf reads the name out of the XML string', () => {
+    const xml = dbus.interfaceXml(new File(extensionDir), 'io.github.pavit12301611.Notch.Psd.xml');
+    assert.equal(dbus.interfaceNameOf(xml), dbus.PSD_INTERFACE);
+    assert.throws(() => dbus.interfaceNameOf('<node/>'), /interface name/);
 });
 
 test('a missing interface file fails with a readable error, not a crash', () => {

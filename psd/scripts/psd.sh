@@ -30,6 +30,77 @@ warn() { printf '%s!%s %s\n' "$c_warn" "$c_reset" "$*"; }
 bad()  { printf '%s✗%s %s\n' "$c_bad" "$c_reset" "$*"; }
 head_() { printf '\n%s%s%s\n' "$c_b" "$*" "$c_reset"; }
 
+# ── settings schema ─────────────────────────────────────────────────────────
+# GJS resolves a schema by id from gschemas.compiled, then checks every key
+# against it. A compiled database that predates our keys is therefore worse than
+# no database at all: the extension looks installed and Preferences dies with
+#
+#   Error: GSettings key psd-url not found in schema io.github.pavit12301611.Notch
+#
+# So: always rebuild, never trust an existing file, and if the compiler is not
+# installed, delete the stale database rather than leave a poisoned one behind.
+SCHEMA_ID="io.github.pavit12301611.Notch"
+
+install_schema_db() {
+  local dir="$1"
+  # A stale database is the failure mode. It must not survive this function.
+  rm -f "$dir/gschemas.compiled"
+
+  if command -v glib-compile-schemas >/dev/null 2>&1; then
+    if glib-compile-schemas "$dir" 2>/dev/null; then
+      ok "settings schema compiled ($(ls "$dir"/*.gschema.xml 2>/dev/null | wc -l) file(s))"
+      return 0
+    fi
+    bad "glib-compile-schemas rejected the schema:"
+    glib-compile-schemas "$dir" 2>&1 | sed 's/^/   /' | head -6
+    return 1
+  fi
+
+  # No compiler. Find one: it ships with glib2 (Fedora), and is very often still
+  # present even when the PATH is unusual for the installer's shell.
+  local candidate
+  for candidate in /usr/bin/glib-compile-schemas /usr/local/bin/glib-compile-schemas \
+      /usr/lib64/glib-2.0/glib-compile-schemas /usr/lib/glib-2.0/glib-compile-schemas; do
+    if [ -x "$candidate" ]; then
+      if "$candidate" "$dir" 2>/dev/null; then
+        ok "settings schema compiled with $candidate"
+        return 0
+      fi
+    fi
+  done
+
+  bad "glib-compile-schemas is not installed, so the settings cannot be registered."
+  say "   Without it GNOME reads a missing/stale key list and Preferences fails with"
+  say "   \"GSettings key psd-url not found in schema $SCHEMA_ID\"."
+  say "   Fix: sudo dnf install glib2-devel   (or: bash scripts/psd.sh fix)"
+  say "   The stale database has been removed, so nothing is left half-installed."
+  return 1
+}
+
+# Read every key the extension and its Preferences window use, and confirm the
+# compiled database has it. This is the check that would have caught the bug the
+# moment it happened, instead of in a screenshot from the owner.
+verify_schema_keys() {
+  local dir="$1"
+  local missing=0 key value
+  for key in psd-url psd-token placement expanded-width expanded-height \
+      collapsed-width collapsed-height reserve-space monitor-index show-dnd \
+      notifications-in-notch replace-panel-clock toggle-notch; do
+    if ! value="$(gsettings --schemadir "$dir" get "$SCHEMA_ID" "$key" 2>&1)"; then
+      bad "the compiled schema is missing '$key'"
+      say "   ${value}"
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    bad "the settings schema did not install correctly — the extension would fail to enable."
+    say "   Try: bash scripts/psd.sh notch repair"
+    return 1
+  fi
+  ok "settings schema has every key the extension and Preferences use"
+  return 0
+}
+
 need_node() {
   if ! command -v node >/dev/null 2>&1; then
     bad "node is not installed. Install Node 20+ (Fedora: sudo dnf install nodejs) and re-run."
@@ -50,8 +121,11 @@ install_deps() {
     warn "dnf not found — skipping dependency install (this build targets Fedora)."
     return
   fi
+  # glib2-devel is what ships glib-compile-schemas. Without it the extension's
+  # settings schema cannot be compiled and Preferences fails with
+  # "GSettings key psd-url not found". It is not optional.
   local packages=(
-    nodejs glib2 libnotify
+    nodejs glib2 glib2-devel libnotify
     grim wl-clipboard wmctrl ydotool wtype
     playerctl wireplumber
     gnome-shell gnome-extensions-app gobject-introspection gtk4 libadwaita
@@ -201,11 +275,20 @@ install_notch() {
   # loading mismatched modules; lib/ is entirely ours.
   rm -rf "$EXTDIR/lib"
   cp -r "$source/." "$EXTDIR/"
+  # Copy the schema, and REMOVE any stale compiled database first.
+  #
+  # This is the bug that produced:
+  #   Error: GSettings key psd-url not found in schema io.github.pavit12301611.Notch
+  # in the Extensions app. The XML was correct, but $SCHEMADIR still held a
+  # gschemas.compiled built from an older schema — GJS resolves the *schema id*
+  # from that file (so the schema looks present) and then rejects every key it
+  # does not contain. Copying a new .xml over the top changes nothing until the
+  # database is rebuilt, and if glib-compile-schemas was missing we previously
+  # only warned and carried on straight into this state.
   cp "$EXTDIR/schemas/"*.gschema.xml "$SCHEMADIR/"
-  if command -v glib-compile-schemas >/dev/null 2>&1; then
-    glib-compile-schemas "$SCHEMADIR" && ok "settings schema compiled"
-  else
-    warn "glib-compile-schemas missing (sudo dnf install glib2-devel)"
+  install_schema_db "$SCHEMADIR" || return 1
+  if command -v gsettings >/dev/null 2>&1; then
+    verify_schema_keys "$SCHEMADIR" || return 1
   fi
   # The Agent tab needs to know where PSD listens. Seed it once; the owner can
   # change it in Preferences → Agent.

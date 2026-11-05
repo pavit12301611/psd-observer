@@ -27,6 +27,10 @@ import {TAB_COUNT, contentLayout, headerLayout, statColumns} from './layout.js';
 import {NotificationBridge} from './notifications.js';
 import {SpringGeometry, SPRING_PROFILES, easeOutCubic} from './spring.js';
 import {
+    StrutReservation, dndEnabled, MONITORS_CHANGED_SIGNAL, onDndChanged, resolveMonitor,
+    shouldReserveSpace, toggleDnd,
+} from './session.js';
+import {
     chargingStarted, countNotifications, cpuSample, defaultRouteInterface, formatBytes,
     formatTime, mediaDisplayArtist, mediaDisplayTitle, mediaErrorMessage, mediaMetadata,
     memorySample, networkSample, plainText, previewText, visualizerLevels,
@@ -126,11 +130,15 @@ export class NotchView {
     }
 
     // ── settings & geometry helpers ─────────────────────────────────────────
+    /**
+     * The monitor the notch sits on.
+     *
+     * `monitor-index` is honoured here: -1 (the default) follows the focused
+     * monitor, a fixed index pins the notch to one screen. It used to be read
+     * nowhere, so the Preferences spinner did nothing.
+     */
     _monitor() {
-        const display = global.backend?.get_monitor_manager?.()?.get_current_monitor?.();
-        if (!display) return {x: 0, y: 0, width: 1920, height: 1080};
-        const geometry = display.get_geometry();
-        return {x: geometry.x, y: geometry.y, width: geometry.width, height: geometry.height};
+        return resolveMonitor(this.settings.get_int('monitor-index'));
     }
 
     _scale() {
@@ -506,6 +514,8 @@ export class NotchView {
             'placement', 'floating-margin', 'horizontal-offset', 'corner-radius', 'adaptive-corners',
             'match-panel-height', 'notch-scale'])
             on(key, () => this._reposition());
+        // Pinning the notch to a different monitor is a move, not a resize.
+        on('monitor-index', () => this._reposition());
 
         on('psd-url', () => {
             this.psd?.client?.loadToken();
@@ -515,7 +525,12 @@ export class NotchView {
         on('replace-panel-clock', () => this._applyPanelClock());
         on('idle-clock', () => this._updateClock());
         on('closed-media', () => this._updateClosedMedia());
+        on('reserve-space', () => this._applyGeometry());
         on('show-dnd', () => this._refreshHome());
+        // Do Not Disturb lives in org.gnome.desktop.notifications, so watch that
+        // too — turning it on from GNOME's own quick settings must update the
+        // notch's button without reopening it.
+        this._dndWatch = onDndChanged(() => this._refreshHome());
         on('show-night-light', () => this._refreshHome());
         on('show-dark-mode', () => this._refreshHome());
         on('notifications-in-notch', () => this.notifications?.configure(
@@ -523,7 +538,6 @@ export class NotchView {
             this.settings.get_boolean('auto-open-notifications')));
         on('hide-on-fullscreen', () => this._evaluateVisibility());
         on('hide-in-overview', () => this._evaluateVisibility());
-        on('reserve-space', () => this._applyGeometry());
     }
 
     _installDbusProbe() {
@@ -653,6 +667,31 @@ export class NotchView {
         return notchGeometry(monitor, this._options(extra), this.expanded, this.mode);
     }
 
+    /**
+     * Reserve work-area space for the collapsed notch, if the owner asked.
+     *
+     * Default off: the notch floats over the desktop and covers nothing. With
+     * `reserve-space` on it behaves like a second top bar and maximised windows
+     * stop underneath it. Only the CLOSED pill reserves space — an open notch is
+     * an overlay you are looking at, not something to shove windows down for.
+     */
+    _applyStruts() {
+        if (this.dead) return;
+        if (!this.struts) this.struts = new StrutReservation();
+        const wanted = shouldReserveSpace(this.settings, {
+            expanded: this.expanded,
+            visible: this.allowed && this.actor?.visible,
+        });
+        const monitor = this.monitor ?? this._monitor();
+        const height = this._panelHeight();
+        this.struts.apply(wanted, {
+            x: monitor.x + Math.round((monitor.width - this.geometry.current.width) / 2),
+            y: monitor.y,
+            width: this.geometry.current.width,
+            height,
+        });
+    }
+
     _applyGeometry(geometry = this.geometry.current) {
         if (this.dead || !this.actor) return;
         const rect = geometry;
@@ -664,6 +703,7 @@ export class NotchView {
         this._applyHeader();
         this.closed.opacity = this.expanded ? 0 : 255;
         this.content.opacity = this.expanded ? 255 : 0;
+        this._applyStruts();
     }
 
     _applyHeader() {
@@ -950,6 +990,15 @@ export class NotchView {
         if (this.settings.get_boolean('show-dark-mode'))
             this.homeActions.add_child(button({text: 'Dark mode', style: 'notch-action',
                 onClick: () => this._toggleDarkMode()}));
+        if (this.settings.get_boolean('show-dnd')) {
+            const on = dndEnabled();
+            this.homeActions.add_child(button({
+                // Say what the button will DO, and mark it when it is already on.
+                text: on ? 'Focus off' : 'Focus on',
+                style: on ? 'notch-action notch-action-active' : 'notch-action',
+                onClick: () => this._toggleDnd(),
+            }));
+        }
         if (this.settings.get_boolean('show-night-light'))
             this.homeActions.add_child(button({text: 'Night light', style: 'notch-action',
                 onClick: () => this._toggleNightLight()}));
@@ -964,6 +1013,16 @@ export class NotchView {
         } catch {
             this.showStatus('This GNOME cannot switch colour schemes.', {});
         }
+    }
+
+    _toggleDnd() {
+        const next = toggleDnd();
+        if (next === null) {
+            this.showStatus('Do Not Disturb is not available here.', {});
+            return;
+        }
+        this.showStatus(next ? 'Focus on — banners paused' : 'Focus off — banners back', {temporary: 1400});
+        this._refreshHome();
     }
 
     _toggleNightLight() {
@@ -1137,6 +1196,9 @@ export class NotchView {
         for (const id of this.settingsIds ?? []) this.settings.disconnect(id);
         this.settingsIds = [];
         this.notifications?.destroy();
+        this.struts?.destroy();
+        this.struts = null;
+        this._dndWatch?.disconnect?.();
         this.injections?.clear();
         this.psd?.destroy();
         this.actor?.remove_all_transitions?.();
