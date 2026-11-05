@@ -169,7 +169,7 @@ stop_temp
 head_ "You are done — here is what you can do now"
 say "  ${c_b}Notch${c_reset}       open the pill (Super+Shift+N), pick the PSD tab, ask anything"
 say "  ${c_b}Terminal${c_reset}    psd \"what is eating my disk\"   ·   psd status   ·   psd doctor"
-say "  ${c_b}Phone${c_reset}       psd-proxy    then http://<this-pc-ip>:7789 on the phone, Add to Home Screen"
+say "  ${c_b}Phone${c_reset}       psd-proxy    then http://<this-pc-ip>:$((${BASE##*:} + 1)) on the phone, Add to Home Screen"
 say "  ${c_b}WhatsApp${c_reset}    bash ~/.local/share/psd/scripts/psd.sh whatsapp   (four lines for its .env)"
 say "  ${c_b}Any OpenAI app${c_reset} base $BASE/v1 · model psd · key $TOKEN"
 say ""
