@@ -133,13 +133,16 @@ the answer is still being assembled.
 ## Tests
 
 ```bash
-npm test        # 23 tests: protocol, engine, server, auth, tools, UI (jsdom)
+npm test        # 24 tests: protocol, engine, server, auth, tools, UI (jsdom)
 cd notch && npm test   # 27 tests: geometry, layout, the PSD client
 bash scripts/test-integration.sh   # live: daemon, SSE, OpenAI, notch, memory
 ```
 
 `test/ui.test.js` runs the real `web/app.js` in a DOM against a real server: it
 sends a message, consumes the stream, and asserts the answer reached the screen.
+It also guards the shell's promises — aria labels, a live-announced thread, one
+`h1`, visible keyboard focus, reduced motion, high contrast, light mode and safe
+insets on phones with a gesture bar.
 
 ## Uninstall
 

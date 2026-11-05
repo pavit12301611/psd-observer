@@ -10,6 +10,10 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
  * that adds the token and the Origin header, so the phone never has to store a
  * secret and PSD keeps refusing anonymous browsers.
  */
+// The shell follows the system theme unless the owner chose one in-app.
+const savedTheme = (() => { try { return localStorage.getItem('psd.theme') || ''; } catch { return ''; } })();
+if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+
 const proxied = () => document.documentElement.dataset.proxied === '1';
 const store = {
   get token() { return proxied() ? '' : (localStorage.getItem('psd.token') || ''); },

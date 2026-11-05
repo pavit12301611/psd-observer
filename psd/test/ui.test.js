@@ -174,3 +174,27 @@ test('a rejected token surfaces the connect sheet instead of a silent empty app'
     await world.web.close();
   }
 });
+
+test('the shell keeps its accessibility and theming promises', () => {
+  const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(WEB, 'styles.css'), 'utf8');
+  const { document } = new JSDOM(html, { url: 'http://127.0.0.1:7788/' }).window;
+
+  // Every navigation target is named for a screen reader, not just an icon.
+  for (const tab of document.querySelectorAll('.tabbar .tab')) {
+    assert.ok(tab.getAttribute('aria-label'), `tab ${tab.dataset.view} needs an aria-label`);
+  }
+  // The composer and its send button are reachable and named.
+  assert.ok(document.querySelector('#input'));
+  assert.ok(document.querySelector('#btn-send').getAttribute('aria-label'));
+  assert.equal(document.querySelector('#thread').getAttribute('aria-live'), 'polite',
+    'the answer thread must announce changes');
+  assert.equal(document.querySelectorAll('h1').length, 1, 'one h1 per page');
+
+  // Focus is visible for keyboard users, and motion is respectful.
+  assert.match(css, /:focus-visible/, 'focus must be styled');
+  assert.match(css, /prefers-reduced-motion/, 'reduced motion must be honoured');
+  assert.match(css, /prefers-contrast/, 'high contrast must be honoured');
+  assert.match(css, /prefers-color-scheme: light/, 'light mode must follow the system');
+  assert.match(css, /safe-area-inset/, 'phones with a gesture bar need safe insets');
+});
