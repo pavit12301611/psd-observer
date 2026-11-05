@@ -118,11 +118,22 @@ install_notch() {
   # The Agent tab needs to know where PSD listens. Seed it once; the owner can
   # change it in Preferences → Agent.
   if command -v gsettings >/dev/null 2>&1; then
-    local current
+    local current url
     current="$(gsettings --schemadir "$SCHEMADIR" get io.github.pavit12301611.Notch psd-url 2>/dev/null || echo "''")"
     if [ "$current" = "''" ] || [ -z "$current" ]; then
-      gsettings --schemadir "$SCHEMADIR" set io.github.pavit12301611.Notch psd-url "'http://127.0.0.1:7788'" || true
-      ok "notch pointed at http://127.0.0.1:7788"
+      url="http://127.0.0.1:${PSD_PORT:-7788}"
+      gsettings --schemadir "$SCHEMADIR" set io.github.pavit12301611.Notch psd-url "'$url'" || true
+      ok "notch pointed at $url"
+    fi
+    # The agent page carries a conversation, so it needs more room than the
+    # other tabs. Only nudge the values the owner has not chosen themselves.
+    local width height
+    width="$(gsettings --schemadir "$SCHEMADIR" get io.github.pavit12301611.Notch expanded-width 2>/dev/null || echo '')"
+    height="$(gsettings --schemadir "$SCHEMADIR" get io.github.pavit12301611.Notch expanded-height 2>/dev/null || echo '')"
+    if [ "$width" = "640" ] && [ "$height" = "480" ]; then
+      gsettings --schemadir "$SCHEMADIR" set io.github.pavit12301611.Notch expanded-width 820 || true
+      gsettings --schemadir "$SCHEMADIR" set io.github.pavit12301611.Notch expanded-height 560 || true
+      ok "notch opened size set to 820x560 for the agent page"
     fi
   fi
   ok "extension installed at $EXTDIR"

@@ -27,7 +27,8 @@ const flag = (name, fallback = null) => {
 };
 
 const config = loadConfig();
-const listenPort = Number(flag('port', 7789));
+// Default to the port just above PSD's own, so the two never collide.
+const listenPort = Number(flag('port', config.port + 1));
 const bind = String(flag('bind', '0.0.0.0'));
 const upstreamHost = '127.0.0.1';
 const upstreamPort = config.port;
