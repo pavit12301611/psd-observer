@@ -122,8 +122,23 @@ verify_extension() {
   [ "$missing" = 0 ]
 }
 
+# Is the extension currently on disk loadable? Used to tell the owner their
+# extension is broken before we start, and to confirm a repair afterwards.
+installed_notch_healthy() {
+  [ -d "$EXTDIR" ] || return 1
+  verify_extension "$EXTDIR" >/dev/null 2>&1 || return 1
+  if command -v node >/dev/null 2>&1 && [ -f "$ROOT/notch/tests/load.test.mjs" ]; then
+    node "$ROOT/notch/tests/load.test.mjs" "$EXTDIR" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
 install_notch() {
   head_ "Notch extension"
+  if [ -d "$EXTDIR" ] && ! installed_notch_healthy; then
+    warn "your installed extension is missing modules (this is the bug that shows"
+    warn "'does not provide an export named: PSD_INTERFACE'). Repairing it now."
+  fi
   local source="$ROOT/notch/extension"
   if [ ! -d "$source" ]; then
     warn "no notch/extension in this checkout — skipping (PSD works without the notch)."
@@ -190,7 +205,13 @@ install_notch() {
       ok "notch opened size set to 820x560 for the agent page"
     fi
   fi
-  ok "extension installed at $EXTDIR"
+  if installed_notch_healthy; then
+    ok "extension installed and loadable at $EXTDIR"
+  else
+    bad "installed, but the extension still does not load — do not enable it."
+    say "   Please report this with the output of: bash scripts/psd.sh notch status"
+    return 1
+  fi
   say "${c_dim}Log out and back in (Wayland cannot restart the Shell), then:${c_reset}"
   say "  gnome-extensions enable $EXT_UUID"
   say "  # or: bash scripts/psd.sh notch enable"
