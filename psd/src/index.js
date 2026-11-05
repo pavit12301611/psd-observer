@@ -109,10 +109,30 @@ export async function start({ port = null } = {}) {
   return { config, web, engine, tools, memory, agents, notch, whatsapp, router, openai, bus, address };
 }
 
+/** A failure the owner can act on, not a stack trace. */
+function explain(err, config) {
+  if (err?.code === 'EADDRINUSE') {
+    const port = config?.port ?? 7788;
+    return [
+      `port ${port} is already in use — another PSD (or something else) has it.`,
+      '',
+      '  if it is an older PSD:',
+      '    systemctl --user stop psd-agent      # or: pkill -f "src/index.js"',
+      '',
+      '  or run this one somewhere else:',
+      '    PSD_PORT=7790 psd serve',
+      '    # or add PSD_PORT=7790 to ~/.config/psd/env',
+    ].join('\n');
+  }
+  if (err?.code === 'EACCES') return `cannot bind port — ports below 1024 need root. Use PSD_PORT=7788.`;
+  return err?.message ?? String(err);
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const portArg = process.argv.find((a) => a.startsWith('--port='));
   start({ port: portArg ? portArg.split('=')[1] : null }).catch((err) => {
-    console.error(`\n✗ PSD did not start: ${err.message}\n`);
+    const config = (() => { try { return loadConfig(); } catch { return null; } })();
+    console.error(`\n✗ PSD did not start: ${explain(err, config)}\n`);
     process.exit(1);
   });
 }
