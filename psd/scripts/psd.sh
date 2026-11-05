@@ -287,7 +287,7 @@ main() {
       say "  psd doctor            what works here"
       say "  psd status            daemon, brain, surfaces"
       say "  psd url               the phone-app link (with its token)"
-      say "  psd-proxy             the phone app on :7789 — token stays on this PC"
+      say "  psd-proxy             the phone app one port up — the token stays on this PC"
       say "  bash scripts/psd.sh whatsapp   wire WhatsApp to this brain"
       ;;
     service) service_cmd "${1:-install}" ;;
