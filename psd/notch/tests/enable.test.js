@@ -22,6 +22,65 @@ import {registerHooks} from 'node:module';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extensionDir = path.resolve(here, '../extension');
 
+/**
+ * The settings schemas the extension reads, and the keys it is allowed to read
+ * from each. Real Gio.Settings throws on an unknown key; the fake has to as
+ * well, or a typo in a key name is invisible until the desktop.
+ */
+/** One dconf database per schema id, shared by every Gio.Settings on it. */
+const STORE = new Map();
+
+const SCHEMA_KEYS = {
+    'io.github.pavit12301611.Notch': {
+        'placement': {default: 'panel'},
+        'collapsed-width': {default: 185},
+        'collapsed-height': {default: 32},
+        'expanded-width': {default: 640},
+        'expanded-height': {default: 480},
+        'floating-margin': {default: 8},
+        'horizontal-offset': {default: 0},
+        'corner-radius': {default: 24},
+        'notch-scale': {default: 1},
+        'opacity': {default: 1.0},
+        'animations': {default: true},
+        'auto-hide-ms': {default: 0},
+        'monitor-index': {default: -1},
+        'hover-delay-ms': {default: 120},
+        'open-animation-ms': {default: 420},
+        'close-animation-ms': {default: 450},
+        'peek-duration-ms': {default: 5000},
+        'auto-close-ms': {default: 4000},
+        'animation-profile': {default: 'mac-spring'},
+        'adaptive-corners': {default: true},
+        'match-panel-height': {default: true},
+        'open-on-hover': {default: true},
+        'hide-on-fullscreen': {default: true},
+        'hide-in-overview': {default: false},
+        'reserve-space': {default: false},
+        'closed-media': {default: true},
+        'idle-clock': {default: true},
+        'replace-panel-clock': {default: true},
+        'show-dnd': {default: true},
+        'show-night-light': {default: false},
+        'show-dark-mode': {default: false},
+        'notifications-in-notch': {default: true},
+        'auto-open-notifications': {default: false},
+        'psd-url': {default: 'http://127.0.0.1:7850'},
+        'psd-token': {default: ''},
+        'psd-auto-open': {default: false},
+        'psd-stream': {default: true},
+    },
+    'org.gnome.desktop.notifications': {
+        'show-banners': {default: true},
+    },
+    'org.gnome.desktop.interface': {
+        'color-scheme': {default: 'default'},
+    },
+    'org.gnome.settings-daemon.plugins.color': {
+        'night-light-enabled': {default: false},
+    },
+};
+
 // ── St / Clutter, strict about constructor properties we use ────────────────
 class Actor {
     constructor(properties = {}) {
@@ -145,14 +204,55 @@ const Gio = {
     File: {new_for_path: (p) => new GFile(expectString(p, 'path'))},
     FileIcon: class { constructor({file} = {}) { if (!(file instanceof GFile)) throw new Error('FileIcon needs a Gio.File'); this.file = file; } },
     ThemedIcon: {new: (name) => ({themed: expectString(name, 'name')})},
+    // Settings that behave like real ones for the schemas we touch: reading a
+    // key the schema does not have is a hard error in GJS, and that is how a
+    // typo becomes a crash at enable().
     Settings: class {
-        constructor({schema_id} = {}) { this.schema_id = schema_id; this._values = {}; }
-        get_boolean() { return false; }
-        get_int() { return 32; }
-        get_double() { return 1; }
-        get_string(key) { return this._values[key] ?? (key === 'placement' ? 'panel' : ''); }
-        connect() { return 1; }
+        // g_settings_sync() — a static in Gio. Real code calls it after a write
+        // so other processes see the change immediately.
+        static sync() {}
+        constructor({schema_id} = {}) {
+            this.schema_id = schema_id;
+            // Real Gio.Settings instances for the same schema share one dconf
+            // backend: a value written through one is visible through another.
+            // A per-instance store looked fine and quietly hid the fact that
+            // session.js re-reads the key instead of caching it.
+            if (!STORE.has(schema_id)) STORE.set(schema_id, {values: {}, handlers: new Map()});
+            const shared = STORE.get(schema_id);
+            this._values = shared.values;
+            this._handlers = shared.handlers;
+            this.settings_schema = {
+                has_key: (key) => Object.hasOwn(SCHEMA_KEYS[schema_id] ?? {}, key),
+            };
+            if (!SCHEMA_KEYS[schema_id])
+                throw new Error(`Settings schema '${schema_id}' is not installed`);
+        }
+        _check(key) {
+            if (!this.settings_schema.has_key(key))
+                throw new Error(`Settings schema '${this.schema_id}' does not contain a key named '${key}'`);
+        }
+        get_boolean(key) { this._check(key); return this._values[key] ?? SCHEMA_KEYS[this.schema_id][key].default; }
+        get_int(key) { this._check(key); return this._values[key] ?? SCHEMA_KEYS[this.schema_id][key].default; }
+        get_double(key) { this._check(key); return this._values[key] ?? SCHEMA_KEYS[this.schema_id][key].default; }
+        get_string(key) { this._check(key); return this._values[key] ?? SCHEMA_KEYS[this.schema_id][key].default; }
+        set_boolean(key, value) { this._check(key); this._values[key] = value; this._emit(key); }
+        set_int(key, value) { this._check(key); this._values[key] = value; this._emit(key); }
+        set_double(key, value) { this._check(key); this._values[key] = value; this._emit(key); }
+        set_string(key, value) { this._check(key); this._values[key] = value; this._emit(key); }
+        _emit(key) {
+            for (const callback of this._handlers.get(`changed::${key}`) ?? []) callback(this, key);
+        }
+        connect(signal, callback) {
+            if (!this._handlers.has(signal)) this._handlers.set(signal, []);
+            this._handlers.get(signal).push(callback);
+            return (this._nextId = (this._nextId ?? 0) + 1);
+        }
         disconnect() {}
+    },
+    SettingsSchemaSource: {
+        get_default: () => ({
+            lookup: (id, recursive) => (SCHEMA_KEYS[id] ? {id} : null),
+        }),
     },
     Cancellable: class {},
     DBusCallFlags: {NONE: 0},
@@ -162,9 +262,25 @@ const Gio = {
     }},
     bus_own_name: () => 1,
     bus_unown_name() {},
-    DBusExportedObject: {wrapJSObject: (xml, callbacks) => ({
-        __callbacks: callbacks, __xml: xml, export() {}, unexport() {},
-    })},
+    DBusExportedObject: {
+        // GJS: wrapJSObject(interfaceInfo, jsObj) hands interfaceInfo to
+        // Gio.DBusInterfaceInfo.new_for_xml(), whose override accepts a string
+        // and nothing else:
+        //   function _newNodeInfo(constructor, value) {
+        //       if (typeof value === 'string') return constructor(value);
+        //       throw TypeError(`Invalid type ${Object.prototype.toString.call(value)}`);
+        //   }
+        // Model the throw, with the desktop's exact wording. Without this the
+        // fake happily exported anything and the extension died at login with
+        // "TypeError: Invalid type [object Object]".
+        wrapJSObject(interfaceInfo, callbacks) {
+            if (typeof interfaceInfo !== 'string')
+                throw new TypeError(`Invalid type ${Object.prototype.toString.call(interfaceInfo)}`);
+            if (!interfaceInfo.includes('<node'))
+                throw new Error('Not a D-Bus interface document');
+            return {__callbacks: callbacks, __xml: interfaceInfo, export() {}, unexport() {}};
+        },
+    },
     BusType: {SESSION: 1},
     BusNameOwnerFlags: {NONE: 0},
 };
@@ -272,6 +388,64 @@ const makeShell = ({inputRegion = false} = {}) => {
 
 const shell = makeShell();
 
+/** A two-screen session, for the monitor-index tests. */
+const makeSessionShell = () => ({
+    backend: {
+        get_monitor_manager: () => ({
+            get_logical_monitors: () => [
+                {x: 0, y: 0, width: 1920, height: 1080, index: 0},
+                {x: 1920, y: 0, width: 1280, height: 720, index: 1},
+            ],
+            // -1 follows whatever is focused; this session is focused on the second.
+            get_current_monitor: () => ({x: 1920, y: 0, width: 1280, height: 720}),
+            get_current_monitor_index: () => 1,
+        }),
+    },
+});
+
+/**
+ * InjectionManager, implemented the way js/extensions/extension.js does:
+ *
+ *   overrideMethod(prototype, name, createOverrideFunc) {
+ *       const original = this._saveMethod(prototype, name);
+ *       this._installMethod(prototype, name, createOverrideFunc(original));
+ *   }
+ *
+ * The third argument is a FACTORY. Our bridge passed a function that returned a
+ * function, and a stub that accepted anything hid that for months. This one
+ * calls the factory, so a wrong shape fails here.
+ */
+class RealInjectionManager {
+    constructor() {
+        this.saved = new Map();
+    }
+    overrideMethod(prototype, methodName, createOverrideFunc) {
+        if (!this.saved.has(prototype)) this.saved.set(prototype, new Map());
+        const bag = this.saved.get(prototype);
+        // Only the first override of a method remembers the real one.
+        if (!bag.has(methodName)) bag.set(methodName, prototype[methodName]);
+        const override = createOverrideFunc(bag.get(methodName));
+        if (typeof override !== 'function')
+            throw new Error('overrideMethod() must be given a factory returning a function');
+        prototype[methodName] = override;
+    }
+    restoreMethod(prototype, methodName) {
+        const bag = this.saved.get(prototype);
+        if (!bag) return;
+        const original = bag.get(methodName);
+        if (original === undefined) delete prototype[methodName];
+        else prototype[methodName] = original;
+        bag.delete(methodName);
+        if (bag.size === 0) this.saved.delete(prototype);
+    }
+    clear() {
+        for (const [prototype, bag] of this.saved)
+            for (const methodName of [...bag.keys()]) this.restoreMethod(prototype, methodName);
+        if (this.saved.size !== 0)
+            throw new Error(`clear() left ${this.saved.size} overrides installed`);
+    }
+}
+
 const stubs = new Map([
     ['gi://Gio', {default: Gio}],
     ['gi://GLib', {default: GLib}],
@@ -290,7 +464,7 @@ const stubs = new Map([
     ['gi://Soup', {default: {Session: class { constructor() {} }}}],
     ['resource:///org/gnome/shell/ui/main.js', shell.Main],
     ['resource:///org/gnome/shell/extensions/extension.js',
-        {Extension: class {}, InjectionManager: class { clear() {} }}],
+        {Extension: class {}, InjectionManager: RealInjectionManager}],
     ['resource:///org/gnome/shell/ui/slider.js', {Slider: Actor}],
 ]);
 
@@ -317,6 +491,7 @@ const hooks = registerHooks({
 });
 
 const view = await import('../extension/lib/view.js');
+const sessionLib = await import('../extension/lib/session.js');
 // extension.js too: its enable() is the code that actually failed, so it has
 // to load while the gi:// stubs are registered.
 const extensionModule = await import('../extension/extension.js');
@@ -451,4 +626,104 @@ test('the notch never sends affectsInputRegion to Shell 49–50, which rejects i
     assert.equal(chrome.trackFullscreen, true);
     assert.equal(chrome.affectsStruts, false);
     notch.destroy();
+});
+
+// ── the three settings that used to do nothing ──────────────────────────────
+//
+// monitor-index, reserve-space and show-dnd were declared in the schema, shown
+// in Preferences, and read by nothing. Each is asserted here at the level a
+// person would check it: does the notch move, does it reserve space, does the
+// button appear and act.
+
+test('monitor-index pins the notch to a chosen monitor, -1 follows focus', () => {
+    const session = makeSessionShell();
+    const saved = global.backend;
+    global.backend = session.backend;
+    try {
+        // Two screens side by side; the second is where a fixed index points.
+        assert.deepEqual(pick(sessionLib.resolveMonitor(1)), {x: 1920, y: 0, width: 1280, height: 720, index: 1});
+        assert.deepEqual(pick(sessionLib.resolveMonitor(0)), {x: 0, y: 0, width: 1920, height: 1080, index: 0});
+        // -1 means "wherever I am", which is the current monitor.
+        assert.equal(sessionLib.resolveMonitor(-1).index, 1, 'follows the current monitor');
+        // An index past the end falls back rather than throwing.
+        assert.equal(sessionLib.resolveMonitor(9).index, 1);
+    } finally {
+        global.backend = saved;
+    }
+});
+
+const pick = (monitor) => ({x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height, index: monitor.index});
+
+test('reserve-space only reserves while the notch is collapsed and visible', () => {
+    const settings = {get_boolean: (key) => key === 'reserve-space'};
+    const off = {get_boolean: () => false};
+    assert.equal(sessionLib.shouldReserveSpace(settings, {expanded: false, visible: true}), true);
+    // An open notch is an overlay; reserving space for it would shove every
+    // maximised window down for as long as the panel is open.
+    assert.equal(sessionLib.shouldReserveSpace(settings, {expanded: true, visible: true}), false);
+    assert.equal(sessionLib.shouldReserveSpace(settings, {expanded: false, visible: false}), false);
+    assert.equal(sessionLib.shouldReserveSpace(off, {expanded: false, visible: true}), false);
+    // A settings object that has gone away must not throw at animation time.
+    assert.equal(sessionLib.shouldReserveSpace({get_boolean() { throw new Error('gone'); }}, {expanded: false, visible: true}), false);
+});
+
+test('the strut actor is tracked, moved with the notch and released', () => {
+    const tracked = [];
+    let removed = 0;
+    const layoutManager = {
+        addChrome(actor, params) {
+            for (const key in params) assert.ok(['trackFullscreen', 'affectsStruts'].includes(key),
+                `strut actor sent "${key}", which this Shell rejects`);
+            tracked.push({actor, params});
+        },
+        removeChrome() { removed++; },
+    };
+    const reservation = new sessionLib.StrutReservation({layoutManager});
+    const monitor = {x: 0, y: 0, width: 2560, height: 1440};
+
+    assert.equal(reservation.apply(true, {...monitor, height: 32}), true);
+    assert.equal(tracked.length, 1);
+    // The whole point of a separate actor: it can ask for a strut.
+    assert.equal(tracked[0].params.affectsStruts, true);
+    assert.equal(reservation.actor.height, 32);
+    assert.equal(reservation.actor.width, 2560);
+
+    // Re-applying moves it without re-tracking (a second addChrome would throw
+    // "trying to re-track existing chrome actor" on the real Shell).
+    reservation.apply(true, {x: 1920, y: 0, width: 1280, height: 40});
+    assert.equal(tracked.length, 1, 'must not re-track');
+    assert.equal(reservation.actor.x, 1920);
+
+    reservation.apply(false, monitor);
+    assert.equal(removed, 1, 'turning the setting off must release the space');
+    assert.equal(reservation.reserved, false);
+
+    // destroy() is safe to call twice and after a release.
+    reservation.destroy();
+    reservation.destroy();
+});
+
+test('the Do Not Disturb action appears and actually toggles banners', () => {
+    const notifications = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
+    assert.equal(sessionLib.dndEnabled(notifications), false, 'banners on by default');
+
+    const extension = makeExtension();
+    extension.settings = extension.getSettings();
+    const notch = new view.NotchView(extension);
+    try {
+        const labels = notch.homeActions.children.map(child => child._notchLabel?.text).filter(Boolean);
+        assert.ok(labels.includes('Focus on'), `expected a Focus button, got ${labels.join(', ')}`);
+
+        // Turning it on from the notch must reach the real session key.
+        assert.equal(sessionLib.toggleDnd(notifications), true);
+        assert.equal(notifications.get_boolean('show-banners'), false, 'banners actually paused');
+
+        // And the button has to read that state back, not keep its own copy.
+        notch._refreshHome();
+        const after = notch.homeActions.children.map(child => child._notchLabel?.text).filter(Boolean);
+        assert.ok(after.includes('Focus off'), `after turning it on, expected Focus off, got ${after.join(', ')}`);
+    } finally {
+        notch.destroy();
+        notifications.set_boolean('show-banners', true);
+    }
 });

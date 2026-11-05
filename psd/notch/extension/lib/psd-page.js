@@ -202,7 +202,12 @@ export class PsdPage {
             return;
         }
         try {
-            const health = await this.client.status();
+            // Hold the client for the duration: destroy() nulls this.client, and
+            // an await that outlives disable() must not dereference null in its
+            // catch block (that surfaced as an unhandled rejection).
+            const client = this.client;
+            if (!client) return;
+            const health = await client.status();
             const brain = health?.brain;
             const access = health?.access;
             const model = brain?.healthy ? (brain.model || 'model') : 'intents';
@@ -211,8 +216,9 @@ export class PsdPage {
             const tools = access?.tools ? `${access.tools} tools` : '';
             setText(this.toolsLabel, tools);
         } catch (error) {
+            if (this.dead) return;
             this._setState('bad');
-            this.updateStatus(this.client.lastError || 'PSD is not answering', 'bad');
+            this.updateStatus(client?.lastError || error?.message || 'PSD is not answering', 'bad');
         }
     }
 
@@ -248,8 +254,8 @@ export class PsdPage {
     // ── chatting ────────────────────────────────────────────────────────────
     async send(preset = null) {
         const text = String(preset ?? this.entry?.get_text() ?? '').trim();
-        if (!text || this.busy) return;
-        if (!this.client.baseUrl) {
+        if (!text || this.busy || this.dead) return;
+        if (!this.client?.baseUrl) {
             this._setState('unconfigured');
             return;
         }
@@ -265,14 +271,18 @@ export class PsdPage {
         this.currentText = '';
 
         try {
-            const done = await this.client.chat(text, {thread: this.thread});
+            // Same rule as _refreshHealth(): keep our own handle across the await.
+            const client = this.client;
+            if (!client) return;
+            const done = await client.chat(text, {thread: this.thread});
             const finalText = (done?.text ?? this.currentText ?? '').trim();
             answer.setText(finalText || 'No answer.');
             answer.setFooter(describeAnswer(done, done?.ms));
             this._setState(done?.ok === false ? 'bad' : 'ok');
             if (done?.ok !== false) this.updateStatus('ready', 'ok');
         } catch (error) {
-            answer.setText(this.client.lastError || error.message || 'PSD did not answer.');
+            if (this.dead) return;
+            answer.setText(client?.lastError || error?.message || 'PSD did not answer.');
             answer.setFooter('');
             this._setState('bad');
             this.updateStatus('failed — press ask to retry', 'bad');
@@ -341,6 +351,11 @@ export class PsdPage {
     }
 
     destroy() {
+        // `dead` is what makes an in-flight request harmless: its continuation
+        // checks the flag and returns instead of touching actors we are about to
+        // throw away. Without it, disabling the extension mid-answer left an
+        // unhandled rejection behind.
+        this.dead = true;
         this.client?.destroy();
         this.client = null;
     }
