@@ -4,7 +4,7 @@
 #   bash scripts/psd.sh install          user install: bin, notch extension, service
 #   bash scripts/psd.sh install --with-deps   also install Fedora packages (sudo)
 #   bash scripts/psd.sh service [install|restart|status|logs|stop]
-#   bash scripts/psd.sh notch [install|enable|reload|disable]
+#   bash scripts/psd.sh notch [install|repair|enable|reload|disable|status]
 #   bash scripts/psd.sh whatsapp         print the exact agent .env lines
 #   bash scripts/psd.sh url              the app link, for this PC and your phone
 #   bash scripts/psd.sh doctor           what works, and the fix
@@ -91,6 +91,37 @@ EOF
   esac
 }
 
+# Refuse to install an extension that GNOME Shell cannot load.
+#
+# This exists because of a real outage: the extension's lib/ was excluded by a
+# `lib/` line in .gitignore, so a downloaded tree had extension.js importing
+# modules that were not there. The Shell reported
+#   "does not provide an export named: 'PSD_INTERFACE'"
+# and disabled the whole extension. A missing file is cheap to detect — so
+# detect it before touching the installed copy.
+verify_extension() {
+  local source="$1"
+  local missing=0
+  local file target
+  while IFS= read -r file; do
+    while IFS= read -r target; do
+      local resolved
+      resolved="$(cd "$(dirname "$file")" && cd "$(dirname "$target")" 2>/dev/null && pwd)/$(basename "$target")"
+      if [ ! -f "$resolved" ]; then
+        bad "$(basename "$file") imports $target, which is not in the download"
+        missing=1
+      fi
+    done < <(grep -oE "from '(\.[^']+)'" "$file" 2>/dev/null | sed "s/from '//; s/'$//")
+  done < <(find "$source" -name '*.js')
+  for required in metadata.json extension.js prefs.js stylesheet.css \
+      schemas/io.github.pavit12301611.Notch.gschema.xml \
+      dbus/io.github.pavit12301611.Notch.xml \
+      dbus/io.github.pavit12301611.Notch.Psd.xml; do
+    [ -f "$source/$required" ] || { bad "missing $required"; missing=1; }
+  done
+  [ "$missing" = 0 ]
+}
+
 install_notch() {
   head_ "Notch extension"
   local source="$ROOT/notch/extension"
@@ -98,6 +129,13 @@ install_notch() {
     warn "no notch/extension in this checkout — skipping (PSD works without the notch)."
     return
   fi
+  if ! verify_extension "$source"; then
+    bad "this download is incomplete — refusing to install a broken extension."
+    say "   Your current extension has NOT been touched."
+    say "   Fix: re-download the latest main, or report this at github.com/pavit12301611/psd-observer"
+    return 1
+  fi
+  ok "download is complete (all imported modules present)"
   # The owner may have the upstream extension installed already. Back it up,
   # then install this build over it: same UUID, so settings and position carry.
   if [ -d "$EXTDIR" ]; then
@@ -108,6 +146,10 @@ install_notch() {
     ok "existing extension backed up to $backup"
   fi
   mkdir -p "$EXTDIR" "$SCHEMADIR"
+  # Install exactly this build, not this build on top of whatever was there.
+  # A stale file left behind by an older version is how the Shell ended up
+  # loading mismatched modules; lib/ is entirely ours.
+  rm -rf "$EXTDIR/lib"
   cp -r "$source/." "$EXTDIR/"
   cp "$EXTDIR/schemas/"*.gschema.xml "$SCHEMADIR/"
   if command -v glib-compile-schemas >/dev/null 2>&1; then
@@ -163,6 +205,7 @@ notch_cmd() {
       fi
       ;;
     status) gnome-extensions info "$EXT_UUID" ;;
+    repair) install_notch ;;
     *) bad "unknown notch action: $action" ;;
   esac
 }
@@ -281,7 +324,11 @@ main() {
         esac
       done
       link_bin
-      [ "${NO_NOTCH:-0}" = "1" ] || install_notch
+      if [ "${NO_NOTCH:-0}" = "1" ]; then
+        :
+      elif ! install_notch; then
+        NO_SERVICE="${NO_SERVICE:-0}"
+      fi
       [ "${NO_SERVICE:-0}" = "1" ] || install_service
       head_ "Next"
       say "  psd doctor            what works here"

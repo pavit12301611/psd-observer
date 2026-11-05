@@ -11,7 +11,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JSDOM, VirtualConsole } from 'jsdom';
+// jsdom is a devDependency: without it this file must *skip*, not fail, so
+// `npm test` stays meaningful on a machine that only runs the service.
+let JSDOM;
+let VirtualConsole;
+try {
+  ({ JSDOM, VirtualConsole } = await import('jsdom'));
+} catch {
+  JSDOM = null;
+}
+const needsDom = JSDOM ? {} : { skip: 'jsdom is not installed (npm install -D jsdom)' };
 
 import { Memory } from '../src/memory.js';
 import { createTools } from '../src/tools.js';
@@ -96,7 +105,7 @@ const waitFor = async (predicate, { timeout = 5000, step = 30 } = {}) => {
   return null;
 };
 
-test('the app renders, streams an answer into a bubble, and fills every view', async () => {
+test('the app renders, streams an answer into a bubble, and fills every view', needsDom, async () => {
   const world = await harness();
   try {
     const { dom, window, errors } = await openApp(world.url);
@@ -158,7 +167,7 @@ test('the app renders, streams an answer into a bubble, and fills every view', a
   }
 });
 
-test('a rejected token surfaces the connect sheet instead of a silent empty app', async () => {
+test('a rejected token surfaces the connect sheet instead of a silent empty app', needsDom, async () => {
   // trustLoopback off is what an owner sees when they point the app at a PC
   // from a device, or after changing the token: a 401, not an empty shell.
   const world = await harness({ trustLoopback: false });
@@ -175,7 +184,7 @@ test('a rejected token surfaces the connect sheet instead of a silent empty app'
   }
 });
 
-test('the shell keeps its accessibility and theming promises', () => {
+test('the shell keeps its accessibility and theming promises', needsDom, () => {
   const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(WEB, 'styles.css'), 'utf8');
   const { document } = new JSDOM(html, { url: 'http://127.0.0.1:7788/' }).window;
