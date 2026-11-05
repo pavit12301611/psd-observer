@@ -1,0 +1,10 @@
+{
+  "name": "notch-psd",
+  "version": "20.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Notch for GNOME with the PSD agent tab (vendored from pavit12301611/notch, extended)",
+  "scripts": {
+    "test": "node --test tests/js/*.test.js"
+  }
+}

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#08080a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PSD">
+<title>PSD — personal agent</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ── header ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="notch-mark" aria-hidden="true">
+      <svg viewBox="0 0 64 24" width="64" height="24">
+        <path d="M0 0h64v0a0 0 0 0 1 0 0H44a7 7 0 0 1-7-7 7 7 0 0 0-7 0 7 7 0 0 1-7 7H0Z" fill="currentColor"/>
+        <rect x="6" y="0" width="52" height="9" rx="0" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <h1>PSD</h1>
+      <p id="brand-sub">personal agent</p>
+    </div>
+    <div class="status-stack" id="status-stack">
+      <button class="pill" id="pill-brain" data-view="system" aria-label="Brain status">
+        <span class="dot" data-state="idle"></span><span class="pill-label" id="brain-label">brain</span>
+      </button>
+      <button class="pill ghost" id="pill-surfaces" aria-label="Surfaces status" data-view="system">
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <span class="pill-label" id="surface-label">notch · wa</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="views" id="views">
+
+    <!-- ── chat ───────────────────────────────────────────────────────── -->
+    <section class="view is-active" id="view-chat" data-view="chat">
+      <div class="thread" id="thread" role="log" aria-live="polite">
+        <div class="hello" id="hello">
+          <div class="hello-glow"></div>
+          <h2>Good to see you.</h2>
+          <p id="hello-line">Same brain as the notch, the phone and WhatsApp. Say what you need.</p>
+          <div class="suggestions" id="suggestions">
+            <button data-send="system status">System status</button>
+            <button data-send="take a screenshot">Screenshot</button>
+            <button data-send="what windows are open">Windows</button>
+            <button data-send="dark mode on">Dark mode</button>
+            <button data-send="volume up">Louder</button>
+            <button data-send="remind me in 25m to stretch">Remind 25m</button>
+            <button data-send="notch: PSD is live">Test notch</button>
+            <button data-send="help">What can you do</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer" id="composer">
+          <button class="icon-btn" id="btn-mic" aria-label="Voice input" title="Voice input">
+            <svg viewBox="0 0 24 24" width="19" height="19"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 1 0-7 0v5.5A3.5 3.5 0 0 0 12 15Zm6-3.5a6 6 0 0 1-5 5.9V20h-2v-2.6a6 6 0 0 1-5-5.9h2a4 4 0 0 0 8 0Z" fill="currentColor"/></svg>
+          </button>
+          <textarea id="input" rows="1" placeholder="Ask PSD…" autocomplete="off" spellcheck="false"></textarea>
+          <button class="send-btn" id="btn-send" aria-label="Send">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 11.5 20 4l-7.5 16-2-6.5L4 11.5Z" fill="currentColor"/></svg>
+          </button>
+        </div>
+        <div class="composer-meta">
+          <span id="hint-line">⏎ send · ⇧⏎ newline</span>
+          <button id="btn-stop" class="link hidden">stop</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── system ─────────────────────────────────────────────────────── -->
+    <section class="view" id="view-system" data-view="system">
+      <div class="view-head">
+        <h2>This machine</h2>
+        <button class="ghost-btn" id="btn-refresh-system">refresh</button>
+      </div>
+      <div class="gauges" id="gauges">
+        <article class="gauge" data-metric="cpu">
+          <svg viewBox="0 0 120 120" class="ring"><circle cx="60" cy="60" r="52" class="ring-bg"/><circle cx="60" cy="60" r="52" class="ring-fg" id="ring-cpu"/></svg>
+          <div class="gauge-body"><strong id="val-cpu">—</strong><span>CPU</span></div>
+        </article>
+        <article class="gauge" data-metric="mem">
+          <svg viewBox="0 0 120 120" class="ring"><circle cx="60" cy="60" r="52" class="ring-bg"/><circle cx="60" cy="60" r="52" class="ring-fg" id="ring-mem"/></svg>
+          <div class="gauge-body"><strong id="val-mem">—</strong><span>memory</span></div>
+        </article>
+        <article class="gauge" data-metric="battery">
+          <svg viewBox="0 0 120 120" class="ring"><circle cx="60" cy="60" r="52" class="ring-bg"/><circle cx="60" cy="60" r="52" class="ring-fg" id="ring-battery"/></svg>
+          <div class="gauge-body"><strong id="val-battery">—</strong><span id="val-battery-state">battery</span></div>
+        </article>
+      </div>
+
+      <div class="cards">
+        <article class="card">
+          <h3>System</h3>
+          <dl class="kv" id="kv-system"></dl>
+        </article>
+        <article class="card">
+          <h3>Brain</h3>
+          <dl class="kv" id="kv-brain"></dl>
+          <div class="brains" id="brains"></div>
+        </article>
+        <article class="card">
+          <h3>Surfaces</h3>
+          <dl class="kv" id="kv-surfaces"></dl>
+          <div class="row-actions">
+            <button class="ghost-btn" data-send="notch: PSD ping">ping notch</button>
+            <button class="ghost-btn" id="btn-wa-test">whatsapp test</button>
+            <button class="ghost-btn" id="btn-probe">re-probe brain</button>
+          </div>
+        </article>
+        <article class="card">
+          <h3>Health</h3>
+          <dl class="kv" id="kv-health"></dl>
+          <div class="row-actions">
+            <button class="ghost-btn" data-view="files">files</button>
+            <button class="ghost-btn" data-view="agents">agents</button>
+            <button class="ghost-btn" data-view="more">memory</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ── files ──────────────────────────────────────────────────────── -->
+    <section class="view" id="view-files" data-view="files">
+      <div class="view-head">
+        <h2>Files</h2>
+        <div class="crumb" id="files-crumb">~</div>
+      </div>
+      <div class="path-row">
+        <input id="files-path" value="~" spellcheck="false" aria-label="Path">
+        <button class="ghost-btn" id="btn-files-go">open</button>
+      </div>
+      <div class="list" id="files-list"></div>
+    </section>
+
+    <!-- ── agents ─────────────────────────────────────────────────────── -->
+    <section class="view" id="view-agents" data-view="agents">
+      <div class="view-head"><h2>Agents &amp; skills</h2><span class="count" id="agents-count"></span></div>
+      <div class="cards" id="agents-cards"></div>
+    </section>
+
+    <!-- ── more ───────────────────────────────────────────────────────── -->
+    <section class="view" id="view-more" data-view="more">
+      <div class="view-head"><h2>Reminders</h2><span class="count" id="reminders-count"></span></div>
+      <div class="list" id="reminders-list"></div>
+      <div class="view-head"><h2>What PSD remembers</h2></div>
+      <div class="list" id="memory-list"></div>
+      <div class="view-head"><h2>Connection</h2></div>
+      <article class="card">
+        <label class="field"><span>Endpoint</span><input id="set-url" spellcheck="false" placeholder="http://this-pc:7788"></label>
+        <label class="field"><span>Token</span><input id="set-token" type="password" spellcheck="false" placeholder="from psd token"></label>
+        <div class="row-actions">
+          <button class="primary-btn" id="btn-save-conn">save &amp; reconnect</button>
+          <button class="ghost-btn" id="btn-forget">sign out</button>
+        </div>
+      </article>
+      <p class="footnote">PSD <span id="foot-version">1.0</span> · runs on your machine · nothing leaves it unless a tool calls the network.</p>
+    </section>
+  </main>
+
+  <!-- ── bottom nav ─────────────────────────────────────────────────────── -->
+  <nav class="tabbar" id="tabbar" aria-label="Sections">
+    <button data-view="chat" class="tab is-active" aria-label="Chat">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.4 3.3A.6.6 0 0 1 4.6 18.8V16A2.5 2.5 0 0 1 4 14.4Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      <span>Chat</span>
+    </button>
+    <button data-view="system" class="tab" aria-label="System">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 17V9m5 8V5m5 12v-6m5 6V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>System</span>
+    </button>
+    <button data-view="files" class="tab" aria-label="Files">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.2a1 1 0 0 1 .8.4l1 1.3h7a2 2 0 0 1 2 2v6.3a2 2 0 0 1-2 2h-13a1 1 0 0 1-1-1Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      <span>Files</span>
+    </button>
+    <button data-view="agents" class="tab" aria-label="Agents">
+      <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 19c.7-3.4 3.6-5 7-5s6.3 1.6 7 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span>Agents</span>
+    </button>
+    <button data-view="more" class="tab" aria-label="More">
+      <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></svg>
+      <span>More</span>
+    </button>
+  </nav>
+
+  <!-- ── overlays ───────────────────────────────────────────────────────── -->
+  <div class="toast" id="toast" role="status"></div>
+
+  <div class="sheet hidden" id="sheet-conn">
+    <div class="sheet-card">
+      <h2>Connect to PSD</h2>
+      <p>This is the token printed by <code>psd token</code> on your PC. It never leaves your network.</p>
+      <label class="field"><span>Endpoint</span><input id="conn-url" spellcheck="false"></label>
+      <label class="field"><span>Token</span><input id="conn-token" type="password" spellcheck="false"></label>
+      <div class="row-actions">
+        <button class="primary-btn" id="btn-conn-save">Connect</button>
+      </div>
+      <p class="footnote" id="conn-error"></p>
+    </div>
+  </div>
+</div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

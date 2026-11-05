@@ -1,0 +1,28 @@
+{
+  "name": "psd-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PSD \u2014 the personal agent behind the Notch. OpenJarvis-style agents and skills, running on your own Fedora machine, wired to WhatsApp, the phone app and GNOME.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "bin": {
+    "psd": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --env-file-if-exists=.env src/index.js",
+    "cli": "node src/cli.js",
+    "test": "node --test test/*.test.js",
+    "doctor": "node src/cli.js doctor",
+    "agents": "node src/cli.js agents",
+    "install:service": "bash scripts/psd.sh service install",
+    "logs": "journalctl --user -u psd-agent -f",
+    "test:ui": "node --test test/ui.test.js"
+  },
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}
