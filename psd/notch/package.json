@@ -5,6 +5,6 @@
   "type": "module",
   "description": "Notch for GNOME with the PSD agent tab (vendored from pavit12301611/notch, extended)",
   "scripts": {
-    "test": "node tests/load.test.mjs > /dev/null && node --test tests/packaging.test.js tests/js/*.test.js"
+    "test": "node tests/load.test.mjs > /dev/null && node --test tests/packaging.test.js tests/gi-contract.test.js tests/enable.test.js tests/js/*.test.js"
   }
 }
