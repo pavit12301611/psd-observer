@@ -287,7 +287,31 @@ install_notch() {
   # only warned and carried on straight into this state.
   cp "$EXTDIR/schemas/"*.gschema.xml "$SCHEMADIR/"
   install_schema_db "$SCHEMADIR" || return 1
+  # The extension's OWN schemas/ directory matters more than the shared one.
+  #
+  # Extension.getSettings() does not read the system-wide database. It builds a
+  # source from $EXTDIR/schemas/ specifically:
+  #
+  #   const schemaDir = this.dir.get_child('schemas');
+  #   if (schemaDir.query_exists(null))
+  #       schemaSource = Gio.SettingsSchemaSource.new_from_directory(
+  #           schemaDir.get_path(), defaultSource, false);
+  #   ... schemaSource.lookup(schema, true)
+  #
+  # (`new_from_directory(..., trusted=false)` reads gschemas.compiled from that
+  # directory.) So if $EXTDIR/schemas/ contains a compiled database from an older
+  # build — which the upstream notch ships, and which we used to leave in place —
+  # the schema id resolves while every new key is missing:
+  #
+  #   Error: GSettings key psd-url not found in schema io.github.pavit12301611.Notch
+  #
+  # Deleting it is not enough on its own either: lookup() returns null and the
+  # extension dies with "Schema ... could not be found". It has to be rebuilt
+  # from the XML we just installed.
+  install_schema_db "$EXTDIR/schemas" || return 1
   if command -v gsettings >/dev/null 2>&1; then
+    # Verify against the same directory the Shell reads from.
+    verify_schema_keys "$EXTDIR/schemas" || return 1
     verify_schema_keys "$SCHEMADIR" || return 1
   fi
   # The Agent tab needs to know where PSD listens. Seed it once; the owner can

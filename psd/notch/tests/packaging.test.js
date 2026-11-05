@@ -190,3 +190,62 @@ test('the schema parses as XML and declares the id and path the code expects', (
     const closes = [...xml.matchAll(/<\/(schema|key)>/g)].length;
     assert.equal(opens, closes, 'unbalanced <schema>/<key> tags');
 });
+
+
+// ── the schema the Shell actually loads ─────────────────────────────────────
+//
+// Extension.getSettings() does NOT read the system-wide schema database. From
+// js/extensions/sharedInternals.js:
+//
+//   const schemaDir = this.dir.get_child('schemas');
+//   if (schemaDir.query_exists(null))
+//       schemaSource = Gio.SettingsSchemaSource.new_from_directory(
+//           schemaDir.get_path(), defaultSource, false);
+//   const schemaObj = schemaSource.lookup(schema, true);
+//
+// new_from_directory(..., trusted=false) reads gschemas.compiled *from that
+// directory*. So the file that decides whether the Agent tab exists is
+// $EXTDIR/schemas/gschemas.compiled — not the one in glib-2.0/schemas.
+//
+// The upstream notch ships a compiled database there; ours used to leave it in
+// place while adding keys, which is exactly:
+//   Error: GSettings key psd-url not found in schema io.github.pavit12301611.Notch
+
+test('the installer compiles the schema inside the extension directory', () => {
+    const sh = fs.readFileSync(path.resolve(here, '../../scripts/psd.sh'), 'utf8');
+    assert.match(sh, /install_schema_db\s+"\$EXTDIR\/schemas"/,
+        'the extension-local schemas/ directory needs its own gschemas.compiled — ' +
+        'that is the one Extension.getSettings() loads');
+    // And it must be verified there too, not only in the shared location.
+    assert.match(sh, /verify_schema_keys\s+"\$EXTDIR\/schemas"/,
+        'verification must cover the directory the Shell reads');
+});
+
+test('install_schema_db removes a stale database before rebuilding it', () => {
+    const sh = fs.readFileSync(path.resolve(here, '../../scripts/psd.sh'), 'utf8');
+    const body = /install_schema_db\(\)\s*\{([\s\S]*?)\n\}/.exec(sh)?.[1];
+    assert.ok(body, 'install_schema_db() must exist');
+    // Copying a new .xml over an existing gschemas.compiled changes nothing;
+    // the database has to go first or the key list stays astern.
+    assert.match(body, /rm -f "\$dir\/gschemas\.compiled"/,
+        'a stale compiled database must be deleted before recompiling');
+    // And a missing compiler must be a hard failure, not a warning: the old
+    // code warned and carried on, leaving exactly the reported breakage.
+    assert.doesNotMatch(body, /^\s*warn /m,
+        'being unable to compile must fail the install, not warn');
+});
+
+test('the shipped extension does not contain a prebuilt schema database', () => {
+    // A committed gschemas.compiled would pin the key list at whatever the
+    // builder had, for ever, on every machine.
+    const found = [];
+    const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(full);
+            else if (entry.name === 'gschemas.compiled') found.push(path.relative(extensionDir, full));
+        }
+    };
+    walk(extensionDir);
+    assert.deepEqual(found, [], 'gschemas.compiled is generated at install time, never shipped');
+});

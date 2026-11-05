@@ -516,6 +516,8 @@ export class NotchView {
             on(key, () => this._reposition());
         // Pinning the notch to a different monitor is a move, not a resize.
         on('monitor-index', () => this._reposition());
+        // Opacity only changes the paint, not the geometry.
+        on('opacity', () => this._applyGeometry());
 
         on('psd-url', () => {
             this.psd?.client?.loadToken();
@@ -697,9 +699,14 @@ export class NotchView {
         const rect = geometry;
         this.actor.set_position(Math.round(rect.x), Math.round(rect.y));
         this.actor.set_size(Math.max(1, Math.round(rect.width)), Math.max(1, Math.round(rect.height)));
-        const style = `border-radius: ${Math.round(rect.topRadius)}px ${Math.round(rect.topRadius)}px ` +
-            `${Math.round(rect.bottomRadius)}px ${Math.round(rect.bottomRadius)}px;`;
-        this.surface.style = style;
+        // The surface is painted (stylesheet.css gives it the black body) and
+        // shaped here. `opacity` in Preferences is a real dial: at 1.0 the pill
+        // is solid, lower lets the desktop show through the way macOS does.
+        // Without reading it, the setting did nothing at all.
+        const alpha = Math.min(1, Math.max(0.5, this.settings.get_double('opacity')));
+        const radius = `${Math.round(rect.topRadius)}px ${Math.round(rect.topRadius)}px ` +
+            `${Math.round(rect.bottomRadius)}px ${Math.round(rect.bottomRadius)}px`;
+        this.surface.style = `border-radius: ${radius}; background-color: rgba(0, 0, 0, ${alpha});`;
         this._applyHeader();
         this.closed.opacity = this.expanded ? 0 : 255;
         this.content.opacity = this.expanded ? 255 : 0;
