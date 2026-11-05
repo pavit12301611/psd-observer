@@ -171,8 +171,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python build output only. Bare `lib/` also swallowed source trees such as the
+# GNOME extension's lib/ — anchor it to packaging roots instead.
+/lib/
+/lib64/
 parts/
 sdist/
 var/
