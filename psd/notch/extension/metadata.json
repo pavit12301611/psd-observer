@@ -1,0 +1,18 @@
+{
+  "uuid": "notch@pavit12301611.github.io",
+  "name": "Notch",
+  "description": "MacBook-style top-edge notch for GNOME with idle clock, in-notch notifications, smooth expansion, media controls and system status. Includes GTK4/Libadwaita settings; install the complete project.",
+  "version": 19,
+  "shell-version": [
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "settings-schema": "io.github.pavit12301611.Notch",
+  "session-modes": [
+    "user"
+  ],
+  "url": "https://github.com/pavit12301611/notch"
+}

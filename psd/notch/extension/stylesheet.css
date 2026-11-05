@@ -1,0 +1,293 @@
+/* MacBook-inspired notch chrome.
+   Build 19: four pages, layered surfaces, bounded header, charging feedback.
+   Only Alerts owns a scroll view; every other page is a centered natural block. */
+.notch-shell {
+  background-color: transparent;
+  color: #f5f5f7;
+  font-size: 10.5pt;
+  -st-icon-style: symbolic;
+}
+.notch-surface { background-color: transparent; }
+.notch-body { background-color: #000000; }
+.notch-flare { background-color: transparent; }
+.notch-closed { background-color: transparent; }
+.notch-closed-button {
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0 14px;
+  color: #f5f5f7;
+}
+.notch-closed-button:hover, .notch-closed-button:focus { background-color: rgba(255,255,255,0.04); }
+.notch-closed-row { spacing: 8px; }
+.notch-clock-box { spacing: 5px; }
+.notch-summary-clock { font-size: 1em; font-weight: 600; color: #f5f5f7; }
+.notch-unread-dot { width: 5px; height: 5px; border-radius: 3px; background-color: #f5f5f7; }
+.notch-live-music { color: #30d158; }
+.notch-live-bars { spacing: 2px; height: 16px; }
+.notch-live-bar { width: 3px; height: 14px; border-radius: 2px; background-color: #30d158; }
+.notch-charge-badge { spacing: 6px; }
+.notch-charge-label { color: #30d158; font-size: 0.95em; font-weight: 600; }
+
+/* Open chrome: equal fixed gutters keep the tab rail centered on every page. */
+.notch-content { background-color: transparent; padding: 0; spacing: 0; }
+.notch-header { spacing: 6px; padding: 0 0 8px; }
+.notch-header-spacer { width: 76px; }
+.notch-header-controls { spacing: 8px; }
+.notch-tabs {
+  spacing: 4px;
+  padding: 3px;
+  background-color: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 13px;
+}
+.notch-page { spacing: 12px; padding: 4px 8px 6px; }
+.notch-page-header { spacing: 8px; padding: 0 0 2px; }
+.notch-page-title { font-size: 1.1em; font-weight: 700; color: #f5f5f7; }
+.notch-list { spacing: 8px; }
+.notch-count-badge {
+  background-color: rgba(255,255,255,0.12);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.75em;
+  font-weight: 700;
+  color: #f5f5f7;
+}
+
+/* Controls. Bundled monochrome SVGs avoid theme-blue symbolic icons. */
+.notch-tab, .notch-button, .notch-action, .notch-icon-button, .notch-small-button,
+.notch-peek-action {
+  padding: 6px 10px;
+  background-color: transparent;
+  color: #a1a1a6;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition-duration: 120ms;
+}
+.notch-tab { padding: 6px 8px; font-size: 0.9em; border-radius: 9px; }
+.notch-tab-icon { padding: 6px; }
+.notch-tab-ultra { padding: 4px; }
+.notch-button { padding: 7px 12px; }
+.notch-action {
+  padding: 9px 14px;
+  background-color: #1c1c1e;
+  border-color: rgba(255,255,255,0.06);
+  border-radius: 12px;
+  color: #d1d1d6;
+}
+.notch-icon-button { padding: 7px; }
+.notch-header-button { padding: 8px; }
+.notch-header-button-ultra { padding: 6px; }
+.notch-small-button { padding: 5px 10px; font-size: 0.85em; border-radius: 8px; }
+.notch-peek-action { padding: 5px 10px; font-size: 0.9em; background-color: #3a3a3c; }
+.notch-tab:hover, .notch-button:hover, .notch-action:hover, .notch-icon-button:hover,
+.notch-small-button:hover, .notch-peek-action:hover,
+.notch-tab:focus, .notch-button:focus, .notch-action:focus, .notch-icon-button:focus,
+.notch-small-button:focus, .notch-peek-action:focus {
+  background-color: #3a3a3c;
+  border-color: rgba(255,255,255,0.10);
+}
+.notch-tab-active, .notch-tab-active:hover, .notch-tab-active:focus {
+  background-color: rgba(255,255,255,0.16);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.notch-button:insensitive, .notch-action:insensitive, .notch-icon-button:insensitive,
+.notch-small-button:insensitive {
+  color: #636366;
+  background-color: rgba(255,255,255,0.04);
+}
+.notch-button:active, .notch-action:active { background-color: #48484a; }
+.notch-play { background-color: #f5f5f7; color: #000000; border-radius: 18px; padding: 7px 14px; }
+.notch-play:hover, .notch-play:focus { background-color: #ffffff; }
+.notch-play-large { border-radius: 24px; padding: 12px 22px; }
+.notch-transport {
+  padding: 12px;
+  border-radius: 999px;
+  background-color: rgba(255,255,255,0.06);
+}
+.notch-action-active, .notch-action-active:hover, .notch-action-active:focus {
+  background-color: rgba(255,255,255,0.18);
+  color: #ffffff;
+  border-color: rgba(255,255,255,0.24);
+}
+
+/* Typography and layered cards. */
+.notch-muted { color: #98989d; font-size: 0.9em; }
+.notch-home-page { spacing: 8px; }
+.notch-home-clock { font-size: 3em; font-weight: 700; color: #f5f5f7; }
+.notch-home-date { color: #98989d; font-size: 0.95em; }
+.notch-card, .notch-notification { transition-duration: 150ms; }
+.notch-card {
+  background-color: #17171a;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 16px;
+  padding: 12px;
+  spacing: 4px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.notch-notification {
+  background-color: #17171a;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 16px;
+  padding: 12px;
+  spacing: 6px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.notch-notification-top { spacing: 8px; }
+.notch-notification-title { font-weight: 700; font-size: 1.02em; color: #f5f5f7; }
+.notch-notification-body { color: #c7c7cc; font-size: 0.9em; }
+.notch-notification-more { padding: 2px 8px; font-size: 0.8em; color: #98989d; background-color: transparent; }
+.notch-notification-actions { spacing: 6px; }
+.notch-empty {
+  background-color: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 18px 16px;
+  spacing: 8px;
+  color: #8e8e93;
+}
+.notch-empty-title { font-weight: 700; font-size: 1.05em; color: #f5f5f7; }
+.notch-empty-body { color: #98989d; font-size: 0.9em; }
+.notch-slider {
+  -barlevel-height: 4px;
+  -barlevel-background-color: #3a3a3c;
+  -barlevel-active-background-color: #f5f5f7;
+  -slider-height: 12px;
+  -slider-width: 12px;
+  -slider-border-width: 0;
+  -slider-background-color: #f5f5f7;
+  -slider-border-color: transparent;
+  -slider-handle-radius: 6px;
+}
+
+/* Music: text-first, centered, no album art and no volume controls. */
+.notch-media-page { spacing: 12px; }
+.notch-media-active { spacing: 10px; }
+.notch-media-title { font-size: 1.45em; font-weight: 700; color: #f5f5f7; }
+.notch-media-artist { color: #98989d; font-size: 0.95em; }
+.notch-media-player { background-color: rgba(255,255,255,0.06); font-size: 0.8em; }
+.notch-media-progress { spacing: 8px; padding: 0 24px; }
+.notch-media-time { color: #98989d; font-size: 0.8em; }
+.notch-media-controls { spacing: 18px; }
+
+/* System: 2x2 metric tiles with large values and quiet labels. */
+.notch-stats-grid { spacing: 10px; }
+.notch-stat-row { spacing: 10px; }
+.notch-stat-card { spacing: 2px; padding: 10px 12px; }
+.notch-stat-label { color: #8e8e93; font-size: 0.75em; font-weight: 700; }
+.notch-stat-value { font-size: 1.65em; font-weight: 700; color: #f5f5f7; }
+.notch-stat-detail { color: #98989d; font-size: 0.8em; }
+.notch-actions-row { spacing: 10px; }
+
+/* Compact notification peek and in-flow status footer (never overlays content). */
+.notch-peek { background-color: transparent; spacing: 6px; padding: 4px 0; }
+.notch-peek-icon { border-radius: 8px; }
+.notch-peek-title { font-weight: 700; font-size: 1em; color: #f5f5f7; }
+.notch-peek-body { color: #c7c7cc; font-size: 0.9em; }
+.notch-status-bar {
+  spacing: 8px;
+  padding: 8px 10px;
+  background-color: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+}
+.notch-status { color: #ffd60a; font-size: 0.85em; }
+.notch-status-error { color: #ff9f0a; }
+
+/* The only scrollable page: Alerts. Keep the affordance monochrome. */
+.notch-alerts-scroll { padding-right: 4px; }
+.notch-alerts-scroll StScrollBar { min-width: 6px; padding: 0 2px; }
+.notch-alerts-scroll StScrollBar StBin#trough { background-color: #1c1c1e; border-radius: 3px; }
+.notch-alerts-scroll StScrollBar StButton#vhandle { background-color: #636366; border-radius: 3px; }
+.notch-alerts-scroll StScrollBar StButton#vhandle:hover { background-color: #98989d; }
+
+/* ── Agent tab (PSD) ──────────────────────────────────────────────────────
+   Same chrome language as the other pages: black body, layered dark cards,
+   one accent (white), no shapes that compete with the typing. */
+.psd-page { spacing: 8px; padding: 2px 6px 4px; }
+.psd-strip {
+  spacing: 7px;
+  padding: 3px 10px;
+  background-color: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 999px;
+}
+.psd-dot { width: 6px; height: 6px; border-radius: 3px; background-color: #636366; }
+.psd-dot-ok { background-color: #30d158; }
+.psd-dot-warn { background-color: #ffd60a; }
+.psd-dot-bad { background-color: #ff453a; }
+.psd-dot-busy { background-color: #f5f5f7; }
+.psd-status { font-size: 0.82em; font-weight: 600; color: #d1d1d6; }
+.psd-tools { font-size: 0.78em; color: #8e8e93; }
+
+.psd-scroll { padding: 0; }
+.psd-list { spacing: 8px; padding: 2px 2px 4px; }
+.psd-empty { spacing: 4px; padding: 18px 8px; }
+.psd-empty-title { font-size: 1.05em; font-weight: 700; color: #f5f5f7; }
+.psd-empty-body { font-size: 0.85em; color: #8e8e93; }
+
+.psd-bubble {
+  spacing: 3px;
+  padding: 8px 11px;
+  border-radius: 13px;
+  background-color: #1c1c1e;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.psd-bubble-user {
+  background-color: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.10);
+}
+.psd-bubble-role { font-size: 0.72em; font-weight: 700; letter-spacing: 0.08em; color: #8e8e93; }
+.psd-bubble-body { font-size: 0.92em; color: #f2f2f7; }
+.psd-bubble-footer { font-size: 0.72em; color: #636366; }
+.psd-image { border-radius: 10px; margin-top: 4px; }
+
+.psd-prompt {
+  spacing: 8px;
+  padding: 3px 3px 3px 12px;
+  background-color: #1c1c1e;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+}
+.psd-prompt:focus-within { border-color: rgba(255,255,255,0.28); }
+.psd-entry {
+  background-color: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #f5f5f7;
+  font-size: 0.95em;
+  padding: 6px 0;
+}
+.psd-send {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background-color: #f5f5f7;
+  color: #000000;
+}
+.psd-send:hover, .psd-send:focus { background-color: #ffffff; }
+.psd-hint { font-size: 0.72em; color: #636366; padding: 0 2px; }
+.psd-chips { spacing: 6px; }
+.psd-chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background-color: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: #d1d1d6;
+  font-size: 0.8em;
+  font-weight: 600;
+}
+.psd-chip:hover, .psd-chip:focus { background-color: #3a3a3c; color: #ffffff; }
+.psd-chip-accent { background-color: #f5f5f7; color: #000000; }
+.psd-chip-accent:hover, .psd-chip-accent:focus { background-color: #ffffff; color: #000000; }
+.psd-actions { spacing: 6px; padding-top: 2px; }
+
+/* Closed-notch card that PSD pushes. Sits inside the pill area, never wider. */
+.notch-psd-peek {
+  spacing: 7px;
+  padding: 0 14px;
+  width: 320px;
+}
+.notch-psd-peek-icon { color: #f5f5f7; }
+.notch-psd-peek-text { font-size: 0.9em; font-weight: 600; color: #f5f5f7; }
