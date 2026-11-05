@@ -162,6 +162,18 @@ install_notch() {
       return 1
     fi
   fi
+  # And run it: enable() must survive a fake Shell. The type errors GNOME
+  # reports ("Expected type string for argument 'path'") only appear at runtime.
+  if command -v node >/dev/null 2>&1 && [ -f "$source/../tests/enable.test.js" ]; then
+    if ( cd "$source/.." && node --test tests/enable.test.js >/dev/null 2>&1 ); then
+      ok "enable() and disable() run cleanly"
+    else
+      bad "the extension fails when enabled:"
+      ( cd "$source/.." && node --test tests/enable.test.js 2>&1 ) | grep -E "error:|AssertionError" | head -4 | sed 's/^/   /'
+      say "   Your current extension has NOT been touched."
+      return 1
+    fi
+  fi
   ok "download is complete (all imported modules present)"
   # The owner may have the upstream extension installed already. Back it up,
   # then install this build over it: same UUID, so settings and position carry.

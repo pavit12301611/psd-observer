@@ -33,6 +33,7 @@ import {
     memorySample, networkSample, plainText, previewText, visualizerLevels,
 } from './model.js';
 import {PsdPage} from './psd-page.js';
+import {setIconDirectory} from './icons.js';
 import {box, button, emptyState, icon, label, setIconSource, setSensitive, setText, sourceIcon, wrapLabel} from './widgets.js';
 
 const MEDIA_POLL_MS = 2000;
@@ -52,8 +53,15 @@ export class NotchView {
     constructor(extension) {
         this.extension = extension;
         this.settings = extension.settings ?? extension.getSettings();
-        this.dir = Gio.File.new_for_path(extension.dir ?? extension.path ??
-            GLib.build_filenamev([GLib.get_home_dir(), '.local/share/gnome-shell/extensions', 'notch@pavit12301611.github.io']));
+        // Extension.dir is a Gio.File. Keep both forms: `dirPath` for strings
+        // (D-Bus interfaces, the settings schema) and `dir` for file lookups.
+        const provided = extension.dir ?? extension.path ?? '';
+        this.dir = provided && typeof provided.get_path === 'function'
+            ? provided                                  // already a Gio.File
+            : Gio.File.new_for_path(String(provided));
+        this.dirPath = this.dir.get_path() ?? this.dir.get_uri() ?? '';
+        // The icons are beside extension.js, not in the system theme.
+        setIconDirectory(this.dir?.get_child('icons') ?? null);
         this.dead = false;
         this.expanded = false;
         this.tab = 'home';
@@ -653,13 +661,36 @@ export class NotchView {
         this._animate();
     }
 
+    /**
+     * Hiding the panel's own clock while the notch is closed must be reversible:
+     * the extension can be disabled, or the setting switched off, at any time.
+     * Whatever we hide is recorded on the actor and put back exactly as found.
+     */
     _applyPanelClock() {
         const replace = this.settings.get_boolean('replace-panel-clock');
         const dateMenu = Main.panel?.statusArea?.dateMenu;
         if (!dateMenu) return;
+        if (!this._ownClocks) this._ownClocks = new Map();
+        if (!this._ownClocks.has(dateMenu))
+            this._ownClocks.set(dateMenu, dateMenu.visible);
+
         // While the notch is closed it *is* the clock, so the panel's own clock
-        // would show it twice. Open, both are visible again.
-        dateMenu.visible = replace ? this.expanded : true;
+        // would show it twice. Open — or with the setting off — both are visible.
+        const wanted = replace ? this.expanded : this._ownClocks.get(dateMenu);
+        dateMenu.visible = wanted;
+    }
+
+    /** Put back every panel actor we hid. Safe to call more than once. */
+    _restorePanelClocks() {
+        for (const [actor, visible] of this._ownClocks ?? []) {
+            try {
+                actor.visible = visible;
+            } catch {
+                /* actor went away with a Shell reload */
+            }
+        }
+        this._ownClocks?.clear();
+        this._ownClocks = null;
     }
 
     _evaluateVisibility() {
@@ -720,16 +751,18 @@ export class NotchView {
                 this._renderMedia();
                 return;
             }
-            const [metadataVariant, statusVariant] = proxy.call_sync('org.freedesktop.DBus.Properties.GetAll',
-                new GLib.Variant('(s)', [proxy.get_interface_name?.() ?? 'org.mpris.MediaPlayer2.Player']),
+            const [properties] = proxy.call_sync('org.freedesktop.DBus.Properties.GetAll',
+                new GLib.Variant('(s)', ['org.mpris.MediaPlayer2.Player']),
                 Gio.DBusCallFlags.NONE, 800, null).deepUnpack();
-            const metadata = mediaMetadata(metadataVariant['Metadata'] ?? {});
+            const metadata = mediaMetadata(properties?.Metadata ?? {});
             this.media = {
                 title: metadata.title,
                 artist: metadata.artist,
-                status: statusVariant?.PlaybackStatus ?? metadata.status ?? 'Stopped',
+                status: properties?.PlaybackStatus ?? 'Stopped',
                 lengthUs: metadata.lengthUs,
-                positionUs: (statusVariant?.Position ?? 0),
+                positionUs: Number(properties?.Position) || 0,
+                trackId: metadata.trackId,
+                canPlay: true,
             };
         } catch (error) {
             this.media = this.media?.title ? this.media : null;
@@ -782,7 +815,7 @@ export class NotchView {
                 Gio.DBusCallFlags.NONE, 800, null);
             this._sampleMedia();
         } catch (error) {
-            this.showStatus(mediaErrorMessage(error.message), {action: () => this._mediaAction(action)});
+            this.showStatus(mediaErrorMessage(error?.message ?? error), {action: () => this._mediaAction(action)});
         }
     }
 
@@ -1035,6 +1068,7 @@ export class NotchView {
     destroy() {
         if (this.dead) return;
         this.dead = true;
+        this._restorePanelClocks();
         for (const id of this.timers) GLib.source_remove(id);
         this.timers.clear();
         this.timerIds?.clear();
