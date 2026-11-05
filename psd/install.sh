@@ -92,32 +92,56 @@ bash "$SRC/psd/scripts/psd.sh" install ${ARGS[@]+"${ARGS[@]}"}
 # ------------------------------------------------------------------- prove it
 head_ "Proving it works"
 PATH="$HOME/.local/bin:$PATH"
-TOKEN="$(cat "${XDG_DATA_HOME:-$HOME/.local/share}/psd/token.txt" 2>/dev/null || true)"
+# Loading the config is what generates the token on a fresh install, so do that
+# first — then read the token it wrote.
 BASE="http://127.0.0.1:$(node -e "import('$HOME/.local/share/psd/src/config.js').then(m=>console.log(m.loadConfig().port))" 2>/dev/null || echo 7788)"
+TOKEN="$(cat "${XDG_DATA_HOME:-$HOME/.local/share}/psd/token.txt" 2>/dev/null || true)"
 
-for i in $(seq 1 25); do
-  curl -sf -m 2 "$BASE/health" >/dev/null 2>&1 && break
-  sleep 0.4
-done
+TEMP_PID=""
+stop_temp() { [ -n "$TEMP_PID" ] && kill "$TEMP_PID" 2>/dev/null || true; }
+trap 'stop_temp; rm -rf "$WORK"' EXIT
 
-if ! curl -sf -m 3 "$BASE/health" >/dev/null 2>&1; then
-  bad "PSD is not answering on $BASE"
-  say "   check:  ${c_b}journalctl --user -u psd-agent -n 40 --no-pager${c_reset}"
-  exit 1
+wait_up() {
+  for _ in $(seq 1 25); do
+    curl -sf -m 2 "$BASE/health" >/dev/null 2>&1 && return 0
+    sleep 0.4
+  done
+  return 1
+}
+
+if ! wait_up; then
+  if [ "$DO_SERVICE" = 0 ] || ! command -v systemctl >/dev/null 2>&1; then
+    # Prove the install anyway: run the installed copy, then put it away again.
+    say "${c_dim}   starting the installed copy for the check…${c_reset}"
+    ( cd "$HOME/.local/share/psd" && exec node src/index.js ) >"$WORK/daemon.log" 2>&1 &
+    TEMP_PID=$!
+    wait_up || {
+      bad "the installed copy did not start:"
+      sed -n '1,15p' "$WORK/daemon.log" | sed 's/^/   /'
+      exit 1
+    }
+  else
+    bad "PSD is not answering on $BASE"
+    say "   check:  ${c_b}journalctl --user -u psd-agent -n 40 --no-pager${c_reset}"
+    exit 1
+  fi
 fi
 ok "daemon up on $BASE"
 
 # It has to be *this* install, with *this* token — not an older PSD already
-# listening on the port, which would make this check lie.
+# listening on the port, which would make every check below lie.
 if [ -n "$TOKEN" ]; then
   OTHER="$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H "origin: $BASE" -H 'x-psd-token: not-this-install' "$BASE/psd/status" || true)"
   MINE="$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H "origin: $BASE" -H "x-psd-token: $TOKEN" "$BASE/psd/status" || true)"
   if [ "$MINE" = "200" ] && [ "$OTHER" = "401" ]; then
     ok "answering with this install's token"
   else
-    warn "another PSD is already on $BASE (its token differs)."
+    warn "another PSD is already on $BASE (its token differs)"
     say "   stop it:  ${c_b}systemctl --user stop psd-agent${c_reset}   or pick a port in ~/.config/psd/env"
   fi
+  # A browser on some other site must not be able to drive it.
+  EVIL="$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H 'origin: https://evil.example' -H "x-psd-token: $TOKEN" "$BASE/psd/status" || true)"
+  [ "$EVIL" = "403" ] && ok "a foreign web page is refused (403)" || warn "foreign origin got $EVIL — expected 403"
 fi
 
 START=$(date +%s%N)
@@ -139,6 +163,7 @@ curl -sf -m 5 "$BASE/v1/models" | grep -q '"psd"' && ok "OpenAI-compatible surfa
 if [ "$DO_SERVICE" = 1 ] && command -v systemctl >/dev/null 2>&1; then
   systemctl --user is-active --quiet psd-agent.service && ok "psd-agent.service is active (starts on login)" || warn "service not active"
 fi
+stop_temp
 
 # ------------------------------------------------------------------- the next steps
 head_ "You are done — here is what you can do now"
