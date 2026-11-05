@@ -5,7 +5,7 @@
 #
 # It fetches the PSD tree (no git needed), then hands over to scripts/psd.sh:
 #   • node runtime check (Node 20.19+)
-#   • ~/.local/share/psd + ~/.local/bin/psd
+#   • ~/.local/lib/psd + ~/.local/bin/psd
 #   • the notch extension, installed over the existing one (backed up first)
 #   • a systemd user service so PSD is always up
 #   • a live proof: status, an intent answer, the SSE stream, the OpenAI surface
@@ -94,7 +94,7 @@ head_ "Proving it works"
 PATH="$HOME/.local/bin:$PATH"
 # Loading the config is what generates the token on a fresh install, so do that
 # first — then read the token it wrote.
-BASE="http://127.0.0.1:$(node -e "import('$HOME/.local/share/psd/src/config.js').then(m=>console.log(m.loadConfig().port))" 2>/dev/null || echo 7788)"
+BASE="http://127.0.0.1:$(node -e "import('$HOME/.local/lib/psd/src/config.js').then(m=>console.log(m.loadConfig().port))" 2>/dev/null || echo 7788)"
 TOKEN="$(cat "${XDG_DATA_HOME:-$HOME/.local/share}/psd/token.txt" 2>/dev/null || true)"
 
 TEMP_PID=""
@@ -113,7 +113,7 @@ if ! wait_up; then
   if [ "$DO_SERVICE" = 0 ] || ! command -v systemctl >/dev/null 2>&1; then
     # Prove the install anyway: run the installed copy, then put it away again.
     say "${c_dim}   starting the installed copy for the check…${c_reset}"
-    ( cd "$HOME/.local/share/psd" && exec node src/index.js ) >"$WORK/daemon.log" 2>&1 &
+    ( cd "$HOME/.local/lib/psd" && exec node src/index.js ) >"$WORK/daemon.log" 2>&1 &
     TEMP_PID=$!
     wait_up || {
       bad "the installed copy did not start:"
@@ -170,7 +170,7 @@ head_ "You are done — here is what you can do now"
 say "  ${c_b}Notch${c_reset}       open the pill (Super+Shift+N), pick the PSD tab, ask anything"
 say "  ${c_b}Terminal${c_reset}    psd \"what is eating my disk\"   ·   psd status   ·   psd doctor"
 say "  ${c_b}Phone${c_reset}       psd-proxy    then http://<this-pc-ip>:$((${BASE##*:} + 1)) on the phone, Add to Home Screen"
-say "  ${c_b}WhatsApp${c_reset}    bash ~/.local/share/psd/scripts/psd.sh whatsapp   (four lines for its .env)"
+say "  ${c_b}WhatsApp${c_reset}    bash ~/.local/lib/psd/scripts/psd.sh whatsapp   (four lines for its .env)"
 say "  ${c_b}Any OpenAI app${c_reset} base $BASE/v1 · model psd · key $TOKEN"
 say ""
 say "  ${c_dim}Full check any time:  psd doctor${c_reset}"
