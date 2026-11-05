@@ -230,10 +230,10 @@ whatsapp_cmd() {
   say "  ${c_b}# optional: instant deterministic commands stay in the agent${c_reset}"
   say "  ${c_dim}# (PSD is used for anything the agent cannot do in one step)${c_reset}"
   say ""
-  say "Verify from this PC:"
-  say "  curl -s http://127.0.0.1:$port/health | head -c 200"
-  say "  curl -s -H 'x-psd-token: $token' -H 'content-type: application/json' \\"
-  say "       -d '{\"text\":\"system status\"}' http://127.0.0.1:$port/psd/chat"
+  say "Verify from this PC (works even before WhatsApp restarts):"
+  say "  curl -s -H 'content-type: application/json' -d '{\"text\":\"system status\"}' \\"
+  say "       http://127.0.0.1:$port/psd/chat"
+  say "  ${c_dim}# then in WhatsApp, ask it something only PSD can answer${c_reset}"
 }
 
 fix_cmd() {
@@ -243,7 +243,7 @@ fix_cmd() {
     # ydotool needs its daemon for input on Wayland; harmless if already on.
     systemctl --user enable --now ydotool.service 2>/dev/null && ok "ydotool daemon on" || warn "ydotool daemon not started (input falls back to wtype)"
   fi
-  bash "$ROOT/scripts/psd.sh" doctor
+  bash "${BASH_SOURCE[0]}" doctor
 }
 
 doctor_cmd() {

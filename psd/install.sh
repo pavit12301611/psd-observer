@@ -92,8 +92,8 @@ bash "$SRC/psd/scripts/psd.sh" install ${ARGS[@]+"${ARGS[@]}"}
 # ------------------------------------------------------------------- prove it
 head_ "Proving it works"
 PATH="$HOME/.local/bin:$PATH"
-BASE="http://127.0.0.1:7788"
 TOKEN="$(cat "${XDG_DATA_HOME:-$HOME/.local/share}/psd/token.txt" 2>/dev/null || true)"
+BASE="http://127.0.0.1:$(node -e "import('$HOME/.local/share/psd/src/config.js').then(m=>console.log(m.loadConfig().port))" 2>/dev/null || echo 7788)"
 
 for i in $(seq 1 25); do
   curl -sf -m 2 "$BASE/health" >/dev/null 2>&1 && break
@@ -106,6 +106,19 @@ if ! curl -sf -m 3 "$BASE/health" >/dev/null 2>&1; then
   exit 1
 fi
 ok "daemon up on $BASE"
+
+# It has to be *this* install, with *this* token — not an older PSD already
+# listening on the port, which would make this check lie.
+if [ -n "$TOKEN" ]; then
+  OTHER="$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H "origin: $BASE" -H 'x-psd-token: not-this-install' "$BASE/psd/status" || true)"
+  MINE="$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H "origin: $BASE" -H "x-psd-token: $TOKEN" "$BASE/psd/status" || true)"
+  if [ "$MINE" = "200" ] && [ "$OTHER" = "401" ]; then
+    ok "answering with this install's token"
+  else
+    warn "another PSD is already on $BASE (its token differs)."
+    say "   stop it:  ${c_b}systemctl --user stop psd-agent${c_reset}   or pick a port in ~/.config/psd/env"
+  fi
+fi
 
 START=$(date +%s%N)
 ANSWER="$(curl -sf -m 20 -H 'content-type: application/json' \
@@ -123,17 +136,17 @@ FRAMES="$(curl -sN -m 10 -H 'content-type: application/json' -d '{"text":"disk s
 
 curl -sf -m 5 "$BASE/v1/models" | grep -q '"psd"' && ok "OpenAI-compatible surface at $BASE/v1" || warn "/v1/models did not list psd"
 
-if command -v systemctl >/dev/null 2>&1; then
+if [ "$DO_SERVICE" = 1 ] && command -v systemctl >/dev/null 2>&1; then
   systemctl --user is-active --quiet psd-agent.service && ok "psd-agent.service is active (starts on login)" || warn "service not active"
 fi
 
 # ------------------------------------------------------------------- the next steps
 head_ "You are done — here is what you can do now"
-say "  ${c_b}Talk to it${c_reset}      open the notch (Super+Shift+N or the pill), pick the PSD tab"
-say "  ${c_b}Terminal${c_reset}     psd chat \"what is eating my disk\"     · psd ask / psd agents / psd doctor"
-say "  ${c_b}Phone${c_reset}        node ~/.local/share/psd/../psd/scripts/psd-phone-proxy.mjs  → http://<this-pc-ip>:7789"
-say "  ${c_b}WhatsApp${c_reset}     bash scripts/psd.sh whatsapp   (paste the four lines into the agent's .env)"
-say "  ${c_b}Any OpenAI app${c_reset} base URL $BASE/v1 · model psd · key $TOKEN"
+say "  ${c_b}Notch${c_reset}       open the pill (Super+Shift+N), pick the PSD tab, ask anything"
+say "  ${c_b}Terminal${c_reset}    psd \"what is eating my disk\"   ·   psd status   ·   psd doctor"
+say "  ${c_b}Phone${c_reset}       psd-proxy    then http://<this-pc-ip>:7789 on the phone, Add to Home Screen"
+say "  ${c_b}WhatsApp${c_reset}    bash ~/.local/share/psd/scripts/psd.sh whatsapp   (four lines for its .env)"
+say "  ${c_b}Any OpenAI app${c_reset} base $BASE/v1 · model psd · key $TOKEN"
 say ""
 say "  ${c_dim}Full check any time:  psd doctor${c_reset}"
 say ""
