@@ -203,12 +203,14 @@ export default class NotchPreferences extends ExtensionPreferences {
                 await client.resolveToken();
                 const health = await client.status({maxAgeMs: 0});
                 const brain = health?.brain;
-                testButton.label = health
+                testButton.label = health?.ok
                     ? `✓ ${brain?.model || (brain?.healthy ? 'model' : 'intents')}`
-                    : '✗ not answering';
+                    : `✗ ${client.lastError || 'not answering'}`.slice(0, 28);
+                testButton.tooltip_text = client.lastError || '';
                 client.destroy();
             } catch (err) {
-                testButton.label = `✗ ${String(err.message ?? err).slice(0, 24)}`;
+                testButton.label = `✗ ${String(err.message ?? err).slice(0, 28)}`;
+                testButton.tooltip_text = String(err.message ?? err);
             }
             testButton.sensitive = true;
         }));

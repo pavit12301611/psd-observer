@@ -41,6 +41,20 @@ export class PsdClient {
     }
 
     /**
+     * Resolve the token, preferring a freshly written one on disk.
+     * Called by Preferences → Agent → Test after the owner saves a URL.
+     */
+    async resolveToken() {
+        const fromSettings = (this.settings.get_string('psd-token') ?? '').trim();
+        if (fromSettings) {
+            this.token = fromSettings;
+            return this.token;
+        }
+        this.token = this._tokenFromDisk() ?? '';
+        return this.token;
+    }
+
+    /**
      * The token. Settings first (the owner may paste one), then the CLI's
      * token file, so a fresh install works with nothing typed.
      */
@@ -137,9 +151,13 @@ export class PsdClient {
         return this.lastError || `PSD returned HTTP ${status}`;
     }
 
-    /** Health + surfaces snapshot, used by the tab's status line. */
-    async status() {
-        return this.request('/psd/status');
+    /**
+     * Health + surfaces snapshot, used by the tab's status line.
+     * `maxAgeMs: 0` asks PSD to re-probe rather than answer from cache.
+     */
+    async status({maxAgeMs = null} = {}) {
+        const fresh = maxAgeMs === 0 || maxAgeMs === undefined && false;
+        return this.request(fresh ? '/psd/status?probe=1' : '/psd/status');
     }
 
     /** Re-probe the brain from the tab. */

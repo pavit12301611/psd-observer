@@ -135,6 +135,18 @@ install_notch() {
     say "   Fix: re-download the latest main, or report this at github.com/pavit12301611/psd-observer"
     return 1
   fi
+  # Stronger check when node is available: load the modules the way the Shell
+  # does, so a wrong export name is caught here instead of at login.
+  if command -v node >/dev/null 2>&1 && [ -f "$source/../tests/load.test.mjs" ]; then
+    if node "$source/../tests/load.test.mjs" "$source" >/dev/null 2>&1; then
+      ok "modules load (imports resolve, exports present)"
+    else
+      bad "the extension's modules do not load:"
+      node "$source/../tests/load.test.mjs" "$source" 2>&1 | sed 's/^/   /' | head -8
+      say "   Your current extension has NOT been touched."
+      return 1
+    fi
+  fi
   ok "download is complete (all imported modules present)"
   # The owner may have the upstream extension installed already. Back it up,
   # then install this build over it: same UUID, so settings and position carry.
