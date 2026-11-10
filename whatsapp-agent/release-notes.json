@@ -1,8 +1,18 @@
 {
-  "3.14.4": {
-    "title": "✉️ /mailme — ek line aur mail chala jayega (default: pavitsingh3222@gmail.com)",
+  "3.14.5": {
+    "title": "🧹 Revert: koi pre-set email address nahi — address aap doge tabhi jaayega",
     "bullets": [
-      "**Ek command**: `/mailme kal ka schedule yaad rakhna` — subject khud ban jaata hai (`Observer · kal ka schedule…`), address `/email to` se set hota hai, aur default is fork ke owner inbox `pavitsingh3222@gmail.com` par jaata hai. Koi to/subject likhne ki zarurat nahi.",
+      "**Hardcoded default hata diya**: `/mailme` ka koi built-in inbox nahi hai. Address pehle `/email to you@example.com` (ya `.env` me `OWNER_EMAIL=`) se aana chahiye — warna command bas poochta hai, bhejta nahi.",
+      "**Kyun yehi sahi hai**: agent ko kisi ke mailbox ka default pata hona hi nahi chahiye — ek galti se `/mailme` kisi aur ke inbox me chala jaata. Ab target sirf owner batata hai.",
+      "**Baaki sab waisa hi**: subject auto, browser pehle + SMTP fallback, dono fail ho to ek hi reply me sach.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 681 → 681 (asserts badle, count same): bina address `/mailme` bhejta nahi, `/email to` set hone ke baad hi jaata hai, aur junk memory value kisi invented address me nahi badalti."
+    ]
+  },
+  "3.14.4": {
+    "title": "✉️ /mailme — ek line aur mail chala jayega",
+    "bullets": [
+      "**Ek command**: `/mailme kal ka schedule yaad rakhna` — subject khud ban jaata hai (`Observer · kal ka schedule…`), address `/email to` se set hota hai,. Koi to/subject likhne ki zarurat nahi.",
       "**Do raste, automatic fallback**: pehle browser wala `/email web` (koi password nahi) — wahan Gmail/session na mile to apne aap SMTP (`/email send`) par gir jaata hai, aur reply me saaf likhta hai kaunsa rasta chala.",
       "**Address badalna**: `/email to you@example.com` (ya `.env` me `OWNER_EMAIL=`) — memory ka email fact bhi utha leta hai, par junk address kabhi default ko nahi harata.",
       "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
@@ -486,5 +496,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.4"
+  "latest": "3.14.5"
 }

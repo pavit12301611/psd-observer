@@ -2969,6 +2969,16 @@ export function createAgent({
   async function mailmeCommand(rawArgs) {
     const body = String(rawArgs ?? '').trim();
     const to = resolveOwnerEmail({ config, store });
+    if (!to) {
+      // Koi default nahi: pehle owner apna address de, tab hi mail jaayega.
+      return [
+        '✉️ *Mail me* — abhi koi address set nahi hai (default jaan-boojh kar nahi rakha).',
+        'Ek baar batao: `/email to you@example.com`',
+        'ya `.env` me `OWNER_EMAIL=you@example.com` likh do.',
+        '',
+        'Uske baad: `/mailme <jo bhejna hai>`',
+      ].join('\n');
+    }
     if (!body) {
       return [
         `✉️ *Mail me* → ${to}`,
@@ -4067,7 +4077,8 @@ export function createAgent({
         const [sub, ...rest] = raw.split(/\s+/);
         const subCmd = (sub || '').toLowerCase();
         if (!subCmd || subCmd === 'status') {
-          return `${mailSetupStatus({ file: mailFileFor(config) })}\n\n📮 \`/mailme\` → ${resolveOwnerEmail({ config, store })}\n\n${selfMail.identitySummary({ dir: mailDataDir() })}`;
+          const mailmeTo = resolveOwnerEmail({ config, store });
+          return `${mailSetupStatus({ file: mailFileFor(config) })}\n\n📮 \`/mailme\` → ${mailmeTo || '*set nahi* · `/email to you@example.com`'}\n\n${selfMail.identitySummary({ dir: mailDataDir() })}`;
         }
         if (subCmd === 'setup' || subCmd === 'add') return await emailSetup(rest.join(' '));
         if (subCmd === 'me' || subCmd === 'self') return await mailmeCommand(rest.join(' '));

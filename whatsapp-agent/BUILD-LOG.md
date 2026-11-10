@@ -1,9 +1,16 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.5 — revert: no pre-set /mailme address (2026-11-10)
+
+- 3.14.4 shipped `DEFAULT_OWNER_EMAIL` baked into `src/mailsend.js` plus `.env.example`. The owner's words: "default nahi rakhna tha, maine to test ke liye bola tha" — and he is right: an agent should never have somebody's inbox as a silent default. A typo'd `/mailme` would have posted to a stranger's mailbox.
+- `resolveOwnerEmail` now returns `''` when nothing is configured (store `/email to` → `OWNER_EMAIL` env → memory fact, then stop). `DEFAULT_OWNER_EMAIL` is gone from code, `.env.example` ships `OWNER_EMAIL=` empty, and all docs/notes mention no personal address.
+- `/mailme` with no target replies with the exact setup line (`/email to you@example.com`) and **sends nothing**; it never guesses. `/email` status shows `set nahi` instead of an invented address.
+- Tests kept at 681 but the assertions inverted: no-address → no send, junk memory value → still no send, `/email to` → then it sends.
+
 ## 3.14.4 — /mailme: one line, own inbox, automatic path (2026-11-10)
 
 - The ask was smaller than a feature: "sirf command dun, bas". `/mailme <text>` now sends to the owner's own address with an auto subject (`Observer · <first 60 chars>`), so no `to`/`subject` syntax is ever typed on WhatsApp.
-- `resolveOwnerEmail` priority: `/email to` (store) → `OWNER_EMAIL` env → memory `email`/`gmail` fact → `DEFAULT_OWNER_EMAIL` (`pavitsingh3222@gmail.com` for this fork). A malformed memory value never beats the safe default.
+- `resolveOwnerEmail` priority: `/email to` (store) → `OWNER_EMAIL` env → memory `email`/`gmail` fact → a baked-in default (removed again in 3.14.5 — see below). A malformed memory value never beats the safe fallback.
 - Path selection is explicit and reported: browser first (`/email web`, zero credentials) → SMTP fallback (`/email send`, sealed app password). `emailWebSend` was refactored to return `{status: sent|unverified|failed|nosession|nosend}` precisely so this fallback is decided by a real status, not by string-matching a reply.
 - `/email to <address>` persists the target in `store.data.ownerEmail`; `/email` status now prints the `/mailme` target; `mailme`/`emailme` added to vocab so fuzzy matching finds it.
 - `.env.example` documents `OWNER_EMAIL=`, config exposes `ownerEmail`.

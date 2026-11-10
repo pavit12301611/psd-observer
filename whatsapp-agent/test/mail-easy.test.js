@@ -687,16 +687,15 @@ test('commands: /email web is wired, and headless PCs get an honest fallback', a
 test('mailsend: /mailme target priority and auto subject', async () => {
   const m = await import('../src/mailsend.js');
 
-  // Default = this fork's owner inbox, so /mailme works with zero setup.
-  assert.equal(m.resolveOwnerEmail({ store: { data: {} }, config: {} }), m.DEFAULT_OWNER_EMAIL);
-  assert.equal(m.DEFAULT_OWNER_EMAIL, 'pavitsingh3222@gmail.com');
+  // No hardcoded default: bina address ke /mailme khud se kisi ko mail nahi bhejta.
+  assert.equal(m.resolveOwnerEmail({ store: { data: {} }, config: {} }), '');
 
   // /email to … beats env, env beats memory, memory beats default.
   assert.equal(m.resolveOwnerEmail({ store: { data: { ownerEmail: 'a@b.co' } }, config: { ownerEmail: 'c@d.co' } }), 'a@b.co');
   assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: 'e@f.co' } } }, config: { ownerEmail: 'c@d.co' } }), 'c@d.co');
   assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: { value: 'e@f.co' } } } }, config: {} }), 'e@f.co');
-  // Junk in memory must not win over the safe default.
-  assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: 'not an email' } } }, config: {} }), m.DEFAULT_OWNER_EMAIL);
+  // Junk in memory is ignored — and never replaced by an invented address.
+  assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: 'not an email' } } }, config: {} }), '');
 
   assert.equal(m.autoSubject('Deploy ho gaya bhai'), 'Observer · Deploy ho gaya bhai');
   assert.equal(m.autoSubject('\n\n  line one  \nline two').startsWith('Observer · line one'), true);
@@ -719,10 +718,13 @@ test('commands: /mailme + /email to are wired end-to-end', async () => {
   fs.mkdirSync(config.sharedDir, { recursive: true });
   const agent = createAgent({ config, store, log: { error() {}, warn() {}, info() {} } });
 
-  // No args → usage + the address it would use.
-  const usage = String(await agent.handle('/mailme'));
-  assert.match(usage, /pavitsingh3222@gmail\.com/);
-  assert.match(usage, /\/mailme <jo bhejna hai>/);
+  // No address configured → it asks for one instead of guessing an inbox.
+  const unset = String(await agent.handle('/mailme'));
+  assert.match(unset, /koi address set nahi/);
+  assert.match(unset, /\/email to you@example\.com/);
+
+  const unsetSend = String(await agent.handle('/mailme test ke liye'));
+  assert.match(unsetSend, /koi address set nahi/, 'no address → bhejne ki koshish bhi nahi');
 
   // Re-point it, then it sticks in the store.
   assert.match(String(await agent.handle('/email to nope')), /Usage/);

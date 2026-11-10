@@ -10,12 +10,11 @@ import { loadMailConfig, MAIL_FILE } from './mail.js';
 import { createSmtpClient, scrubCredentials } from './smtp.js';
 import { explainMailError, resolveStoredSecret } from './mailsetup.js';
 
-/** This fork's owner inbox — `/mailme` ka default. `/email to` se badal sakte ho. */
-export const DEFAULT_OWNER_EMAIL = 'pavitsingh3222@gmail.com';
-
 /**
  * Kahan bhejna hai, priority order me: `/email to` se saved → OWNER_EMAIL env →
- * memory ka email fact → fork ka default. Return hamesha ek valid address.
+ * memory ka email fact. Koi hardcoded default nahi — jab tak owner khud address
+ * na de, `/mailme` bhejne ki koshish nahi karta (khud se kisi ko mail nahi
+ * jaayega). Kuch set na ho to '' return hota hai.
  */
 export function resolveOwnerEmail({ config = null, store = null } = {}) {
   const candidates = [
@@ -23,14 +22,13 @@ export function resolveOwnerEmail({ config = null, store = null } = {}) {
     config?.ownerEmail,
     store?.data?.facts?.email,
     store?.data?.facts?.gmail,
-    DEFAULT_OWNER_EMAIL,
   ];
   for (const raw of candidates) {
     const value = typeof raw === 'string' ? raw : raw?.value;
     const address = String(value ?? '').trim().toLowerCase();
     if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(address)) return address;
   }
-  return DEFAULT_OWNER_EMAIL;
+  return '';
 }
 
 /** Pehli line se subject, taaki `/mailme hi bhai` bhi ek accha mail bane. */
