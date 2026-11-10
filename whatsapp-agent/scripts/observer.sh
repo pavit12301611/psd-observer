@@ -543,6 +543,8 @@ classic|unsloth/Qwen3-14B-GGUF|UD-Q4_K_XL|9.0|16|standard|reliable tool calling,
 reason|unsloth/gpt-oss-20b-GGUF|UD-Q4_K_XL|15.8|24|standard,heavy|strong reasoning + tools, MoE (fast on CPU)
 efficient|ggml-org/gemma-4-26B-A4B-it-GGUF|Q4_K_M|16.0|24|standard,heavy,vision|only 4B active per token — big quality, laptop speed
 best|unsloth/Qwen3.8-27B-GGUF|UD-Q4_K_XL|17.9|24|standard,heavy|#1 local model 2026; agentic tool use, vision
+hermes|NousResearch/Hermes-3-Llama-3.1-70B-GGUF|Q4_K_M|41.0|64|standard,heavy|Nous Hermes 3 flagship 70B — reasoning + tool calling, needs ~64 GB RAM
+hermes-8b|NousResearch/Hermes-3-Llama-3.1-8B-GGUF|Q4_K_M|4.9|12|tiny,light,vision|Nous Hermes 3 small 8B — fast on laptops, good fallback
 EOF
 )
 
@@ -945,6 +947,18 @@ cmd_models() {
     -h|--help|help)     models_list ;;
     *) die "models: unknown subcommand '$sub' (list|recommend|detect|status|commands|download|serve|wire|setup|ollama)" ;;
   esac
+}
+
+cmd_hermes() {
+  say "Nous Hermes 3 — update + local setup (100% free, zero API key)"
+  info "Main   : hermes  (Nous Hermes-3-Llama-3.1-70B, Q4_K_M, ~41 GB, needs ~64 GB RAM)"
+  info "Small  : hermes-8b (Nous Hermes-3-Llama-3.1-8B, Q4_K_M, ~5 GB)"
+  echo
+  info "Step 1/2 — code update (branch: ${BRANCH:-arena/42a47047-psd-observer})"
+  cmd_update --app
+  echo
+  info "Step 2/2 — download + serve + wire Hermes into the agent"
+  cmd_models setup hermes --small hermes-8b
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2196,6 +2210,7 @@ main() {
     harness|dsh|deepseek) cmd_harness "$@" ;;
     keys|key|api-key|api-keys) cmd_keys "$@" ;;
     models|model|local)   cmd_models "$@" ;;
+    hermes|hermes3)       cmd_hermes "$@" ;;
     test|selftest|verify) cmd_test "$@" ;;
     doctor|diag|check)    cmd_doctor "$@" ;;
     service|systemd)      cmd_service "$@" ;;
