@@ -1,5 +1,17 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.2 — signup assistant: availability check + label-driven form fill (2026-11-10)
+
+- The ask "nayi mail id banani hai" has one wall that code cannot climb: Google has no public @gmail.com creation API, signup needs a phone OTP + captcha, and automated signup violates the Terms. So this release automates everything *around* that wall and says so in the reply text instead of pretending.
+- `src/gmailsignup.js` — `profileFromFacts` reads name/birthday/gender from `store.data.facts` (string or `{value}` shaped), `parseBirthday` accepts `yyyy-mm-dd`, `dd/mm/yyyy` and `12 March 2006`, rejecting month 13 and future years. Nothing is invented: missing fact → missing field.
+- `signupFieldPlan` orders First/Last/Username/Password/Confirm (+ Month/Day/Year, + Gender only when known) and marks the two password fields `secret`, so `describePlan` can only ever print ••••••••.
+- `parseAvailability` reads Google's `gxlu` `COMPASS` cookie (taken) vs 4xx (free) vs anything else (unknown); `checkUsername` validates the handle first (5–30 chars) and returns `unknown` — never a fake "free" — when offline. `describeAvailability` offers concrete alternatives when taken.
+- Wiring in `commands.js`: `/email signup check|start|fill|type`. `fill` walks the plan, locating each label with `finder.locateOnScreen`, clicking, `ctrl+a`, then typing — the sealed password goes through `selfMail.typeSecretIntoField` straight to `pc.typeText`. Fields that are not on screen land in a `skipped` list with a "next card pe dobara fill" hint.
+- Tests 672 → 676: name/birthday parsing (including the rejections), plan ordering + secret masking, availability states, checklist honesty, and the command path with no display/browser present.
+
+### Notes for next time
+- `locateOnScreen` per field is ~1–2s each (screenshot + OCR), so `fill` is deliberately iterative rather than one giant run — Google's signup is a multi-card flow and a stale plan is worse than a short one.
+
 ## 3.14.1 — /email auto: the agent reads the app password itself (2026-11-10)
 
 - The complaint after 3.14.0 was right: setup still needed the owner to copy 16 characters out of Google's modal. Gmail app passwords cannot be *created* by a script (no API, 2FA phone approval is mandatory, and Google blocks automated signup), but **reading the box on screen** is automatable — so `src/mailauto.js` does exactly that and nothing more.

@@ -334,13 +334,22 @@ aapka hai, kyunki Google uske bina app password deta hi nahi.
 `••••••••`. Iska matlab: **backup me `data/.mail-key` bhi le jao**, warna
 `/email setup` dobara karna padega (wahi recovery path hai, decryption nahi).
 
-**Agent ki apni mailbox:** `/email signup` 20-character password generate karke
-khud seal kar leta hai, Google ka signup page kholta hai aur `/email type` pe
-wahi password **screen pe type** karta hai (chat me nahi). Honest limit: Google
-ke paas `@gmail.com` account banane ka public API nahi hai, phone OTP + captcha
-aata hai, aur automated signup Terms ke against hai — isliye OTP step aapke
-phone pe hi rahega. Agar `psd_ai@gmail.com` pehle se aapka hai, seedha
-`/email setup psd_ai@gmail.com` chalao.
+**Nayi Gmail banani hai?** `/email signup` ek assistant hai, jadoo nahi:
+
+```text
+/email signup check            naam pehle se kisi ka hai? + alternatives
+/email signup start            signup page kholta hai (password already sealed)
+/email signup fill             jo fields screen pe dikhein, label se dhoondh ke bhar deta hai
+/email signup type             sirf password field pe cursor rakh ke type karta hai
+```
+
+Naam/birthday `/remember` kiye facts se aate hain (guess nahi). Password
+20-character, sealed, aur **sirf keyboard tak** jaata hai — chat me kabhi nahi.
+**Phone OTP + captcha aap hi karo**: Google ke paas `@gmail.com` banane ka koi
+public API nahi hai aur automated signup Terms ke against hai — isliye ye ek
+cheez insaan ke bina nahi hoti. Account ban jaane ke baad `/email auto create`.
+
+Agar `psd_ai@gmail.com` pehle se aapka hai, seedha `/email setup psd_ai@gmail.com`.
 
 Purana `/mail setup imap.gmail.com user apppass` bhi chalta rahega.
 

@@ -62,6 +62,7 @@ import {
 import { sendMail, mailFileFor } from './mailsend.js';
 import * as selfMail from './selfmail.js';
 import * as mailAuto from './mailauto.js';
+import * as gmailSignup from './gmailsignup.js';
 import { createImapClient } from './imap.js';
 import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
@@ -2895,29 +2896,72 @@ export function createAgent({
    * the sealed password into the focused field (owner-confirmed, never echoed).
    */
   async function emailSignup(rawArgs, ctx = {}) {
-    const sub = String(rawArgs ?? '').trim().toLowerCase();
+    const raw = String(rawArgs ?? '').trim();
+    const parts = raw.split(/\s+/);
+    const sub = (parts[0] || '').toLowerCase();
+    const rest = raw.slice(parts[0] ? parts[0].length : 0).trim();
     const dir = mailDataDir();
-    if (sub === 'go') {
-      selfMail.createIdentity({ dir, log });
+    const identity = selfMail.loadIdentity({ dir }) ?? selfMail.createIdentity({ dir, log }).identity;
+    const username = String(identity?.address ?? selfMail.AGENT_MAILBOX).split('@')[0];
+    const profile = gmailSignup.profileFromFacts(store.data.facts ?? {});
+
+    // 🪪 availability hint — Google's own gxlu endpoint, best effort.
+    if (sub === 'check') {
+      const result = await gmailSignup.checkUsername(rest || username);
+      return gmailSignup.describeAvailability(result);
+    }
+
+    // Form kholo + batao kya karna hai (password pehle se sealed ready hai).
+    if (sub === 'start' || sub === 'go') {
       try {
-        await pc.openTarget(selfMail.SIGNUP_URL);
+        await pc.openTarget(gmailSignup.SIGNUP_URL);
       } catch (err) {
-        return `🪪 Signup page khud kholo: ${selfMail.SIGNUP_URL}\n(${err?.message ?? err})`;
+        return `🪪 Signup page khud kholo: ${gmailSignup.SIGNUP_URL}\n(${err?.message ?? err})`;
       }
       return [
-        `🪪 *Signup page khul gaya* — ${selfMail.AGENT_MAILBOX}`,
-        '1. Naam / DOB bharo, email field me `psd_ai` daalo (agar taken hai to Google suggest karega).',
-        '2. Password field pe click karke cursor rakh do.',
-        '3. Phir `/email type` bhejo — main 3 second baad password khud type karunga.',
+        gmailSignup.signupChecklist({ username, profile }),
         '',
-        '🔐 Password chat me kabhi nahi aayega — sirf screen pe type hoga.',
+        '📄 Page khul gaya — ab `/email signup fill` bhejo (jo field dikhega wo bhar dunga).',
       ].join('\n');
     }
+
+    // Jo field screen pe visible hai, label se dhoondh ke bharo.
+    if (sub === 'fill') {
+      const plan = gmailSignup.signupFieldPlan({ username, profile });
+      const filled = [];
+      const skipped = [];
+      for (const field of plan) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const target = await finder.locateOnScreen(config, field.label, log);
+          // eslint-disable-next-line no-await-in-loop
+          await pc.click(target.x, target.y);
+          try { await pc.keyCombo('ctrl+a'); } catch { /* empty field */ }
+          if (field.secret) {
+            // The sealed password goes straight to the keyboard — never a reply.
+            // eslint-disable-next-line no-await-in-loop
+            await selfMail.typeSecretIntoField({ typeText: (value) => pc.typeText(value), opts: { dir } });
+          } else {
+            // eslint-disable-next-line no-await-in-loop
+            await pc.typeText(field.value);
+          }
+          filled.push(field.label);
+        } catch {
+          skipped.push(field.label);
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      const tail = skipped.length
+        ? '\n\n_Agar koi field nahi mila: us card pe pahunch ke dobara `/email signup fill`._'
+        : '';
+      return `${gmailSignup.describePlan(plan, { filled, skipped })}${tail}`;
+    }
+
+    // Purana path: password field pe cursor rakh ke type karwana.
     if (sub === 'type') {
       if (!selfMail.loadIdentity({ dir })) return '🪪 Pehle `/email signup` chalao (identity banti hai).';
       if (!ctx.confirmed) return requestConfirm('email', 'type');
-      // Type it in the background: holding the reply until the keystrokes land
-      // would leave the owner staring at a spinning chat while the field waits.
       const timer = setTimeout(() => {
         selfMail.typeSecretIntoField({ typeText: (secret) => pc.typeText(secret), opts: { dir } })
           .then(() => notifyOwner('🔐 Password type ho gaya. Galat field ho to turant Ctrl+A → Backspace.'))
@@ -2926,7 +2970,14 @@ export function createAgent({
       timer.unref?.();
       return '⏳ 3 second me type karunga — abhi password field pe click karke cursor rakh do…';
     }
-    return selfMail.signupPlan({ dir, log }).steps;
+
+    return [
+      gmailSignup.signupChecklist({ username, profile }),
+      '',
+      selfMail.identityStatus({ dir }),
+      '',
+      selfMail.gmailLimits(),
+    ].filter(Boolean).join('\n');
   }
 
   async function handleCommand(cmd, args, ctx) {
@@ -3887,7 +3938,7 @@ export function createAgent({
           '• `/email setup psd_ai@gmail.com` — guide · `… abcd efgh ijkl mnop` — save + live test',
           '• `/email send to@x.com Subject | body` · `/email test` · `/email status` · `/email forget`',
           '• `/email auto` — agent khud app password banwaye + screen se padhke save kare (copy-paste nahi)',
-          '• `/email signup` — agent apni mailbox identity banaye (password sirf usko pata)',
+          '• `/email signup` — nayi mailbox identity · check = naam available? · start = form kholo · fill = fields bharo',
         ].join('\n');
       }
       case 'make': {

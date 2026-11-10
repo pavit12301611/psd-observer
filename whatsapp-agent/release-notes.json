@@ -1,4 +1,15 @@
 {
+  "3.14.2": {
+    "title": "🪪 Nayi Gmail banane ka assistant — availability check + form auto-fill (OTP aapka)",
+    "bullets": [
+      "**Naam pehle check karo**: `/email signup check` — `psd_ai@gmail.com` pehle se kisi ka hai ya khali, Google ke apne endpoint se hint (final faisla signup form karega). Taken ho to ready alternatives bhi suggest karta hai.",
+      "**Form bharna ab agent ka kaam (`src/gmailsignup.js`)**: `/email signup fill` screen pe dikh rahe fields ko label se dhoondhta hai (First name, Last name, Username, Password, Confirm, Month/Day/Year) aur click+type karta hai. Password **sealed** hi rehta hai — sirf keyboard tak jaata hai, chat me kabhi nahi.",
+      "**Guess nahi**: naam aur birthday `/remember` kiye facts se aate hain; nahi mile to field khaali chhod deta hai (galat DOB Google me permanently chala jaata, isliye invent nahi karte). Jo field screen pe nahi mila, wo alag se report hota hai — agle card pe dobara `fill`.",
+      "**Sirf OTP aapka**: phone verification + captcha Google khud maangta hai; account creation ka koi API nahi hai. Account banne ke baad `/email auto create` app password khud banwa ke padh leta hai.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 672 → 676: name/birthday parsing (3 formats, invalid dates rejected), fill plan me password mask, availability parser (taken/free/unknown/invalid), checklist ki sach-sach baatein, aur command path jab browser/display na ho."
+    ]
+  },
   "3.14.1": {
     "title": "📧 Email bilkul auto — agent khud app password banwaye aur screen se padh le 🔍",
     "bullets": [
@@ -454,5 +465,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.1"
+  "latest": "3.14.2"
 }

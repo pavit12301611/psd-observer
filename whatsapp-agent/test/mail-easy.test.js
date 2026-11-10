@@ -500,3 +500,105 @@ test('commands: /email auto is wired and explains the two human-only steps', asy
   const grab = await agent.handle('/email auto grab');
   assert.match(String(grab), /tesseract|Screen padh nahi paya|app password nahi mila/, 'grab degrades with a next step');
 });
+
+// ══ signup assistant — naam check + form fill (OTP human hi rahega) ═════════
+
+test('gmailsignup: name/birthday parsing never guesses', async () => {
+  const g = await import('../src/gmailsignup.js');
+
+  assert.deepEqual(g.splitName('Pavit Kumar Singh'), { first: 'Pavit', last: 'Kumar Singh' });
+  assert.deepEqual(g.splitName('  Pavit  '), { first: 'Pavit', last: '' });
+  assert.deepEqual(g.splitName(''), { first: '', last: '' });
+
+  assert.deepEqual(g.parseBirthday('2006-03-12'), { day: 12, month: 3, year: 2006, monthName: 'March' });
+  assert.deepEqual(g.parseBirthday('12/03/2006'), { day: 12, month: 3, year: 2006, monthName: 'March' });
+  assert.equal(g.parseBirthday('12 March 2006').day, 12);
+  assert.equal(g.parseBirthday('12 March 2006').monthName, 'March');
+  assert.equal(g.parseBirthday(''), null);
+  assert.equal(g.parseBirthday('tomorrow'), null);
+  assert.equal(g.parseBirthday('31/13/2006'), null, 'month 13 rejected');
+  assert.equal(g.parseBirthday('12/03/2999'), null, 'future year rejected');
+
+  const facts = { naam: 'Pavit Kumar', birthday: '12 March 2006' };
+  const profile = g.profileFromFacts(facts);
+  assert.equal(profile.first, 'Pavit');
+  assert.equal(profile.last, 'Kumar');
+  assert.equal(profile.birthday.year, 2006);
+  assert.equal(profile.gender, null, 'gender is never guessed');
+
+  const fromObjects = g.profileFromFacts({ name: { value: 'Pavit Kumar' }, dob: { value: '2006-03-12' } });
+  assert.equal(fromObjects.first, 'Pavit');
+  assert.equal(fromObjects.birthday.day, 12);
+});
+
+test('gmailsignup: fill plan masks the password and reports missing fields', async () => {
+  const g = await import('../src/gmailsignup.js');
+  const profile = { first: 'Pavit', last: 'Kumar', birthday: { day: 12, month: 3, year: 2006, monthName: 'March' } };
+  const plan = g.signupFieldPlan({ username: 'psd_ai', profile });
+
+  assert.deepEqual(plan.map((f) => f.label), ['First name', 'Last name', 'Username', 'Password', 'Confirm', 'Month', 'Day', 'Year']);
+  assert.equal(plan.filter((f) => f.secret).length, 2, 'password + confirm are secret');
+  assert.ok(plan.filter((f) => f.secret).every((f) => f.value === 'secret'));
+
+  const text = g.describePlan(plan, { filled: ['First name'], skipped: ['Confirm'] });
+  assert.match(text, /••••••••/);
+  assert.doesNotMatch(text, /secret/, 'the placeholder never leaks either');
+  assert.match(text, /Bhar diya: First name/);
+  assert.match(text, /Nahi mila.*Confirm/);
+
+  // No birthday → no date fields at all (never invented).
+  const noDob = g.signupFieldPlan({ username: 'psd_ai', profile: { first: 'Pavit' } });
+  assert.deepEqual(noDob.map((f) => f.label), ['First name', 'Username', 'Password', 'Confirm']);
+});
+
+test('gmailsignup: availability hint + checklist tell the truth', async () => {
+  const g = await import('../src/gmailsignup.js');
+
+  assert.equal(g.parseAvailability([['set-cookie', 'COMPASS=gxlu=abc']], 200), 'taken');
+  assert.equal(g.parseAvailability({}, 404), 'free');
+  assert.equal(g.parseAvailability({}, 0), 'unknown');
+
+  const taken = g.describeAvailability({ username: 'psd_ai', address: 'psd_ai@gmail.com', state: 'taken' });
+  assert.match(taken, /pehle se kisi ka/i);
+  assert.match(taken, /Alternatives/);
+  assert.match(g.describeAvailability({ username: 'psd_ai', state: 'free' }), /khali/);
+  assert.match(g.describeAvailability({ username: 'psd_ai', state: 'unknown' }), /pata nahi/);
+  assert.match(g.describeAvailability({ username: 'ab', state: 'invalid' }), /valid Gmail username nahi/);
+
+  // No network in the sandbox → "unknown", never a crash or a fake "free".
+  assert.equal((await g.checkUsername('psd_ai', { fetchImpl: async () => { throw new Error('offline'); } })).state, 'unknown');
+  assert.equal((await g.checkUsername('ab')).state, 'invalid');
+
+  const checklist = g.signupChecklist({ username: 'psd_ai', profile: { first: 'Pavit' } });
+  assert.match(checklist, /OTP/);
+  assert.match(checklist, /birthday/);
+  assert.match(checklist, /chat me kabhi nahi/);
+  const ready = g.signupChecklist({ username: 'psd_ai', profile: { first: 'Pavit', birthday: { day: 1, month: 1, year: 2006 } } });
+  assert.match(ready, /fill ready/);
+});
+
+test('commands: /email signup check + fill + start degrade honestly', async () => {
+  const { createAgent } = await import('../src/commands.js');
+  const { Store } = await import('../src/store.js');
+  const dir = tmpDir('sgcmd');
+  const store = new Store(path.join(dir, 'store.json'));
+  store.data.facts = { naam: 'Pavit Kumar', birthday: '12 March 2006' };
+  const config = {
+    ownerNumber: '919528923866', agentNumber: '918859555795', timezone: 'Asia/Kolkata',
+    aiProvider: 'none', allowShell: false, shellPin: '', dataDir: dir,
+    sharedDir: path.join(dir, 'shared'), downloadsDir: path.join(dir, 'dl'),
+  };
+  fs.mkdirSync(config.sharedDir, { recursive: true });
+  const agent = createAgent({ config, store, log: { error() {}, warn() {}, info() {} } });
+
+  const summary = await agent.handle('/email signup');
+  assert.match(summary, /Naya Gmail|psd_ai@gmail\.com/);
+  assert.match(summary, /koi public API nahi/);
+
+  const check = await agent.handle('/email signup check');
+  assert.match(String(check), /psd_ai@gmail\.com|valid Gmail username|pata nahi/i);
+
+  // No browser/display in the sandbox → an honest instruction, not a crash.
+  const start = await agent.handle('/email signup start');
+  assert.match(String(start), /Page khul gaya|Signup page khud kholo/);
+});
