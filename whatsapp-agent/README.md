@@ -341,6 +341,13 @@ sirf tab click hota hai jab ek hi ho aur button jaisa dikhe (do barabar ke blue 
 = no click); split-button ke ▾ arrow se bachne ke liye click label ke 40% par hota
 hai. Reply me tareeka, attempt number aur Gmail ka toast dono likhe aate hain.
 
+**Click ke baad bhi confirm hota hai:** Wayland par portal ka screenshot *physical*
+pixels me aata hai aur pointer *logical* pixels me chalta hai (125% scaling par dono
+alag) — isliye sahi jagah ka click kabhi-kabhi asar nahi karta. Aisa hone par agent
+Gmail ka **Ctrl+Enter** dabata hai (usme coordinate hi nahi) aur phir dobara toast
+padhta hai. Gmail ne error dikhaya ho to shortcut nahi dabta, aur mail pehle hi ja
+chuki ho to compose band hota hai — double send ka khatra nahi.
+
 **Password hi nahi chahiye?** `/email web send to@x.com Subject | body` — jo Gmail
 Chrome me logged-in hai wahi use hota hai: compose prefill, sirf *Send* click, aur
 Gmail ke "Message sent" toast se verify. `/email web check` pehle login state bata

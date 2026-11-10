@@ -434,3 +434,58 @@ export async function clickSend(opts = {}) {
 
   return { ok: false, tried, reason: 'nobutton', ocrBroken };
 }
+
+// ── after the press: verify, then escalate ───────────────────────────────────
+
+/**
+ * Gmail's Ctrl+Enter is the *coordinate-free* way to send — and clicks can miss
+ * on a scaled Wayland display, where a portal screenshot is in physical pixels
+ * while ydotool moves the pointer in logical pixels. So a press that Gmail never
+ * confirms is finished with the shortcut instead of being reported as a maybe.
+ *
+ * Pure orchestration: `readVerdict`, `pressShortcut` and `wait` are injected.
+ *
+ * @returns {{verdict: 'sent'|'failed'|'unknown', usedShortcut: boolean, reads: number}}
+ */
+export async function finishSend({
+  pressed = null,
+  readVerdict,
+  pressShortcut = null,
+  wait = async () => {},
+} = {}) {
+  if (typeof readVerdict !== 'function') return { verdict: 'unknown', usedShortcut: false, reads: 0 };
+
+  let reads = 0;
+  const read = async () => {
+    reads += 1;
+    try {
+      return await readVerdict();
+    } catch {
+      return 'unknown';
+    }
+  };
+
+  let verdict = await read();
+  // "failed" means Gmail shouted an error (bad address, attachment limit) —
+  // pressing Ctrl+Enter again cannot help and could resend a bad message.
+  if (verdict !== 'unknown') return { verdict, usedShortcut: false, reads };
+  if (pressed?.method === 'shortcut') return { verdict, usedShortcut: false, reads };
+  if (typeof pressShortcut !== 'function') return { verdict, usedShortcut: false, reads };
+
+  let usedShortcut = false;
+  try {
+    await pressShortcut('ctrl+enter');
+    usedShortcut = true;
+  } catch {
+    return { verdict, usedShortcut: false, reads };
+  }
+
+  await wait(1500);
+  verdict = await read();
+  if (verdict === 'unknown') {
+    // The snackbar can take a moment on a slow machine; one more honest look.
+    await wait(1800);
+    verdict = await read();
+  }
+  return { verdict, usedShortcut, reads };
+}

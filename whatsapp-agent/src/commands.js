@@ -64,7 +64,9 @@ import * as selfMail from './selfmail.js';
 import * as mailAuto from './mailauto.js';
 import * as gmailSignup from './gmailsignup.js';
 import * as emailWeb from './emailweb.js';
-import { clickSend, invertForOcr, describeMethod } from './sendbutton.js';
+import {
+  clickSend, invertForOcr, describeMethod, finishSend,
+} from './sendbutton.js';
 import { createImapClient } from './imap.js';
 import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
@@ -2965,18 +2967,37 @@ export function createAgent({
 
     await nap(2200);
 
-    // Gmail ka apna toast padho — click ka matlab "delivered" nahi hota.
-    let verdict = 'unknown';
-    try {
-      const shot = await ocr.ocrScreen(config);
-      verdict = emailWeb.detectSentState(shot.text);
-    } catch { /* screenshot na mile to verdict unknown */ }
+    // Gmail ka apna toast padho — click ka matlab "delivered" nahi hota. Toast
+    // na aaye to Ctrl+Enter (coordinate hi nahi) se send finish karo: scaled
+    // Wayland display par screenshot physical pixel me hota hai aur pointer
+    // logical pixel me, isliye click miss ho sakta hai.
+    const outcome = await finishSend({
+      pressed,
+      readVerdict: async () => {
+        const shot = await ocr.ocrScreen(config);
+        return emailWeb.detectSentState(shot.text);
+      },
+      pressShortcut: (combo) => pc.keyCombo(combo),
+      wait: nap,
+    });
+    const verdict = outcome.verdict;
 
     const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
-    const clicked = `\n🖱️ Send khud dabaya — ${describeMethod(pressed.method)}, attempt ${pressed.attempts ?? 1}`;
-    if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.${clicked}` };
-    if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.${clicked}` };
-    return { status: 'unverified', plan, text: `${head}\n❔ Send dabaya, par confirmation nahi mila — Gmail ke *Sent* folder me check karo.${clicked}` };
+    const how = `\n🖱️ Send khud dabaya — ${describeMethod(pressed.method)}, attempt ${pressed.attempts ?? 1}`
+      + (outcome.usedShortcut ? '\n⌨️ Toast na aaya to Ctrl+Enter bhi dabaya' : '');
+    if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.${how}` };
+    if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.${how}` };
+    return {
+      status: 'unverified',
+      plan,
+      text: [
+        head,
+        '❔ Send (aur Ctrl+Enter) dono dabaye, par Gmail ka *Message sent* nahi dikha.',
+        '• Compose window abhi bhi khula hai? Matlab Gmail ka keyboard shortcut off hai — Settings → *Keyboard shortcuts* on karo.',
+        '• Sent folder me ek baar dekh lo — agar mail wahan hai to sab theek hai.',
+        how,
+      ].join('\n'),
+    };
   }
 
   /**

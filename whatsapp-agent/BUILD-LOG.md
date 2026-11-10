@@ -1,5 +1,13 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.8 — click ke baad Ctrl+Enter (Wayland scaling) (2026-11-10)
+
+- Second report on the same flow: "🖱️ Send khud dabaya — blue button, attempt 2" and yet the compose page in the screenshot was untouched — the click was *located* correctly but had no effect. That is the signature of a coordinate-space mismatch, not a miss: `xdg-desktop-portal` screenshots come back in **physical** pixels while `ydotool mousemove --absolute` works in **logical** pixels, so on a 125 % scaled Wayland display the same numbers point somewhere else. Keyboard input was never affected — the pasted body *was* in the compose, which is the proof that only the pointer space is off.
+- `sendbutton.js` gained `finishSend({pressed, readVerdict, pressShortcut, wait})`: read Gmail's toast; if it is `unknown` (no snackbar), press **Ctrl+Enter** — Gmail's own send shortcut, zero coordinates — then read again (1.5 s, and once more at 3.3 s for slow machines). It deliberately does *not* press when the verdict is `failed` (Gmail showed an error: resending a bad message is worse) or when `clickSend` already sent the shortcut.
+- `emailWebSend` now uses it, and the reply says which mechanism fired (`OCR` / `inverted OCR` / `zoomed OCR` / `blue button` / `Ctrl+Enter`) plus whether the shortcut rescue was used. If confirmation still never arrives, the reply asks the two questions that actually decide it: is the compose still open (then Gmail's *Keyboard shortcuts* setting is off), and is the mail already in Sent?
+- No double send: if the earlier click did work, Gmail closes the compose, so Ctrl+Enter has nothing to send; if it showed an error, we never press it.
+- Tests 687 → 688: toast on the first read → no shortcut, miss → shortcut then re-verify, `failed` → no shortcut, `pressed.method === 'shortcut'` → no repeat, keyboard failure → honest `unknown` without throwing.
+
 ## 3.14.7 — Send button: colour search + Ctrl+Enter (2026-11-10)
 
 - The owner sent a screenshot: compose open, Send visible, and still "Send button 3 attempts me nahi mila (nobutton)". That killed the assumption behind 3.14.6 — the OCR passes (plain *and* inverted) were not sufficient. Two causes fit the evidence: a 12 px white-on-blue label is small even when negated, and if `tesseract` is missing on the machine every OCR pass throws and the old code reported the same generic `nobutton`.

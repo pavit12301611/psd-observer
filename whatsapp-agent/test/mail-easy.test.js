@@ -964,3 +964,71 @@ test('sendbutton: zoomed crop OCR is mapped back to real screen coordinates', as
   // zoom starts at 45% of 200 = 90px, factor 2 → x 60, y 90 + 36
   assert.deepEqual(clicked, [[60, 126]]);
 });
+
+test('sendbutton: click miss hone par Ctrl+Enter se send finish hota hai', async () => {
+  const { finishSend } = await import('../src/sendbutton.js');
+  const pressed = { ok: true, method: 'blue-button', attempts: 2 };
+
+  // 1. Gmail ne turant confirm kiya → shortcut ki zarurat nahi.
+  let pressed_keys = 0;
+  const confirmed = await finishSend({
+    pressed,
+    readVerdict: async () => 'sent',
+    pressShortcut: async () => { pressed_keys += 1; },
+  });
+  assert.deepEqual(confirmed, { verdict: 'sent', usedShortcut: false, reads: 1 });
+  assert.equal(pressed_keys, 0);
+
+  // 2. Click ka koi asar nahi (scaled display) → Ctrl+Enter, phir toast.
+  const keys = [];
+  const waits = [];
+  const rescued = await finishSend({
+    pressed,
+    readVerdict: async () => (keys.length ? 'sent' : 'unknown'),
+    pressShortcut: async (combo) => keys.push(combo),
+    wait: async (ms) => waits.push(ms),
+  });
+  assert.deepEqual(keys, ['ctrl+enter']);
+  assert.equal(rescued.verdict, 'sent');
+  assert.equal(rescued.usedShortcut, true);
+  assert.equal(rescued.reads, 2);
+
+  // 3. Gmail ne error dikhaya → dobara send karne ki koshish nahi.
+  let nope = 0;
+  const failed = await finishSend({
+    pressed,
+    readVerdict: async () => 'failed',
+    pressShortcut: async () => { nope += 1; },
+  });
+  assert.equal(failed.verdict, 'failed');
+  assert.equal(failed.usedShortcut, false);
+  assert.equal(nope, 0);
+
+  // 4. Shortcut pehle hi dab chuka hai → dobara nahi.
+  const alreadyShortcut = await finishSend({
+    pressed: { ok: true, method: 'shortcut', attempts: 3 },
+    readVerdict: async () => 'unknown',
+    pressShortcut: async () => { nope += 1; },
+  });
+  assert.equal(alreadyShortcut.usedShortcut, false);
+  assert.equal(nope, 0);
+
+  // 5. Keyboard hi na chale → honest unknown, throw nahi.
+  const noKeys = await finishSend({
+    pressed,
+    readVerdict: async () => 'unknown',
+    pressShortcut: async () => { throw new Error('ydotool gayab'); },
+  });
+  assert.equal(noKeys.verdict, 'unknown');
+  assert.equal(noKeys.usedShortcut, false);
+
+  // 6. Screenshot fail → unknown, shortcut try hota hai, phir bhi unknown.
+  const blind = await finishSend({
+    pressed,
+    readVerdict: async () => { throw new Error('no display'); },
+    pressShortcut: async () => keys.push('again'),
+    wait: async () => {},
+  });
+  assert.equal(blind.verdict, 'unknown');
+  assert.equal(blind.usedShortcut, true);
+});

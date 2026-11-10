@@ -1,4 +1,17 @@
 {
+  "3.14.8": {
+    "title": "⌨️ Click miss ho jaye to Ctrl+Enter se send — mail ab nikalna nahi rukega",
+    "bullets": [
+      "**Report**: reply ne bola 'blue button, attempt 2' — par compose waisa hi khula reh gaya, mail gaya nahi. Matlab click *locate* ho gaya tha, par asar nahi hua.",
+      "**Wajah**: Wayland par portal ka screenshot **physical** pixels me aata hai aur pointer **logical** pixels me chalta hai (125% scaling par dono alag). Isliye sahi dikhne wala coordinate galat jagah par gir sakta hai.",
+      "**Fix**: click ke baad Gmail ka toast padha jaata hai. Toast na aaye to agent **Ctrl+Enter** (Gmail ka apna send shortcut) dabata hai — usme coordinate hi nahi, isliye scaling ka sawal hi nahi — aur phir dobara confirm karta hai.",
+      "**Double-send ka khatra nahi**: Gmail ne error dikhaya ho to shortcut dabaya hi nahi jaata; aur agar mail pehle hi ja chuki ho to compose band hota hai, Ctrl+Enter kisi aur cheez par nahi girta.",
+      "**Reply me poora sach**: kaun sa tareeka chala (OCR / inverted / zoom / blue button / Ctrl+Enter), kaun attempt, aur shortcut laga ya nahi.",
+      "**Agar phir bhi confirm na mile**: reply kehta hai compose khula hai to Gmail Settings → *Keyboard shortcuts* on karo, aur Sent folder check karne ko.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 687 → 688: toast turant mile to shortcut nahi, click miss ho to Ctrl+Enter aur dobara verify, Gmail error par dobara send nahi, pehle se shortcut ho to repeat nahi, keyboard fail ho to honest unknown."
+    ]
+  },
   "3.14.7": {
     "title": "🎯 Send button ab rang se bhi milta hai — 4 tareeke, phir hi haar",
     "bullets": [
@@ -522,5 +535,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.7"
+  "latest": "3.14.8"
 }
