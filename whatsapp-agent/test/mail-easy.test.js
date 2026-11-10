@@ -681,3 +681,61 @@ test('commands: /email web is wired, and headless PCs get an honest fallback', a
   const check = String(await agent.handle('/email web check'));
   assert.match(check, /Browser khul nahi paya|xdg-open|Screen padh nahi paya/);
 });
+
+// ══ /mailme — ek line, apna inbox ═══════════════════════════════════════════
+
+test('mailsend: /mailme target priority and auto subject', async () => {
+  const m = await import('../src/mailsend.js');
+
+  // Default = this fork's owner inbox, so /mailme works with zero setup.
+  assert.equal(m.resolveOwnerEmail({ store: { data: {} }, config: {} }), m.DEFAULT_OWNER_EMAIL);
+  assert.equal(m.DEFAULT_OWNER_EMAIL, 'pavitsingh3222@gmail.com');
+
+  // /email to … beats env, env beats memory, memory beats default.
+  assert.equal(m.resolveOwnerEmail({ store: { data: { ownerEmail: 'a@b.co' } }, config: { ownerEmail: 'c@d.co' } }), 'a@b.co');
+  assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: 'e@f.co' } } }, config: { ownerEmail: 'c@d.co' } }), 'c@d.co');
+  assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: { value: 'e@f.co' } } } }, config: {} }), 'e@f.co');
+  // Junk in memory must not win over the safe default.
+  assert.equal(m.resolveOwnerEmail({ store: { data: { facts: { email: 'not an email' } } }, config: {} }), m.DEFAULT_OWNER_EMAIL);
+
+  assert.equal(m.autoSubject('Deploy ho gaya bhai'), 'Observer · Deploy ho gaya bhai');
+  assert.equal(m.autoSubject('\n\n  line one  \nline two').startsWith('Observer · line one'), true);
+  const longSubject = m.autoSubject('x'.repeat(200));
+  assert.equal(longSubject.length <= 80, true, 'subject stays short');
+  assert.equal(longSubject.slice('Observer · '.length).length, 60, 'snippet is capped at 60 chars');
+  assert.equal(m.autoSubject(''), 'Observer · note');
+});
+
+test('commands: /mailme + /email to are wired end-to-end', async () => {
+  const { createAgent } = await import('../src/commands.js');
+  const { Store } = await import('../src/store.js');
+  const dir = tmpDir('mailme');
+  const store = new Store(path.join(dir, 'store.json'));
+  const config = {
+    ownerNumber: '919528923866', agentNumber: '918859555795', timezone: 'Asia/Kolkata',
+    aiProvider: 'none', allowShell: false, shellPin: '', dataDir: dir, ownerEmail: '',
+    sharedDir: path.join(dir, 'shared'), downloadsDir: path.join(dir, 'dl'),
+  };
+  fs.mkdirSync(config.sharedDir, { recursive: true });
+  const agent = createAgent({ config, store, log: { error() {}, warn() {}, info() {} } });
+
+  // No args → usage + the address it would use.
+  const usage = String(await agent.handle('/mailme'));
+  assert.match(usage, /pavitsingh3222@gmail\.com/);
+  assert.match(usage, /\/mailme <jo bhejna hai>/);
+
+  // Re-point it, then it sticks in the store.
+  assert.match(String(await agent.handle('/email to nope')), /Usage/);
+  const set = String(await agent.handle('/email to Owner@Example.com'));
+  assert.match(set, /owner@example\.com/);
+  assert.equal(store.data.ownerEmail, 'owner@example.com');
+  assert.match(String(await agent.handle('/mailme')), /owner@example\.com/);
+
+  // Sending with no browser and no SMTP account must explain BOTH paths, not crash.
+  const sent = String(await agent.handle('/mailme deploy ho gaya bhai'));
+  assert.match(sent, /Browser khul nahi paya|browser/i);
+  assert.match(sent, /email setup|SMTP/i);
+
+  // Status surfaces the /mailme target too.
+  assert.match(String(await agent.handle('/email')), /mailme.*owner@example\.com/is);
+});

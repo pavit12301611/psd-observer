@@ -310,6 +310,8 @@ Chrome.
 /email test                                 dono directions dobara check
 /email send to@x.com Report ready | body    isi PC se bhejo (465 TLS / 587 STARTTLS)
 /email status · /email forget               masked status · credentials wipe
+/mailme <text>                              ek line → aapke inbox (default pavitsingh3222@gmail.com)
+/email to you@example.com                   /mailme ka address badlo
 /email web check|send …                     bina password: Chrome ke logged-in Gmail se bhejo
 /email auto                                 page kholo · auto create = button khud dabao · auto grab = code khud padho
 /email signup                               agent ki apni identity (psd_ai@gmail.com)
@@ -322,6 +324,10 @@ sirf **app password** chahiye (`myaccount.google.com/apppasswords`; normal Gmail
 password kaam nahi karega). Setup ke saath hi agent live test karta hai aur fail
 pe seedha reason deta hai ("app password galat", "port 587 ne STARTTLS refuse
 kiya", "office Wi-Fi block kar raha hai").
+
+**Sabse chhota rasta:** `/mailme <jo bhejna hai>` — subject khud banta hai, address
+`/email to` se set hota hai (default `pavitsingh3222@gmail.com`, ya `.env` me
+`OWNER_EMAIL=`), aur browser na chale to apne aap SMTP par fallback hota hai.
 
 **Password hi nahi chahiye?** `/email web send to@x.com Subject | body` — jo Gmail
 Chrome me logged-in hai wahi use hota hai: compose prefill, sirf *Send* click, aur

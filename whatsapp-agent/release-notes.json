@@ -1,4 +1,14 @@
 {
+  "3.14.4": {
+    "title": "✉️ /mailme — ek line aur mail chala jayega (default: pavitsingh3222@gmail.com)",
+    "bullets": [
+      "**Ek command**: `/mailme kal ka schedule yaad rakhna` — subject khud ban jaata hai (`Observer · kal ka schedule…`), address `/email to` se set hota hai, aur default is fork ke owner inbox `pavitsingh3222@gmail.com` par jaata hai. Koi to/subject likhne ki zarurat nahi.",
+      "**Do raste, automatic fallback**: pehle browser wala `/email web` (koi password nahi) — wahan Gmail/session na mile to apne aap SMTP (`/email send`) par gir jaata hai, aur reply me saaf likhta hai kaunsa rasta chala.",
+      "**Address badalna**: `/email to you@example.com` (ya `.env` me `OWNER_EMAIL=`) — memory ka email fact bhi utha leta hai, par junk address kabhi default ko nahi harata.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 679 → 681: /mailme target priority (store > env > memory > default), subject cap, `/email to` persistence, aur browser+SMTP dono fail hone par ek hi reply me dono ka sach."
+    ]
+  },
   "3.14.3": {
     "title": "🌐 /email web — bina password email (Chrome ke logged-in Gmail se)",
     "bullets": [
@@ -476,5 +486,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.3"
+  "latest": "3.14.4"
 }

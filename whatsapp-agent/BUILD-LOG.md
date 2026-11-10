@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.4 — /mailme: one line, own inbox, automatic path (2026-11-10)
+
+- The ask was smaller than a feature: "sirf command dun, bas". `/mailme <text>` now sends to the owner's own address with an auto subject (`Observer · <first 60 chars>`), so no `to`/`subject` syntax is ever typed on WhatsApp.
+- `resolveOwnerEmail` priority: `/email to` (store) → `OWNER_EMAIL` env → memory `email`/`gmail` fact → `DEFAULT_OWNER_EMAIL` (`pavitsingh3222@gmail.com` for this fork). A malformed memory value never beats the safe default.
+- Path selection is explicit and reported: browser first (`/email web`, zero credentials) → SMTP fallback (`/email send`, sealed app password). `emailWebSend` was refactored to return `{status: sent|unverified|failed|nosession|nosend}` precisely so this fallback is decided by a real status, not by string-matching a reply.
+- `/email to <address>` persists the target in `store.data.ownerEmail`; `/email` status now prints the `/mailme` target; `mailme`/`emailme` added to vocab so fuzzy matching finds it.
+- `.env.example` documents `OWNER_EMAIL=`, config exposes `ownerEmail`.
+- Tests 679 → 681: target priority, subject cap, `/email to` validation + persistence, and a send attempt with neither browser nor SMTP account explaining both failures in one reply.
+
 ## 3.14.3 — /email web: send from the browser session, zero credentials (2026-11-10)
 
 - Every previous path bottlenecked on "get an app password", which Google refuses to hand out without 2FA + a human click. This one removes the credential entirely: whichever Gmail is logged into Chrome is enough.

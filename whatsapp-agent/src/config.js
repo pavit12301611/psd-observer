@@ -89,6 +89,8 @@ export function loadConfig({ dryRun = false, env = null } = {}) {
     // The owner's two numbers are the shipped defaults so it works out of the
     // box; either can be overridden in a private .env (gitignored).
     ownerNumber: normalizeNumber(e.OWNER_NUMBER || '919528923866'),
+    // Where `/mailme` lands. Default = this fork's owner inbox; `/email to` overrides.
+    ownerEmail: String(e.OWNER_EMAIL || '').trim().toLowerCase(),
     agentNumber: normalizeNumber(e.AGENT_NUMBER || '918859555795'),
     strictAgentNumber: bool(e.STRICT_AGENT_NUMBER, false),
     usePairingCode: bool(e.USE_PAIRING_CODE, false),

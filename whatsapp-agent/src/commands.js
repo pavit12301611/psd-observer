@@ -59,7 +59,7 @@ import { checkMail, mailStatus, setMonitor, loadMailConfig } from './mail.js';
 import {
   parseSetupArgs, saveMailSetup, setupGuide, mailSetupStatus, forgetMail, verifyMailSetup, resolveStoredSecret,
 } from './mailsetup.js';
-import { sendMail, mailFileFor } from './mailsend.js';
+import { sendMail, mailFileFor, resolveOwnerEmail, autoSubject } from './mailsend.js';
 import * as selfMail from './selfmail.js';
 import * as mailAuto from './mailauto.js';
 import * as gmailSignup from './gmailsignup.js';
@@ -2903,8 +2903,100 @@ export function createAgent({
    * Gmail's own "Message sent" toast; an unverified click is reported as
    * unverified, never as success.
    */
-  async function emailWebCommand(rawArgs) {
+  /**
+   * 🌐 Browser-send, structured so callers can fall back honestly.
+   * status: sent | unverified | failed | nosession | nosend
+   */
+  async function emailWebSend({ to, subject, body }) {
     const nap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    let plan;
+    try {
+      plan = emailWeb.buildComposeUrl({ to, subject, body });
+    } catch (err) {
+      return { status: 'nosend', text: `🌐 ${err?.message ?? err}` };
+    }
+    try {
+      await pc.openTarget(plan.url);
+    } catch (err) {
+      return { status: 'nosession', text: `🌐 Browser khul nahi paya (${err?.message ?? err}).` };
+    }
+    // Gmail compose load hone do; lambi body clipboard se paste hoti hai.
+    await nap(plan.mode === 'paste' ? 3200 : 3500);
+    if (plan.mode === 'paste') {
+      try {
+        await pc.pasteText(body);
+        await nap(700);
+      } catch (err) {
+        return { status: 'nosend', text: `🌐 Body paste nahi ho paya (${err?.message ?? err}) — compose me khud paste karke Send dabao.` };
+      }
+    }
+
+    let target = null;
+    for (const attempt of [0, 1]) {
+      try {
+        target = await finder.locateOnScreen(config, 'Send', log);
+      } catch { target = null; }
+      if (target) break;
+      if (attempt === 0) await nap(2000);
+    }
+    if (!target) {
+      return {
+        status: 'nosend',
+        plan,
+        text: '🌐 *Send* button screen pe nahi mila (compose khula hai? browser foreground me hai?).',
+      };
+    }
+
+    await pc.click(target.x, target.y);
+    await nap(2200);
+
+    let verdict = 'unknown';
+    try {
+      const shot = await ocr.ocrScreen(config);
+      verdict = emailWeb.detectSentState(shot.text);
+    } catch { /* screenshot hi nahi mila: verdict unknown rehta hai */ }
+
+    const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
+    if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.` };
+    if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.` };
+    return { status: 'unverified', plan, text: `${head}\n❔ Send dabaya, par confirmation nahi mila — Gmail ke *Sent* folder me check karo.` };
+  }
+
+  /**
+   * `/mailme <text>` — ONE line: apne hi inbox pe note bhej do.
+   * Pehle browser (zero credentials), phir SMTP (agar configured ho).
+   */
+  async function mailmeCommand(rawArgs) {
+    const body = String(rawArgs ?? '').trim();
+    const to = resolveOwnerEmail({ config, store });
+    if (!body) {
+      return [
+        `✉️ *Mail me* → ${to}`,
+        'Bhejo: `/mailme <jo bhejna hai>` — subject khud ban jaata hai.',
+        'Address badalna: `/email to you@example.com`',
+      ].join('\n');
+    }
+    const subject = autoSubject(body);
+
+    const web = await emailWebSend({ to, subject, body });
+    if (web.status === 'sent' || web.status === 'unverified') {
+      return `${web.text}\n_🌐 browser se — koi app password nahi_`;
+    }
+
+    const smtp = await sendMail({ to, subject, text: body }, { config, log });
+    if (smtp.ok) {
+      return `${smtp.text}\n_✉️ SMTP se (browser path: ${web.status})_`;
+    }
+    return [
+      web.text,
+      '',
+      smtp.text,
+      '',
+      '_Dono raste fail — `/email web check` se Gmail login dekho, ya `/email setup <address> <app-password>` se SMTP lagao._',
+    ].join('\n');
+  }
+
+  async function emailWebCommand(rawArgs) {
     const raw = String(rawArgs ?? '').trim();
     const first = raw.split(/\s+/)[0] ?? '';
     const sub = first.toLowerCase();
@@ -2917,7 +3009,7 @@ export function createAgent({
       } catch (err) {
         return `🌐 Browser khul nahi paya (${err?.message ?? err}).\nConsole se khol lo: xdg-open ${emailWeb.GMAIL_INBOX}\n(Headless PC par \`/email send …\` SMTP wala rasta use karo.)`;
       }
-      await nap(4000);
+      await new Promise((resolve) => setTimeout(resolve, 4000));
       try {
         const shot = await ocr.ocrScreen(config);
         return emailWeb.describeLogin(emailWeb.detectLoginState(shot.text));
@@ -2936,58 +3028,14 @@ export function createAgent({
     const body = bodyParts.join('|').trim();
     if (!body) return '🌐 Body chahiye: `/email web send to@x.com Subject | body`';
 
-    let plan;
-    try {
-      plan = emailWeb.buildComposeUrl({ to, subject: subjectPart.trim(), body });
-    } catch (err) {
-      return `🌐 ${err?.message ?? err}`;
+    const result = await emailWebSend({ to, subject: subjectPart.trim(), body });
+    if (result.status === 'nosession') {
+      return `${result.text}\nHeadless PC par \`/email send ${to} …\` (SMTP) use karo.`;
     }
-
-    try {
-      await pc.openTarget(plan.url);
-    } catch (err) {
-      return `🌐 Browser khul nahi paya (${err?.message ?? err}).\nHeadless PC par \`/email send ${plan.to} ${plan.subject} | ${String(body).slice(0, 40)}…\` (SMTP) use karo.`;
+    if (result.status === 'nosend') {
+      return `${result.text}\n• Compose khula rakho aur khud Send dabao, ya\n• \`/email send ${to} …\` (SMTP rasta).`;
     }
-    // Gmail compose load hone do; lambi body clipboard se paste hoti hai.
-    await nap(plan.mode === 'paste' ? 3200 : 3500);
-    if (plan.mode === 'paste') {
-      try {
-        await pc.pasteText(body);
-        await nap(700);
-      } catch (err) {
-        return `🌐 Body paste nahi ho paya (${err?.message ?? err}) — compose window me body khud paste karke Send dabao.`;
-      }
-    }
-
-    let target = null;
-    for (const attempt of [0, 1]) {
-      try {
-        target = await finder.locateOnScreen(config, 'Send', log);
-      } catch { target = null; }
-      if (target) break;
-      if (attempt === 0) await nap(2000);
-    }
-    if (!target) {
-      return [
-        `🌐 *Send* button screen pe nahi mila (compose khula hai? browser foreground me hai?).`,
-        '• Compose window khula rakho aur khud Send dabao, ya',
-        `• Headless PC par: \`/email send ${plan.to} …\` (SMTP rasta).`,
-      ].join('\n');
-    }
-
-    await pc.click(target.x, target.y);
-    await nap(2200);
-
-    let verdict = 'unknown';
-    try {
-      const shot = await ocr.ocrScreen(config);
-      verdict = emailWeb.detectSentState(shot.text);
-    } catch { /* screenshot hi nahi mila: verdict unknown rehta hai */ }
-
-    const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
-    if (verdict === 'sent') return `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.`;
-    if (verdict === 'failed') return `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya. Screen dekh lo (attachment/size/network).`;
-    return `${head}\n❔ Send dabaya, par confirmation screen pe nahi mila — Gmail ke *Sent* folder me check karo (ja chuka ho sakta hai).`;
+    return result.text;
   }
 
   async function emailSignup(rawArgs, ctx = {}) {
@@ -4011,6 +4059,7 @@ export function createAgent({
         if (sub === 'status') return mailStatus();
         return checkMail();
       }
+      case 'mailme': case 'emailme': case 'mailmein': return await mailmeCommand(args);
       case 'email': {
         // 📧 3.14.0 — easy setup (auto-detect + live test), sending, and the
         // agent's own mailbox identity. Secrets are sealed and never echoed.
@@ -4018,9 +4067,17 @@ export function createAgent({
         const [sub, ...rest] = raw.split(/\s+/);
         const subCmd = (sub || '').toLowerCase();
         if (!subCmd || subCmd === 'status') {
-          return `${mailSetupStatus({ file: mailFileFor(config) })}\n\n${selfMail.identitySummary({ dir: mailDataDir() })}`;
+          return `${mailSetupStatus({ file: mailFileFor(config) })}\n\n📮 \`/mailme\` → ${resolveOwnerEmail({ config, store })}\n\n${selfMail.identitySummary({ dir: mailDataDir() })}`;
         }
         if (subCmd === 'setup' || subCmd === 'add') return await emailSetup(rest.join(' '));
+        if (subCmd === 'me' || subCmd === 'self') return await mailmeCommand(rest.join(' '));
+        if (subCmd === 'to') {
+          const address = rest.join(' ').trim().toLowerCase();
+          if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(address)) return '📧 Usage: `/email to you@example.com`';
+          store.data.ownerEmail = address;
+          store.save?.();
+          return `📧 \`/mailme\` ab *${address}* pe bhejega. (Kabhi bhi badal sakte ho.)`;
+        }
         if (subCmd === 'guide' || subCmd === 'help') return setupGuide(rest.join(' '));
         if (subCmd === 'test' || subCmd === 'verify') return await emailTest();
         if (subCmd === 'send' || subCmd === 'mail') return await emailSend(rest.join(' '));
@@ -4034,7 +4091,9 @@ export function createAgent({
           '• `/email setup psd_ai@gmail.com` — guide · `… abcd efgh ijkl mnop` — save + live test',
           '• `/email send to@x.com Subject | body` · `/email test` · `/email status` · `/email forget`',
           '• `/email auto` — agent khud app password banwaye + screen se padhke save kare (copy-paste nahi)',
+          '• `/mailme <text>` — apne hi inbox par ek line bhej do (browser se, password nahi)',
           '• `/email web check|send … <to> <subject> | <body>` — bina password, Chrome ke logged-in Gmail se bhejo',
+          '• `/email to you@example.com` — /mailme ka address badlo',
           '• `/email signup` — nayi mailbox identity · check = naam available? · start = form kholo · fill = fields bharo',
         ].join('\n');
       }
