@@ -61,6 +61,9 @@ import {
 } from './mailsetup.js';
 import { sendMail, mailFileFor } from './mailsend.js';
 import * as selfMail from './selfmail.js';
+import * as mailAuto from './mailauto.js';
+import { createImapClient } from './imap.js';
+import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
 import { scanPII, redactPII, guardOutbound } from './pii.js';
 import { syncFromICS, exportICS } from './gcal.js';
@@ -2781,6 +2784,74 @@ export function createAgent({
     return r.reply;
   }
 
+  /**
+   * `/email auto` — the zero-typing path: the agent opens Google's page, can
+   * click "Create app password" itself, then READS the 16-char code off the
+   * screen with local OCR and proves it against Gmail before saving it.
+   * 2FA / the login step stays human — Google allows nothing else.
+   */
+  async function emailAuto(rawArgs) {
+    const sub = String(rawArgs ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+    const file = mailFileFor(config);
+    const cfg = loadMailConfig(file);
+    const user = cfg.user || selfMail.AGENT_MAILBOX;
+
+    if (!sub || sub === 'help') {
+      try { await pc.openTarget(mailAuto.APP_PASSWORD_URL); } catch { /* owner can open it */ }
+      return mailAuto.autoIntro();
+    }
+
+    if (sub === 'create') {
+      if (!ocr.ocrAvailable()) return `📷 OCR chahiye (screen padhne ke liye):\n\`sudo dnf install tesseract\`\nYa code khud dekh ke bhej do: \`/email setup ${user} <app-password>\``;
+      try {
+        const target = await finder.locateOnScreen(config, 'Create app password', log);
+        await pc.click(target.x, target.y);
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+      } catch (err) {
+        return `🖱️ "Create app password" button khud nahi daba paya (${err?.message ?? err}).\nPage pe wo button aap dabao, phir \`/email auto grab\` — code main padh lunga.`;
+      }
+      return emailAuto('grab');
+    }
+
+    if (sub === 'grab') {
+      if (!ocr.ocrAvailable()) return `📷 OCR chahiye (screen padhne ke liye):\n\`sudo dnf install tesseract\`\nYa code khud dekh ke bhej do: \`/email setup ${user} <app-password>\``;
+      let shot;
+      try {
+        shot = await ocr.ocrScreen(config);
+      } catch (err) {
+        return `📸 Screen padh nahi paya: ${err?.message ?? err}\n(\`bash scripts/fix-desktop.sh\` chalane se screenshots theek ho jaate hain)`;
+      }
+      const candidates = mailAuto.extractAppPasswordCandidates(shot.text);
+      if (!candidates.length) {
+        return '🔍 Screen pe 16-character app password nahi mila.\n"Create app password" dabane ke baad jo code dikhta hai wo screen pe khula rakho, phir `/email auto grab` dobara.';
+      }
+      const verifyOne = async (candidate) => {
+        const client = createImapClient({ host: cfg.host || 'imap.gmail.com', port: cfg.imapPort || 993, user, pass: candidate });
+        try {
+          await client.connect();
+          return true;
+        } catch {
+          return false;
+        } finally {
+          try { await client.logout?.(); } catch { /* bye */ }
+        }
+      };
+      const found = await mailAuto.findWorkingCandidate(candidates, verifyOne, { log });
+      if (!found.ok) {
+        return [
+          `🔍 ${mailAuto.describeCandidates(candidates)} — lekin Gmail ne koi accept nahi kiya (${found.tried.length} try).`,
+          'Screen pe code saaf dikh raha ho to phone se photo bhej do, ya seedha: `/email setup ' + user + ' <app-password>`.',
+        ].join('\n');
+      }
+      // Verified by Gmail itself — now seal it and run the normal live test.
+      return saveMailSetup({ address: user, secret: found.candidate, provider: 'gmail' }, {
+        file, dataDir: mailDataDir(), log,
+      });
+    }
+
+    return mailAuto.autoIntro();
+  }
+
   // ── 📧 email helpers (3.14.0) ──────────────────────────────────────────────
   function mailDataDir() {
     return config.dataDir ?? path.join(ROOT, 'data');
@@ -3808,12 +3879,14 @@ export function createAgent({
         if (subCmd === 'test' || subCmd === 'verify') return await emailTest();
         if (subCmd === 'send' || subCmd === 'mail') return await emailSend(rest.join(' '));
         if (subCmd === 'forget' || subCmd === 'wipe') return forgetMail({ file: mailFileFor(config) });
+        if (subCmd === 'auto') return await emailAuto(rest.join(' '), ctx);
         if (subCmd === 'signup' || subCmd === 'identity') return await emailSignup(rest.join(' '), ctx);
         if (subCmd === 'type') return await emailSignup('type', ctx);
         return [
           '📧 *Email commands*',
           '• `/email setup psd_ai@gmail.com` — guide · `… abcd efgh ijkl mnop` — save + live test',
           '• `/email send to@x.com Subject | body` · `/email test` · `/email status` · `/email forget`',
+          '• `/email auto` — agent khud app password banwaye + screen se padhke save kare (copy-paste nahi)',
           '• `/email signup` — agent apni mailbox identity banaye (password sirf usko pata)',
         ].join('\n');
       }

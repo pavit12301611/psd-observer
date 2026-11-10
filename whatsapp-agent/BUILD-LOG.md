@@ -1,5 +1,17 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.1 — /email auto: the agent reads the app password itself (2026-11-10)
+
+- The complaint after 3.14.0 was right: setup still needed the owner to copy 16 characters out of Google's modal. Gmail app passwords cannot be *created* by a script (no API, 2FA phone approval is mandatory, and Google blocks automated signup), but **reading the box on screen** is automatable — so `src/mailauto.js` does exactly that and nothing more.
+- `extractAppPasswordCandidates`: accepts the 4×4 rendering (`abcd efgh ijkl mnop`), the unbroken 16-char copy view, and OCR damage — `0→o, 1|!→l, 2→z, 5→s, 6/9→g, 8→b`. Prose that happens to be four 4-letter words is rejected by a stopword rule instead of being wasted on a login attempt. `l↔i` produces both spellings, deduped, capped at 6.
+- `findWorkingCandidate`: **Gmail decides, not the OCR** — each candidate is tried with a real IMAP LOGIN and only an accepted one is returned. A wrong guess costs one round trip, never a saved credential.
+- Wiring: `/email auto` (opens the page + explains the two human-only steps), `/email auto create` (locates "Create app password" via `finder.locateOnScreen` and clicks it, then grabs), `/email auto grab` (screenshot → tesseract → verify → `saveMailSetup`, so sealing + the IMAP/SMTP live test still happen in one place).
+- Degrades honestly: missing tesseract, no screenshot tool, or a closed modal each produce a specific next step instead of a stack trace. A missing button says "dabao khud, phir `/email auto grab`".
+- Tests 669 → 672: extraction from Google's exact format + single run + digit damage, prose rejected, no duplicates, stopword ordering (digit-damaged candidate verified first), verify-until-one-works loop, and the command path with no tesseract/screenshot present.
+
+### Notes for next time
+- The shades announcement test runs against *whatever version package.json says*, so every release entry needs a shades line (3.14.0 and 3.14.1 both carry "Shades unchanged"). Same for `webapp/sw.js`'s cache name and `release-bundle.tar.gz`.
+
 ## 3.14.0 — email: ek command setup, real SMTP send, aur apna mailbox (2026-11-10)
 
 - The gap: reading mail shipped in 3.7.0 (`imap.js` + `mail.js`), but **sending could not happen without the paid cloud** — `app/src/utils/handlers/utils.ts` posts to `api.observer-ai.com/tools/send-email` with an Auth0 token, which is exactly the dependency this fork exists to remove. Setup was also `/mail setup imap.gmail.com user apppass`: you had to know a hostname, and the password was stored as plaintext.

@@ -310,6 +310,7 @@ Chrome.
 /email test                                 dono directions dobara check
 /email send to@x.com Report ready | body    isi PC se bhejo (465 TLS / 587 STARTTLS)
 /email status · /email forget               masked status · credentials wipe
+/email auto                                 page kholo · auto create = button khud dabao · auto grab = code khud padho
 /email signup                               agent ki apni identity (psd_ai@gmail.com)
 /email signup go · /email type · /email signup   page kholo → field pe cursor → "haan" → khud type karta hai
 /mail today · /mail on|off                  purana digest + priority alerts (same account)
@@ -320,6 +321,12 @@ sirf **app password** chahiye (`myaccount.google.com/apppasswords`; normal Gmail
 password kaam nahi karega). Setup ke saath hi agent live test karta hai aur fail
 pe seedha reason deta hai ("app password galat", "port 587 ne STARTTLS refuse
 kiya", "office Wi-Fi block kar raha hai").
+
+**Copy-paste nahi karna?** `/email auto` → Google ka app-password page khulta hai.
+`/email auto create` *Create app password* khud dabata hai aur `/email auto grab`
+screen se 16-character code **khud OCR karke padhta hai** — aur tabhi maanta hai jab
+Gmail login accept kar le (galat OCR guess apne aap reject). Sirf login + 2FA
+aapka hai, kyunki Google uske bina app password deta hi nahi.
 
 **Password sirf bot ke paas:** app password `data/mail.json` me *sealed*
 (AES-256-GCM) jaata hai, key `data/.mail-key` (mode `0600`) me hoti hai. Reply,

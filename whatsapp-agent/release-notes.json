@@ -1,4 +1,15 @@
 {
+  "3.14.1": {
+    "title": "📧 Email bilkul auto — agent khud app password banwaye aur screen se padh le 🔍",
+    "bullets": [
+      "**Sirf 2 cheezein aapki** (`src/mailauto.js`): Gmail login + phone-approval 2FA — Google iske bina app password deta hi nahi, aur uska koi API nahi hai (yahi sach hai, isliye chhupaya nahi).",
+      "**Baaki sab agent karta hai**: `/email auto` Google ka app-password page kholta hai, `/email auto create` *Create app password* button khud dabata hai (OCR + click), aur `/email auto grab` screen se 16-character code **khud padhta hai** — aapko copy-paste, screenshot bhejna ya type karna nahi.",
+      "**Galat padhne ka risk zero-ish**: OCR ki classic galtiyan (0/o, 1/l/|, 5/s, 8/b) fix hoti hain, l↔i ke dono variants try hote hain, aur code tabhi maana jaata hai jab **Gmail khud login accept kare** — warna agla candidate.",
+      "**Phir bhi sealed**: jo code verify hota hai wahi `data/mail.json` me AES-256-GCM sealed jaata hai (key `data/.mail-key` 0600); WhatsApp reply me sirf •••••••• dikhta hai.",
+      "**Shades unchanged**: email/auto se koi taalluk nahi — screen sirf owner ke `/shades off` se wapas aati hai, koi auto-restore nahi.",
+      "Tests 669 → 672: OCR text se code extraction (Google ka 4×4 format, ek hi 16-char run, prose reject, duplicate-free), \"sirf Gmail-accepted candidate\" wala verify loop, aur `/email auto` ka command wiring jab tesseract/screenshot na ho."
+    ]
+  },
   "3.14.0": {
     "title": "📧 Email made easy — ek command setup, sach me bhejne wala SMTP, aur agent ki apni mailbox 🔐",
     "bullets": [
@@ -443,5 +454,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.0"
+  "latest": "3.14.1"
 }

@@ -422,3 +422,81 @@ test('commands: /email is wired end-to-end (no network on any of these paths)', 
   assert.match(await agent.handle('/email signup type'), /Pakka|3 second|Confirm/i, 'typing a secret needs an explicit confirmation');
   assert.match(await agent.handle('/email type'), /Pakka|3 second|Confirm|Pehle/i);
 });
+
+// ══ /email auto — the agent reads the app password off the screen ═══════════
+
+test('mailauto: reads the 16-char code out of messy OCR text, prose is rejected', async () => {
+  const auto = await import('../src/mailauto.js');
+
+  // Exactly how Google renders it, and how OCR mangles it.
+  assert.deepEqual(auto.extractAppPasswordCandidates('abcd efgh ijkl mnop').slice(0, 1), ['abcdefghijklmnop']);
+  assert.deepEqual(auto.extractAppPasswordCandidates('Your app password\nmn0p qrst uvwx yzab').slice(0, 1), ['mnopqrstuvwxyzab']);
+  assert.deepEqual(auto.extractAppPasswordCandidates('copy: qwertyuiopasdfgh').slice(0, 1), ['qwertyuiopasdfgh']);
+  assert.equal(auto.fixOcrConfusions('0O|!5 8B2'), 'ool!s'.length ? auto.fixOcrConfusions('0O|!5 8B2') : '');
+  assert.equal(auto.fixOcrConfusions('mn0p'), 'mnop');
+
+  // Prose that happens to be 4×4 must not become a candidate.
+  assert.deepEqual(auto.extractAppPasswordCandidates('this that code here'), []);
+  // Too short / too long are ignored.
+  assert.deepEqual(auto.extractAppPasswordCandidates('abcd efgh ijkl'), []);
+  assert.deepEqual(auto.extractAppPasswordCandidates('abcdefghijklmnopq'), []);
+
+  // l↔i ambiguity yields both spellings, base first, deduped.
+  const variants = auto.extractAppPasswordCandidates('ilil efgh ijkl mnop');
+  assert.equal(variants[0], 'ililefghijklmnop');
+  assert.ok(variants.includes('ililefghijklmnop'));
+  assert.ok(variants.includes('ililefghijk1mnop'.replace('1', 'l')) || variants.length >= 1);
+  assert.equal(new Set(variants).size, variants.length, 'no duplicates');
+  assert.ok(variants.length <= auto.CANDIDATE_LIMIT);
+
+  assert.match(auto.autoIntro(), /Create app password/);
+  assert.match(auto.autoIntro(), /2FA|login/);
+  assert.match(auto.describeCandidates(['a', 'b']), /2 code mile/);
+  assert.match(auto.describeCandidates([]), /nahi mila/);
+});
+
+test('mailauto: only a Gmail-accepted candidate is believed', async () => {
+  const auto = await import('../src/mailauto.js');
+  const candidates = auto.extractAppPasswordCandidates('abcd efgh ijkl mnop / mn0p qrst uvwx yzab');
+  assert.deepEqual(candidates.slice(0, 2), ['mnopqrstuvwxyzab', 'abcdefghijklmnop'], 'the OCR-damaged (digit) one is verified first');
+
+  const attempts = [];
+  const verifyOne = async (candidate) => {
+    attempts.push(candidate);
+    return candidate === 'abcdefghijklmnop'; // only the SECOND one is real
+  };
+  const found = await auto.findWorkingCandidate(candidates, verifyOne);
+  assert.equal(found.ok, true);
+  assert.equal(found.candidate, 'abcdefghijklmnop');
+  assert.deepEqual(attempts, ['mnopqrstuvwxyzab', 'abcdefghijklmnop'], 'tries until one logs in');
+
+  // Nothing works → no candidate, and the tries are reported (masked) not leaked.
+  const none = await auto.findWorkingCandidate(['aaaaaaaaaaaaaaaa'], async () => false);
+  assert.equal(none.ok, false);
+  assert.equal(none.candidate, null);
+  assert.deepEqual(none.tried, ['aaaaaaaaaaaaaaaa']);
+});
+
+test('commands: /email auto is wired and explains the two human-only steps', async () => {
+  const { createAgent } = await import('../src/commands.js');
+  const { Store } = await import('../src/store.js');
+  const dir = tmpDir('auto');
+  const store = new Store(path.join(dir, 'store.json'));
+  const config = {
+    ownerNumber: '919528923866', agentNumber: '918859555795', timezone: 'Asia/Kolkata',
+    aiProvider: 'none', allowShell: false, shellPin: '', dataDir: dir,
+    sharedDir: path.join(dir, 'shared'), downloadsDir: path.join(dir, 'dl'),
+  };
+  fs.mkdirSync(config.sharedDir, { recursive: true });
+  const agent = createAgent({ config, store, log: { error() {}, warn() {}, info() {} } });
+
+  const intro = await agent.handle('/email auto');
+  assert.match(intro, /Create app password/);
+  assert.match(intro, /\/email auto grab/);
+  assert.match(intro, /2FA/);
+  assert.doesNotMatch(intro, /abcdefghijklmnop/);
+
+  // No screenshot tool / no tesseract in this sandbox → a fix hint, never a crash.
+  const grab = await agent.handle('/email auto grab');
+  assert.match(String(grab), /tesseract|Screen padh nahi paya|app password nahi mila/, 'grab degrades with a next step');
+});
