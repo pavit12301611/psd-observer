@@ -3053,7 +3053,7 @@ export function createAgent({
       return `${result.text}\nHeadless PC par \`/email send ${to} …\` (SMTP) use karo.`;
     }
     if (result.status === 'nosend') {
-      return `${result.text}\n• Compose khula rakho aur khud Send dabao, ya\n• \`/email send ${to} …\` (SMTP rasta).`;
+      return `${result.text}\n• Compose window saamne rakho (browser background me ho to lao) aur 2s baad dobara bhejo, ya\n• \`/email send ${to} …\` (SMTP rasta).`;
     }
     return result.text;
   }
