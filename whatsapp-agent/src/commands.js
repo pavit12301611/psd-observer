@@ -55,7 +55,20 @@ import {
   moveToTrash, listTrash, restoreTrash, runPanic, pendingTicket,
 } from './safety.js';
 import { saveSnapshot, rollback as rollbackTo, snapshotList } from './rollback.js';
-import { setupMail, checkMail, mailStatus, setMonitor } from './mail.js';
+import { checkMail, mailStatus, setMonitor, loadMailConfig } from './mail.js';
+import {
+  parseSetupArgs, saveMailSetup, setupGuide, mailSetupStatus, forgetMail, verifyMailSetup, resolveStoredSecret,
+} from './mailsetup.js';
+import { sendMail, mailFileFor, resolveOwnerEmail, autoSubject } from './mailsend.js';
+import * as selfMail from './selfmail.js';
+import * as mailAuto from './mailauto.js';
+import * as gmailSignup from './gmailsignup.js';
+import * as emailWeb from './emailweb.js';
+import {
+  clickSend, invertForOcr, describeMethod, finishSend,
+} from './sendbutton.js';
+import { createImapClient } from './imap.js';
+import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
 import { scanPII, redactPII, guardOutbound } from './pii.js';
 import { syncFromICS, exportICS } from './gcal.js';
@@ -379,6 +392,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • Notes/meetings se ✅ action-items auto-extract · HW reminders escalate
 *📬 3.7.0 — Duet-Class Features*
 • 📧 \`/mail setup imap.gmail.com user apppass\` · \`/mail today\` · \`/mail on\` — mail digest + priority alerts (Gmail app-password)
+• ✉️ \`/email setup psd_ai@gmail.com\` — auto-detect + live IMAP/SMTP test (password sealed, never printed) · \`/email send to@x Subject | body\` · \`/email signup\` — agent ki apni mailbox identity
 • 🛠️ \`/make report|slides|dashboard|csv <topic>\` — review/edit files bana deta hai
 • 🔐 \`/pii scan <text>\` — card/Aadhaar/PAN/API-key detect; outbound strict PII BLOCK; clipboard history redacted
 • 🗓️ \`/cal sync <ics-url>\` (Google Calendar secret iCal) · \`/cal export\` — .ics file
@@ -2775,6 +2789,388 @@ export function createAgent({
     return r.reply;
   }
 
+  /**
+   * `/email auto` — the zero-typing path: the agent opens Google's page, can
+   * click "Create app password" itself, then READS the 16-char code off the
+   * screen with local OCR and proves it against Gmail before saving it.
+   * 2FA / the login step stays human — Google allows nothing else.
+   */
+  async function emailAuto(rawArgs) {
+    const sub = String(rawArgs ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+    const file = mailFileFor(config);
+    const cfg = loadMailConfig(file);
+    const user = cfg.user || selfMail.AGENT_MAILBOX;
+
+    if (!sub || sub === 'help') {
+      try { await pc.openTarget(mailAuto.APP_PASSWORD_URL); } catch { /* owner can open it */ }
+      return mailAuto.autoIntro();
+    }
+
+    if (sub === 'create') {
+      if (!ocr.ocrAvailable()) return `📷 OCR chahiye (screen padhne ke liye):\n\`sudo dnf install tesseract\`\nYa code khud dekh ke bhej do: \`/email setup ${user} <app-password>\``;
+      try {
+        const target = await finder.locateOnScreen(config, 'Create app password', log);
+        await pc.click(target.x, target.y);
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+      } catch (err) {
+        return `🖱️ "Create app password" button khud nahi daba paya (${err?.message ?? err}).\nPage pe wo button aap dabao, phir \`/email auto grab\` — code main padh lunga.`;
+      }
+      return emailAuto('grab');
+    }
+
+    if (sub === 'grab') {
+      if (!ocr.ocrAvailable()) return `📷 OCR chahiye (screen padhne ke liye):\n\`sudo dnf install tesseract\`\nYa code khud dekh ke bhej do: \`/email setup ${user} <app-password>\``;
+      let shot;
+      try {
+        shot = await ocr.ocrScreen(config);
+      } catch (err) {
+        return `📸 Screen padh nahi paya: ${err?.message ?? err}\n(\`bash scripts/fix-desktop.sh\` chalane se screenshots theek ho jaate hain)`;
+      }
+      const candidates = mailAuto.extractAppPasswordCandidates(shot.text);
+      if (!candidates.length) {
+        return '🔍 Screen pe 16-character app password nahi mila.\n"Create app password" dabane ke baad jo code dikhta hai wo screen pe khula rakho, phir `/email auto grab` dobara.';
+      }
+      const verifyOne = async (candidate) => {
+        const client = createImapClient({ host: cfg.host || 'imap.gmail.com', port: cfg.imapPort || 993, user, pass: candidate });
+        try {
+          await client.connect();
+          return true;
+        } catch {
+          return false;
+        } finally {
+          try { await client.logout?.(); } catch { /* bye */ }
+        }
+      };
+      const found = await mailAuto.findWorkingCandidate(candidates, verifyOne, { log });
+      if (!found.ok) {
+        return [
+          `🔍 ${mailAuto.describeCandidates(candidates)} — lekin Gmail ne koi accept nahi kiya (${found.tried.length} try).`,
+          'Screen pe code saaf dikh raha ho to phone se photo bhej do, ya seedha: `/email setup ' + user + ' <app-password>`.',
+        ].join('\n');
+      }
+      // Verified by Gmail itself — now seal it and run the normal live test.
+      return saveMailSetup({ address: user, secret: found.candidate, provider: 'gmail' }, {
+        file, dataDir: mailDataDir(), log,
+      });
+    }
+
+    return mailAuto.autoIntro();
+  }
+
+  // ── 📧 email helpers (3.14.0) ──────────────────────────────────────────────
+  function mailDataDir() {
+    return config.dataDir ?? path.join(ROOT, 'data');
+  }
+
+  /** `/email setup …` and legacy `/mail setup …` share one path. */
+  async function emailSetup(rawArgs) {
+    const parsed = parseSetupArgs(rawArgs);
+    if (parsed.error === 'empty') return setupGuide('');
+    return saveMailSetup(parsed, { file: mailFileFor(config), dataDir: mailDataDir(), log });
+  }
+
+  /** Live IMAP + SMTP check against the saved account (no password in output). */
+  async function emailTest() {
+    const file = mailFileFor(config);
+    const cfg = loadMailConfig(file);
+    if (!cfg.user) return setupGuide('');
+    const secret = resolveStoredSecret(cfg, { dir: mailDataDir(), log });
+    if (typeof secret !== 'string' || !secret) {
+      return `📧 ${secret?.error ?? 'password missing'} — \`/email setup ${cfg.user} <app-password>\` se dobara lagao.`;
+    }
+    const report = await verifyMailSetup({ ...cfg, pass: secret }, { log });
+    return report.text;
+  }
+
+  /** `/email send <to> <subject> | <body>` */
+  async function emailSend(rawArgs) {
+    const text = String(rawArgs ?? '').trim();
+    const first = /^(\S+)\s+([\s\S]+)$/.exec(text);
+    if (!first) return '✉️ Usage: `/email send to@x.com Subject | body`';
+    const to = first[1];
+    const [subject, ...bodyParts] = first[2].split('|');
+    const body = bodyParts.join('|').trim();
+    if (!body) return '✉️ Body chahiye: `/email send to@x.com Subject | body`';
+    const result = await sendMail({ to, subject, text: body }, { config, log });
+    return result.text;
+  }
+
+  /**
+   * `/email signup` builds the identity, `go` opens Google's form, `type` puts
+   * the sealed password into the focused field (owner-confirmed, never echoed).
+   */
+  /**
+   * 🌐 `/email web` — send through the browser session that is already logged
+   * into Gmail. No app password, no SMTP credentials, no setup.
+   * Only one click is automated (Send) and the result is verified against
+   * Gmail's own "Message sent" toast; an unverified click is reported as
+   * unverified, never as success.
+   */
+  /**
+   * 🌐 Browser-send, structured so callers can fall back honestly.
+   * status: sent | unverified | failed | nosession | nosend
+   */
+  async function emailWebSend({ to, subject, body }) {
+    const nap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    let plan;
+    try {
+      plan = emailWeb.buildComposeUrl({ to, subject, body });
+    } catch (err) {
+      return { status: 'nosend', text: `🌐 ${err?.message ?? err}` };
+    }
+    try {
+      await pc.openTarget(plan.url);
+    } catch (err) {
+      return { status: 'nosession', text: `🌐 Browser khul nahi paya (${err?.message ?? err}).` };
+    }
+    // Gmail compose load hone do; lambi body clipboard se paste hoti hai.
+    await nap(plan.mode === 'paste' ? 3200 : 3500);
+    if (plan.mode === 'paste') {
+      try {
+        await pc.pasteText(body);
+        await nap(700);
+      } catch (err) {
+        return { status: 'nosend', text: `🌐 Body paste nahi ho paya (${err?.message ?? err}).` };
+      }
+    }
+
+    // 🖱️ Send khud dabao — OCR (plain/inverted/zoomed) → blue-button colour
+    // search → Ctrl+Enter. Owner ko kuch click nahi karna.
+    const pressed = await clickSend({
+      capture: () => pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }),
+      ocrWords: (frame) => finder.ocrScreenshot(frame),
+      invert: invertForOcr,
+      click: (x, y) => pc.click(x, y),
+      keys: (combo) => pc.keyCombo(combo),
+      wait: nap,
+      log,
+    });
+    if (!pressed.ok) {
+      const why = pressed.reason === 'noscreen'
+        ? 'display se screenshot hi nahi mila (PC locked / headless / portal block)'
+        : pressed.ocrBroken
+          ? 'OCR (tesseract) hi nahi chala — compose ka Send dhoondhne ke 3 tareeke rehte hi nahi'
+          : 'compose window screen par nahi tha (browser background me, ya Gmail logged out)';
+      const debug = (pressed.tried ?? []).slice(-3).map((line) => `   · ${line}`);
+      return {
+        status: 'nosend',
+        plan,
+        tried: pressed.tried,
+        text: [
+          `🌐 *Send* button nahi mila — wajah: ${why}.`,
+          ...debug,
+          '• Compose ko saamne lao (Chrome full-screen) aur 2 second baad `/mailme` dobara bhejo.',
+          `• Ya bina browser: \`/email send ${plan.to} …\` (SMTP).`,
+        ].join('\n'),
+      };
+    }
+
+    await nap(2200);
+
+    // Gmail ka apna toast padho — click ka matlab "delivered" nahi hota. Toast
+    // na aaye to Ctrl+Enter (coordinate hi nahi) se send finish karo: scaled
+    // Wayland display par screenshot physical pixel me hota hai aur pointer
+    // logical pixel me, isliye click miss ho sakta hai.
+    const outcome = await finishSend({
+      pressed,
+      readVerdict: async () => {
+        const shot = await ocr.ocrScreen(config);
+        return emailWeb.detectSentState(shot.text);
+      },
+      pressShortcut: (combo) => pc.keyCombo(combo),
+      wait: nap,
+    });
+    const verdict = outcome.verdict;
+
+    const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
+    const how = `\n🖱️ Send khud dabaya — ${describeMethod(pressed.method)}, attempt ${pressed.attempts ?? 1}`
+      + (outcome.usedShortcut ? '\n⌨️ Toast na aaya to Ctrl+Enter bhi dabaya' : '');
+    if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.${how}` };
+    if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.${how}` };
+    return {
+      status: 'unverified',
+      plan,
+      text: [
+        head,
+        '❔ Send (aur Ctrl+Enter) dono dabaye, par Gmail ka *Message sent* nahi dikha.',
+        '• Compose window abhi bhi khula hai? Matlab Gmail ka keyboard shortcut off hai — Settings → *Keyboard shortcuts* on karo.',
+        '• Sent folder me ek baar dekh lo — agar mail wahan hai to sab theek hai.',
+        how,
+      ].join('\n'),
+    };
+  }
+
+  /**
+   * `/mailme <text>` — ONE line: apne hi inbox pe note bhej do.
+   * Pehle browser (zero credentials), phir SMTP (agar configured ho).
+   */
+  async function mailmeCommand(rawArgs) {
+    const body = String(rawArgs ?? '').trim();
+    const to = resolveOwnerEmail({ config, store });
+    if (!to) {
+      // Koi default nahi: pehle owner apna address de, tab hi mail jaayega.
+      return [
+        '✉️ *Mail me* — abhi koi address set nahi hai (default jaan-boojh kar nahi rakha).',
+        'Ek baar batao: `/email to you@example.com`',
+        'ya `.env` me `OWNER_EMAIL=you@example.com` likh do.',
+        '',
+        'Uske baad: `/mailme <jo bhejna hai>`',
+      ].join('\n');
+    }
+    if (!body) {
+      return [
+        `✉️ *Mail me* → ${to}`,
+        'Bhejo: `/mailme <jo bhejna hai>` — subject khud ban jaata hai.',
+        'Address badalna: `/email to you@example.com`',
+      ].join('\n');
+    }
+    const subject = autoSubject(body);
+
+    const web = await emailWebSend({ to, subject, body });
+    if (web.status === 'sent' || web.status === 'unverified') {
+      return `${web.text}\n_🌐 browser se — koi app password nahi_`;
+    }
+
+    const smtp = await sendMail({ to, subject, text: body }, { config, log });
+    if (smtp.ok) {
+      return `${smtp.text}\n_✉️ SMTP se (browser path: ${web.status})_`;
+    }
+    return [
+      web.text,
+      '',
+      smtp.text,
+      '',
+      '_Dono raste fail — `/email web check` se Gmail login dekho, ya `/email setup <address> <app-password>` se SMTP lagao._',
+    ].join('\n');
+  }
+
+  async function emailWebCommand(rawArgs) {
+    const raw = String(rawArgs ?? '').trim();
+    const first = raw.split(/\s+/)[0] ?? '';
+    const sub = first.toLowerCase();
+
+    if (!sub || sub === 'help') return emailWeb.webIntro();
+
+    if (sub === 'check' || sub === 'status') {
+      try {
+        await pc.openTarget(emailWeb.GMAIL_INBOX);
+      } catch (err) {
+        return `🌐 Browser khul nahi paya (${err?.message ?? err}).\nConsole se khol lo: xdg-open ${emailWeb.GMAIL_INBOX}\n(Headless PC par \`/email send …\` SMTP wala rasta use karo.)`;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      try {
+        const shot = await ocr.ocrScreen(config);
+        return emailWeb.describeLogin(emailWeb.detectLoginState(shot.text));
+      } catch (err) {
+        return `🌐 Screen padh nahi paya (${err?.message ?? err}) — \`bash scripts/fix-desktop.sh\` chalane se screenshots theek ho jaate hain.`;
+      }
+    }
+
+    // `/email web send …` ya seedha `/email web to@x.com Subject | body`.
+    const sendArgs = sub === 'send' ? raw.slice(first.length).trim() : raw;
+    if (!sendArgs) return emailWeb.webIntro();
+    const parsed = /^(\S+)\s+([\s\S]+)$/.exec(sendArgs);
+    if (!parsed) return '🌐 Usage: `/email web send to@x.com Subject | body`';
+    const to = parsed[1];
+    const [subjectPart, ...bodyParts] = parsed[2].split('|');
+    const body = bodyParts.join('|').trim();
+    if (!body) return '🌐 Body chahiye: `/email web send to@x.com Subject | body`';
+
+    const result = await emailWebSend({ to, subject: subjectPart.trim(), body });
+    if (result.status === 'nosession') {
+      return `${result.text}\nHeadless PC par \`/email send ${to} …\` (SMTP) use karo.`;
+    }
+    if (result.status === 'nosend') {
+      return `${result.text}\n• Compose window saamne rakho (browser background me ho to lao) aur 2s baad dobara bhejo, ya\n• \`/email send ${to} …\` (SMTP rasta).`;
+    }
+    return result.text;
+  }
+
+  async function emailSignup(rawArgs, ctx = {}) {
+    const raw = String(rawArgs ?? '').trim();
+    const parts = raw.split(/\s+/);
+    const sub = (parts[0] || '').toLowerCase();
+    const rest = raw.slice(parts[0] ? parts[0].length : 0).trim();
+    const dir = mailDataDir();
+    const identity = selfMail.loadIdentity({ dir }) ?? selfMail.createIdentity({ dir, log }).identity;
+    const username = String(identity?.address ?? selfMail.AGENT_MAILBOX).split('@')[0];
+    const profile = gmailSignup.profileFromFacts(store.data.facts ?? {});
+
+    // 🪪 availability hint — Google's own gxlu endpoint, best effort.
+    if (sub === 'check') {
+      const result = await gmailSignup.checkUsername(rest || username);
+      return gmailSignup.describeAvailability(result);
+    }
+
+    // Form kholo + batao kya karna hai (password pehle se sealed ready hai).
+    if (sub === 'start' || sub === 'go') {
+      try {
+        await pc.openTarget(gmailSignup.SIGNUP_URL);
+      } catch (err) {
+        return `🪪 Signup page khud kholo: ${gmailSignup.SIGNUP_URL}\n(${err?.message ?? err})`;
+      }
+      return [
+        gmailSignup.signupChecklist({ username, profile }),
+        '',
+        '📄 Page khul gaya — ab `/email signup fill` bhejo (jo field dikhega wo bhar dunga).',
+      ].join('\n');
+    }
+
+    // Jo field screen pe visible hai, label se dhoondh ke bharo.
+    if (sub === 'fill') {
+      const plan = gmailSignup.signupFieldPlan({ username, profile });
+      const filled = [];
+      const skipped = [];
+      for (const field of plan) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const target = await finder.locateOnScreen(config, field.label, log);
+          // eslint-disable-next-line no-await-in-loop
+          await pc.click(target.x, target.y);
+          try { await pc.keyCombo('ctrl+a'); } catch { /* empty field */ }
+          if (field.secret) {
+            // The sealed password goes straight to the keyboard — never a reply.
+            // eslint-disable-next-line no-await-in-loop
+            await selfMail.typeSecretIntoField({ typeText: (value) => pc.typeText(value), opts: { dir } });
+          } else {
+            // eslint-disable-next-line no-await-in-loop
+            await pc.typeText(field.value);
+          }
+          filled.push(field.label);
+        } catch {
+          skipped.push(field.label);
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      const tail = skipped.length
+        ? '\n\n_Agar koi field nahi mila: us card pe pahunch ke dobara `/email signup fill`._'
+        : '';
+      return `${gmailSignup.describePlan(plan, { filled, skipped })}${tail}`;
+    }
+
+    // Purana path: password field pe cursor rakh ke type karwana.
+    if (sub === 'type') {
+      if (!selfMail.loadIdentity({ dir })) return '🪪 Pehle `/email signup` chalao (identity banti hai).';
+      if (!ctx.confirmed) return requestConfirm('email', 'type');
+      const timer = setTimeout(() => {
+        selfMail.typeSecretIntoField({ typeText: (secret) => pc.typeText(secret), opts: { dir } })
+          .then(() => notifyOwner('🔐 Password type ho gaya. Galat field ho to turant Ctrl+A → Backspace.'))
+          .catch((err) => notifyOwner(`🔐 Type fail: ${err?.message ?? err}`));
+      }, 3000);
+      timer.unref?.();
+      return '⏳ 3 second me type karunga — abhi password field pe click karke cursor rakh do…';
+    }
+
+    return [
+      gmailSignup.signupChecklist({ username, profile }),
+      '',
+      selfMail.identityStatus({ dir }),
+      '',
+      selfMail.gmailLimits(),
+    ].filter(Boolean).join('\n');
+  }
+
   async function handleCommand(cmd, args, ctx) {
     // 3.6.0 quick hooks into existing commands (look diff / webcam timelapse / yt playlist)
     if (cmd === 'look' && /^diff\b/i.test(String(args ?? ''))) return diffFlow();
@@ -3705,11 +4101,50 @@ export function createAgent({
         // 📧 Mail monitor — IMAP digest (Gmail app-password works).
         const raw = String(args || '').trim();
         const [sub, ...rest] = raw.split(/\s+/);
-        if (sub === 'setup') return setupMail(rest.join(' '));
+        if (sub === 'setup') return await emailSetup(rest.join(' '));
         if (sub === 'on') return setMonitor(true);
         if (sub === 'off') return setMonitor(false);
         if (sub === 'status') return mailStatus();
         return checkMail();
+      }
+      case 'mailme': case 'emailme': case 'mailmein': return await mailmeCommand(args);
+      case 'email': {
+        // 📧 3.14.0 — easy setup (auto-detect + live test), sending, and the
+        // agent's own mailbox identity. Secrets are sealed and never echoed.
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        const subCmd = (sub || '').toLowerCase();
+        if (!subCmd || subCmd === 'status') {
+          const mailmeTo = resolveOwnerEmail({ config, store });
+          return `${mailSetupStatus({ file: mailFileFor(config) })}\n\n📮 \`/mailme\` → ${mailmeTo || '*set nahi* · `/email to you@example.com`'}\n\n${selfMail.identitySummary({ dir: mailDataDir() })}`;
+        }
+        if (subCmd === 'setup' || subCmd === 'add') return await emailSetup(rest.join(' '));
+        if (subCmd === 'me' || subCmd === 'self') return await mailmeCommand(rest.join(' '));
+        if (subCmd === 'to') {
+          const address = rest.join(' ').trim().toLowerCase();
+          if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(address)) return '📧 Usage: `/email to you@example.com`';
+          store.data.ownerEmail = address;
+          store.save?.();
+          return `📧 \`/mailme\` ab *${address}* pe bhejega. (Kabhi bhi badal sakte ho.)`;
+        }
+        if (subCmd === 'guide' || subCmd === 'help') return setupGuide(rest.join(' '));
+        if (subCmd === 'test' || subCmd === 'verify') return await emailTest();
+        if (subCmd === 'send' || subCmd === 'mail') return await emailSend(rest.join(' '));
+        if (subCmd === 'forget' || subCmd === 'wipe') return forgetMail({ file: mailFileFor(config) });
+        if (subCmd === 'auto') return await emailAuto(rest.join(' '), ctx);
+        if (subCmd === 'web') return await emailWebCommand(rest.join(' '));
+        if (subCmd === 'signup' || subCmd === 'identity') return await emailSignup(rest.join(' '), ctx);
+        if (subCmd === 'type') return await emailSignup('type', ctx);
+        return [
+          '📧 *Email commands*',
+          '• `/email setup psd_ai@gmail.com` — guide · `… abcd efgh ijkl mnop` — save + live test',
+          '• `/email send to@x.com Subject | body` · `/email test` · `/email status` · `/email forget`',
+          '• `/email auto` — agent khud app password banwaye + screen se padhke save kare (copy-paste nahi)',
+          '• `/mailme <text>` — apne hi inbox par ek line bhej do (browser se, password nahi)',
+          '• `/email web check|send … <to> <subject> | <body>` — bina password, Chrome ke logged-in Gmail se bhejo',
+          '• `/email to you@example.com` — /mailme ka address badlo',
+          '• `/email signup` — nayi mailbox identity · check = naam available? · start = form kholo · fill = fields bharo',
+        ].join('\n');
       }
       case 'make': {
         // 🛠️ Deliverables — report/slides/dashboard/csv files.

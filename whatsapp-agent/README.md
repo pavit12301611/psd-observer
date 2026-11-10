@@ -301,6 +301,89 @@ Voice notes, photos and documents sent on WhatsApp are transcribed / OCR'd /
 read and summarised automatically; a voice note that says "chrome kholo" opens
 Chrome.
 
+### Email — setup, sending, aur agent ki apni mailbox (3.14.0)
+
+```text
+/email setup psd_ai@gmail.com               provider auto-detect + 3-step guide (app-password link)
+/email setup psd_ai@gmail.com abcd efgh ijkl mnop
+                                            save + LIVE test: IMAP login + SMTP auth
+/email test                                 dono directions dobara check
+/email send to@x.com Report ready | body    isi PC se bhejo (465 TLS / 587 STARTTLS)
+/email status · /email forget               masked status · credentials wipe
+/mailme <text>                              ek line → aapke inbox, Send bhi khud (address `/email to` se)
+/email to you@example.com                   /mailme ka address badlo
+/email web check|send …                     bina password: Chrome ke logged-in Gmail se bhejo
+/email auto                                 page kholo · auto create = button khud dabao · auto grab = code khud padho
+/email signup                               agent ki apni identity (psd_ai@gmail.com)
+/email signup go · /email type · /email signup   page kholo → field pe cursor → "haan" → khud type karta hai
+/mail today · /mail on|off                  purana digest + priority alerts (same account)
+```
+
+Gmail/Outlook/Yahoo/iCloud/Zoho/Rediffmail hosts khud detect hote hain — aapko
+sirf **app password** chahiye (`myaccount.google.com/apppasswords`; normal Gmail
+password kaam nahi karega). Setup ke saath hi agent live test karta hai aur fail
+pe seedha reason deta hai ("app password galat", "port 587 ne STARTTLS refuse
+kiya", "office Wi-Fi block kar raha hai").
+
+**Sabse chhota rasta:** `/mailme <jo bhejna hai>` — subject khud banta hai, aur
+**Send button bhi agent khud dabata hai** (aapko click nahi karna). Address pehle
+ek baar dena hoga (`/email to you@example.com`, ya `.env` me `OWNER_EMAIL=`); koi
+hardcoded default nahi hai, isliye bina address `/mailme` bhejne ki koshish nahi
+karta. Browser na chale to apne aap SMTP par fallback hota hai.
+
+**Send button pakka mile:** Gmail ka *Send* white text on blue fill hai, isliye OCR
+usko aksar miss karta hai (aur tesseract na ho to bilkul hi nahi padhta). Isliye
+press 4 tareeke try karta hai, isi order me — plain OCR → **inverted** (black-on-white)
+OCR → **2× zoom** kiye lower-half ka OCR → **rang se button** (Gmail blue, button
+shape, halke page ke andar). Aakhri hathyar **Ctrl+Enter** hai, Gmail ka apna send
+shortcut — usme coordinate hi nahi, galat cheez click hone ka sawal nahi. Blue box
+sirf tab click hota hai jab ek hi ho aur button jaisa dikhe (do barabar ke blue box
+= no click); split-button ke ▾ arrow se bachne ke liye click label ke 40% par hota
+hai. Reply me tareeka, attempt number aur Gmail ka toast dono likhe aate hain.
+
+**Click ke baad bhi confirm hota hai:** Wayland par portal ka screenshot *physical*
+pixels me aata hai aur pointer *logical* pixels me chalta hai (125% scaling par dono
+alag) — isliye sahi jagah ka click kabhi-kabhi asar nahi karta. Aisa hone par agent
+Gmail ka **Ctrl+Enter** dabata hai (usme coordinate hi nahi) aur phir dobara toast
+padhta hai. Gmail ne error dikhaya ho to shortcut nahi dabta, aur mail pehle hi ja
+chuki ho to compose band hota hai — double send ka khatra nahi.
+
+**Password hi nahi chahiye?** `/email web send to@x.com Subject | body` — jo Gmail
+Chrome me logged-in hai wahi use hota hai: compose prefill, sirf *Send* click, aur
+Gmail ke "Message sent" toast se verify. `/email web check` pehle login state bata
+deta hai. (Headless/locked PC par SMTP wala `/email send` hi chalega.)
+
+**Copy-paste nahi karna?** `/email auto` → Google ka app-password page khulta hai.
+`/email auto create` *Create app password* khud dabata hai aur `/email auto grab`
+screen se 16-character code **khud OCR karke padhta hai** — aur tabhi maanta hai jab
+Gmail login accept kar le (galat OCR guess apne aap reject). Sirf login + 2FA
+aapka hai, kyunki Google uske bina app password deta hi nahi.
+
+**Password sirf bot ke paas:** app password `data/mail.json` me *sealed*
+(AES-256-GCM) jaata hai, key `data/.mail-key` (mode `0600`) me hoti hai. Reply,
+`/email status`, logs aur error messages me password kabhi nahi aata — sirf
+`••••••••`. Iska matlab: **backup me `data/.mail-key` bhi le jao**, warna
+`/email setup` dobara karna padega (wahi recovery path hai, decryption nahi).
+
+**Nayi Gmail banani hai?** `/email signup` ek assistant hai, jadoo nahi:
+
+```text
+/email signup check            naam pehle se kisi ka hai? + alternatives
+/email signup start            signup page kholta hai (password already sealed)
+/email signup fill             jo fields screen pe dikhein, label se dhoondh ke bhar deta hai
+/email signup type             sirf password field pe cursor rakh ke type karta hai
+```
+
+Naam/birthday `/remember` kiye facts se aate hain (guess nahi). Password
+20-character, sealed, aur **sirf keyboard tak** jaata hai — chat me kabhi nahi.
+**Phone OTP + captcha aap hi karo**: Google ke paas `@gmail.com` banane ka koi
+public API nahi hai aur automated signup Terms ke against hai — isliye ye ek
+cheez insaan ke bina nahi hoti. Account ban jaane ke baad `/email auto create`.
+
+Agar `psd_ai@gmail.com` pehle se aapka hai, seedha `/email setup psd_ai@gmail.com`.
+
+Purana `/mail setup imap.gmail.com user apppass` bhi chalta rahega.
+
 ---
 
 ## 5. The free brain (optional but recommended)

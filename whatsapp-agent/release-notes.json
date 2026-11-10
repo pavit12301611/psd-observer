@@ -1,4 +1,107 @@
 {
+  "3.14.8": {
+    "title": "⌨️ Click miss ho jaye to Ctrl+Enter se send — mail ab nikalna nahi rukega",
+    "bullets": [
+      "**Report**: reply ne bola 'blue button, attempt 2' — par compose waisa hi khula reh gaya, mail gaya nahi. Matlab click *locate* ho gaya tha, par asar nahi hua.",
+      "**Wajah**: Wayland par portal ka screenshot **physical** pixels me aata hai aur pointer **logical** pixels me chalta hai (125% scaling par dono alag). Isliye sahi dikhne wala coordinate galat jagah par gir sakta hai.",
+      "**Fix**: click ke baad Gmail ka toast padha jaata hai. Toast na aaye to agent **Ctrl+Enter** (Gmail ka apna send shortcut) dabata hai — usme coordinate hi nahi, isliye scaling ka sawal hi nahi — aur phir dobara confirm karta hai.",
+      "**Double-send ka khatra nahi**: Gmail ne error dikhaya ho to shortcut dabaya hi nahi jaata; aur agar mail pehle hi ja chuki ho to compose band hota hai, Ctrl+Enter kisi aur cheez par nahi girta.",
+      "**Reply me poora sach**: kaun sa tareeka chala (OCR / inverted / zoom / blue button / Ctrl+Enter), kaun attempt, aur shortcut laga ya nahi.",
+      "**Agar phir bhi confirm na mile**: reply kehta hai compose khula hai to Gmail Settings → *Keyboard shortcuts* on karo, aur Sent folder check karne ko.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 687 → 688: toast turant mile to shortcut nahi, click miss ho to Ctrl+Enter aur dobara verify, Gmail error par dobara send nahi, pehle se shortcut ho to repeat nahi, keyboard fail ho to honest unknown."
+    ]
+  },
+  "3.14.7": {
+    "title": "🎯 Send button ab rang se bhi milta hai — 4 tareeke, phir hi haar",
+    "bullets": [
+      "**Asli report**: compose khula tha, Send dikh raha tha, par bot ne phir bhi 'Send button nahi mila' bola — kyunki OCR white-on-blue 12px label padh hi nahi paya (ya tesseract hi missing tha).",
+      "**Ab 4 tareeke, isi order me**: plain OCR → inverted (black-on-white) OCR → **2× zoom** kiye hue lower-half ka OCR → aur phir **rang se button** (Gmail blue, button shape, halke page ke andar). Sab fail ho to aakhri hathyar **Ctrl+Enter** (Gmail ka apna send shortcut) — usme coordinate hi nahi, galat cheez click hone ka sawal nahi.",
+      "**Rang wala path OCR par depend nahi karta** — isi liye locale, dark theme aur 'tesseract install hi nahi hai' teeno case me kaam karta hai.",
+      "**Safety**: blue box sirf tab click hota hai jab wo button jaisa ho (chaudai:unchai 1.1–7, bhara hua, halke ring ke andar) aur **ek hi** ho — do barabar ke blue box dikhein to click nahi, Ctrl+Enter. Split-button ke ▾ arrow se bachne ke liye click label ke 40% par hota hai, centre par nahi.",
+      "**Screenshot par test kiya**: aapke bheje screenshot (1920×1200) par ring se theek **ek** blue button mila — (354, 1048) — wahi Send.",
+      "**Fail hone par ab sach**: OCR chala hi nahi (tesseract missing) / compose screen par nahi tha / screenshot hi nahi mila — teen alag wajah, aur aakhri 3 attempt ki asli lines reply me.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 684 → 687: colour search (blue button mila, square dock icon reject, dark theme reject, do barabar box = no click), Ctrl+Enter fallback, zoom→screen coordinate mapping, aur tesseract ENOENT ka alag signal."
+    ]
+  },
+  "3.14.6": {
+    "title": "🖱️ Send khud dabta hai — OCR ab white-on-blue button bhi padhta hai",
+    "bullets": [
+      "**`/mailme` khud Send dabata hai**: 3 attempts, har attempt me pehle plain frame phir **inverted** frame ka OCR — owner ko sirf command dena hai, click kabhi nahi karna.",
+      "**Asli wajah fix hui**: Gmail ka Send white text on blue fill hota hai, aur tesseract light-on-dark kharab padhta hai — isi liye pehle bot 'khud Send dabao' bol deta tha.",
+      "**Do engines**: `sharp` ho to wahi invert karta hai, warna pure-JS `pngjs` — koi native build/compile fail nahi.",
+      "**Naya `sendbutton.js`**: labels Send / Send message / Send mail / Senden / Enviar; click sirf locate hue label ke centre par — blind coordinate kabhi nahi (galat click draft uda deta hai).",
+      "**Reply me poora sach**: Send dabaya (attempt number) + Gmail ne kya dikhaya — sent / unverified / failed / button nahi mila.",
+      "**Button na mile to**: saaf wajah (compose khula hi nahi / browser background me / Gmail logged out) aur do raaste — 2s baad dobara `/mailme`, ya browser ke bina `/email send …` (SMTP).",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 681 → 684: label picking, inverted-frame second pass, asli pixel inversion (blue fill → light, alpha same), 3-attempt budget bina click ke, no-display reason, aur `/mailme` ka reply jo manual click nahi maangta."
+    ]
+  },
+  "3.14.5": {
+    "title": "🧹 Revert: koi pre-set email address nahi — address aap doge tabhi jaayega",
+    "bullets": [
+      "**Hardcoded default hata diya**: `/mailme` ka koi built-in inbox nahi hai. Address pehle `/email to you@example.com` (ya `.env` me `OWNER_EMAIL=`) se aana chahiye — warna command bas poochta hai, bhejta nahi.",
+      "**Kyun yehi sahi hai**: agent ko kisi ke mailbox ka default pata hona hi nahi chahiye — ek galti se `/mailme` kisi aur ke inbox me chala jaata. Ab target sirf owner batata hai.",
+      "**Baaki sab waisa hi**: subject auto, browser pehle + SMTP fallback, dono fail ho to ek hi reply me sach.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 681 → 681 (asserts badle, count same): bina address `/mailme` bhejta nahi, `/email to` set hone ke baad hi jaata hai, aur junk memory value kisi invented address me nahi badalti."
+    ]
+  },
+  "3.14.4": {
+    "title": "✉️ /mailme — ek line aur mail chala jayega",
+    "bullets": [
+      "**Ek command**: `/mailme kal ka schedule yaad rakhna` — subject khud ban jaata hai (`Observer · kal ka schedule…`), address `/email to` se set hota hai,. Koi to/subject likhne ki zarurat nahi.",
+      "**Do raste, automatic fallback**: pehle browser wala `/email web` (koi password nahi) — wahan Gmail/session na mile to apne aap SMTP (`/email send`) par gir jaata hai, aur reply me saaf likhta hai kaunsa rasta chala.",
+      "**Address badalna**: `/email to you@example.com` (ya `.env` me `OWNER_EMAIL=`) — memory ka email fact bhi utha leta hai, par junk address kabhi default ko nahi harata.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 679 → 681: /mailme target priority (store > env > memory > default), subject cap, `/email to` persistence, aur browser+SMTP dono fail hone par ek hi reply me dono ka sach."
+    ]
+  },
+  "3.14.3": {
+    "title": "🌐 /email web — bina password email (Chrome ke logged-in Gmail se)",
+    "bullets": [
+      "**Setup khatam**: koi app password nahi, koi 2FA setup nahi, koi SMTP/IMAP nahi. `/email web check` se pata chalta hai Chrome me Gmail logged-in hai ya nahi — phir `/email web send to@x.com Subject | body`.",
+      "**Sirf ek click** (`src/emailweb.js`): compose ke to/subject/body Gmail ke prefill link se khud bhar jaate hain, agent sirf *Send* dabata hai. Lambi body URL limit se bachne ke liye clipboard se paste hoti hai.",
+      "**Jhooth nahi bolta**: Send dabane ke baad Gmail ke \"Message sent\" toast ko padh ke confirm karta hai — toast na mile to \"Sent folder check karo\", error dikhe to \"mail nahi gaya\".",
+      "**Donon raste saath**: browser wala `/email web` foreground PC ke liye, aur SMTP wala `/email send` headless/locked PC ke liye (jo verify + sealed password ke saath chalta hai).",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 676 → 679: compose URL (encoding, subject flatten, 1200+ chars → paste mode, header-injection reject), login/send verdict parsing, aur headless PC par honest fallback (`/email send` ka naam le kar)."
+    ]
+  },
+  "3.14.2": {
+    "title": "🪪 Nayi Gmail banane ka assistant — availability check + form auto-fill (OTP aapka)",
+    "bullets": [
+      "**Naam pehle check karo**: `/email signup check` — `psd_ai@gmail.com` pehle se kisi ka hai ya khali, Google ke apne endpoint se hint (final faisla signup form karega). Taken ho to ready alternatives bhi suggest karta hai.",
+      "**Form bharna ab agent ka kaam (`src/gmailsignup.js`)**: `/email signup fill` screen pe dikh rahe fields ko label se dhoondhta hai (First name, Last name, Username, Password, Confirm, Month/Day/Year) aur click+type karta hai. Password **sealed** hi rehta hai — sirf keyboard tak jaata hai, chat me kabhi nahi.",
+      "**Guess nahi**: naam aur birthday `/remember` kiye facts se aate hain; nahi mile to field khaali chhod deta hai (galat DOB Google me permanently chala jaata, isliye invent nahi karte). Jo field screen pe nahi mila, wo alag se report hota hai — agle card pe dobara `fill`.",
+      "**Sirf OTP aapka**: phone verification + captcha Google khud maangta hai; account creation ka koi API nahi hai. Account banne ke baad `/email auto create` app password khud banwa ke padh leta hai.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 672 → 676: name/birthday parsing (3 formats, invalid dates rejected), fill plan me password mask, availability parser (taken/free/unknown/invalid), checklist ki sach-sach baatein, aur command path jab browser/display na ho."
+    ]
+  },
+  "3.14.1": {
+    "title": "📧 Email bilkul auto — agent khud app password banwaye aur screen se padh le 🔍",
+    "bullets": [
+      "**Sirf 2 cheezein aapki** (`src/mailauto.js`): Gmail login + phone-approval 2FA — Google iske bina app password deta hi nahi, aur uska koi API nahi hai (yahi sach hai, isliye chhupaya nahi).",
+      "**Baaki sab agent karta hai**: `/email auto` Google ka app-password page kholta hai, `/email auto create` *Create app password* button khud dabata hai (OCR + click), aur `/email auto grab` screen se 16-character code **khud padhta hai** — aapko copy-paste, screenshot bhejna ya type karna nahi.",
+      "**Galat padhne ka risk zero-ish**: OCR ki classic galtiyan (0/o, 1/l/|, 5/s, 8/b) fix hoti hain, l↔i ke dono variants try hote hain, aur code tabhi maana jaata hai jab **Gmail khud login accept kare** — warna agla candidate.",
+      "**Phir bhi sealed**: jo code verify hota hai wahi `data/mail.json` me AES-256-GCM sealed jaata hai (key `data/.mail-key` 0600); WhatsApp reply me sirf •••••••• dikhta hai.",
+      "**Shades unchanged**: email/auto se koi taalluk nahi — screen sirf owner ke `/shades off` se wapas aati hai, koi auto-restore nahi.",
+      "Tests 669 → 672: OCR text se code extraction (Google ka 4×4 format, ek hi 16-char run, prose reject, duplicate-free), \"sirf Gmail-accepted candidate\" wala verify loop, aur `/email auto` ka command wiring jab tesseract/screenshot na ho."
+    ]
+  },
+  "3.14.0": {
+    "title": "📧 Email made easy — ek command setup, sach me bhejne wala SMTP, aur agent ki apni mailbox 🔐",
+    "bullets": [
+      "**Ek line me setup (`src/mailsetup.js`)**: `/email setup psd_ai@gmail.com` — Gmail/Outlook/Yahoo/iCloud/Zoho/Rediffmail auto-detect, app-password ka seedha link, phir wahi password bhejo aur agent khud **IMAP login + SMTP auth dono live test** karta hai. Host/port yaad rakhne ki zarurat khatam; galat password pe \"app password galat hai\" jaisa seedha fix milta hai.",
+      "**Sach me email bhejta hai (`src/smtp.js`)**: zero-dependency SMTP (465 implicit TLS + 587 STARTTLS, AUTH PLAIN/LOGIN, UTF-8 subject via RFC 2047, attachments, dot-stuffing, header-injection guard). Pehle \"email kar do\" sirf paid cloud (Auth0 → SendGrid) se jaata tha — ab isi PC se. Naya `/email send to@x.com Subject | body` aur AI action `send_email`.",
+      "**Password sirf bot ke paas (`src/secrets.js`)**: app password `data/mail.json` me *sealed* (AES-256-GCM, key `data/.mail-key` mode 0600) jaata hai — reply, status, log, error kisi me bhi password nahi. `/email status` sirf •••••••• dikhata hai, `/email forget` wipe karta hai.",
+      "**Agent ki apni mailbox (`src/selfmail.js`)**: `psd_ai@gmail.com` ke liye 20-char strong password khud generate karke sealed rakhta hai, signup page kholta hai aur `/email type` pe wahi password **screen pe khud type** karta hai (chat me kabhi nahi). Seedhi baat bhi likhi hai: Google ke paas @gmail.com banane ka public API nahi hai aur OTP aapke phone pe hi aayega — isliye assist, jhootha automation nahi.",
+      "Tests 657 → 669: scripted SMTP server (multi-line EHLO, AUTH, DATA, 535 failure), sealed-secret round-trip + 0600 perms, provider detection, teeno setup shapes, aur \"password kabhi reply me nahi\" ke explicit asserts.",
+      "**Shades unchanged**: email ka is release se koi taalluk nahi — screen phir bhi sirf owner ke `/shades off` se wapas aati hai, koi auto-restore nahi."
+    ]
+  },
   "3.4.3": {
     "title": "🕶️ FLASH-PROOF Shades — brightness keys ab 1 frame bhi screen nahi dikhayenge! ⚡🛡️",
     "bullets": [
@@ -314,7 +417,6 @@
       "🗓️🔄 CHANNELS: Google Calendar sync (`/cal sync <ics-url>` + `/cal export`), `/topic` channels with shared memory, aur speed: lookup cache 553µs→19µs. (Shades rule: auto-restore kabhi nahi — sirf /shades off se.)"
     ]
   },
-  "latest": "3.13.0",
   "3.8.0": "🆕 *PSD_Ai v3.8.0 — Complete Feature Suite (29 upgrades!)*\n\nHar suggestion complete: 11 shelf + 18 naye features.\n\n*Padhai & Voice*\n• /revise call — JARVIS khud call karta hai + revision (voice segments)\n• /today — aaj ka complete timeline\n• /exam add <sub> <date> — exam countdown + auto study schedule\n• /study scan — flashcards photo → OCR → pack\n• /accuracy report — bot ka report card\n\n*Proactive & Smart*\n• /nudges — proactive messages (padh lo, reminder miss, battery)\n• /recap — weekly recap + goal tracker\n• /routine at 7am — morning auto-routines\n• /leaveby — leave-by time calculator (traffic estimate)\n• HW reminders ab escalate hote hain (48h → 24h → 2h bursts)\n\n*PC & Home*\n• /block — study window me distracting sites auto-close\n• /organize — downloads auto-sort\n• /backup now|cloud — zip backup + GitHub upload\n• /timeline — screenshot timeline recall\n• /home — smart home webhooks (lights/AC/TV)\n• /wake — \"Hey JARVIS\" wake word + voice commands\n\n*Family & Safety*\n• /role kids|family + /rolelimit — per-role modes\n• /fun quiz|riddle — timepass\n• /audit — security audit log\n• /pcs ask|all|check — fleet remote commands (queue)\n• Notes meetings se action-items auto-extract\n• /photos ab actual images bhejta hai (top match)\n\nUpdate: BRANCH=main bash <(curl -fsSL https://raw.githubusercontent.com/pavit12301611/psd-observer/main/whatsapp-agent/scripts/observer.sh) update",
   "3.8.1": {
     "title": "Heavy tasks: reliable routing & safe failover",
@@ -432,5 +534,6 @@
       "Take over stops the running agent job and hands input back on request, frame failures back off instead of hanging for 25s, and preview starts when the page opens and pauses when the app is backgrounded.",
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
-  }
+  },
+  "latest": "3.14.8"
 }

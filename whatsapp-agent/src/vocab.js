@@ -282,7 +282,7 @@ export const KNOWN_SLASH_COMMANDS = [
   'watchme', 'recordactions', 'replayactions', 'teach', 'macro', 'macros',
   'location', 'whereami', 'near', 'nearby', 'weather', 'calc', 'unit', 'currency',
   'wiki', 'define', 'vocab', 'word', 'synonym', 'translate', 'news', 'qr', 'url', 'pass',
-  'msg', 'reply', 'broadcast', 'contact', 'contacts', 'guest', 'guests', 'pending',
+  'msg', 'reply', 'broadcast', 'contact', 'contacts', 'guest', 'guests', 'pending', 'email', 'mailme', 'emailme',
   'approve', 'reject', 'block', 'unblock', 'allow', 'inbox',
   'agent', 'do', 'auto', 'autopilot', 'use', 'hands', 'brains', 'models', 'model',
   'doctor', 'solve', 'accuracy', 'verify', 'factcheck', 'reach', 'yt', 'gh', 'reddit', 'hn', 'ui', 'brief', 'undo', 'stop',

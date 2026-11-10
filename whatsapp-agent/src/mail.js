@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { redactPII } from './pii.js';
 import { createImapClient } from './imap.js';
+import { sealSecret, openSecret } from './secrets.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const MAIL_FILE = path.join(ROOT, 'data', 'mail.json');
@@ -23,8 +24,10 @@ export function loadMailConfig(file = MAIL_FILE) {
 
 export function saveMailConfig(cfg, file = MAIL_FILE) {
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    // 0600: credentials are nobody else's business, even on a shared PC.
+    fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(file, 0o600); } catch { /* windows/ro fs */ }
   } catch { /* best effort */ }
 }
 
@@ -39,9 +42,12 @@ export function setupMail(args, opts = {}) {
   const cfg = loadMailConfig(file);
   cfg.host = host;
   cfg.user = user;
-  cfg.pass = pass;
+  cfg.pass = sealSecret(pass, { dir: path.dirname(file) });
+  cfg.provider = cfg.provider ?? 'custom';
+  cfg.setupAt = Date.now();
   saveMailConfig(cfg, file);
-  return `📧 *Mail setup done* — ${user} @ ${host}\nCheck: \`/mail today\` · Monitor: \`/mail on\`\n(_credentials sirf is PC ke data/ folder me hain_)`;
+  // The password is deliberately absent from this reply (sealed on disk instead).
+  return `📧 *Mail setup done* — ${user} @ ${host}\nPassword •••••••• (sealed, 0600) · Test: \`/email test\`\nCheck: \`/mail today\` · Monitor: \`/mail on\``;
 }
 
 const PRIORITY_RE = /(otp|verification|invoice|payment|urgent|action required|due|salary|offer|aadhaar|pan\b)/i;
@@ -71,7 +77,7 @@ export function mailDigest(messages, opts = {}) {
 export async function checkMail(opts = {}) {
   const {
     file = MAIL_FILE,
-    createClient = (cfg) => createImapClient({ host: cfg.host, user: cfg.user, pass: cfg.pass }),
+    createClient = (cfg) => createImapClient({ host: cfg.host, port: cfg.imapPort, user: cfg.user, pass: cfg.pass }),
     limit = MAX_DIGEST,
   } = opts;
   const cfg = loadMailConfig(file);
@@ -79,8 +85,14 @@ export async function checkMail(opts = {}) {
     return '📧 Mail setup nahi hua. `/mail setup imap.gmail.com user@gmail.com apppass` pehle chalao.';
   }
   let client;
+  let pass;
   try {
-    client = createClient(cfg);
+    pass = openSecret(cfg.pass, { dir: path.dirname(file) });
+  } catch (err) {
+    return `📧 Mail password khul nahi raha: ${err?.message ?? err}\n\`/email setup <address> <app-password>\` se dobara lagao.`;
+  }
+  try {
+    client = createClient({ ...cfg, pass });
     await client.connect();
     const messages = await client.fetchUnseen(limit);
     await client.logout?.();

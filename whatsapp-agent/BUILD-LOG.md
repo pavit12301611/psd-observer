@@ -1,5 +1,100 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.8 — click ke baad Ctrl+Enter (Wayland scaling) (2026-11-10)
+
+- Second report on the same flow: "🖱️ Send khud dabaya — blue button, attempt 2" and yet the compose page in the screenshot was untouched — the click was *located* correctly but had no effect. That is the signature of a coordinate-space mismatch, not a miss: `xdg-desktop-portal` screenshots come back in **physical** pixels while `ydotool mousemove --absolute` works in **logical** pixels, so on a 125 % scaled Wayland display the same numbers point somewhere else. Keyboard input was never affected — the pasted body *was* in the compose, which is the proof that only the pointer space is off.
+- `sendbutton.js` gained `finishSend({pressed, readVerdict, pressShortcut, wait})`: read Gmail's toast; if it is `unknown` (no snackbar), press **Ctrl+Enter** — Gmail's own send shortcut, zero coordinates — then read again (1.5 s, and once more at 3.3 s for slow machines). It deliberately does *not* press when the verdict is `failed` (Gmail showed an error: resending a bad message is worse) or when `clickSend` already sent the shortcut.
+- `emailWebSend` now uses it, and the reply says which mechanism fired (`OCR` / `inverted OCR` / `zoomed OCR` / `blue button` / `Ctrl+Enter`) plus whether the shortcut rescue was used. If confirmation still never arrives, the reply asks the two questions that actually decide it: is the compose still open (then Gmail's *Keyboard shortcuts* setting is off), and is the mail already in Sent?
+- No double send: if the earlier click did work, Gmail closes the compose, so Ctrl+Enter has nothing to send; if it showed an error, we never press it.
+- Tests 687 → 688: toast on the first read → no shortcut, miss → shortcut then re-verify, `failed` → no shortcut, `pressed.method === 'shortcut'` → no repeat, keyboard failure → honest `unknown` without throwing.
+
+## 3.14.7 — Send button: colour search + Ctrl+Enter (2026-11-10)
+
+- The owner sent a screenshot: compose open, Send visible, and still "Send button 3 attempts me nahi mila (nobutton)". That killed the assumption behind 3.14.6 — the OCR passes (plain *and* inverted) were not sufficient. Two causes fit the evidence: a 12 px white-on-blue label is small even when negated, and if `tesseract` is missing on the machine every OCR pass throws and the old code reported the same generic `nobutton`.
+- `clickSend` now runs four strategies per attempt and stops at the first hit: (a) plain OCR, (b) inverted-frame OCR, (c) **2× zoom** of the bottom 55 % (`zoomBottomForOcr` + `mapZoomedTarget` map the hit back to real screen pixels), (d) **colour search** for the button itself (`isGmailBlue` → `blueBlobCandidates` → `pickSendBlob`). If all four miss, the last resort is `Ctrl+Enter` (`pc.keyCombo`), Gmail's own send shortcut — zero coordinates, so it can never click the wrong control.
+- The colour path is the one that does not depend on OCR at all: a connected component of Gmail-blue pixels is accepted only when it is filled (≥ 55 %), wide-ish (ratio 1.1–7), of toolbar height (12–90 px), surrounded by a light ring (≥ 40 %) and the **only** candidate of its size — two equal blue boxes means a coin flip between Send and something destructive, so we refuse and use the keyboard instead. Click point is 40 % across the box, not the centre, because the right edge of Gmail's Send is the ▾ arrow (a centre click on a narrow button can open that menu).
+- Verified on the owner's own screenshot (1920×1200): exactly one blue blob survives the filters, box (324,1029,76,38), click point (354,1048) — the Send button.
+- Failures now name the stage: `reason: 'noscreen'` (capture failed), `ocrBroken` (tesseract ENOENT — the OCR passes are skipped instead of being retried pointlessly), otherwise "compose screen par nahi tha". `/mailme`'s reply prints the last three attempt lines verbatim, so a bad next report can be debugged from the message alone.
+- Tests 684 → 687: blue-button found on a white page, square dock icon rejected, blue-on-dark rejected, two equal blue boxes → no click + `Ctrl+Enter` used, zoom→screen coordinate mapping, and tesseract ENOENT surfacing as `ocrBroken`.
+
+## 3.14.6 — Send khud dabta hai: OCR ka inverted pass (2026-11-10)
+
+- The owner's words: "ise bol yeh khud hi send karein, mereko click na karna pade". Clicking already existed — the bug was *finding* the button. Gmail's Send is white text on a blue fill, and tesseract reads light-on-dark badly, so a single plain `locateOnScreen('Send')` (plus one retry of the same frame) often returned nothing and the reply fell back to "khud Send dabao". The fix is a better look, not more of the same look.
+- New `src/sendbutton.js`: `pickSendTarget(words, labels)` (pure, on top of `elementfinder.findTextTarget`), `invertForOcr(buffer)` (`sharp().negate({alpha:false})`, returns `null` when the optional `sharp` is absent), and `clickSend({capture, ocrWords, invert, click, wait, attempts = 3, labels, log})` → `{ok, target?, attempts?, tried[], reason?: 'missing-deps'|'noscreen'|'nobutton'}`. Every dependency is injected, so the whole loop runs in tests without a screen.
+- Per attempt: OCR the plain frame → if no label, negate the frame and OCR again (white-on-blue becomes black-on-white) → click **only** the centre of a located label. Labels: Send / Send message / Send mail / Senden / Enviar. Blind coordinates are never used: a stray click in Gmail can discard the draft, which is worse than a reported failure.
+- `src/commands.js`: `emailWebSend`'s inline `locateOnScreen('Send')` + 1-retry loop is gone, replaced by `clickSend` (3 attempts). The success replies now name the attempt number and the toast verdict (`sent` / `unverified` / `failed`); the `nosend` reply gives the real cause (compose never opened, browser in background, Gmail logged out) and the truthful alternative `/email send …` (SMTP). The old "compose me khud paste karke Send dabao" body-paste line is dropped — it contradicted the no-click promise.
+- `invertForOcr` prefers `sharp` and falls back to a pure-JS `pngjs` negation (`invertPngJs`) so a machine without the native binary still gets the second pass; both return `null` on an undecodable frame and the caller simply keeps the plain one.
+- Tests 681 → 684: label picking (Discard vs Send, centre coordinates, empty list, `null` input), inverted-frame second pass, a real pixel inversion (blue fill → light, alpha untouched), a 3-attempt budget that performs **zero** clicks, a distinct `noscreen` reason, `missing-deps` never throwing, and a `/mailme` reply that no longer asks the owner to click anything.
+
+## 3.14.5 — revert: no pre-set /mailme address (2026-11-10)
+
+- 3.14.4 shipped `DEFAULT_OWNER_EMAIL` baked into `src/mailsend.js` plus `.env.example`. The owner's words: "default nahi rakhna tha, maine to test ke liye bola tha" — and he is right: an agent should never have somebody's inbox as a silent default. A typo'd `/mailme` would have posted to a stranger's mailbox.
+- `resolveOwnerEmail` now returns `''` when nothing is configured (store `/email to` → `OWNER_EMAIL` env → memory fact, then stop). `DEFAULT_OWNER_EMAIL` is gone from code, `.env.example` ships `OWNER_EMAIL=` empty, and all docs/notes mention no personal address.
+- `/mailme` with no target replies with the exact setup line (`/email to you@example.com`) and **sends nothing**; it never guesses. `/email` status shows `set nahi` instead of an invented address.
+- Tests kept at 681 but the assertions inverted: no-address → no send, junk memory value → still no send, `/email to` → then it sends.
+
+## 3.14.4 — /mailme: one line, own inbox, automatic path (2026-11-10)
+
+- The ask was smaller than a feature: "sirf command dun, bas". `/mailme <text>` now sends to the owner's own address with an auto subject (`Observer · <first 60 chars>`), so no `to`/`subject` syntax is ever typed on WhatsApp.
+- `resolveOwnerEmail` priority: `/email to` (store) → `OWNER_EMAIL` env → memory `email`/`gmail` fact → a baked-in default (removed again in 3.14.5 — see below). A malformed memory value never beats the safe fallback.
+- Path selection is explicit and reported: browser first (`/email web`, zero credentials) → SMTP fallback (`/email send`, sealed app password). `emailWebSend` was refactored to return `{status: sent|unverified|failed|nosession|nosend}` precisely so this fallback is decided by a real status, not by string-matching a reply.
+- `/email to <address>` persists the target in `store.data.ownerEmail`; `/email` status now prints the `/mailme` target; `mailme`/`emailme` added to vocab so fuzzy matching finds it.
+- `.env.example` documents `OWNER_EMAIL=`, config exposes `ownerEmail`.
+- Tests 679 → 681: target priority, subject cap, `/email to` validation + persistence, and a send attempt with neither browser nor SMTP account explaining both failures in one reply.
+
+## 3.14.3 — /email web: send from the browser session, zero credentials (2026-11-10)
+
+- Every previous path bottlenecked on "get an app password", which Google refuses to hand out without 2FA + a human click. This one removes the credential entirely: whichever Gmail is logged into Chrome is enough.
+- `src/emailweb.js`: `buildComposeUrl` uses Gmail's `view=cm&fs=1&to&su&body` prefill, so no Compose click and no typing into three fields. Bodies over 1200 chars (or URLs over 1900) switch to `mode: 'paste'` — prefill to+subject, then clipboard-paste the body — instead of silently truncating.
+- Anti-injection: recipient rejects CR/LF (`Bcc:` smuggling) and non-addresses; the subject has newlines flattened and is capped at 200 chars.
+- Only one click is automated (`finder.locateOnScreen('Send')`, retried once after 2s), and the verdict comes from Gmail's own toast: `detectSentState` → sent / failed / unknown. Unknown is reported as "Send dabaya, confirmation nahi mila — Sent folder check karo"; a click is never described as a delivered mail.
+- Wiring: `/email web`, `/email web check` (open inbox → OCR → signed-in/signed-out/unknown), `/email web send <to> <subject> | <body>` (the `send` word is optional). Headless PCs get an explicit pointer to `/email send` (SMTP) instead of a dead end.
+- Tests 676 → 679: URL encoding + subject flattening + paste-mode threshold + header-injection rejection, login/send verdict parsing, and the command path with no display present.
+
+### Notes for next time
+- A prefilled compose URL is the only stable Gmail interface here: the DOM changes, but `view=cm` params have not. Prefer prefill over clicking through Compose.
+- "Sent" must be proven by the toast, not by the compose window closing — Gmail also closes it when it is discarded.
+
+## 3.14.2 — signup assistant: availability check + label-driven form fill (2026-11-10)
+
+- The ask "nayi mail id banani hai" has one wall that code cannot climb: Google has no public @gmail.com creation API, signup needs a phone OTP + captcha, and automated signup violates the Terms. So this release automates everything *around* that wall and says so in the reply text instead of pretending.
+- `src/gmailsignup.js` — `profileFromFacts` reads name/birthday/gender from `store.data.facts` (string or `{value}` shaped), `parseBirthday` accepts `yyyy-mm-dd`, `dd/mm/yyyy` and `12 March 2006`, rejecting month 13 and future years. Nothing is invented: missing fact → missing field.
+- `signupFieldPlan` orders First/Last/Username/Password/Confirm (+ Month/Day/Year, + Gender only when known) and marks the two password fields `secret`, so `describePlan` can only ever print ••••••••.
+- `parseAvailability` reads Google's `gxlu` `COMPASS` cookie (taken) vs 4xx (free) vs anything else (unknown); `checkUsername` validates the handle first (5–30 chars) and returns `unknown` — never a fake "free" — when offline. `describeAvailability` offers concrete alternatives when taken.
+- Wiring in `commands.js`: `/email signup check|start|fill|type`. `fill` walks the plan, locating each label with `finder.locateOnScreen`, clicking, `ctrl+a`, then typing — the sealed password goes through `selfMail.typeSecretIntoField` straight to `pc.typeText`. Fields that are not on screen land in a `skipped` list with a "next card pe dobara fill" hint.
+- Tests 672 → 676: name/birthday parsing (including the rejections), plan ordering + secret masking, availability states, checklist honesty, and the command path with no display/browser present.
+
+### Notes for next time
+- `locateOnScreen` per field is ~1–2s each (screenshot + OCR), so `fill` is deliberately iterative rather than one giant run — Google's signup is a multi-card flow and a stale plan is worse than a short one.
+
+## 3.14.1 — /email auto: the agent reads the app password itself (2026-11-10)
+
+- The complaint after 3.14.0 was right: setup still needed the owner to copy 16 characters out of Google's modal. Gmail app passwords cannot be *created* by a script (no API, 2FA phone approval is mandatory, and Google blocks automated signup), but **reading the box on screen** is automatable — so `src/mailauto.js` does exactly that and nothing more.
+- `extractAppPasswordCandidates`: accepts the 4×4 rendering (`abcd efgh ijkl mnop`), the unbroken 16-char copy view, and OCR damage — `0→o, 1|!→l, 2→z, 5→s, 6/9→g, 8→b`. Prose that happens to be four 4-letter words is rejected by a stopword rule instead of being wasted on a login attempt. `l↔i` produces both spellings, deduped, capped at 6.
+- `findWorkingCandidate`: **Gmail decides, not the OCR** — each candidate is tried with a real IMAP LOGIN and only an accepted one is returned. A wrong guess costs one round trip, never a saved credential.
+- Wiring: `/email auto` (opens the page + explains the two human-only steps), `/email auto create` (locates "Create app password" via `finder.locateOnScreen` and clicks it, then grabs), `/email auto grab` (screenshot → tesseract → verify → `saveMailSetup`, so sealing + the IMAP/SMTP live test still happen in one place).
+- Degrades honestly: missing tesseract, no screenshot tool, or a closed modal each produce a specific next step instead of a stack trace. A missing button says "dabao khud, phir `/email auto grab`".
+- Tests 669 → 672: extraction from Google's exact format + single run + digit damage, prose rejected, no duplicates, stopword ordering (digit-damaged candidate verified first), verify-until-one-works loop, and the command path with no tesseract/screenshot present.
+
+### Notes for next time
+- The shades announcement test runs against *whatever version package.json says*, so every release entry needs a shades line (3.14.0 and 3.14.1 both carry "Shades unchanged"). Same for `webapp/sw.js`'s cache name and `release-bundle.tar.gz`.
+
+## 3.14.0 — email: ek command setup, real SMTP send, aur apna mailbox (2026-11-10)
+
+- The gap: reading mail shipped in 3.7.0 (`imap.js` + `mail.js`), but **sending could not happen without the paid cloud** — `app/src/utils/handlers/utils.ts` posts to `api.observer-ai.com/tools/send-email` with an Auth0 token, which is exactly the dependency this fork exists to remove. Setup was also `/mail setup imap.gmail.com user apppass`: you had to know a hostname, and the password was stored as plaintext.
+- `src/smtp.js`: zero-dependency SMTP over `node:tls`/`node:net` — implicit TLS 465, STARTTLS 587 (`tls.connect({socket})` upgrade + second EHLO), AUTH PLAIN with LOGIN fallback, `MAIL FROM`/`RCPT TO`/`DATA`, RFC 2047 subjects, base64 UTF-8 bodies, attachments, dot-stuffing, `MAX_RECIPIENTS`, and a CR/LF guard in `parseAddressList` (a `\r\n` address could have injected a second `RCPT TO`).
+- The bug this avoided: a single-part message used to be assembled as `headers + blank line + part-headers + blank line + body`, i.e. the content headers sat *inside* the body. Tests caught it by decoding what the server actually received; `buildMessage` now puts content headers in the top block for single-part and only nests them for multipart.
+- `src/mailsetup.js`: `PROVIDERS` (gmail/outlook/yahoo/icloud/zoho/rediff/fastmail/proton/custom) + `detectProvider` by domain, three accepted setup shapes (address only → guide, address + spaced app password → save, legacy `host address secret`), and `verifyMailSetup` which logs in over IMAP **and** SMTP before saying "done", retrying 465↔587 once. `explainMailError` turns 535/ENOTFOUND/ETIMEDOUT/STARTTLS into one-line fixes.
+- `src/secrets.js`: AES-256-GCM sealing with a `data/.mail-key` (0600) key file, `enc:v1:<iv>:<tag>:<ct>`; legacy plaintext still opens and is sealed on the next save. `openSecret` says "key file badal gaya hai, /email setup dobara chalao" instead of dumping a crypto stack trace.
+- `src/selfmail.js`: `psd_ai@gmail.com` identity — 20-char password from an ambiguity-free alphabet (no `l/I/1/O/0`), sealed on write, never returned by any status function, and `typeSecretIntoField({typeText})` hands it straight to `pc.typeText` so it can reach a browser form without ever passing through WhatsApp. `gmailLimits()` and `signupPlan()` state the truth: no public Gmail signup API, OTP is human, automated signup violates Terms — assist, not fake automation.
+- Wiring: `case 'email'` in `commands.js` (`setup|guide|test|send|status|forget|signup [go|type]`), `/mail setup` now delegates to the same path (old syntax included), `email` added to `vocab.js` known commands, `send_email` action in `actions.js` (throws on failure because `execute()` forces `ok:true` on returned objects), help text line, README section.
+- Tests 657 → 668 (`test/mail-easy.test.js`): scripted SMTP server for the full EHLO/AUTH/MAIL/RCPT/DATA transcript, 535 → "app password" with the password absent from the message, STARTTLS refusal, sealed round-trip + a *different* key failing to open it, 0600 modes, provider detection, all three setup shapes, `••••••••` and "password absent from every reply" asserts, and the unseal-before-client check on send.
+
+### Notes for next time
+- `execute()` returns `{ ok: true, ...result }`, so a `run()` that returns `{ ok: false }` is silently reported as success. Throw instead.
+- The service worker cache name embeds the version and `test/deep-webapp.test.js` derives it from `package.json` — bumping the version without touching `webapp/sw.js` fails that test.
+- `verify:bundle` requires `release-bundle.tar.gz` to byte-match the tree, so any `src/` change means `npm run build:bundle` before committing.
+
 ## 3.13.0 — paint the pointer into the frame (2026-10-25)
 
 - Three versions of app-side markers still left the owner without a cursor, so this stops depending on the app at all: when the capture tool cannot draw the pointer (GNOME's portal, ImageMagick, Spectacle), the PC now **paints the arrow into the PNG itself** with `sharp` (already a dependency) before cropping and shrinking. Whatever displays the frame — the phone, a zoomed crop, a screenshot sent to WhatsApp — has the cursor in its pixels.

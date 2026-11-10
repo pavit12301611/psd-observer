@@ -33,6 +33,7 @@ import * as grounding from './grounding.js';
 import { StoppedError, isStoppedError } from './cancel.js';
 import * as tts from './tts.js';
 import { runDoctor } from './doctor.js';
+import { sendMail } from './mailsend.js';
 import { createProgress, describeHandsStep } from './progress.js';
 import { noteOfflineAnnounced } from './lifecycle.js';
 import { ensureProfile, addLesson } from './persona.js';
@@ -555,6 +556,22 @@ export function createActions({
         path: { type: 'string', description: 'Save to this path (optional, default ~/Downloads)' },
       },
       run: async ({ url, path: p }, ctx) => files.downloadUrl(url, p, { extraRoots, signal: ctx?.signal }),
+    },
+    {
+      name: 'send_email', level: 'standard', label: 'Send email',
+      description: "Send an email from the owner's configured mailbox (setup: /email setup).",
+      params: {
+        to: { type: 'string', description: 'Recipient email address', required: true },
+        subject: { type: 'string', description: 'Subject line', required: true },
+        body: { type: 'string', description: 'Plain-text body (Hinglish/emoji fine)', required: true },
+      },
+      run: async ({ to, subject, body }) => {
+        const result = await sendMail({ to, subject, text: body }, { config, log });
+        // execute() forces ok:true on returned objects, so a failure has to throw
+        // to reach the AI as a failure (the text is already human-readable).
+        if (!result.ok) throw new Error(result.text.replace(/^✉️\s*/, ''));
+        return result.text;
+      },
     },
     {
       name: 'send_file', level: 'standard', label: 'Send file',
