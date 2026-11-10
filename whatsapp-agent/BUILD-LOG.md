@@ -1,5 +1,12 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.9 — docs `main` par point karte hain (2026-11-10)
+
+- 3.14.0–3.14.8 ka poora kaam `main` me merge ho gaya (PR #48). Uske baad docs me ek purana zakhm dikha: README (2 jagah) aur QUICKSTART (6 jagah) ke `curl`, API-fallback, `codeload` tar, zip aur `git clone` commands ab bhi `arena/592311b3-psd-observer` branch par point kar rahe the — wo branch merge ke baad gayab hai, isliye copy-paste 404 deta.
+- Saare links `main` par, `git clone -b <branch>` se `-b` hata diya, `psd-observer-arena-5f4643a1-psd-observer` extract dir `psd-observer-main` ho gaya, aur QUICKSTART ka "2.3 code sirf PR branch par hai" wala warning hata diya (ab sach nahi tha).
+- Install/update script ko chhune ki zarurat nahi thi: `observer.sh` pehle se `BRANCH="${BRANCH:-main}"` leta hai — sirf documentation galat thi.
+- Tests 688 → 688 (docs-only change; bundle rebuild taaki README/QUICKSTART bundle ke andar bhi updated hon).
+
 ## 3.14.8 — click ke baad Ctrl+Enter (Wayland scaling) (2026-11-10)
 
 - Second report on the same flow: "🖱️ Send khud dabaya — blue button, attempt 2" and yet the compose page in the screenshot was untouched — the click was *located* correctly but had no effect. That is the signature of a coordinate-space mismatch, not a miss: `xdg-desktop-portal` screenshots come back in **physical** pixels while `ydotool mousemove --absolute` works in **logical** pixels, so on a 125 % scaled Wayland display the same numbers point somewhere else. Keyboard input was never affected — the pasted body *was* in the compose, which is the proof that only the pointer space is off.

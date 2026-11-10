@@ -29,9 +29,9 @@ Everything is free; no paid API, no Observer app.
 ```bash
 # ek hi script — install + update + models + doctor, sab isi me
 curl -fL -o /tmp/observer.sh \
-  "https://raw.githubusercontent.com/pavit12301611/psd-observer/arena/592311b3-psd-observer/whatsapp-agent/scripts/observer.sh" \
+  "https://raw.githubusercontent.com/pavit12301611/psd-observer/main/whatsapp-agent/scripts/observer.sh" \
   || curl -fL -o /tmp/observer.sh -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=arena/592311b3-psd-observer"
+  "https://api.github.com/repos/pavit12301611/psd-observer/contents/whatsapp-agent/scripts/observer.sh?ref=main"
 
 bash /tmp/observer.sh install --service --power --phone --model auto
 ```
@@ -54,24 +54,24 @@ Sirf download karna hai (install baad me): `--no-install`.
 Tum git use nahi karte, isliye ye sirf record ke liye hai. Agar kabhi git chahiye:
 
 ```bash
-git clone -b arena/592311b3-psd-observer https://github.com/pavit12301611/psd-observer.git
+git clone https://github.com/pavit12301611/psd-observer.git
 cd psd-observer/whatsapp-agent
 ```
 
-> ⚠️ 2.3 code sirf `arena/592311b3-psd-observer` branch pe hai, `main` pe nahi.
+> ✅ Ab sab kuch `main` par hai — yahi default branch hai.
 
 ### 🅲 Na script, na curl-fallback — seedha tar/zip manually
 
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/592311b3-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/main"
 tar -xzf agent.tar.gz
-mv psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent ~/observer-agent
+mv psd-observer-main/whatsapp-agent ~/observer-agent
 cd ~/observer-agent
 ```
 
-(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/592311b3-psd-observer.zip`)
+(Ya browser se: `https://github.com/pavit12301611/psd-observer/archive/refs/heads/main.zip`)
 
 ---
 
@@ -181,9 +181,9 @@ karna padega), `data/` (PIN, token, notes, reminders, todos, downloads),
 ```bash
 cd /tmp
 curl -fL -o agent.tar.gz \
-  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/arena/592311b3-psd-observer"
+  "https://codeload.github.com/pavit12301611/psd-observer/tar.gz/refs/heads/main"
 tar -xzf agent.tar.gz
-cd psd-observer-arena-5f4643a1-psd-observer/whatsapp-agent
+cd psd-observer-main/whatsapp-agent
 # naye code ko purani install ke upar copy karo (secrets ko chhod ke)
 cp -a src webapp test scripts systemd package.json package-lock.json \
       README.md QUICKSTART.md LOCAL-MODELS.md .env.example start.sh \
@@ -194,7 +194,7 @@ systemctl --user restart observer-whatsapp-agent
 
 Version check: `./scripts/observer.sh update --check` (remote version dikhata hai).
 Browser se bhi download kar sakte ho:
-`https://github.com/pavit12301611/psd-observer/archive/refs/heads/arena/592311b3-psd-observer.zip`
+`https://github.com/pavit12301611/psd-observer/archive/refs/heads/main.zip`
 
 ---
 

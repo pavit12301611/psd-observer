@@ -1,4 +1,15 @@
 {
+  "3.14.9": {
+    "title": "🔗 Docs ab `main` par — purane PR branch ke links gaye",
+    "bullets": [
+      "**Problem**: README aur QUICKSTART ke curl/clone commands purane branch `arena/592311b3-psd-observer` par point kar rahe the — wo branch merge ho chuki hai, isliye copy-paste par 404.",
+      "**Fix**: saare install/update links ab `main` (default branch) par — `curl`, API fallback, `codeload` tar, zip aur `git clone` — chaaron.",
+      "**Bonus**: QUICKSTART ka purana warning (\"2.3 code sirf PR branch par hai\") hata diya — ab sab `main` par hai.",
+      "**Aapke PC para kuch nahi badla**: `observer.sh update` pehle se hi default `main` leta hai; ye sirf docs ka link theek karta hai.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 688 → 688 (sirf docs), bundle dobara bana."
+    ]
+  },
   "3.14.8": {
     "title": "⌨️ Click miss ho jaye to Ctrl+Enter se send — mail ab nikalna nahi rukega",
     "bullets": [
@@ -535,5 +546,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.8"
+  "latest": "3.14.9"
 }
