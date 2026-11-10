@@ -1,5 +1,18 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.3 — /email web: send from the browser session, zero credentials (2026-11-10)
+
+- Every previous path bottlenecked on "get an app password", which Google refuses to hand out without 2FA + a human click. This one removes the credential entirely: whichever Gmail is logged into Chrome is enough.
+- `src/emailweb.js`: `buildComposeUrl` uses Gmail's `view=cm&fs=1&to&su&body` prefill, so no Compose click and no typing into three fields. Bodies over 1200 chars (or URLs over 1900) switch to `mode: 'paste'` — prefill to+subject, then clipboard-paste the body — instead of silently truncating.
+- Anti-injection: recipient rejects CR/LF (`Bcc:` smuggling) and non-addresses; the subject has newlines flattened and is capped at 200 chars.
+- Only one click is automated (`finder.locateOnScreen('Send')`, retried once after 2s), and the verdict comes from Gmail's own toast: `detectSentState` → sent / failed / unknown. Unknown is reported as "Send dabaya, confirmation nahi mila — Sent folder check karo"; a click is never described as a delivered mail.
+- Wiring: `/email web`, `/email web check` (open inbox → OCR → signed-in/signed-out/unknown), `/email web send <to> <subject> | <body>` (the `send` word is optional). Headless PCs get an explicit pointer to `/email send` (SMTP) instead of a dead end.
+- Tests 676 → 679: URL encoding + subject flattening + paste-mode threshold + header-injection rejection, login/send verdict parsing, and the command path with no display present.
+
+### Notes for next time
+- A prefilled compose URL is the only stable Gmail interface here: the DOM changes, but `view=cm` params have not. Prefer prefill over clicking through Compose.
+- "Sent" must be proven by the toast, not by the compose window closing — Gmail also closes it when it is discarded.
+
 ## 3.14.2 — signup assistant: availability check + label-driven form fill (2026-11-10)
 
 - The ask "nayi mail id banani hai" has one wall that code cannot climb: Google has no public @gmail.com creation API, signup needs a phone OTP + captcha, and automated signup violates the Terms. So this release automates everything *around* that wall and says so in the reply text instead of pretending.

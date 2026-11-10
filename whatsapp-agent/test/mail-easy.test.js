@@ -602,3 +602,82 @@ test('commands: /email signup check + fill + start degrade honestly', async () =
   const start = await agent.handle('/email signup start');
   assert.match(String(start), /Page khul gaya|Signup page khud kholo/);
 });
+
+// ══ /email web — browser session se bhejo (zero credentials) ════════════════
+
+test('emailweb: compose URL prefill, paste mode, and junk rejection', async () => {
+  const web = await import('../src/emailweb.js');
+
+  const plan = web.buildComposeUrl({ to: 'owner@example.com', subject: 'Report ready', body: 'Bhai render pura ho gaya' });
+  assert.equal(plan.mode, 'url');
+  assert.equal(plan.to, 'owner@example.com');
+  assert.match(plan.url, /^https:\/\/mail\.google\.com\/mail\/\?/);
+  assert.match(plan.url, /view=cm/);
+  assert.match(plan.url, /to=owner%40example\.com/);
+  assert.match(plan.url, /su=Report\+ready/);
+  assert.match(plan.url, /body=Bhai\+render/);
+
+  // Newlines in the subject would end the header; they are flattened.
+  const flat = web.buildComposeUrl({ to: 'a@b.co', subject: 'one\ntwo', body: 'x' });
+  assert.doesNotMatch(flat.url, /%0A/);
+
+  // Long body → paste mode (URL stays small), body still not lost.
+  const long = 'x'.repeat(4000);
+  const heavy = web.buildComposeUrl({ to: 'a@b.co', subject: 'big', body: long });
+  assert.equal(heavy.mode, 'paste');
+  assert.equal(heavy.bodyInUrl, false);
+  assert.ok(heavy.url.length < web.MAX_URL_LENGTH);
+
+  assert.throws(() => web.buildComposeUrl({ to: 'nope' }), /valid email address/);
+  assert.throws(() => web.buildComposeUrl({ to: 'a@b.co\r\nBcc: evil@x.com' }), /line break/);
+  assert.throws(() => web.cleanRecipient(''), /valid email address/);
+});
+
+test('emailweb: login and send verdicts are read, never guessed', async () => {
+  const web = await import('../src/emailweb.js');
+
+  assert.equal(web.detectLoginState('Compose Inbox Starred Snoozed'), 'signed-in');
+  assert.equal(web.detectLoginState('Sign in to continue'), 'signed-out');
+  assert.equal(web.detectLoginState('Create an account'), 'signed-out');
+  assert.equal(web.detectLoginState('Loading…'), 'unknown');
+
+  assert.equal(web.detectSentState('Message sent. Undo'), 'sent');
+  assert.equal(web.detectSentState("Couldn't send mail"), 'failed');
+  assert.equal(web.detectSentState('Inbox'), 'unknown');
+
+  assert.match(web.describeLogin('signed-in'), /ready/);
+  assert.match(web.describeLogin('signed-out'), /logged in nahi/);
+  assert.match(web.describeLogin('unknown'), /pata nahi/);
+  assert.match(web.webIntro(), /app password nahi/i);
+  assert.match(web.describeWebEmail({ to: 'a@b.co', subject: 's', body: 'x', mode: 'paste' }), /paste hoga/);
+});
+
+test('commands: /email web is wired, and headless PCs get an honest fallback', async () => {
+  const { createAgent } = await import('../src/commands.js');
+  const { Store } = await import('../src/store.js');
+  const dir = tmpDir('webcmd');
+  const store = new Store(path.join(dir, 'store.json'));
+  const config = {
+    ownerNumber: '919528923866', agentNumber: '918859555795', timezone: 'Asia/Kolkata',
+    aiProvider: 'none', allowShell: false, shellPin: '', dataDir: dir,
+    sharedDir: path.join(dir, 'shared'), downloadsDir: path.join(dir, 'dl'),
+  };
+  fs.mkdirSync(config.sharedDir, { recursive: true });
+  const agent = createAgent({ config, store, log: { error() {}, warn() {}, info() {} } });
+
+  const intro = await agent.handle('/email web');
+  assert.match(intro, /app password nahi/i);
+  assert.match(intro, /\/email web send/);
+
+  assert.match(String(await agent.handle('/email web send')), /Usage|bina password/i);
+  assert.match(String(await agent.handle('/email web send a@b.co Subject')), /Body chahiye/);
+  assert.match(String(await agent.handle('/email web send nope Subject | body')), /valid email address/);
+
+  // No display in the sandbox: browser open fails → the SMTP fallback is named.
+  const send = String(await agent.handle('/email web send owner@example.com Test | hello'));
+  assert.match(send, /Browser khul nahi paya|Headless/);
+  assert.match(send, /email send/);
+
+  const check = String(await agent.handle('/email web check'));
+  assert.match(check, /Browser khul nahi paya|xdg-open|Screen padh nahi paya/);
+});

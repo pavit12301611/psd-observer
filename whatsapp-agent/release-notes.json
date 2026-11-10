@@ -1,4 +1,15 @@
 {
+  "3.14.3": {
+    "title": "🌐 /email web — bina password email (Chrome ke logged-in Gmail se)",
+    "bullets": [
+      "**Setup khatam**: koi app password nahi, koi 2FA setup nahi, koi SMTP/IMAP nahi. `/email web check` se pata chalta hai Chrome me Gmail logged-in hai ya nahi — phir `/email web send to@x.com Subject | body`.",
+      "**Sirf ek click** (`src/emailweb.js`): compose ke to/subject/body Gmail ke prefill link se khud bhar jaate hain, agent sirf *Send* dabata hai. Lambi body URL limit se bachne ke liye clipboard se paste hoti hai.",
+      "**Jhooth nahi bolta**: Send dabane ke baad Gmail ke \"Message sent\" toast ko padh ke confirm karta hai — toast na mile to \"Sent folder check karo\", error dikhe to \"mail nahi gaya\".",
+      "**Donon raste saath**: browser wala `/email web` foreground PC ke liye, aur SMTP wala `/email send` headless/locked PC ke liye (jo verify + sealed password ke saath chalta hai).",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 676 → 679: compose URL (encoding, subject flatten, 1200+ chars → paste mode, header-injection reject), login/send verdict parsing, aur headless PC par honest fallback (`/email send` ka naam le kar)."
+    ]
+  },
   "3.14.2": {
     "title": "🪪 Nayi Gmail banane ka assistant — availability check + form auto-fill (OTP aapka)",
     "bullets": [
@@ -465,5 +476,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.2"
+  "latest": "3.14.3"
 }

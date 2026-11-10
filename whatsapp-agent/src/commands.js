@@ -63,6 +63,7 @@ import { sendMail, mailFileFor } from './mailsend.js';
 import * as selfMail from './selfmail.js';
 import * as mailAuto from './mailauto.js';
 import * as gmailSignup from './gmailsignup.js';
+import * as emailWeb from './emailweb.js';
 import { createImapClient } from './imap.js';
 import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
@@ -2895,6 +2896,100 @@ export function createAgent({
    * `/email signup` builds the identity, `go` opens Google's form, `type` puts
    * the sealed password into the focused field (owner-confirmed, never echoed).
    */
+  /**
+   * 🌐 `/email web` — send through the browser session that is already logged
+   * into Gmail. No app password, no SMTP credentials, no setup.
+   * Only one click is automated (Send) and the result is verified against
+   * Gmail's own "Message sent" toast; an unverified click is reported as
+   * unverified, never as success.
+   */
+  async function emailWebCommand(rawArgs) {
+    const nap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const raw = String(rawArgs ?? '').trim();
+    const first = raw.split(/\s+/)[0] ?? '';
+    const sub = first.toLowerCase();
+
+    if (!sub || sub === 'help') return emailWeb.webIntro();
+
+    if (sub === 'check' || sub === 'status') {
+      try {
+        await pc.openTarget(emailWeb.GMAIL_INBOX);
+      } catch (err) {
+        return `🌐 Browser khul nahi paya (${err?.message ?? err}).\nConsole se khol lo: xdg-open ${emailWeb.GMAIL_INBOX}\n(Headless PC par \`/email send …\` SMTP wala rasta use karo.)`;
+      }
+      await nap(4000);
+      try {
+        const shot = await ocr.ocrScreen(config);
+        return emailWeb.describeLogin(emailWeb.detectLoginState(shot.text));
+      } catch (err) {
+        return `🌐 Screen padh nahi paya (${err?.message ?? err}) — \`bash scripts/fix-desktop.sh\` chalane se screenshots theek ho jaate hain.`;
+      }
+    }
+
+    // `/email web send …` ya seedha `/email web to@x.com Subject | body`.
+    const sendArgs = sub === 'send' ? raw.slice(first.length).trim() : raw;
+    if (!sendArgs) return emailWeb.webIntro();
+    const parsed = /^(\S+)\s+([\s\S]+)$/.exec(sendArgs);
+    if (!parsed) return '🌐 Usage: `/email web send to@x.com Subject | body`';
+    const to = parsed[1];
+    const [subjectPart, ...bodyParts] = parsed[2].split('|');
+    const body = bodyParts.join('|').trim();
+    if (!body) return '🌐 Body chahiye: `/email web send to@x.com Subject | body`';
+
+    let plan;
+    try {
+      plan = emailWeb.buildComposeUrl({ to, subject: subjectPart.trim(), body });
+    } catch (err) {
+      return `🌐 ${err?.message ?? err}`;
+    }
+
+    try {
+      await pc.openTarget(plan.url);
+    } catch (err) {
+      return `🌐 Browser khul nahi paya (${err?.message ?? err}).\nHeadless PC par \`/email send ${plan.to} ${plan.subject} | ${String(body).slice(0, 40)}…\` (SMTP) use karo.`;
+    }
+    // Gmail compose load hone do; lambi body clipboard se paste hoti hai.
+    await nap(plan.mode === 'paste' ? 3200 : 3500);
+    if (plan.mode === 'paste') {
+      try {
+        await pc.pasteText(body);
+        await nap(700);
+      } catch (err) {
+        return `🌐 Body paste nahi ho paya (${err?.message ?? err}) — compose window me body khud paste karke Send dabao.`;
+      }
+    }
+
+    let target = null;
+    for (const attempt of [0, 1]) {
+      try {
+        target = await finder.locateOnScreen(config, 'Send', log);
+      } catch { target = null; }
+      if (target) break;
+      if (attempt === 0) await nap(2000);
+    }
+    if (!target) {
+      return [
+        `🌐 *Send* button screen pe nahi mila (compose khula hai? browser foreground me hai?).`,
+        '• Compose window khula rakho aur khud Send dabao, ya',
+        `• Headless PC par: \`/email send ${plan.to} …\` (SMTP rasta).`,
+      ].join('\n');
+    }
+
+    await pc.click(target.x, target.y);
+    await nap(2200);
+
+    let verdict = 'unknown';
+    try {
+      const shot = await ocr.ocrScreen(config);
+      verdict = emailWeb.detectSentState(shot.text);
+    } catch { /* screenshot hi nahi mila: verdict unknown rehta hai */ }
+
+    const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
+    if (verdict === 'sent') return `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.`;
+    if (verdict === 'failed') return `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya. Screen dekh lo (attachment/size/network).`;
+    return `${head}\n❔ Send dabaya, par confirmation screen pe nahi mila — Gmail ke *Sent* folder me check karo (ja chuka ho sakta hai).`;
+  }
+
   async function emailSignup(rawArgs, ctx = {}) {
     const raw = String(rawArgs ?? '').trim();
     const parts = raw.split(/\s+/);
@@ -3931,6 +4026,7 @@ export function createAgent({
         if (subCmd === 'send' || subCmd === 'mail') return await emailSend(rest.join(' '));
         if (subCmd === 'forget' || subCmd === 'wipe') return forgetMail({ file: mailFileFor(config) });
         if (subCmd === 'auto') return await emailAuto(rest.join(' '), ctx);
+        if (subCmd === 'web') return await emailWebCommand(rest.join(' '));
         if (subCmd === 'signup' || subCmd === 'identity') return await emailSignup(rest.join(' '), ctx);
         if (subCmd === 'type') return await emailSignup('type', ctx);
         return [
@@ -3938,6 +4034,7 @@ export function createAgent({
           '• `/email setup psd_ai@gmail.com` — guide · `… abcd efgh ijkl mnop` — save + live test',
           '• `/email send to@x.com Subject | body` · `/email test` · `/email status` · `/email forget`',
           '• `/email auto` — agent khud app password banwaye + screen se padhke save kare (copy-paste nahi)',
+          '• `/email web check|send … <to> <subject> | <body>` — bina password, Chrome ke logged-in Gmail se bhejo',
           '• `/email signup` — nayi mailbox identity · check = naam available? · start = form kholo · fill = fields bharo',
         ].join('\n');
       }

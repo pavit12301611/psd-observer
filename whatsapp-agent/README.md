@@ -310,6 +310,7 @@ Chrome.
 /email test                                 dono directions dobara check
 /email send to@x.com Report ready | body    isi PC se bhejo (465 TLS / 587 STARTTLS)
 /email status · /email forget               masked status · credentials wipe
+/email web check|send …                     bina password: Chrome ke logged-in Gmail se bhejo
 /email auto                                 page kholo · auto create = button khud dabao · auto grab = code khud padho
 /email signup                               agent ki apni identity (psd_ai@gmail.com)
 /email signup go · /email type · /email signup   page kholo → field pe cursor → "haan" → khud type karta hai
@@ -321,6 +322,11 @@ sirf **app password** chahiye (`myaccount.google.com/apppasswords`; normal Gmail
 password kaam nahi karega). Setup ke saath hi agent live test karta hai aur fail
 pe seedha reason deta hai ("app password galat", "port 587 ne STARTTLS refuse
 kiya", "office Wi-Fi block kar raha hai").
+
+**Password hi nahi chahiye?** `/email web send to@x.com Subject | body` — jo Gmail
+Chrome me logged-in hai wahi use hota hai: compose prefill, sirf *Send* click, aur
+Gmail ke "Message sent" toast se verify. `/email web check` pehle login state bata
+deta hai. (Headless/locked PC par SMTP wala `/email send` hi chalega.)
 
 **Copy-paste nahi karna?** `/email auto` → Google ka app-password page khulta hai.
 `/email auto create` *Create app password* khud dabata hai aur `/email auto grab`
