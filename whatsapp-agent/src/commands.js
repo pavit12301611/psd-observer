@@ -55,7 +55,12 @@ import {
   moveToTrash, listTrash, restoreTrash, runPanic, pendingTicket,
 } from './safety.js';
 import { saveSnapshot, rollback as rollbackTo, snapshotList } from './rollback.js';
-import { setupMail, checkMail, mailStatus, setMonitor } from './mail.js';
+import { checkMail, mailStatus, setMonitor, loadMailConfig } from './mail.js';
+import {
+  parseSetupArgs, saveMailSetup, setupGuide, mailSetupStatus, forgetMail, verifyMailSetup, resolveStoredSecret,
+} from './mailsetup.js';
+import { sendMail, mailFileFor } from './mailsend.js';
+import * as selfMail from './selfmail.js';
 import { makeDeliverable } from './make.js';
 import { scanPII, redactPII, guardOutbound } from './pii.js';
 import { syncFromICS, exportICS } from './gcal.js';
@@ -379,6 +384,7 @@ _No Observer app needed. No paid API. Everything runs on your own PC._
 • Notes/meetings se ✅ action-items auto-extract · HW reminders escalate
 *📬 3.7.0 — Duet-Class Features*
 • 📧 \`/mail setup imap.gmail.com user apppass\` · \`/mail today\` · \`/mail on\` — mail digest + priority alerts (Gmail app-password)
+• ✉️ \`/email setup psd_ai@gmail.com\` — auto-detect + live IMAP/SMTP test (password sealed, never printed) · \`/email send to@x Subject | body\` · \`/email signup\` — agent ki apni mailbox identity
 • 🛠️ \`/make report|slides|dashboard|csv <topic>\` — review/edit files bana deta hai
 • 🔐 \`/pii scan <text>\` — card/Aadhaar/PAN/API-key detect; outbound strict PII BLOCK; clipboard history redacted
 • 🗓️ \`/cal sync <ics-url>\` (Google Calendar secret iCal) · \`/cal export\` — .ics file
@@ -2775,6 +2781,83 @@ export function createAgent({
     return r.reply;
   }
 
+  // ── 📧 email helpers (3.14.0) ──────────────────────────────────────────────
+  function mailDataDir() {
+    return config.dataDir ?? path.join(ROOT, 'data');
+  }
+
+  /** `/email setup …` and legacy `/mail setup …` share one path. */
+  async function emailSetup(rawArgs) {
+    const parsed = parseSetupArgs(rawArgs);
+    if (parsed.error === 'empty') return setupGuide('');
+    return saveMailSetup(parsed, { file: mailFileFor(config), dataDir: mailDataDir(), log });
+  }
+
+  /** Live IMAP + SMTP check against the saved account (no password in output). */
+  async function emailTest() {
+    const file = mailFileFor(config);
+    const cfg = loadMailConfig(file);
+    if (!cfg.user) return setupGuide('');
+    const secret = resolveStoredSecret(cfg, { dir: mailDataDir(), log });
+    if (typeof secret !== 'string' || !secret) {
+      return `📧 ${secret?.error ?? 'password missing'} — \`/email setup ${cfg.user} <app-password>\` se dobara lagao.`;
+    }
+    const report = await verifyMailSetup({ ...cfg, pass: secret }, { log });
+    return report.text;
+  }
+
+  /** `/email send <to> <subject> | <body>` */
+  async function emailSend(rawArgs) {
+    const text = String(rawArgs ?? '').trim();
+    const first = /^(\S+)\s+([\s\S]+)$/.exec(text);
+    if (!first) return '✉️ Usage: `/email send to@x.com Subject | body`';
+    const to = first[1];
+    const [subject, ...bodyParts] = first[2].split('|');
+    const body = bodyParts.join('|').trim();
+    if (!body) return '✉️ Body chahiye: `/email send to@x.com Subject | body`';
+    const result = await sendMail({ to, subject, text: body }, { config, log });
+    return result.text;
+  }
+
+  /**
+   * `/email signup` builds the identity, `go` opens Google's form, `type` puts
+   * the sealed password into the focused field (owner-confirmed, never echoed).
+   */
+  async function emailSignup(rawArgs, ctx = {}) {
+    const sub = String(rawArgs ?? '').trim().toLowerCase();
+    const dir = mailDataDir();
+    if (sub === 'go') {
+      selfMail.createIdentity({ dir, log });
+      try {
+        await pc.openTarget(selfMail.SIGNUP_URL);
+      } catch (err) {
+        return `🪪 Signup page khud kholo: ${selfMail.SIGNUP_URL}\n(${err?.message ?? err})`;
+      }
+      return [
+        `🪪 *Signup page khul gaya* — ${selfMail.AGENT_MAILBOX}`,
+        '1. Naam / DOB bharo, email field me `psd_ai` daalo (agar taken hai to Google suggest karega).',
+        '2. Password field pe click karke cursor rakh do.',
+        '3. Phir `/email type` bhejo — main 3 second baad password khud type karunga.',
+        '',
+        '🔐 Password chat me kabhi nahi aayega — sirf screen pe type hoga.',
+      ].join('\n');
+    }
+    if (sub === 'type') {
+      if (!selfMail.loadIdentity({ dir })) return '🪪 Pehle `/email signup` chalao (identity banti hai).';
+      if (!ctx.confirmed) return requestConfirm('email', 'type');
+      // Type it in the background: holding the reply until the keystrokes land
+      // would leave the owner staring at a spinning chat while the field waits.
+      const timer = setTimeout(() => {
+        selfMail.typeSecretIntoField({ typeText: (secret) => pc.typeText(secret), opts: { dir } })
+          .then(() => notifyOwner('🔐 Password type ho gaya. Galat field ho to turant Ctrl+A → Backspace.'))
+          .catch((err) => notifyOwner(`🔐 Type fail: ${err?.message ?? err}`));
+      }, 3000);
+      timer.unref?.();
+      return '⏳ 3 second me type karunga — abhi password field pe click karke cursor rakh do…';
+    }
+    return selfMail.signupPlan({ dir, log }).steps;
+  }
+
   async function handleCommand(cmd, args, ctx) {
     // 3.6.0 quick hooks into existing commands (look diff / webcam timelapse / yt playlist)
     if (cmd === 'look' && /^diff\b/i.test(String(args ?? ''))) return diffFlow();
@@ -3705,11 +3788,34 @@ export function createAgent({
         // 📧 Mail monitor — IMAP digest (Gmail app-password works).
         const raw = String(args || '').trim();
         const [sub, ...rest] = raw.split(/\s+/);
-        if (sub === 'setup') return setupMail(rest.join(' '));
+        if (sub === 'setup') return await emailSetup(rest.join(' '));
         if (sub === 'on') return setMonitor(true);
         if (sub === 'off') return setMonitor(false);
         if (sub === 'status') return mailStatus();
         return checkMail();
+      }
+      case 'email': {
+        // 📧 3.14.0 — easy setup (auto-detect + live test), sending, and the
+        // agent's own mailbox identity. Secrets are sealed and never echoed.
+        const raw = String(args || '').trim();
+        const [sub, ...rest] = raw.split(/\s+/);
+        const subCmd = (sub || '').toLowerCase();
+        if (!subCmd || subCmd === 'status') {
+          return `${mailSetupStatus({ file: mailFileFor(config) })}\n\n${selfMail.identitySummary({ dir: mailDataDir() })}`;
+        }
+        if (subCmd === 'setup' || subCmd === 'add') return await emailSetup(rest.join(' '));
+        if (subCmd === 'guide' || subCmd === 'help') return setupGuide(rest.join(' '));
+        if (subCmd === 'test' || subCmd === 'verify') return await emailTest();
+        if (subCmd === 'send' || subCmd === 'mail') return await emailSend(rest.join(' '));
+        if (subCmd === 'forget' || subCmd === 'wipe') return forgetMail({ file: mailFileFor(config) });
+        if (subCmd === 'signup' || subCmd === 'identity') return await emailSignup(rest.join(' '), ctx);
+        if (subCmd === 'type') return await emailSignup('type', ctx);
+        return [
+          '📧 *Email commands*',
+          '• `/email setup psd_ai@gmail.com` — guide · `… abcd efgh ijkl mnop` — save + live test',
+          '• `/email send to@x.com Subject | body` · `/email test` · `/email status` · `/email forget`',
+          '• `/email signup` — agent apni mailbox identity banaye (password sirf usko pata)',
+        ].join('\n');
       }
       case 'make': {
         // 🛠️ Deliverables — report/slides/dashboard/csv files.

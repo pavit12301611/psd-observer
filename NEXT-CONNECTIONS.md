@@ -55,13 +55,15 @@ Effort = my honest estimate for *this* repo's standards (module + `/command` + t
 
 ### P0 — small, removes a real hole
 
-**① Local SMTP send → the last cloud dependency in messaging is gone.**
+**① Local SMTP send → the last cloud dependency in messaging is gone.  ✅ SHIPPED in 3.14.0**
+(`src/smtp.js`, `src/mailsetup.js`, `src/secrets.js`, `src/selfmail.js`, `src/mailsend.js`,
+`/email setup|test|send|status|forget|signup`, `send_email` action, 12 new tests.)
 The fork proudly kills Twilio for WhatsApp, but "email me this" still goes
 `app → api.observer-ai.com → SendGrid → Auth0 token`. `imap.js` already proves the pattern
 (raw TLS, zero deps, app password). A sibling `smtp.js` (~150 lines: `EHLO`, `AUTH LOGIN`,
 `MAIL FROM`, `RCPT TO`, `DATA`) plus `/email to <addr> <text|file>` reuses the **same app
 password** the user already typed for `/mail setup`, so setup cost is zero.
-*Effort ½–1 day. Files: `src/smtp.js`, `src/mail.js`, `src/commands.js`, `test/smtp.test.js`.*
+
 
 **② Notification fan-out + dead-man's switch.**
 Today: agent phone unlinks / Baileys hiccups → *silence*. Reminders, watch alerts and

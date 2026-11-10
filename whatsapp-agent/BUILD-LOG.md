@@ -1,5 +1,21 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.0 — email: ek command setup, real SMTP send, aur apna mailbox (2026-11-10)
+
+- The gap: reading mail shipped in 3.7.0 (`imap.js` + `mail.js`), but **sending could not happen without the paid cloud** — `app/src/utils/handlers/utils.ts` posts to `api.observer-ai.com/tools/send-email` with an Auth0 token, which is exactly the dependency this fork exists to remove. Setup was also `/mail setup imap.gmail.com user apppass`: you had to know a hostname, and the password was stored as plaintext.
+- `src/smtp.js`: zero-dependency SMTP over `node:tls`/`node:net` — implicit TLS 465, STARTTLS 587 (`tls.connect({socket})` upgrade + second EHLO), AUTH PLAIN with LOGIN fallback, `MAIL FROM`/`RCPT TO`/`DATA`, RFC 2047 subjects, base64 UTF-8 bodies, attachments, dot-stuffing, `MAX_RECIPIENTS`, and a CR/LF guard in `parseAddressList` (a `\r\n` address could have injected a second `RCPT TO`).
+- The bug this avoided: a single-part message used to be assembled as `headers + blank line + part-headers + blank line + body`, i.e. the content headers sat *inside* the body. Tests caught it by decoding what the server actually received; `buildMessage` now puts content headers in the top block for single-part and only nests them for multipart.
+- `src/mailsetup.js`: `PROVIDERS` (gmail/outlook/yahoo/icloud/zoho/rediff/fastmail/proton/custom) + `detectProvider` by domain, three accepted setup shapes (address only → guide, address + spaced app password → save, legacy `host address secret`), and `verifyMailSetup` which logs in over IMAP **and** SMTP before saying "done", retrying 465↔587 once. `explainMailError` turns 535/ENOTFOUND/ETIMEDOUT/STARTTLS into one-line fixes.
+- `src/secrets.js`: AES-256-GCM sealing with a `data/.mail-key` (0600) key file, `enc:v1:<iv>:<tag>:<ct>`; legacy plaintext still opens and is sealed on the next save. `openSecret` says "key file badal gaya hai, /email setup dobara chalao" instead of dumping a crypto stack trace.
+- `src/selfmail.js`: `psd_ai@gmail.com` identity — 20-char password from an ambiguity-free alphabet (no `l/I/1/O/0`), sealed on write, never returned by any status function, and `typeSecretIntoField({typeText})` hands it straight to `pc.typeText` so it can reach a browser form without ever passing through WhatsApp. `gmailLimits()` and `signupPlan()` state the truth: no public Gmail signup API, OTP is human, automated signup violates Terms — assist, not fake automation.
+- Wiring: `case 'email'` in `commands.js` (`setup|guide|test|send|status|forget|signup [go|type]`), `/mail setup` now delegates to the same path (old syntax included), `email` added to `vocab.js` known commands, `send_email` action in `actions.js` (throws on failure because `execute()` forces `ok:true` on returned objects), help text line, README section.
+- Tests 657 → 668 (`test/mail-easy.test.js`): scripted SMTP server for the full EHLO/AUTH/MAIL/RCPT/DATA transcript, 535 → "app password" with the password absent from the message, STARTTLS refusal, sealed round-trip + a *different* key failing to open it, 0600 modes, provider detection, all three setup shapes, `••••••••` and "password absent from every reply" asserts, and the unseal-before-client check on send.
+
+### Notes for next time
+- `execute()` returns `{ ok: true, ...result }`, so a `run()` that returns `{ ok: false }` is silently reported as success. Throw instead.
+- The service worker cache name embeds the version and `test/deep-webapp.test.js` derives it from `package.json` — bumping the version without touching `webapp/sw.js` fails that test.
+- `verify:bundle` requires `release-bundle.tar.gz` to byte-match the tree, so any `src/` change means `npm run build:bundle` before committing.
+
 ## 3.13.0 — paint the pointer into the frame (2026-10-25)
 
 - Three versions of app-side markers still left the owner without a cursor, so this stops depending on the app at all: when the capture tool cannot draw the pointer (GNOME's portal, ImageMagick, Spectacle), the PC now **paints the arrow into the PNG itself** with `sharp` (already a dependency) before cropping and shrinking. Whatever displays the frame — the phone, a zoomed crop, a screenshot sent to WhatsApp — has the cursor in its pixels.
