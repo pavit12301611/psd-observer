@@ -64,7 +64,7 @@ import * as selfMail from './selfmail.js';
 import * as mailAuto from './mailauto.js';
 import * as gmailSignup from './gmailsignup.js';
 import * as emailWeb from './emailweb.js';
-import { clickSend, invertForOcr } from './sendbutton.js';
+import { clickSend, invertForOcr, describeMethod } from './sendbutton.js';
 import { createImapClient } from './imap.js';
 import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
@@ -2932,25 +2932,32 @@ export function createAgent({
       }
     }
 
-    // 🖱️ Send khud dabao — 3 attempts, aur white-on-blue button ke liye
-    // inverted-frame OCR. Owner ko kuch click nahi karna.
+    // 🖱️ Send khud dabao — OCR (plain/inverted/zoomed) → blue-button colour
+    // search → Ctrl+Enter. Owner ko kuch click nahi karna.
     const pressed = await clickSend({
       capture: () => pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }),
       ocrWords: (frame) => finder.ocrScreenshot(frame),
       invert: invertForOcr,
       click: (x, y) => pc.click(x, y),
+      keys: (combo) => pc.keyCombo(combo),
       wait: nap,
       log,
     });
     if (!pressed.ok) {
+      const why = pressed.reason === 'noscreen'
+        ? 'display se screenshot hi nahi mila (PC locked / headless / portal block)'
+        : pressed.ocrBroken
+          ? 'OCR (tesseract) hi nahi chala — compose ka Send dhoondhne ke 3 tareeke rehte hi nahi'
+          : 'compose window screen par nahi tha (browser background me, ya Gmail logged out)';
+      const debug = (pressed.tried ?? []).slice(-3).map((line) => `   · ${line}`);
       return {
         status: 'nosend',
         plan,
         tried: pressed.tried,
         text: [
-          `🌐 *Send* button ${pressed.attempts ?? 3} attempts me nahi mila (${pressed.reason ?? 'unknown'}).`,
-          '• Aksar wajah: compose window khula hi nahi (browser background me / Gmail logged out).',
-          '• Panel pe compose dikh raha ho to 2 second baad `/mailme` dobara bhejo.',
+          `🌐 *Send* button nahi mila — wajah: ${why}.`,
+          ...debug,
+          '• Compose ko saamne lao (Chrome full-screen) aur 2 second baad `/mailme` dobara bhejo.',
           `• Ya bina browser: \`/email send ${plan.to} …\` (SMTP).`,
         ].join('\n'),
       };
@@ -2966,7 +2973,7 @@ export function createAgent({
     } catch { /* screenshot na mile to verdict unknown */ }
 
     const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
-    const clicked = `\n🖱️ Send khud dabaya (attempt ${pressed.attempts ?? 1})`;
+    const clicked = `\n🖱️ Send khud dabaya — ${describeMethod(pressed.method)}, attempt ${pressed.attempts ?? 1}`;
     if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.${clicked}` };
     if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.${clicked}` };
     return { status: 'unverified', plan, text: `${head}\n❔ Send dabaya, par confirmation nahi mila — Gmail ke *Sent* folder me check karo.${clicked}` };

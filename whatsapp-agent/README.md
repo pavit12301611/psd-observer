@@ -331,12 +331,15 @@ ek baar dena hoga (`/email to you@example.com`, ya `.env` me `OWNER_EMAIL=`); ko
 hardcoded default nahi hai, isliye bina address `/mailme` bhejne ki koshish nahi
 karta. Browser na chale to apne aap SMTP par fallback hota hai.
 
-**Send button pakka mile:** Gmail ka *Send* white text on blue fill hota hai, jise
-OCR light-on-dark me dhundhla padhta hai. Isliye click 3 attempts me hota hai aur
-har attempt me pehle normal frame, phir **inverted** (black-on-white) frame padha
-jaata hai (`src/sendbutton.js`) — `sharp` na ho to pure-JS `pngjs` se. Click sirf locate hue label ke centre par hota hai
-— blind coordinate kabhi nahi, kyunki galat click draft uda deta hai. Reply me
-attempt number aur Gmail ka toast dono likhe aate hain.
+**Send button pakka mile:** Gmail ka *Send* white text on blue fill hai, isliye OCR
+usko aksar miss karta hai (aur tesseract na ho to bilkul hi nahi padhta). Isliye
+press 4 tareeke try karta hai, isi order me — plain OCR → **inverted** (black-on-white)
+OCR → **2× zoom** kiye lower-half ka OCR → **rang se button** (Gmail blue, button
+shape, halke page ke andar). Aakhri hathyar **Ctrl+Enter** hai, Gmail ka apna send
+shortcut — usme coordinate hi nahi, galat cheez click hone ka sawal nahi. Blue box
+sirf tab click hota hai jab ek hi ho aur button jaisa dikhe (do barabar ke blue box
+= no click); split-button ke ▾ arrow se bachne ke liye click label ke 40% par hota
+hai. Reply me tareeka, attempt number aur Gmail ka toast dono likhe aate hain.
 
 **Password hi nahi chahiye?** `/email web send to@x.com Subject | body` — jo Gmail
 Chrome me logged-in hai wahi use hota hai: compose prefill, sirf *Send* click, aur

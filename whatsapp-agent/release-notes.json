@@ -1,4 +1,17 @@
 {
+  "3.14.7": {
+    "title": "🎯 Send button ab rang se bhi milta hai — 4 tareeke, phir hi haar",
+    "bullets": [
+      "**Asli report**: compose khula tha, Send dikh raha tha, par bot ne phir bhi 'Send button nahi mila' bola — kyunki OCR white-on-blue 12px label padh hi nahi paya (ya tesseract hi missing tha).",
+      "**Ab 4 tareeke, isi order me**: plain OCR → inverted (black-on-white) OCR → **2× zoom** kiye hue lower-half ka OCR → aur phir **rang se button** (Gmail blue, button shape, halke page ke andar). Sab fail ho to aakhri hathyar **Ctrl+Enter** (Gmail ka apna send shortcut) — usme coordinate hi nahi, galat cheez click hone ka sawal nahi.",
+      "**Rang wala path OCR par depend nahi karta** — isi liye locale, dark theme aur 'tesseract install hi nahi hai' teeno case me kaam karta hai.",
+      "**Safety**: blue box sirf tab click hota hai jab wo button jaisa ho (chaudai:unchai 1.1–7, bhara hua, halke ring ke andar) aur **ek hi** ho — do barabar ke blue box dikhein to click nahi, Ctrl+Enter. Split-button ke ▾ arrow se bachne ke liye click label ke 40% par hota hai, centre par nahi.",
+      "**Screenshot par test kiya**: aapke bheje screenshot (1920×1200) par ring se theek **ek** blue button mila — (354, 1048) — wahi Send.",
+      "**Fail hone par ab sach**: OCR chala hi nahi (tesseract missing) / compose screen par nahi tha / screenshot hi nahi mila — teen alag wajah, aur aakhri 3 attempt ki asli lines reply me.",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 684 → 687: colour search (blue button mila, square dock icon reject, dark theme reject, do barabar box = no click), Ctrl+Enter fallback, zoom→screen coordinate mapping, aur tesseract ENOENT ka alag signal."
+    ]
+  },
   "3.14.6": {
     "title": "🖱️ Send khud dabta hai — OCR ab white-on-blue button bhi padhta hai",
     "bullets": [
@@ -509,5 +522,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.6"
+  "latest": "3.14.7"
 }

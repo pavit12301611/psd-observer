@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.7 — Send button: colour search + Ctrl+Enter (2026-11-10)
+
+- The owner sent a screenshot: compose open, Send visible, and still "Send button 3 attempts me nahi mila (nobutton)". That killed the assumption behind 3.14.6 — the OCR passes (plain *and* inverted) were not sufficient. Two causes fit the evidence: a 12 px white-on-blue label is small even when negated, and if `tesseract` is missing on the machine every OCR pass throws and the old code reported the same generic `nobutton`.
+- `clickSend` now runs four strategies per attempt and stops at the first hit: (a) plain OCR, (b) inverted-frame OCR, (c) **2× zoom** of the bottom 55 % (`zoomBottomForOcr` + `mapZoomedTarget` map the hit back to real screen pixels), (d) **colour search** for the button itself (`isGmailBlue` → `blueBlobCandidates` → `pickSendBlob`). If all four miss, the last resort is `Ctrl+Enter` (`pc.keyCombo`), Gmail's own send shortcut — zero coordinates, so it can never click the wrong control.
+- The colour path is the one that does not depend on OCR at all: a connected component of Gmail-blue pixels is accepted only when it is filled (≥ 55 %), wide-ish (ratio 1.1–7), of toolbar height (12–90 px), surrounded by a light ring (≥ 40 %) and the **only** candidate of its size — two equal blue boxes means a coin flip between Send and something destructive, so we refuse and use the keyboard instead. Click point is 40 % across the box, not the centre, because the right edge of Gmail's Send is the ▾ arrow (a centre click on a narrow button can open that menu).
+- Verified on the owner's own screenshot (1920×1200): exactly one blue blob survives the filters, box (324,1029,76,38), click point (354,1048) — the Send button.
+- Failures now name the stage: `reason: 'noscreen'` (capture failed), `ocrBroken` (tesseract ENOENT — the OCR passes are skipped instead of being retried pointlessly), otherwise "compose screen par nahi tha". `/mailme`'s reply prints the last three attempt lines verbatim, so a bad next report can be debugged from the message alone.
+- Tests 684 → 687: blue-button found on a white page, square dock icon rejected, blue-on-dark rejected, two equal blue boxes → no click + `Ctrl+Enter` used, zoom→screen coordinate mapping, and tesseract ENOENT surfacing as `ocrBroken`.
+
 ## 3.14.6 — Send khud dabta hai: OCR ka inverted pass (2026-11-10)
 
 - The owner's words: "ise bol yeh khud hi send karein, mereko click na karna pade". Clicking already existed — the bug was *finding* the button. Gmail's Send is white text on a blue fill, and tesseract reads light-on-dark badly, so a single plain `locateOnScreen('Send')` (plus one retry of the same frame) often returned nothing and the reply fell back to "khud Send dabao". The fix is a better look, not more of the same look.

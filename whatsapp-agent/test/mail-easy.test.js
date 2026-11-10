@@ -785,7 +785,7 @@ test('sendbutton: picks the label, survives white-on-blue, retries, never blind-
   assert.equal(failed.ok, false);
   assert.equal(failed.reason, 'nobutton');
   assert.equal(captures, 3, 'retries the full attempt budget');
-  assert.equal(failed.tried.length, 3);
+  assert.ok(failed.tried.length >= 3, 'every strategy explains itself');
 
   // No screen at all → a distinct reason so the caller can explain it.
   const noscreen = await clickSend({
@@ -836,4 +836,131 @@ test('sendbutton: inverted frame really is inverted (sharp or pure-JS pngjs)', a
     assert.equal(px[3], 255, 'alpha untouched');
   }
   assert.equal(await invertPngJs(Buffer.from('not a png at all, really')), null);
+});
+
+test('sendbutton: finds the blue Send button by colour when OCR cannot read it', async () => {
+  const {
+    blueBlobCandidates, pickSendBlob, clickSend, isGmailBlue, mapZoomedTarget,
+  } = await import('../src/sendbutton.js');
+  const { PNG } = await import('pngjs');
+
+  const paint = (w, h, bg) => {
+    const png = new PNG({ width: w, height: h });
+    for (let i = 0; i < png.data.length; i += 4) {
+      png.data[i] = bg[0]; png.data[i + 1] = bg[1]; png.data[i + 2] = bg[2]; png.data[i + 3] = 255;
+    }
+    return png;
+  };
+  const box = (png, x0, y0, w, h, rgb) => {
+    for (let y = y0; y < y0 + h; y += 1) {
+      for (let x = x0; x < x0 + w; x += 1) {
+        const i = (y * png.width + x) * 4;
+        png.data[i] = rgb[0]; png.data[i + 1] = rgb[1]; png.data[i + 2] = rgb[2];
+      }
+    }
+  };
+
+  assert.equal(isGmailBlue(26, 115, 232), true, 'Gmail #1a73e8');
+  assert.equal(isGmailBlue(250, 250, 250), false, 'a white button is not a blue one');
+  assert.equal(isGmailBlue(0, 122, 204), true, 'other blues pass the colour test…');
+
+  // Light page + one blue Send box in the lower half, exactly like the screenshot.
+  const shot = paint(400, 300, [255, 255, 255]);
+  box(shot, 30, 240, 60, 24, [26, 115, 232]);
+  const cands = blueBlobCandidates(shot);
+  assert.equal(cands.length, 1, 'one button-shaped blue blob');
+  assert.deepEqual([cands[0].x, cands[0].y], [54, 252], 'clicks inside the label, left of the split arrow');
+  assert.ok(cands[0].ringLight >= 0.4, 'a white page surrounds it');
+
+  const clicked = [];
+  const viaColour = await clickSend({
+    capture: async () => PNG.sync.write(shot),
+    ocrWords: async () => [],
+    invert: async () => null,
+    click: async (x, y) => clicked.push([x, y]),
+    wait: async () => {},
+    attempts: 1,
+  });
+  assert.equal(viaColour.ok, true);
+  assert.equal(viaColour.method, 'blue-button');
+  assert.deepEqual(clicked, [[54, 252]]);
+
+  // …but shape removes non-buttons: a square (dock icon) has no wide ratio.
+  const dock = paint(400, 300, [255, 255, 255]);
+  box(dock, 30, 240, 48, 48, [0, 122, 204]);
+  assert.equal(blueBlobCandidates(dock).length, 0, 'square icons are ignored');
+
+  // Dark theme / dock icon: blue on dark background is NOT clicked.
+  const dark = paint(400, 300, [25, 26, 28]);
+  box(dark, 30, 240, 60, 24, [26, 115, 232]);
+  assert.equal(pickSendBlob(blueBlobCandidates(dark)), null);
+
+  // Two equal blue boxes = a coin flip between Send and something else → refuse.
+  const two = paint(400, 300, [255, 255, 255]);
+  box(two, 30, 240, 60, 24, [26, 115, 232]);
+  box(two, 200, 240, 60, 24, [26, 115, 232]);
+  assert.equal(pickSendBlob(blueBlobCandidates(two)), null, 'ambiguous → no click');
+
+  // …and then the keyboard shortcut is the last resort, at zero coordinates.
+  const keys = [];
+  const fallback = await clickSend({
+    capture: async () => PNG.sync.write(two),
+    ocrWords: async () => [],
+    invert: async () => null,
+    click: async () => { throw new Error('must not click an ambiguous blue box'); },
+    keys: async (combo) => keys.push(combo),
+    wait: async () => {},
+    attempts: 1,
+  });
+  assert.equal(fallback.ok, true);
+  assert.equal(fallback.method, 'shortcut');
+  assert.deepEqual(keys, ['ctrl+enter']);
+
+  assert.deepEqual(
+    mapZoomedTarget({ x: 300, y: 200, box: { left: 280, top: 190, width: 40, height: 20 } }, { offsetY: 400, factor: 2 }),
+    { x: 150, y: 500, box: { left: 140, top: 495, width: 20, height: 10 } },
+  );
+});
+
+test('sendbutton: missing tesseract is reported, not hidden', async () => {
+  const { clickSend } = await import('../src/sendbutton.js');
+  const enoent = Object.assign(new Error('spawn tesseract ENOENT'), { code: 'ENOENT' });
+  const res = await clickSend({
+    capture: async () => Buffer.from('frame'),
+    ocrWords: async () => { throw enoent; },
+    invert: async () => null,
+    click: async () => {},
+    wait: async () => {},
+    attempts: 2,
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'nobutton');
+  assert.equal(res.ocrBroken, true, 'the caller can say "tesseract missing"');
+  assert.match(res.tried.join(' '), /ocr fail/);
+});
+
+test('sendbutton: zoomed crop OCR is mapped back to real screen coordinates', async () => {
+  const { clickSend } = await import('../src/sendbutton.js');
+  const { PNG } = await import('pngjs');
+  const png = new PNG({ width: 200, height: 200 });
+  png.data.fill(255);
+  const frame = PNG.sync.write(png);
+
+  const clicked = [];
+  const res = await clickSend({
+    capture: async () => frame,
+    // Plain + inverted passes see nothing; the zoomed frame "reads" Send at 2× scale.
+    ocrWords: async (buf) => {
+      if (buf === frame) return [];
+      return [{ text: 'Send', left: 100, top: 60, width: 40, height: 24, conf: 92, lineKey: 'z1', wordNum: 1 }];
+    },
+    invert: async () => null,
+    click: async (x, y) => clicked.push([x, y]),
+    wait: async () => {},
+    attempts: 1,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.method, 'zoomed-ocr');
+  // zoom starts at 45% of 200 = 90px, factor 2 → x 60, y 90 + 36
+  assert.deepEqual(clicked, [[60, 126]]);
 });
