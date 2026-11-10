@@ -741,3 +741,99 @@ test('commands: /mailme + /email to are wired end-to-end', async () => {
   // Status surfaces the /mailme target too.
   assert.match(String(await agent.handle('/email')), /mailme.*owner@example\.com/is);
 });
+
+// ══ Send button khud dabao — OCR + inverted frame + retries ═════════════════
+
+test('sendbutton: picks the label, survives white-on-blue, retries, never blind-clicks', async () => {
+  const { pickSendTarget, clickSend, SEND_LABELS } = await import('../src/sendbutton.js');
+
+  const words = [
+    { text: 'Discard', left: 10, top: 10, width: 40, height: 12, conf: 90, lineKey: 'l1', wordNum: 1 },
+    { text: 'Send', left: 200, top: 300, width: 30, height: 12, conf: 88, lineKey: 'l2', wordNum: 1 },
+  ];
+  const hit = pickSendTarget(words);
+  assert.ok(hit, 'Send is found');
+  assert.equal(hit.label, 'Send');
+  assert.equal(hit.x, 215);
+  assert.equal(hit.y, 306, 'clicks the centre of the label');
+  assert.equal(pickSendTarget([]), null);
+  assert.equal(pickSendTarget(null), null);
+  assert.ok(SEND_LABELS.includes('Send message'));
+
+  // First pass sees nothing (white on blue), the inverted frame does.
+  const clicked = [];
+  const first = await clickSend({
+    capture: async () => Buffer.from('frame'),
+    ocrWords: async (frame) => (frame.toString() === 'frame' ? [] : words),
+    invert: async () => Buffer.from('flipped'),
+    click: async (x, y) => clicked.push([x, y]),
+    wait: async () => {},
+  });
+  assert.equal(first.ok, true);
+  assert.deepEqual(clicked, [[215, 306]]);
+  assert.match(first.tried.join(' '), /inverted frame read it/);
+
+  // Nothing found: 3 attempts, no click at all (blind click = discarded draft).
+  let captures = 0;
+  const failed = await clickSend({
+    capture: async () => { captures += 1; return Buffer.from('frame'); },
+    ocrWords: async () => [],
+    invert: async () => null,
+    click: async () => { throw new Error('must not click'); },
+    wait: async () => {},
+  });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, 'nobutton');
+  assert.equal(captures, 3, 'retries the full attempt budget');
+  assert.equal(failed.tried.length, 3);
+
+  // No screen at all → a distinct reason so the caller can explain it.
+  const noscreen = await clickSend({
+    capture: async () => { throw new Error('no display'); },
+    ocrWords: async () => [],
+    click: async () => {},
+  });
+  assert.equal(noscreen.reason, 'noscreen');
+
+  // Missing dependencies never throw.
+  assert.equal((await clickSend({})).reason, 'missing-deps');
+});
+
+test('commands: /mailme auto-click path reports the click, not a manual step', async () => {
+  const { createAgent } = await import('../src/commands.js');
+  const { Store } = await import('../src/store.js');
+  const dir = tmpDir('sendbtn');
+  const store = new Store(path.join(dir, 'store.json'));
+  store.data.ownerEmail = 'owner@example.com';
+  const config = {
+    ownerNumber: '919528923866', agentNumber: '918859555795', timezone: 'Asia/Kolkata',
+    aiProvider: 'none', allowShell: false, shellPin: '', dataDir: dir,
+    sharedDir: path.join(dir, 'shared'), downloadsDir: path.join(dir, 'dl'),
+  };
+  fs.mkdirSync(config.sharedDir, { recursive: true });
+  const agent = createAgent({ config, store, log: { error() {}, warn() {}, info() {} } });
+
+  const reply = String(await agent.handle('/mailme send button test'));
+  // Sandbox has no display → the honest no-display path, still naming SMTP.
+  assert.match(reply, /Browser khul nahi paya|Send.*nahi mila|SMTP/i);
+  assert.doesNotMatch(reply, /khud Send dabao/);
+});
+
+test('sendbutton: inverted frame really is inverted (sharp or pure-JS pngjs)', async () => {
+  const { invertForOcr, invertPngJs } = await import('../src/sendbutton.js');
+  const { PNG } = await import('pngjs');
+
+  const png = new PNG({ width: 4, height: 2 });
+  for (let i = 0; i < png.data.length; i += 4) {
+    png.data[i] = 20; png.data[i + 1] = 20; png.data[i + 2] = 180; png.data[i + 3] = 255; // Gmail blue
+  }
+  const blue = PNG.sync.write(png);
+
+  for (const buf of [await invertForOcr(blue), await invertPngJs(blue)]) {
+    assert.ok(Buffer.isBuffer(buf), 'an inverted frame comes back');
+    const px = PNG.sync.read(buf).data;
+    assert.ok(px[0] > 200 && px[1] > 200 && px[2] < 80, 'blue fill becomes light, so white text reads as dark');
+    assert.equal(px[3], 255, 'alpha untouched');
+  }
+  assert.equal(await invertPngJs(Buffer.from('not a png at all, really')), null);
+});

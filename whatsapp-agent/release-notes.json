@@ -1,4 +1,17 @@
 {
+  "3.14.6": {
+    "title": "🖱️ Send khud dabta hai — OCR ab white-on-blue button bhi padhta hai",
+    "bullets": [
+      "**`/mailme` khud Send dabata hai**: 3 attempts, har attempt me pehle plain frame phir **inverted** frame ka OCR — owner ko sirf command dena hai, click kabhi nahi karna.",
+      "**Asli wajah fix hui**: Gmail ka Send white text on blue fill hota hai, aur tesseract light-on-dark kharab padhta hai — isi liye pehle bot 'khud Send dabao' bol deta tha.",
+      "**Do engines**: `sharp` ho to wahi invert karta hai, warna pure-JS `pngjs` — koi native build/compile fail nahi.",
+      "**Naya `sendbutton.js`**: labels Send / Send message / Send mail / Senden / Enviar; click sirf locate hue label ke centre par — blind coordinate kabhi nahi (galat click draft uda deta hai).",
+      "**Reply me poora sach**: Send dabaya (attempt number) + Gmail ne kya dikhaya — sent / unverified / failed / button nahi mila.",
+      "**Button na mile to**: saaf wajah (compose khula hi nahi / browser background me / Gmail logged out) aur do raaste — 2s baad dobara `/mailme`, ya browser ke bina `/email send …` (SMTP).",
+      "**Shades unchanged**: sirf owner ka `/shades off` display wapas laata hai.",
+      "Tests 681 → 684: label picking, inverted-frame second pass, asli pixel inversion (blue fill → light, alpha same), 3-attempt budget bina click ke, no-display reason, aur `/mailme` ka reply jo manual click nahi maangta."
+    ]
+  },
   "3.14.5": {
     "title": "🧹 Revert: koi pre-set email address nahi — address aap doge tabhi jaayega",
     "bullets": [
@@ -496,5 +509,5 @@
       "Shades unchanged: only the owner's /shades off restores the display."
     ]
   },
-  "latest": "3.14.5"
+  "latest": "3.14.6"
 }

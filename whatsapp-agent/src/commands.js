@@ -64,6 +64,7 @@ import * as selfMail from './selfmail.js';
 import * as mailAuto from './mailauto.js';
 import * as gmailSignup from './gmailsignup.js';
 import * as emailWeb from './emailweb.js';
+import { clickSend, invertForOcr } from './sendbutton.js';
 import { createImapClient } from './imap.js';
 import * as ocr from './ocr.js';
 import { makeDeliverable } from './make.js';
@@ -2927,39 +2928,48 @@ export function createAgent({
         await pc.pasteText(body);
         await nap(700);
       } catch (err) {
-        return { status: 'nosend', text: `🌐 Body paste nahi ho paya (${err?.message ?? err}) — compose me khud paste karke Send dabao.` };
+        return { status: 'nosend', text: `🌐 Body paste nahi ho paya (${err?.message ?? err}).` };
       }
     }
 
-    let target = null;
-    for (const attempt of [0, 1]) {
-      try {
-        target = await finder.locateOnScreen(config, 'Send', log);
-      } catch { target = null; }
-      if (target) break;
-      if (attempt === 0) await nap(2000);
-    }
-    if (!target) {
+    // 🖱️ Send khud dabao — 3 attempts, aur white-on-blue button ke liye
+    // inverted-frame OCR. Owner ko kuch click nahi karna.
+    const pressed = await clickSend({
+      capture: () => pc.captureScreenshot({ portalTimeoutMs: config.portalTimeoutMs }),
+      ocrWords: (frame) => finder.ocrScreenshot(frame),
+      invert: invertForOcr,
+      click: (x, y) => pc.click(x, y),
+      wait: nap,
+      log,
+    });
+    if (!pressed.ok) {
       return {
         status: 'nosend',
         plan,
-        text: '🌐 *Send* button screen pe nahi mila (compose khula hai? browser foreground me hai?).',
+        tried: pressed.tried,
+        text: [
+          `🌐 *Send* button ${pressed.attempts ?? 3} attempts me nahi mila (${pressed.reason ?? 'unknown'}).`,
+          '• Aksar wajah: compose window khula hi nahi (browser background me / Gmail logged out).',
+          '• Panel pe compose dikh raha ho to 2 second baad `/mailme` dobara bhejo.',
+          `• Ya bina browser: \`/email send ${plan.to} …\` (SMTP).`,
+        ].join('\n'),
       };
     }
 
-    await pc.click(target.x, target.y);
     await nap(2200);
 
+    // Gmail ka apna toast padho — click ka matlab "delivered" nahi hota.
     let verdict = 'unknown';
     try {
       const shot = await ocr.ocrScreen(config);
       verdict = emailWeb.detectSentState(shot.text);
-    } catch { /* screenshot hi nahi mila: verdict unknown rehta hai */ }
+    } catch { /* screenshot na mile to verdict unknown */ }
 
     const head = `✉️ *${plan.to}* — ${plan.subject || '(no subject)'}`;
-    if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.` };
-    if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.` };
-    return { status: 'unverified', plan, text: `${head}\n❔ Send dabaya, par confirmation nahi mila — Gmail ke *Sent* folder me check karo.` };
+    const clicked = `\n🖱️ Send khud dabaya (attempt ${pressed.attempts ?? 1})`;
+    if (verdict === 'sent') return { status: 'sent', plan, text: `${head}\n✅ Gmail ne "Message sent" dikhaya — mail chala gaya.${clicked}` };
+    if (verdict === 'failed') return { status: 'failed', plan, text: `${head}\n⚠️ Gmail ne error dikhaya — mail nahi gaya.${clicked}` };
+    return { status: 'unverified', plan, text: `${head}\n❔ Send dabaya, par confirmation nahi mila — Gmail ke *Sent* folder me check karo.${clicked}` };
   }
 
   /**

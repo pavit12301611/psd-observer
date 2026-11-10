@@ -310,7 +310,7 @@ Chrome.
 /email test                                 dono directions dobara check
 /email send to@x.com Report ready | body    isi PC se bhejo (465 TLS / 587 STARTTLS)
 /email status · /email forget               masked status · credentials wipe
-/mailme <text>                              ek line → aapke inbox (address `/email to` se set hota hai)
+/mailme <text>                              ek line → aapke inbox, Send bhi khud (address `/email to` se)
 /email to you@example.com                   /mailme ka address badlo
 /email web check|send …                     bina password: Chrome ke logged-in Gmail se bhejo
 /email auto                                 page kholo · auto create = button khud dabao · auto grab = code khud padho
@@ -325,10 +325,18 @@ password kaam nahi karega). Setup ke saath hi agent live test karta hai aur fail
 pe seedha reason deta hai ("app password galat", "port 587 ne STARTTLS refuse
 kiya", "office Wi-Fi block kar raha hai").
 
-**Sabse chhota rasta:** `/mailme <jo bhejna hai>` — subject khud banta hai. Address
-pehle ek baar dena hoga (`/email to you@example.com`, ya `.env` me `OWNER_EMAIL=`);
-koi hardcoded default nahi hai, isliye bina address `/mailme` bhejne ki koshish
-nahi karta. Browser na chale to apne aap SMTP par fallback hota hai.
+**Sabse chhota rasta:** `/mailme <jo bhejna hai>` — subject khud banta hai, aur
+**Send button bhi agent khud dabata hai** (aapko click nahi karna). Address pehle
+ek baar dena hoga (`/email to you@example.com`, ya `.env` me `OWNER_EMAIL=`); koi
+hardcoded default nahi hai, isliye bina address `/mailme` bhejne ki koshish nahi
+karta. Browser na chale to apne aap SMTP par fallback hota hai.
+
+**Send button pakka mile:** Gmail ka *Send* white text on blue fill hota hai, jise
+OCR light-on-dark me dhundhla padhta hai. Isliye click 3 attempts me hota hai aur
+har attempt me pehle normal frame, phir **inverted** (black-on-white) frame padha
+jaata hai (`src/sendbutton.js`) — `sharp` na ho to pure-JS `pngjs` se. Click sirf locate hue label ke centre par hota hai
+— blind coordinate kabhi nahi, kyunki galat click draft uda deta hai. Reply me
+attempt number aur Gmail ka toast dono likhe aate hain.
 
 **Password hi nahi chahiye?** `/email web send to@x.com Subject | body` — jo Gmail
 Chrome me logged-in hai wahi use hota hai: compose prefill, sirf *Send* click, aur

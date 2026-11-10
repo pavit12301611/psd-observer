@@ -1,5 +1,14 @@
 # BUILD-LOG.md — jo banaya, kaise banaya, kya toota, kaise theek hua
 
+## 3.14.6 — Send khud dabta hai: OCR ka inverted pass (2026-11-10)
+
+- The owner's words: "ise bol yeh khud hi send karein, mereko click na karna pade". Clicking already existed — the bug was *finding* the button. Gmail's Send is white text on a blue fill, and tesseract reads light-on-dark badly, so a single plain `locateOnScreen('Send')` (plus one retry of the same frame) often returned nothing and the reply fell back to "khud Send dabao". The fix is a better look, not more of the same look.
+- New `src/sendbutton.js`: `pickSendTarget(words, labels)` (pure, on top of `elementfinder.findTextTarget`), `invertForOcr(buffer)` (`sharp().negate({alpha:false})`, returns `null` when the optional `sharp` is absent), and `clickSend({capture, ocrWords, invert, click, wait, attempts = 3, labels, log})` → `{ok, target?, attempts?, tried[], reason?: 'missing-deps'|'noscreen'|'nobutton'}`. Every dependency is injected, so the whole loop runs in tests without a screen.
+- Per attempt: OCR the plain frame → if no label, negate the frame and OCR again (white-on-blue becomes black-on-white) → click **only** the centre of a located label. Labels: Send / Send message / Send mail / Senden / Enviar. Blind coordinates are never used: a stray click in Gmail can discard the draft, which is worse than a reported failure.
+- `src/commands.js`: `emailWebSend`'s inline `locateOnScreen('Send')` + 1-retry loop is gone, replaced by `clickSend` (3 attempts). The success replies now name the attempt number and the toast verdict (`sent` / `unverified` / `failed`); the `nosend` reply gives the real cause (compose never opened, browser in background, Gmail logged out) and the truthful alternative `/email send …` (SMTP). The old "compose me khud paste karke Send dabao" body-paste line is dropped — it contradicted the no-click promise.
+- `invertForOcr` prefers `sharp` and falls back to a pure-JS `pngjs` negation (`invertPngJs`) so a machine without the native binary still gets the second pass; both return `null` on an undecodable frame and the caller simply keeps the plain one.
+- Tests 681 → 684: label picking (Discard vs Send, centre coordinates, empty list, `null` input), inverted-frame second pass, a real pixel inversion (blue fill → light, alpha untouched), a 3-attempt budget that performs **zero** clicks, a distinct `noscreen` reason, `missing-deps` never throwing, and a `/mailme` reply that no longer asks the owner to click anything.
+
 ## 3.14.5 — revert: no pre-set /mailme address (2026-11-10)
 
 - 3.14.4 shipped `DEFAULT_OWNER_EMAIL` baked into `src/mailsend.js` plus `.env.example`. The owner's words: "default nahi rakhna tha, maine to test ke liye bola tha" — and he is right: an agent should never have somebody's inbox as a silent default. A typo'd `/mailme` would have posted to a stranger's mailbox.
