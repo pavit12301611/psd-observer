@@ -37,7 +37,9 @@
     "test:deep": "npm run check && npm run test:coverage && npm run test:mutation && npm run audit:deps && npm run audit:report",
     "audit:deps": "node -e \"require('fs').mkdirSync('.cache/deep-audit',{recursive:true})\" && npm audit --json > .cache/deep-audit/dependency-after.json",
     "app:update": "node scripts/app-update.mjs",
-    "app:update:pack": "node scripts/app-update.mjs pack"
+    "app:update:pack": "node scripts/app-update.mjs pack",
+    "oracle:cloud": "node src/oracle-cloud.js",
+    "oracle:pc": "node src/oracle-pc.js"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {

@@ -293,6 +293,13 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
     store.bump('received');
     const key = rawMsg?.key;
 
+    // Oracle mode deliberately supports text only: media handlers otherwise
+    // access the machine hosting WhatsApp, not the owner's desktop.
+    if (config.oracleTextOnly && (content.media || content.kind === 'location')) {
+      await transportSend(chatJid, '⚠️ Oracle mode currently supports text only; no PC action was run.', rawMsg);
+      return;
+    }
+
     // Media: download → save on the PC → then act on the caption / describe.
     if (content.media && ['image', 'video', 'document', 'audio', 'voice', 'sticker'].includes(content.kind)) {
       return handleMedia({ chatJid, content, rawMsg });
@@ -823,6 +830,8 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
   }
 
   async function handleCallEvents(calls) {
+    // Oracle mode has no voice engine or phone-app fallback.
+    if (config.oracleTextOnly) return;
     for (const event of calls ?? []) {
       try {
         const callId = String(event.id ?? '');
@@ -892,7 +901,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
         const numbers = await senderNumbers(key);
         if (!isOwner(numbers, config.ownerNumber) && !isFromOwnerLid(key)) {
           const guestNumber = numbers[0] || jidToNumber(chatJid) || '';
-          const gate = canGuestInteract(store, config, guestNumber, state.guestRateMap);
+          const gate = config.oracleTextOnly ? { allowed: false, reason: 'oracle_owner_only' } : canGuestInteract(store, config, guestNumber, state.guestRateMap);
           if (!gate.allowed) {
             store.bump('ignoredNonOwner');
             log.info?.(`[wa] ignored non-owner message from ${numbers.map(maskNumber).join(',') || chatJid} (${gate.reason})`);
@@ -1006,7 +1015,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
         try {
           fs.mkdirSync(config.dataDir, { recursive: true });
           await QRCode.toFile(config.qrPngFile, qr, { width: 480 });
-          log.info?.(`\n[wa] 📱 Scan this QR with the AGENT phone (+${config.agentNumber}): WhatsApp → Linked devices → Link a device\n${await QRCode.toString(qr, { type: 'terminal', small: true })}\n[wa] QR also at http://${config.host}:${config.port}/ and saved to ${config.qrPngFile}\n`);
+          log.info?.(`\n[wa] 📱 Scan this QR with the AGENT phone (+${config.agentNumber}): WhatsApp → Linked devices → Link a device\n${await QRCode.toString(qr, { type: 'terminal', small: true })}\n[wa] ${config.oracleTextOnly ? `QR saved to ${config.qrPngFile}` : `QR also at http://${config.host}:${config.port}/ and saved to ${config.qrPngFile}`}\n`);
           // Fedora desktop: first QR of the run pops open in the default image
           // viewer (GNOME/KDE both honour xdg-open). QRs refresh every ~20 s,
           // so only the first one opens; later ones update the file silently.
@@ -1164,7 +1173,7 @@ export function createWhatsApp({ config, store, agent, log = console, onConnecte
   /** Dry-run/test hook: run the owner vs controlled guest pipeline without WhatsApp. */
   async function simulate(text, fromNumber = config.ownerNumber, opts = {}) {
     if (!isOwner([fromNumber], config.ownerNumber)) {
-      const gate = canGuestInteract(store, config, fromNumber, state.guestRateMap);
+      const gate = config.oracleTextOnly ? { allowed: false, reason: 'oracle_owner_only' } : canGuestInteract(store, config, fromNumber, state.guestRateMap);
       if (!gate.allowed) {
         store.bump('ignoredNonOwner');
         return { ignored: true, isOwner: false, reason: gate.reason, sent: [] };

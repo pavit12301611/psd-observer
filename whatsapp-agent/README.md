@@ -1,3 +1,5 @@
+> **Oracle mode (limited command relay):** see [`ORACLE-MODE.md`](ORACLE-MODE.md) for WhatsApp + one model on Oracle and a private PC connector.
+
 # 👁️ Observer Agent 3.0 — your PC, in your pocket
 
 A personal agent that runs on **your own Fedora/Linux computer for ₹0** and is
