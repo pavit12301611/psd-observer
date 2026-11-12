@@ -3,9 +3,8 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import { parseIntent } from './nlp.js';
 
-const MAX_REQUEST = 4096;
+const MAX_REQUEST = 16384;
 const MAX_RESPONSE = 8 * 1024 * 1024;
 export function isPrivateRelayIp(ip) {
   const parts = String(ip).split('.');
@@ -18,36 +17,52 @@ export function validateRelaySettings(ip, token) {
   if (!/^[0-9a-f]{64}$/i.test(token || '')) throw new Error('ORACLE_RELAY_TOKEN must be 64 hex characters (32 random bytes).');
 }
 
-// Return a structured action, never shell text. The PC validates this again.
-export function actionForText(input) {
-  const text = String(input ?? '').trim();
-  if (!text || text.length > 500) return null;
-  let cmd, args;
-  if (text.startsWith('/')) {
-    const match = text.match(/^\/([a-z]+)(?:\s+([\s\S]*))?$/i);
-    if (!match) return null;
-    [, cmd, args = ''] = match; cmd = cmd.toLowerCase();
-  } else {
-    const parsed = parseIntent(text);
-    if (!parsed?.cmd) return null;
-    ({ cmd, args = '' } = parsed);
-  }
-  args = String(args).trim();
-  if (cmd === 'open' && args.length > 0 && args.length <= 100 && /^[\p{L}\p{N} ._+-]+$/u.test(args)) return { name: 'open_app', args: { app: args } };
-  if (['screenshot', 'shot'].includes(cmd) && !args) return { name: 'screenshot', args: {} };
-  if (['apps', 'applications'].includes(cmd) && !args) return { name: 'list_apps', args: {} };
-  if (cmd === 'windows' && !args) return { name: 'list_windows', args: {} };
+// Slash commands always go to the PC. This explicit local-only subset avoids
+// silently starting AI, schedulers, or unsupported WhatsApp integration.
+const COMMANDS = new Set(`help commands menu ping time date access apps applications windows tasks open close quit focus switch screenshot shot ocr webcam cam record screencast wifi bt bluetooth kill svc service notify system sysinfo pc ls dir read cat write savefile send getfile download dl mv move rename cp copy mkdir zip unzip rm delete files get sendfile yes haan no nahi cancel confirm`.split(' '));
+const PC_SUBCOMMANDS = new Set(`status info disk ip battery top screenshot shot volume vol brightness bright media music open close quit notify lock clipboard clip clipset find get elements ui ground type paste key click mousemove move mouse scroll drag shutdown poweroff reboot restart suspend sleep confirm cancel`.split(' '));
+export function isSupportedPcCommand(input) {
+  if (typeof input !== 'string' || input.length > 4000 || /[\r\n]/.test(input)) return false;
+  const match = input.trim().match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+([^\r\n]*))?$/);
+  if (!match) return false;
+  const cmd = match[1].toLowerCase();
+  if (!COMMANDS.has(cmd)) return false;
   if (cmd === 'pc') {
-    const match = args.toLowerCase().match(/^(volume|brightness)(?:\s+(get|up|down|mute|\d{1,3}))?$/);
-    if (!match || (match[1] === 'brightness' && match[2] === 'mute')) return null;
-    const value = match[2];
-    if (value && /^\d+$/.test(value)) {
-      if (Number(value) > 100) return null;
-      return { name: match[1], args: { action: 'set', value: Number(value) } };
-    }
-    return { name: match[1], args: { action: value || 'get' } };
+    const sub = (match[2] || 'status').trim().split(/\s+/)[0].toLowerCase();
+    return PC_SUBCOMMANDS.has(sub);
   }
-  return null;
+  return true;
+}
+const HELP = 'PC commands: /open, /close, /apps, /windows, /screenshot, /ocr, /pc, /wifi, /bt, /system, /ls, /read, /write, /send, /download, /mv, /cp, /mkdir, /zip, /unzip, /rm, /yes, /no. One slash command per message. AI, shell, scheduled jobs and voice commands are not supported in this connector. All non-slash text goes to Oracle AI.';
+function encodeReply(reply) {
+  if (typeof reply === 'string') return { text: reply };
+  if (!reply || typeof reply !== 'object') return { text: '⚠️ Command returned no reply; check PC before retrying.' };
+  const out = { text: typeof reply.text === 'string' ? reply.text : '' };
+  for (const key of ['image', 'video', 'audio']) if (Buffer.isBuffer(reply[key])) out[key] = reply[key].toString('base64');
+  if (reply.document && Buffer.isBuffer(reply.document.buffer)) out.document = { buffer: reply.document.buffer.toString('base64'), fileName: String(reply.document.fileName || 'file').slice(0, 255), mimetype: String(reply.document.mimetype || 'application/octet-stream').slice(0, 150) };
+  if (reply.audio) { out.mimetype = String(reply.mimetype || 'audio/mpeg').slice(0, 150); out.ptt = Boolean(reply.ptt); }
+  if (Array.isArray(reply.extraImages)) out.extraImages = reply.extraImages.filter(Buffer.isBuffer).map(b => b.toString('base64'));
+  if (!out.text && !out.image && !out.video && !out.audio && !out.document && !out.extraImages?.length) out.text = '⚠️ Unsupported reply type; check PC before retrying.';
+  return out;
+}
+function decodeReply(data) {
+  if (typeof data?.text !== 'string') throw new Error('Invalid PC response');
+  const decode = value => {
+    if (typeof value !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new Error('Invalid PC media');
+    return Buffer.from(value, 'base64');
+  };
+  const out = { text: data.text };
+  for (const key of ['image', 'video', 'audio']) if (data[key] !== undefined) out[key] = decode(data[key]);
+  if (data.extraImages !== undefined) {
+    if (!Array.isArray(data.extraImages)) throw new Error('Invalid PC media');
+    out.extraImages = data.extraImages.map(decode);
+  }
+  if (data.document !== undefined) {
+    if (!data.document || typeof data.document.fileName !== 'string' || typeof data.document.mimetype !== 'string') throw new Error('Invalid PC document');
+    out.document = { buffer: decode(data.document.buffer), fileName: data.document.fileName, mimetype: data.document.mimetype };
+  }
+  if (data.audio !== undefined) { out.mimetype = String(data.mimetype || 'audio/mpeg'); out.ptt = Boolean(data.ptt); }
+  return Object.keys(out).length === 1 ? out.text : out;
 }
 function safeToken(a, b) {
   const x = Buffer.from(String(a ?? '')), y = Buffer.from(b);
@@ -74,16 +89,17 @@ export function createPcRelay({ host, port, token, execute, allowUnboundForTest 
     if (busy) return send(409, { error: 'PC busy; request was not executed' });
     let data;
     try { data = JSON.parse(await body(req, MAX_REQUEST)); } catch { if (!res.destroyed) send(400, { error: 'Invalid request' }); return; }
-    const action = typeof data?.text === 'string' ? actionForText(data.text) : null;
-    if (!action) return send(400, { error: 'Unsupported PC command; nothing executed' });
+    const text = typeof data?.text === 'string' ? data.text.trim() : '';
+    if (!isSupportedPcCommand(text)) return send(400, { error: 'Unsupported PC command; nothing executed' });
     if (busy) return send(409, { error: 'PC busy; request was not executed' });
     busy = true;
     try {
-      const result = await execute(action.name, action.args);
-      const image = Buffer.isBuffer(result?.image) ? result.image.toString('base64') : undefined;
-      if (image && image.length > MAX_RESPONSE - 4096) return send(413, { error: 'Screenshot too large' });
-      send(200, { text: String(result?.text ?? 'Done').slice(0, 3000), image });
-    } catch { send(500, { error: 'PC action failed; check connector logs' }); }
+      const result = /^\/(?:help|commands|menu)$/i.test(text) ? HELP : await execute(text);
+      const encoded = encodeReply(result);
+      if (/reply[^\n]*(?:yes|haan)/i.test(encoded.text)) encoded.text += '\n\nOracle mode: confirm with /yes or cancel with /no (plain text goes to AI).';
+      if (Buffer.byteLength(JSON.stringify(encoded)) > MAX_RESPONSE) return send(413, { error: 'Reply too large to relay; command may have run' });
+      send(200, encoded);
+    } catch { send(500, { error: 'PC action failed; it may have run. Check the PC before retrying.' }); }
     finally { busy = false; }
   });
   server.requestTimeout = 10000;
@@ -102,7 +118,6 @@ export async function sendPcCommand({ host, port, token, text, timeoutMs = 30000
     for await (const chunk of response.body) { size += chunk.length; if (size > MAX_RESPONSE) { controller.abort(); throw new Error('Response too large'); } parts.push(chunk); }
     const data = JSON.parse(Buffer.concat(parts).toString('utf8'));
     if (!response.ok) return `⚠️ PC: ${String(data.error || 'request failed').slice(0, 200)}`;
-    if (typeof data.text !== 'string' || (data.image !== undefined && (typeof data.image !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(data.image)))) throw new Error('Invalid PC response');
-    return data.image ? { text: data.text, image: Buffer.from(data.image, 'base64') } : data.text;
+    return decodeReply(data);
   } finally { clearTimeout(timer); }
 }

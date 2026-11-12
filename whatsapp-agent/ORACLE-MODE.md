@@ -3,27 +3,35 @@
 This is a **separate, intentionally limited mode**, not a migration of the
 existing agent. On Oracle it runs only WhatsApp and one OpenAI-compatible
 model endpoint on loopback. On the Linux desktop it runs a small command relay
-using the existing action registry, without running an AI provider. It does not
+using the existing command engine, without running an AI provider. It does not
 remove any pre-existing models, credentials, files, services, or other code.
 Stop old services yourself before switching; never link the same WhatsApp
 session from two running agents.
 
-## What works / what does not
+## Routing and current limitations
 
-* `/open chrome`, `/apps`, `/windows`, `/screenshot`, `/pc volume 40`,
-  `/pc volume up|down|mute`, `/pc brightness 40|up|down`. Some existing
-  Hinglish shortcuts like `chrome kholo` and `awaaz kam karo` also work.
-  `/help` lists the supported commands. Access levels and desktop permissions
-  still apply; apps need at least `ACCESS_LEVEL=standard`.
-* Other recognized commands are rejected, not executed on the Oracle VM. No
-  shell, destructive actions, AI tool calls, file transfers, reminders, phone
-  dashboard, incoming media, voice, or WhatsApp calling in this mode. Chat
-  questions go only to the one model, without tools or conversation history.
-  A general AI answer is labelled as chat, not an action.
+* Every owner text message beginning with `/` is sent to the PC connector,
+  never to the Oracle model or executed on the Oracle VM. The connector only
+  executes its supported single-line command subset; unknown or unsupported
+  commands are rejected on the PC. `/help` lists the available commands.
+  Examples: `/open chrome`, `/screenshot`, `/pc volume 40`, `/wifi status`,
+  `/ls ~`, `/read <path>`, `/send <path>` and `/rm <path>`.
+* **All other text** goes directly to the single Oracle AI model as chat. For
+  example, `chrome kholo`, `wifi off karo`, and `haan` are AI messages, not PC
+  actions. The AI has no PC tools and does not execute commands. Text longer
+  than 16,000 characters is rejected rather than silently truncated.
+* Local access levels, control PINs and confirmation checks still apply.
+  Confirmation must be sent as `/yes`, `/no` or `/pc confirm`, as requested by
+  the PC, not plain `yes` or `haan`. Some commands require `ACCESS_LEVEL=full`
+  or `ALLOW_PC_CONTROL=true`. Shell is disabled even if the old config enabled
+  it. The connector supports no AI/agent, shell, scheduled jobs, incoming media,
+  voice, calls or phone dashboard; not every command from the original agent
+  is available. `/help` is authoritative. Replies with attachments over the
+  8 MiB encoded relay limit cannot be sent; a command might already have run.
 * The PC must be awake, online, and logged into a working graphical session
   for desktop actions; the cloud agent being up does not make the PC available.
   If a request times out, its outcome is **unknown**: check before retrying.
-  No automatic retries or offline action queue are used.
+  No automatic retries or offline action queue are used. Commands are serialized.
 * OCI Always Free availability and eligibility vary. VM capacity, service
   restarts, network and WhatsApp connection are not guaranteed 24/7; the small
   CPU model may be slow. Verify your OCI region, current limits, boot volume,
@@ -39,7 +47,7 @@ on **both** machines. On the PC the connector must bind to that local address.
 Do not use a public IP, `0.0.0.0`, port-forwarding, or a public reverse proxy.
 HTTP is used only inside the encrypted Tailscale tunnel. Protect the tailnet,
 server accounts and token: an authorized relay client can control the allowed
-PC actions and read screenshots. Restrict the PC firewall to the Oracle
+PC actions, read files and screenshots, change settings and request destructive actions. Keep confirmation controls enabled and protect the token like a password. Restrict the PC firewall to the Oracle
 Tailscale IP and TCP 8790; firewall instructions vary by OS. Loopback addresses
 are supported only for same-machine testing, not cloud-to-PC connectivity.
 
@@ -130,7 +138,7 @@ Tailscale's IP changes, update both private `.env` files and restart.
 ## Tests
 
 ```sh
-node --test test/oracle-relay.test.js
+node scripts/test-oracle.mjs
 ```
 
 The tests use a loopback relay and mocks; they do not verify a real Oracle VM,
